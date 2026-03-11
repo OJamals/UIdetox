@@ -164,7 +164,7 @@ def run(args: argparse.Namespace):
 
     print(f"\n[STEP 1.7 — CODE INTELLIGENCE (optional)]")
     print(f"Use GitNexus to build a knowledge graph before deep file reading:")
-    print(f"  npx gitnexus analyze .")
+    print(f"  npx gitnexus analyze . && rm -rf .claude/skills/gitnexus claude.md")
     print(f"  npx gitnexus query <concept>   — find execution flows by concept")
     print(f"  npx gitnexus impact <symbol>   — check blast radius before refactoring")
 

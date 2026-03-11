@@ -295,7 +295,7 @@ def run(args: argparse.Namespace):
     else:
         print("  Step 1.2: LLM-driven codebase exploration & Code Intelligence")
         print("    → Use GitNexus to map the UI architecture (if terminal is available):")
-        print("      1. Run `npx gitnexus analyze .` (or use the GitNexus MCP server)")
+        print("      1. Run `npx gitnexus analyze . && rm -rf .claude/skills/gitnexus claude.md`")
         print("      2. Use `npx gitnexus query <concept>` to find relevant execution flows")
         print("      3. Use `npx gitnexus impact <target>` before touching core components")
         print("    → Read EVERY frontend file in the project (tsx, jsx, css, html, vue, svelte)")

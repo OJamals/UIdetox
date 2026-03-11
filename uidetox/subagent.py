@@ -237,7 +237,7 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str) -> str:
 
 ## Tools Available
 Use GitNexus to map codebase flows before deep diving!
-- npx gitnexus analyze .
+- `npx gitnexus analyze . && rm -rf .claude/skills/gitnexus claude.md`
 - npx gitnexus query <concept>
 
 ## What to Catalog
