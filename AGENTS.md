@@ -43,7 +43,7 @@ Run `uidetox review` to perform an LLM-driven subjective quality assessment acro
 
 ### Phase 4: Verification & Status
 The loop triggers `uidetox status` to view your blended Design Score (60% objective static analysis + 40% subjective LLM review). If the score is below 95, the loop continues.
-For large codebases, the loop supports Orchestrator Mode via `uidetox loop --orchestrator`, splitting work into sub-agents (`uidetox subagent --stage-prompt observe`).
+For large codebases (>15 frontend files), the loop automatically engages Orchestrator Mode, splitting work into sub-agents (`uidetox subagent --stage-prompt observe`). You can also force it via `uidetox loop --orchestrator`.
 
 ### Phase 5: Finalize
 Once the target score is reached, the loop triggers `uidetox finish` to squash-merge the autonomous session branch cleanly.

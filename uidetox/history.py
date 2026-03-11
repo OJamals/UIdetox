@@ -85,7 +85,12 @@ def _compute_score(state: dict) -> int:
     total_slop = current_slop + resolved_slop
 
     if total_slop == 0:
-        return 100
-
-    score = int(100 - ((current_slop / total_slop) * 100))
-    return max(0, min(100, score))
+        objective_score = 100
+    else:
+        objective_score = int(100 - ((current_slop / total_slop) * 100))
+        objective_score = max(0, min(100, objective_score))
+        
+    subjective_score = state.get("subjective", {}).get("score")
+    if subjective_score is not None:
+        return int(objective_score * 0.6 + subjective_score * 0.4)
+    return objective_score

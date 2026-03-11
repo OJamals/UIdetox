@@ -33,7 +33,7 @@ def run(args: argparse.Namespace):
             tiers[tier] += 1
 
     # Category breakdown (infer from issue descriptions)
-    categories = {
+    categories: dict[str, dict[str, list[str] | int]] = {
         "typography": {"keywords": ["font", "typography", "inter", "roboto", "type scale"], "pending": 0, "resolved": 0},
         "color": {"keywords": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "blue", "black"], "pending": 0, "resolved": 0},
         "layout": {"keywords": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "viewport", "h-screen"], "pending": 0, "resolved": 0},
@@ -47,14 +47,18 @@ def run(args: argparse.Namespace):
     for issue in issues:
         desc = issue.get("issue", "").lower()
         for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["pending"] += 1
+            kws = cat["keywords"]
+            if isinstance(kws, list) and any(kw in desc for kw in kws):
+                current: int = getattr(cat["pending"], "real", 0) if isinstance(cat["pending"], int) else 0 # type: ignore
+                cat["pending"] = current + 1
                 break
     for issue in resolved:
         desc = issue.get("issue", "").lower()
         for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["resolved"] += 1
+            kws = cat["keywords"]
+            if isinstance(kws, list) and any(kw in desc for kw in kws):
+                current: int = getattr(cat["resolved"], "real", 0) if isinstance(cat["resolved"], int) else 0 # type: ignore
+                cat["resolved"] = current + 1
                 break
 
     # Smarter health score: blend objective (static analysis) + subjective (LLM review)
@@ -144,16 +148,18 @@ def run(args: argparse.Namespace):
     print(f"  AUTO_COMMIT      : {'enabled' if auto_commit else 'disabled'}")
 
     # Category breakdown with actionable hints
-    active_cats = {k: v for k, v in categories.items() if v["pending"] > 0 or v["resolved"] > 0}
+    active_cats = {k: v for k, v in categories.items() if int(v["pending"]) > 0 or int(v["resolved"]) > 0}
     if active_cats:
         print()
         print("  ─── Category Breakdown ───")
         for cat_name, cat in active_cats.items():
-            total_cat = cat["pending"] + cat["resolved"]
+            pending_val = int(cat["pending"])
+            resolved_val = int(cat["resolved"])
+            total_cat = pending_val + resolved_val
             if total_cat > 0:
-                cat_score = int((cat["resolved"] / total_cat) * 100)
+                cat_score = int((resolved_val / total_cat) * 100)
                 cat_bar = "█" * (cat_score // 10) + "░" * (10 - cat_score // 10)
-                print(f"  {cat_name:<14} [{cat_bar}] {cat_score}%  ({cat['pending']} pending, {cat['resolved']} resolved)")
+                print(f"  {cat_name:<14} [{cat_bar}] {cat_score}%  ({pending_val} pending, {resolved_val} resolved)")
                 # Show hint for worst-performing categories
                 if cat_score == 0 and cat_name in _CATEGORY_HINTS:
                     print(f"                 ^ {_CATEGORY_HINTS[cat_name]}")
@@ -175,6 +181,6 @@ def run(args: argparse.Namespace):
     if score >= 95 and len(issues) == 0:
         print("TARGET REACHED. You may exit the loop.")
     elif len(issues) == 0:
-        print(f"Queue is empty but score is {score}. Run 'uidetox rescan' to find more issues.")
+        print(f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design.")
     else:
         print(f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue.")

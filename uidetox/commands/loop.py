@@ -39,9 +39,24 @@ def run(args: argparse.Namespace):
     issues = state.get("issues", [])
     resolved = len(state.get("resolved", []))
 
-    # Auto-calculate optimal parallel count from unique files in queue
-    unique_files = len(set(i.get("file", "") for i in issues))
-    auto_parallel = max(1, min(5, unique_files))  # 1-5 based on file spread
+    # Auto-calculate codebase size and parallel count
+    import pathlib
+    frontend_exts = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html", ".css", ".scss", ".sass"}
+    exclude_dirs = {"node_modules", ".git", "dist", "build", ".next", "out", ".uidetox"}
+    
+    frontend_file_list = [
+        p for p in pathlib.Path('.').rglob('*')
+        if p.is_file() and p.suffix in frontend_exts and not any(excluded in p.parts for excluded in exclude_dirs)
+    ]
+    frontend_count = len(frontend_file_list)
+
+    unique_files_in_queue = len(set(i.get("file", "") for i in issues))
+    # If we have issues, scale based on the queue spread. Otherwise scale on total codebase size.
+    spread = unique_files_in_queue if unique_files_in_queue > 0 else (frontend_count // 5)
+    auto_parallel = max(1, min(5, spread))
+    
+    # Auto-enable orchestrator mode for large codebases (> 15 files)
+    is_orchestrator = getattr(args, "orchestrator", False) or frontend_count > 15
 
     print("================================================================")
     print("          UIdetox Autonomous Loop — Full Bootstrap             ")
@@ -261,24 +276,38 @@ def run(args: argparse.Namespace):
     print("    → Run: uidetox scan --path .")
     print("    → This runs the 41-rule deterministic analyzer and auto-queues anti-patterns.")
     print()
-    print("  Step 1.2: LLM-driven codebase exploration")
-    print("    → Read EVERY frontend file in the project (tsx, jsx, css, html, vue, svelte)")
-    print("    → For each file, systematically observe:")
-    print("        • Typography: font families, sizes, weights, line heights")
-    print("        • Colors: all color values (hex, rgb, hsl, oklch, CSS vars, Tailwind classes)")
-    print("        • Layout: grid systems, flex patterns, max-widths, padding/margin patterns")
-    print("        • Components: UI patterns used (cards, modals, heroes, navbars, forms)")
-    print("        • Motion: animations, transitions, hover/focus/active effects")
-    print("        • States: loading, error, empty, disabled state handling")
-    print("        • Accessibility: ARIA labels, focus indicators, semantic HTML")
-    print("        • Content: placeholder data quality, copy tone, generic names")
-    print()
-    print("  Step 1.3: Design audit against SKILL.md")
-    print("    → Read SKILL.md and compare your observations against its rules")
-    print("    → For EACH issue found that wasn't caught by static analysis:")
-    print('      uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
-    print()
-    print("  Step 1.4: Targeted design skill audits")
+    
+    is_orchestrator = getattr(args, "orchestrator", False)
+    
+    if is_orchestrator:
+        print("  Step 1.2: Orchestrator Mode — Parallel Sub-Agent Exploration")
+        print("    → DO NOT manually read files. Act as a manager.")
+        print(f"    → Run: uidetox subagent --stage-prompt observe --parallel {auto_parallel}")
+        print(f"    → Launch {auto_parallel} sub-agents in parallel with the printed prompts.")
+        print(f"    → Wait for them to finish, then run: uidetox subagent --stage-prompt diagnose")
+        print(f"    → Launch the diagnosis agent. It will queue the issues.")
+        print(f"    → Record them: uidetox subagent --record <session_id>")
+        print()
+    else:
+        print("  Step 1.2: LLM-driven codebase exploration")
+        print("    → Read EVERY frontend file in the project (tsx, jsx, css, html, vue, svelte)")
+        print("    → For each file, systematically observe:")
+        print("        • Typography: font families, sizes, weights, line heights")
+        print("        • Colors: all color values (hex, rgb, hsl, oklch, CSS vars, Tailwind classes)")
+        print("        • Layout: grid systems, flex patterns, max-widths, padding/margin patterns")
+        print("        • Components: UI patterns used (cards, modals, heroes, navbars, forms)")
+        print("        • Motion: animations, transitions, hover/focus/active effects")
+        print("        • States: loading, error, empty, disabled state handling")
+        print("        • Accessibility: ARIA labels, focus indicators, semantic HTML")
+        print("        • Content: placeholder data quality, copy tone, generic names")
+        print()
+        print("  Step 1.3: Design audit against SKILL.md")
+        print("    → Read SKILL.md and compare your observations against its rules")
+        print("    → For EACH issue found that wasn't caught by static analysis:")
+        print('      uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+        print()
+
+    print(f"  Step {'1.3' if is_orchestrator else '1.4'}: Targeted design skill audits")
     print("    → Run design skills on components that need deep attention:")
     print("      uidetox audit <target>     — Technical quality (a11y, perf, theming)")
     print("      uidetox critique <target>  — UX review (hierarchy, emotion, composition)")
@@ -286,21 +315,12 @@ def run(args: argparse.Namespace):
     print()
 
     if has_fullstack:
-        print("  Step 1.5: Full-stack integration audit")
+        print(f"  Step {'1.4' if is_orchestrator else '1.5'}: Full-stack integration audit")
         print("    → Read backend source files, API routes, and database schemas")
         print("    → Check DTO alignment, type safety across boundaries")
         print("    → Run: uidetox harden <target> for edge cases and error handling")
         print("    → Queue mismatches as issues")
         print()
-
-    # Orchestrator: sub-agent parallel exploration
-    print("  Step 1.6: OPTIONAL — Parallel sub-agent exploration")
-    print(f"    → For large codebases, spawn parallel observers:")
-    print(f"      uidetox subagent --stage-prompt observe --parallel {auto_parallel}")
-    print(f"    → Launch {auto_parallel} sub-agents with the printed prompts.")
-    print(f"    → Then run diagnosis: uidetox subagent --stage-prompt diagnose")
-    print(f"    → Record each: uidetox subagent --record <session_id>")
-    print()
 
     # ================================================================
     # PHASE 2: FIX LOOP (Component-Level)
@@ -312,7 +332,7 @@ def run(args: argparse.Namespace):
     print("  Step 1: Check baseline")
     print(f"          → Run `uidetox status`")
     print(f"          → Score >= {target} AND Queue Empty? → GOTO PHASE 4.")
-    print(f"          → Queue Empty but Score < {target}?  → Run `uidetox rescan`")
+    print(f"          → Queue Empty but Score < {target}?  → GOTO PHASE 3.")
     print()
     print("  Step 2: Clear the easy wins")
     print("          → Run `uidetox autofix`")
@@ -383,6 +403,9 @@ def run(args: argparse.Namespace):
     if has_mechanical:
         print("Agent: Begin with PHASE 0. Run `uidetox check --fix` now.")
     elif len(issues) == 0:
-        print("Agent: Begin with PHASE 1. Run `uidetox scan --path .` now, then systematically read every frontend file.")
+        if is_orchestrator:
+            print("Agent: Begin with PHASE 1. Run `uidetox scan --path .` now, then launch the sub-agents (Step 1.2).")
+        else:
+            print("Agent: Begin with PHASE 1. Run `uidetox scan --path .` now, then systematically read every frontend file.")
     else:
         print("Agent: Begin with PHASE 2 Step 1. Run `uidetox status` now.")
