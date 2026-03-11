@@ -81,6 +81,10 @@ def parse_args(args_list=None):
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
     review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
     
+    # Command: capture
+    capture_parser = subparsers.add_parser("capture", help="Capture a visual regression screenshot via Playwright")
+    capture_parser.add_argument("--url", type=str, help="URL of the local dev server (default: http://localhost:3000)")
+    
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
     update_parser.add_argument("agent", choices=["claude", "cursor", "gemini", "codex", "windsurf", "copilot"], help="Target AI agent")
@@ -125,6 +129,7 @@ def parse_args(args_list=None):
     # Command: history
     history_parser = subparsers.add_parser("history", help="View run history and score progression")
     history_parser.add_argument("--full", action="store_true", help="Show full run details")
+    history_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # Command: viz
     viz_parser = subparsers.add_parser("viz", help="Generate an HTML treemap heatmap of codebase issues")

@@ -207,6 +207,64 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "SEMANTIC HTML: Use appropriate HTML5 semantic elements. A single <h1> per page with proper heading hierarchy. Include skip-to-content link for keyboard users.",
         None,
     ),
+    "any": (
+        "TYPE SAFETY: Replace `any` with proper TypeScript types, `unknown`, or generic parameters. The `any` type defeats the entire purpose of TypeScript. Use discriminated unions for variant types.",
+        None,
+    ),
+    "ts-ignore": (
+        "TYPE SAFETY: Fix the underlying type error instead of suppressing with @ts-ignore. Use @ts-expect-error only as last resort, always with an explanation comment.",
+        None,
+    ),
+    "eslint": (
+        "CODE QUALITY: Fix the underlying lint issue instead of suppressing with eslint-disable. If a rule is truly wrong for your project, disable it in config — not inline.",
+        None,
+    ),
+    "ternary": (
+        "READABILITY: Extract nested ternaries into named variables, early returns, or switch/if blocks. Nested ternaries in JSX are unreadable. One level of ternary max in render.",
+        None,
+    ),
+    "inline style": (
+        "CODE QUALITY: Extract inline style objects (40+ chars) to Tailwind classes, CSS modules, styled-components, or cva() variants. Inline styles bypass the design system.",
+        None,
+    ),
+    "!important": (
+        "CSS QUALITY: Fix CSS specificity instead of using !important. Use CSS layers (@layer), lower-specificity selectors, or BEM naming to avoid specificity wars.",
+        None,
+    ),
+    # Duplication
+    "duplicate": (
+        "DRY PRINCIPLE: Extract repeated code into shared components, utility functions, or CSS custom properties. If the same className, handler, or markup appears twice, it should be a component.",
+        None,
+    ),
+    "copy-paste": (
+        "COMPONENT EXTRACTION: Copy-pasted markup blocks should become reusable components with props for variation. Use composition, not duplication.",
+        None,
+    ),
+    "repeated": (
+        "DRY PRINCIPLE: Merge duplicate media queries into one block. Extract repeated color literals to CSS variables. Deduplicate identical event handlers into named functions.",
+        None,
+    ),
+    # Dead code
+    "commented": (
+        "DEAD CODE: Delete commented-out code immediately. Git preserves history. Commented code rots, confuses readers, and signals unfinished work.",
+        None,
+    ),
+    "unused": (
+        "DEAD CODE: Remove unused imports, variables, and state declarations. Use your linter's auto-fix (`uidetox check --fix`) to clean automatically.",
+        None,
+    ),
+    "unreachable": (
+        "DEAD CODE: Remove code after return/throw/break statements. Unreachable code is never executed and confuses maintainers.",
+        None,
+    ),
+    "deprecated": (
+        "MODERNIZATION: Migrate deprecated React lifecycle methods to hooks. Use useEffect for side effects, useMemo for computation, useCallback for handlers.",
+        None,
+    ),
+    "console": (
+        "PRODUCTION CODE: Remove all console.log/warn/error statements. Use a proper logging utility or conditional debug logging that's stripped in production.",
+        None,
+    ),
     # Responsive
     "responsive": (
         "RESPONSIVE RULES: Use container queries for components, viewport queries for page layouts. Use repeat(auto-fit, minmax(280px, 1fr)) for responsive grids without breakpoints. Ensure mobile layout collapse for high-variance designs.",
@@ -340,6 +398,20 @@ def run(args: argparse.Namespace):
             for ref in ref_files:
                 print(f"    {ref}")
             print()
+
+    # Inject semantic memory context based on current issues
+    try:
+        from uidetox.subagent import _build_memory_block # type: ignore
+        query_text = " ".join([i.get("issue", "") + " " + i.get("command", "") for i in batch])
+        memory_block = _build_memory_block(query=query_text)
+        if memory_block:
+            print("  ━━━ PERSISTENT AGENT MEMORY (semantically matched) ━━━")
+            for line in memory_block.split("\n"):
+                if line.strip():
+                    print(f"  {line}")
+            print()
+    except Exception:
+        pass
 
     # Point the agent to the full SKILL.md for deeper reference
     skill_path = _get_skill_path()

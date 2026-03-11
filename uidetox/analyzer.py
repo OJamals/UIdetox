@@ -15,6 +15,19 @@ _FE_EXTS = {".css", ".scss", ".tsx", ".jsx", ".html", ".svelte", ".vue"}
 _JSX_EXTS = {".tsx", ".jsx", ".html", ".svelte", ".vue"}
 _ALL_FE_EXTS = _FE_EXTS | {".ts", ".js", ".less"}
 
+HAS_AST = False
+try:
+    import tree_sitter
+    import tree_sitter_javascript as ts_js
+    import tree_sitter_typescript as ts_ts
+    import tree_sitter_css as ts_css
+    HAS_AST = True
+    JS_LANG = tree_sitter.Language(ts_js.language())
+    TSX_LANG = tree_sitter.Language(ts_ts.language_tsx())
+    CSS_LANG = tree_sitter.Language(ts_css.language())
+except ImportError:
+    pass
+
 # The Anti-Pattern Rule Catalog
 RULES = [
     {
@@ -139,11 +152,12 @@ RULES = [
     },
     {
         "id": "MISSING_HOVER_STATES",
-        "pattern": re.compile(r'<button[^>]*(?!hover:)[^>]*className', re.IGNORECASE),
+        "pattern": re.compile(r'<button[^>]*className=["\'][^"\']*["\']', re.IGNORECASE),
         "tier": "T2",
         "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
         "description": "Button element without hover: state detected.",
-        "command": "Add hover:, focus:, and active: states to all interactive elements."
+        "command": "Add hover:, focus:, and active: states to all interactive elements.",
+        "_custom_check": "missing_hover"
     },
     {
         "id": "EMOJI_HEAVY_SLOP",
@@ -222,11 +236,12 @@ RULES = [
     },
     {
         "id": "MISSING_FOCUS_SLOP",
-        "pattern": re.compile(r'<(?:button|a)\s[^>]*className=["\'][^"]*(?!focus:)[^"]*["\']', re.IGNORECASE),
+        "pattern": re.compile(r'<(?:button|a)\s[^>]*className=["\'][^"\']*["\']', re.IGNORECASE),
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Interactive element without focus: state — accessibility gap.",
-        "command": "Add focus:ring or focus:outline states for keyboard accessibility."
+        "command": "Add focus:ring or focus:outline states for keyboard accessibility.",
+        "_custom_check": "missing_focus"
     },
     {
         "id": "DIV_SOUP_SLOP",
@@ -296,11 +311,12 @@ RULES = [
     },
     {
         "id": "UGLY_SCROLLBAR_SLOP",
-        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*overflow-[xy]-(?:auto|scroll)(?![^"\']*scrollbar)[^"\']*["\']', re.IGNORECASE),
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*overflow-[xy]-(?:auto|scroll)[^"\']*["\']', re.IGNORECASE),
         "tier": "T1",
         "exts": _JSX_EXTS,
         "description": "Scrollable container without scrollbar styling or hiding.",
-        "command": "Add scrollbar-hide or custom CSS scrollbar for polish."
+        "command": "Add scrollbar-hide or custom CSS scrollbar for polish.",
+        "_custom_check": "ugly_scrollbar"
     },
     {
         "id": "TIGHT_LINE_HEIGHT_SLOP",
@@ -312,11 +328,12 @@ RULES = [
     },
     {
         "id": "MISSING_TRANSITION_SLOP",
-        "pattern": re.compile(r'class(?:Name)?=["\'](?:(?!transition-).)*?hover:(?:(?!transition-).)*?["\']', re.IGNORECASE),
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*hover:[^"\']*["\']', re.IGNORECASE),
         "tier": "T1",
         "exts": _JSX_EXTS,
         "description": "Interactive element with hover states but missing transition class.",
-        "command": "Add 'transition-colors' or 'transition-all' with duration (e.g., duration-200) for smooth easing."
+        "command": "Add 'transition-colors' or 'transition-all' with duration (e.g., duration-200) for smooth easing.",
+        "_custom_check": "missing_transition"
     },
     {
         "id": "ORPHANED_LABEL_SLOP",
@@ -342,14 +359,379 @@ RULES = [
         "description": "Using basic named CSS colors (red, blue). Looks unpolished.",
         "command": "Use a curated hex/hsl palette or Tailwind colors (e.g. text-blue-500) instead."
     },
+    # ──────────────────────────────────────────────
+    # ADDITIONAL RULES (10 more detections for 2024+ patterns)
+    # ──────────────────────────────────────────────
+    {
+        "id": "IMPORTANT_ABUSE_SLOP",
+        "pattern": re.compile(r'!important', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "!important override detected — indicates specificity war.",
+        "command": "Refactor CSS specificity. Use lower-specificity selectors or CSS layers instead of !important."
+    },
+    {
+        "id": "INLINE_STYLE_SLOP",
+        "pattern": re.compile(r'\bstyle=\{?\{[^}]{40,}\}\}?', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Large inline style object detected (40+ chars). Harms maintainability.",
+        "command": "Extract inline styles to Tailwind classes, CSS modules, or styled-components."
+    },
+    {
+        "id": "CONSOLE_LOG_SLOP",
+        "pattern": re.compile(r'\bconsole\.(log|warn|error|debug|info)\s*\(', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Console statement detected in production code.",
+        "command": "Remove console statements or replace with a proper logging utility."
+    },
+    {
+        "id": "TODO_FIXME_SLOP",
+        "pattern": re.compile(r'(?://|/\*|<!--)\s*(?:TODO|FIXME|HACK|XXX|TEMP)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "TODO/FIXME/HACK comment detected — unfinished work.",
+        "command": "Resolve the TODO or convert to a tracked issue. No orphan comments in production."
+    },
+    {
+        "id": "MAGIC_NUMBER_SLOP",
+        "pattern": re.compile(r'(?:margin|padding|gap|top|left|right|bottom|width|height):\s*\d{3,}px', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Magic number (large px value) in CSS — no spacing system.",
+        "command": "Use spacing tokens or CSS custom properties. Map values to a design scale."
+    },
+    {
+        "id": "NESTED_TERNARY_SLOP",
+        "pattern": re.compile(r'\?[^:]*\?[^:]*:', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Nested ternary operator detected — harms readability in JSX.",
+        "command": "Extract nested ternaries into named variables or early returns for clarity.",
+        "_custom_check": "nested_ternary"
+    },
+    {
+        "id": "DISABLED_NO_CURSOR_SLOP",
+        "pattern": re.compile(r'disabled[^"\']*(?:className|class)=["\'][^"\']*["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Disabled element without cursor-not-allowed style.",
+        "command": "Add 'disabled:cursor-not-allowed disabled:opacity-50' for clear disabled state.",
+        "_custom_check": "disabled_cursor"
+    },
+    {
+        "id": "BROKEN_IMAGE_SLOP",
+        "pattern": re.compile(r'(?:src|href)=["\']https?://(?:unsplash\.com|images\.unsplash\.com|source\.unsplash\.com)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Direct Unsplash URL detected — likely to break. Use picsum.photos instead.",
+        "command": "Replace with https://picsum.photos/seed/{name}/800/600 for reliable placeholders."
+    },
+    {
+        "id": "EXCLAMATION_UX_SLOP",
+        "pattern": re.compile(r'(?:Success|Saved|Done|Created|Updated|Deleted|Welcome)[^.]*!', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Exclamation mark in success/status message — feels unprofessional.",
+        "command": "Remove exclamation marks from status messages. Use calm, confident tone."
+    },
+    {
+        "id": "OOPS_ERROR_SLOP",
+        "pattern": re.compile(r'\b(?:Oops|Whoops|Uh[- ]?oh|Oh no)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Infantile error messaging detected (Oops/Whoops/Uh-oh).",
+        "command": "Replace with direct, actionable error messages. Be specific about what went wrong."
+    },
+    # ──────────────────────────────────────────────
+    # DUPLICATION SMELLS
+    # ──────────────────────────────────────────────
+    {
+        "id": "DUPLICATE_TAILWIND_BLOCK",
+        "pattern": re.compile(
+            r'class(?:Name)?=["\']([^"\']{40,})["\']'
+            r'(?:[\s\S]{0,2000})'
+            r'class(?:Name)?=["\'](\1)["\']',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Repeated identical long className string detected — extract to component or utility.",
+        "command": "Extract duplicated class strings to a shared component, cn() utility, or cva() variant."
+    },
+    {
+        "id": "DUPLICATE_COLOR_LITERAL",
+        "pattern": re.compile(
+            r'(#[0-9a-fA-F]{6})\b(?:[\s\S]{0,3000})\1(?:[\s\S]{0,3000})\1',
+        ),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Same hex color literal repeated 3+ times — extract to CSS variable or design token.",
+        "command": "Define a CSS custom property (--color-brand: #XXXXXX) and reference it everywhere."
+    },
+    {
+        "id": "COPY_PASTE_COMPONENT",
+        "pattern": re.compile(
+            r'(<(?:div|section|article)\s[^>]{30,}>)'
+            r'([\s\S]{80,300}?)'
+            r'</(?:div|section|article)>'
+            r'[\s\S]{0,200}'
+            r'\1\2',
+            re.IGNORECASE,
+        ),
+        "tier": "T3",
+        "exts": _JSX_EXTS,
+        "description": "Copy-pasted markup block detected — extract to reusable component.",
+        "command": "Extract repeated markup into a shared component with props for variation."
+    },
+    {
+        "id": "DUPLICATE_HANDLER",
+        "pattern": re.compile(
+            r'((?:on(?:Click|Change|Submit|Press|Focus|Blur))\s*=\s*\{[^}]{20,}\})'
+            r'[\s\S]{0,2000}\1',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Identical inline event handler duplicated — extract to named function.",
+        "command": "Extract duplicated handler logic into a named function or custom hook."
+    },
+    {
+        "id": "REPEATED_MEDIA_QUERY",
+        "pattern": re.compile(
+            r'(@media\s*\([^)]+\)\s*\{)'
+            r'[\s\S]{0,5000}'
+            r'\1',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Same @media query duplicated — consolidate into one block.",
+        "command": "Merge duplicate media queries into a single block or use container queries."
+    },
+    # ──────────────────────────────────────────────
+    # DEAD CODE SMELLS
+    # ──────────────────────────────────────────────
+    {
+        "id": "COMMENTED_OUT_CODE",
+        "pattern": re.compile(
+            r'(?://|/\*|{/\*)\s*(?:'
+            r'<[A-Z][a-zA-Z]+|'               # Commented JSX component
+            r'(?:const|let|var|function|import|export|return|if|for)\s|'  # Commented JS
+            r'(?:className|onClick|onChange|style)='  # Commented JSX attrs
+            r')',
+            re.IGNORECASE,
+        ),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Commented-out code detected — use version control, not comments.",
+        "command": "Delete commented-out code. Git preserves history. Ship only live code.",
+        "_custom_check": "commented_code"
+    },
+    {
+        "id": "UNUSED_IMPORT",
+        "pattern": re.compile(
+            r'^import\s+(?:\{[^}]+\}|[A-Za-z_$]+)\s+from\s+["\'][^"\']+["\'];?\s*$',
+            re.MULTILINE,
+        ),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Potentially unused import detected — verify and remove.",
+        "command": "Run `uidetox check --fix` to auto-remove unused imports via linter.",
+        "_custom_check": "unused_import"
+    },
+    {
+        "id": "UNREACHABLE_CODE",
+        "pattern": re.compile(
+            r'(?:return|throw|break|continue)\s[^;]*;\s*\n\s*(?![\s})\]*/])'
+            r'(?:const|let|var|function|if|for|while|switch|try)\b',
+            re.MULTILINE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Unreachable code after return/throw/break detected.",
+        "command": "Remove dead code after return/throw/break statements."
+    },
+    {
+        "id": "EMPTY_HANDLER",
+        "pattern": re.compile(
+            r'(?:on(?:Click|Change|Submit|Press|Focus|Blur|Key\w+))\s*=\s*\{\s*\(\s*\)\s*=>\s*\{\s*\}\s*\}',
+            re.IGNORECASE,
+        ),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Empty event handler (no-op arrow function) detected.",
+        "command": "Either implement the handler or remove the prop. No-op handlers confuse readers."
+    },
+    {
+        "id": "DEAD_CSS_CLASS",
+        "pattern": re.compile(
+            r'^\s*\.(?:[a-zA-Z_][\w-]*)\s*\{\s*\}',
+            re.MULTILINE,
+        ),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Empty CSS rule (no declarations) detected — dead code.",
+        "command": "Remove empty CSS classes or add declarations."
+    },
+    {
+        "id": "UNUSED_STATE",
+        "pattern": re.compile(
+            r'const\s+\[(\w+),\s*set\w+\]\s*=\s*useState',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "useState declaration where state variable may be unused.",
+        "command": "Verify the state variable is referenced in JSX or effects. Remove if unused.",
+        "_custom_check": "unused_state"
+    },
+    {
+        "id": "DEPRECATED_LIFECYCLE",
+        "pattern": re.compile(
+            r'\b(?:componentWillMount|componentWillReceiveProps|componentWillUpdate|UNSAFE_componentWillMount|UNSAFE_componentWillReceiveProps|UNSAFE_componentWillUpdate)\b',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "Deprecated React lifecycle method detected.",
+        "command": "Migrate to functional components with hooks (useEffect, useMemo)."
+    },
+    {
+        "id": "DISABLED_LINT_RULE",
+        "pattern": re.compile(
+            r'(?://\s*eslint-disable(?:-next-line)?|/\*\s*eslint-disable)',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "ESLint disable directive detected — suppressing lint rules.",
+        "command": "Fix the underlying lint issue instead of suppressing it."
+    },
+    {
+        "id": "ANY_TYPE_SLOP",
+        "pattern": re.compile(
+            r':\s*any\b|as\s+any\b|<any>',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "TypeScript `any` type detected — defeats type safety.",
+        "command": "Replace `any` with a proper type, `unknown`, or a generic parameter."
+    },
+    {
+        "id": "TS_IGNORE_SLOP",
+        "pattern": re.compile(
+            r'(?://\s*@ts-ignore|//\s*@ts-expect-error|//\s*@ts-nocheck)',
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "TypeScript suppression directive detected (@ts-ignore/@ts-nocheck).",
+        "command": "Fix the type error instead of suppressing it. Use @ts-expect-error only as last resort with explanation."
+    },
+    {
+        "id": "LOW_CONTRAST_SLOP",
+        "pattern": None,
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Text contrast ratio below WCAG AA standard (4.5:1).",
+        "command": "Increase text contrast against background color.",
+        "_custom_check": "contrast_ratio"
+    },
 ]
 
-def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
+def _get_parser(ext: str):
+    if not HAS_AST:
+        return None
+    if ext in {".js", ".jsx", ".mjs", ".cjs"}:
+        return tree_sitter.Parser(JS_LANG)
+    elif ext in {".ts", ".tsx"}:
+        return tree_sitter.Parser(TSX_LANG)
+    elif ext in {".css", ".scss", ".less"}:
+        return tree_sitter.Parser(CSS_LANG)
+    return None
+
+def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
+    parser = _get_parser(ext)
+    if not parser:
+        return []
+        
+    try:
+        tree = parser.parse(content.encode("utf-8", errors="ignore"))
+    except Exception:
+        return []
+        
+    issues = []
+    
+    if ext in {".tsx", ".jsx", ".js", ".ts"}:
+        state = {"div_count": 0, "semantic_count": 0, "nested_ternaries": 0, "cards": 0, "charts": 0}
+        
+        def walk(node):
+            if node.type in ("jsx_element", "jsx_self_closing_element"):
+                open_tag = node.child_by_field_name("open_tag") if node.type == "jsx_element" else node
+                if open_tag:
+                    name_node = open_tag.child_by_field_name("name")
+                    if name_node:
+                        try:
+                            tag_name = name_node.text.decode("utf-8", errors="ignore")
+                        except AttributeError:
+                            tag_name = str(name_node.text)
+                        
+                        if tag_name == "div":
+                            state["div_count"] += 1
+                        elif tag_name in {"nav", "main", "article", "section", "aside", "header", "footer"}:
+                            state["semantic_count"] += 1
+                            
+                        # Detect Dashboard Slop
+                        if "Card" in tag_name or "Stat" in tag_name or "Metric" in tag_name:
+                            state["cards"] += 1
+                        elif "Chart" in tag_name or "Graph" in tag_name or "Activity" in tag_name:
+                            state["charts"] += 1
+                            
+            elif node.type == "ternary_expression":
+                for child in node.children:
+                    if child.type == "ternary_expression":
+                        state["nested_ternaries"] += 1
+            for child in node.children:
+                walk(child)
+
+        walk(tree.root_node)
+        
+        if state["div_count"] > 20 and state["semantic_count"] == 0:
+            issues.append({
+                "file": str(filepath.resolve()),
+                "tier": "T2",
+                "issue": f"Div-heavy file with no semantic HTML elements detected via AST. ({state['div_count']} divs, 0 semantic elements)",
+                "command": "Replace generic divs with <nav>, <main>, <article>, <section>, <aside>, <header>, <footer>."
+            })
+            
+        if state["nested_ternaries"] >= 2:
+            issues.append({
+                "file": str(filepath.resolve()),
+                "tier": "T2",
+                "issue": f"Nested ternary operator detected via AST — harms readability in JSX. ({state['nested_ternaries']} nested ternaries found)",
+                "command": "Extract nested ternaries into named variables or early returns for clarity."
+            })
+            
+        if state["cards"] >= 3 and state["charts"] >= 1:
+            issues.append({
+                "file": str(filepath.resolve()),
+                "tier": "T3",
+                "issue": f"Hero metric dashboard pattern detected via AST ({state['cards']} cards, {state['charts']} charts) — cliché AI layout.",
+                "command": "Replace with contextual data visualization or inline metrics woven into the narrative flow."
+            })
+
+    return issues
+
+def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[str, str] | None = None) -> list[dict]:
     """Scan a single file against all slop rules.
 
     Args:
         filepath: File to scan.
         design_variance: Current DESIGN_VARIANCE dial value (affects conditional rules).
+        dynamic_colors: Tailwind configuration colors mappings.
     """
     issues = []
     ext = filepath.suffix.lower()
@@ -372,6 +754,10 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
     except (UnicodeDecodeError, OSError):
         return issues  # Skip binary or unreadable files
 
+    if HAS_AST:
+        ast_issues = _analyze_ast(filepath, content, ext)
+        issues.extend(ast_issues)
+
     for rule in applicable_rules:
         # Skip rules conditioned on DESIGN_VARIANCE if below threshold
         variance_threshold = rule.get("_requires_variance_gt")
@@ -379,7 +765,10 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
             continue
 
         # Custom check: div_soup requires counting, not just pattern match
-        if rule.get("_custom_check") == "div_soup":
+        custom = rule.get("_custom_check")
+        if custom == "div_soup":
+            if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
+                continue # Handled by AST
             div_count = len(re.findall(r'<div[\s>]', content, re.IGNORECASE))
             semantic_count = len(re.findall(
                 r'<(?:nav|main|article|section|aside|header|footer)[\s>]',
@@ -392,6 +781,212 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
                     "issue": f"{rule['description']} ({div_count} divs, 0 semantic elements)",
                     "command": rule["command"]
                 })
+            continue
+
+        # Custom check: missing_hover — buttons with className but no hover: class
+        if custom == "missing_hover":
+            for m in re.finditer(r'<button[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                classes = m.group(1)
+                if "hover:" not in classes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+                    break  # Flag once per file
+            continue
+
+        # Custom check: missing_focus — interactive elements without focus: class
+        if custom == "missing_focus":
+            for m in re.finditer(r'<(?:button|a)\s[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                classes = m.group(1)
+                if "focus:" not in classes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+                    break  # Flag once per file
+            continue
+
+        # Custom check: missing_transition — hover: classes without transition-
+        if custom == "missing_transition":
+            for m in re.finditer(r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                classes = m.group(1)
+                if "hover:" in classes and "transition" not in classes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+                    break  # Flag once per file
+            continue
+
+        # Custom check: ugly_scrollbar — overflow scroll without scrollbar styling
+        if custom == "ugly_scrollbar":
+            for m in re.finditer(r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                classes = m.group(1)
+                if re.search(r'overflow-[xy]-(?:auto|scroll)', classes) and "scrollbar" not in classes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+                    break  # Flag once per file
+            continue
+
+        # Custom check: nested_ternary — only flag in JSX return blocks (rough heuristic)
+        if custom == "nested_ternary":
+            if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
+                continue # Handled by AST
+            # Count nested ternaries: lines with ? ... ? ... : pattern
+            ternary_nests = len(re.findall(r'\?[^:?\n]{0,80}\?', content))
+            if ternary_nests >= 2:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({ternary_nests} nested ternaries found)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: disabled_cursor — disabled elements missing cursor-not-allowed
+        if custom == "disabled_cursor":
+            # Find elements with disabled prop/attr
+            disabled_elements = re.findall(
+                r'(?:disabled|isDisabled)[^>]*class(?:Name)?=["\']([^"\']*)["\']',
+                content, re.IGNORECASE
+            )
+            for classes in disabled_elements:
+                if "cursor-not-allowed" not in classes and "disabled:" not in classes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+                    break
+            continue
+
+        # Custom check: commented_code — blocks of commented-out source code (not doc comments)
+        if custom == "commented_code":
+            lines = content.splitlines()
+            commented_code_lines = 0
+            for line in lines:
+                stripped = line.strip()
+                # Match single-line commented code patterns
+                if re.match(
+                    r'^(?://|/\*|\*|{/\*)\s*(?:'
+                    r'<[A-Z]|'
+                    r'(?:const|let|var|function|import|export|return|if|for|while)\s|'
+                    r'(?:className|onClick|onChange|style)=|'
+                    r'\w+\.\w+\(|'
+                    r'\}\s*(?:else|catch|finally)|'
+                    r'(?:await|async)\s'
+                    r')',
+                    stripped,
+                ):
+                    commented_code_lines += 1
+            if commented_code_lines >= 3:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({commented_code_lines} lines of commented-out code)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: contrast_ratio
+        if custom == "contrast_ratio" and dynamic_colors:
+            for m in re.finditer(r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                classes = m.group(1).split()
+                bg_color = None
+                text_color = None
+                
+                for c in classes:
+                    if c.startswith("bg-"):
+                        bg_name = c[3:].split('/')[0]
+                        if bg_name in dynamic_colors:
+                            bg_color = dynamic_colors[bg_name]
+                    elif c.startswith("text-"):
+                        text_name = c[5:].split('/')[0]
+                        if text_name in dynamic_colors:
+                            text_color = dynamic_colors[text_name]
+                            
+                if bg_color and text_color:
+                    from uidetox.color_utils import contrast_ratio
+                    ratio = contrast_ratio(text_color, bg_color)
+                    if ratio < 4.5:
+                        issues.append({
+                            "file": str(filepath.resolve()),
+                            "tier": rule["tier"],
+                            "issue": f"Low contrast detected: {text_color} on {bg_color} (ratio {ratio:.1f}:1).",
+                            "command": rule["command"]
+                        })
+                        break
+            continue
+
+        # Custom check: unused_import — imports whose identifiers appear nowhere else in the file
+        if custom == "unused_import":
+            import_pattern = re.compile(
+                r'^import\s+'
+                r'(?:'
+                r'(?:type\s+)?(\w+)(?:\s*,\s*\{([^}]+)\})?'  # default + named
+                r'|\{([^}]+)\}'                                 # named only
+                r'|\*\s+as\s+(\w+)'                             # namespace
+                r')'
+                r'\s+from\s+["\'][^"\']+["\'];?\s*$',
+                re.MULTILINE,
+            )
+            unused_names: list[str] = []
+            for m in import_pattern.finditer(content):
+                names: list[str] = []
+                if m.group(1):
+                    names.append(m.group(1))
+                for g in (m.group(2), m.group(3)):
+                    if g:
+                        for part in g.split(","):
+                            part = part.strip()
+                            if " as " in part:
+                                part = part.split(" as ")[-1].strip()
+                            if part and part != "type":
+                                names.append(part)
+                if m.group(4):
+                    names.append(m.group(4))
+                for name in names:
+                    # Count occurrences beyond the import line itself
+                    occurrences = len(re.findall(r'\b' + re.escape(name) + r'\b', content))
+                    if occurrences <= 1:
+                        unused_names.append(name)
+            if unused_names:
+                sample = ", ".join(unused_names[:5])
+                suffix = f" (+{len(unused_names) - 5} more)" if len(unused_names) > 5 else ""
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} Likely unused: {sample}{suffix}",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: unused_state — useState where the state var is never read
+        if custom == "unused_state":
+            for m in re.finditer(r'const\s+\[(\w+),\s*set(\w+)\]\s*=\s*useState', content):
+                state_var = m.group(1)
+                # Check if state var is referenced beyond the declaration
+                occurrences = len(re.findall(r'\b' + re.escape(state_var) + r'\b', content))
+                if occurrences <= 1:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": f"{rule['description']} `{state_var}` appears unused.",
+                        "command": rule["command"]
+                    })
+                    break  # Flag once per file
             continue
 
         # Standard regex match — flag once per file
@@ -434,9 +1029,12 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
                 zone_skip.add(str(Path(fpath).resolve()))
 
     from concurrent.futures import ThreadPoolExecutor
+    from uidetox.color_utils import load_dynamic_colors
+
+    dynamic_colors = load_dynamic_colors(root)
 
     def _analyze_wrapper(fp: Path) -> list:
-        return analyze_file(fp, design_variance=design_variance) # type: ignore
+        return analyze_file(fp, design_variance=design_variance, dynamic_colors=dynamic_colors) # type: ignore
 
     futures = []
     with ThreadPoolExecutor() as executor:

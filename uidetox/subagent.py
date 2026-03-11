@@ -80,8 +80,19 @@ def record_result(session_id: str, result: dict) -> bool:
     # Update meta
     meta_path = session_dir / "meta.json"
     meta = json.loads(meta_path.read_text())
-    meta["status"] = "completed"
+    
+    # Parse confidence score if provided
+    confidence = 1.0
+    text = result.get("note", "")
+    import re
+    m = re.search(r'CONFIDENCE:\s*(0\.\d+|1\.0)', text, re.IGNORECASE)
+    if m:
+        confidence = float(m.group(1))
+
+    meta["status"] = "completed_with_warnings" if confidence < 0.85 else "completed"
+    meta["confidence"] = confidence
     meta["completed_at"] = _now_iso()
+    
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
@@ -139,6 +150,83 @@ def get_frontend_files() -> list[str]:
     return sorted(files)
 
 
+def _build_memory_block(query: str = "") -> str:
+    """Build a memory injection block from persistent agent memory.
+
+    Injects learned patterns, notes, and session context so sub-agents
+    have continuity with prior work. If a query is provided, performs
+    a semantic search using ChromaDB.
+    """
+    try:
+        from uidetox.memory import get_patterns, get_notes, get_session as get_mem_session, get_last_scan
+    except ImportError:
+        return ""
+
+    sections: list[str] = []
+
+    patterns = get_patterns(query=query)
+    if patterns:
+        lines = ["## Learned Patterns (from prior sessions — MUST follow)"]
+        for p in patterns[-15:]:  # Last 15 to keep prompt size manageable
+            lines.append(f"- [{p.get('category', 'general')}] {p['pattern']}")
+        sections.append("\n".join(lines))
+
+    notes = get_notes(query=query)
+    if notes:
+        lines = ["## Agent Notes (persistent context)"]
+        for n in notes[-10:]:
+            lines.append(f"- {n['note']}")
+        sections.append("\n".join(lines))
+
+    session = get_mem_session()
+    if session:
+        lines = ["## Session Continuity"]
+        lines.append(f"- Last Phase: {session.get('phase', 'unknown')}")
+        lines.append(f"- Last Command: {session.get('last_command', 'none')}")
+        if session.get("last_component"):
+            lines.append(f"- Last Component: {session['last_component']}")
+        lines.append(f"- Issues Fixed This Session: {session.get('issues_fixed_this_session', 0)}")
+        if session.get("context"):
+            lines.append(f"- Context: {session['context']}")
+        sections.append("\n".join(lines))
+
+    last_scan = get_last_scan()
+    if last_scan:
+        lines = ["## Last Scan Summary"]
+        lines.append(f"- Total Found: {last_scan.get('total_found', 0)}")
+        by_tier = last_scan.get("by_tier", {})
+        if by_tier:
+            tier_str = ", ".join(f"{k}: {v}" for k, v in sorted(by_tier.items()))
+            lines.append(f"- By Tier: {tier_str}")
+        top = last_scan.get("top_files", [])
+        if top:
+            lines.append(f"- Hottest Files: {', '.join(top[:5])}")
+        sections.append("\n".join(lines))
+
+    if not sections:
+        return ""
+
+    return "\n\n".join(["# Memory Bank Injection"] + sections) + "\n"
+
+
+def _build_deconfliction_block(shard_index: int, total_shards: int, shard_files: list[str]) -> str:
+    """Build a deconfliction directive for parallel sub-agents.
+
+    Prevents merge conflicts by ensuring each shard only touches its assigned files.
+    """
+    if total_shards <= 1:
+        return ""
+
+    return f"""## Shard Deconfliction (CRITICAL — violating this causes merge conflicts)
+- You are shard {shard_index + 1} of {total_shards}.
+- You may ONLY read and modify files in YOUR shard assignment below.
+- Do NOT touch ANY file outside your shard, even if you see issues in it.
+- If you discover issues in files outside your shard, note them but DO NOT fix.
+- Your assigned files:
+{chr(10).join(f'  - {f}' for f in shard_files)}
+"""
+
+
 def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     """Generate focused prompts for a specific sub-agent stage.
 
@@ -163,17 +251,21 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
 Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
 
     if stage == "observe":
+        memory_block = _build_memory_block()
         if parallel > 1:
             files = get_frontend_files()
             if not files:
-                return [_observe_prompt(tooling, [], dials_block)]
+                return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
             chunk_size = max(1, len(files) // parallel)
             chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)] # type: ignore
             # Merge trailing chunk if rounding caused an extra bucket
             if len(chunks) > parallel:
                 chunks[parallel-1].extend(chunks.pop()) # type: ignore
-            return [_observe_prompt(tooling, chunk, dials_block) for chunk in chunks]
-        return [_observe_prompt(tooling, [], dials_block)]
+            return [
+                _observe_prompt(tooling, chunk, dials_block, memory_block, idx, len(chunks))
+                for idx, chunk in enumerate(chunks)
+            ]
+        return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
 
     elif stage == "diagnose":
         return [_diagnose_prompt(issues, dials_block)]
@@ -183,7 +275,7 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
 
     elif stage == "fix":
         if not issues:
-            return [_fix_prompt([], dials_block)]
+            return [_fix_prompt([], dials_block, 0, 1)]
 
         tiers_order = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
         # Safely group by file to prevent merge conflicts
@@ -213,7 +305,8 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         if not buckets:  # Fallback sanity check
             buckets = [issues[:5]] # type: ignore
 
-        return [_fix_prompt(bucket, dials_block) for bucket in buckets]
+        total_buckets = len(buckets)
+        return [_fix_prompt(bucket, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)]
 
     elif stage == "verify":
         return [_verify_prompt(issues, resolved)]
@@ -221,23 +314,28 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
     return [f"Unknown stage: {stage}"]
 
 
-def _observe_prompt(tooling: dict, files: list[str], dials_block: str) -> str:
+def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
+                    memory_block: str = "", shard_index: int = 0, total_shards: int = 1) -> str:
     # Build file target list if specific shard provided
     target_directive = "Systematically scan the codebase and catalog everything you see."
+    deconfliction = ""
     if files:
         file_list = "\n".join(f"- {f}" for f in files)
         target_directive = f"Systematically scan ONLY the following files in your shard:\n{file_list}"
+        deconfliction = _build_deconfliction_block(shard_index, total_shards, files)
 
     return f"""# UIdetox Sub-Agent: OBSERVE Stage
 
+{memory_block}
 {dials_block}
+{deconfliction}
 
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
 
 ## Tools Available
 Use GitNexus to map codebase flows before deep diving!
-- `npx gitnexus analyze . && rm -rf .claude/skills/gitnexus claude.md`
+- `npx gitnexus analyze --embeddings` (or `npx gitnexus analyze` if embeddings are not needed)
 - npx gitnexus query <concept>
 
 ## What to Catalog
@@ -412,7 +510,8 @@ Provide the recommended fix order as a numbered list with rationale for each gro
 """
 
 
-def _fix_prompt(batch: list, dials_block: str) -> str:
+def _fix_prompt(batch: list, dials_block: str,
+                shard_index: int = 0, total_shards: int = 1) -> str:
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
 
@@ -432,9 +531,16 @@ def _fix_prompt(batch: list, dials_block: str) -> str:
                 lines.append(f"  (Deep-dive: {ref_file})")
         context_block = "\n".join(lines)
 
+    # Build memory and deconfliction blocks
+    memory_block = _build_memory_block(query=batch_text)
+    batch_files = list(set(i.get("file", "") for i in batch))
+    deconfliction = _build_deconfliction_block(shard_index, total_shards, batch_files)
+
     return f"""# UIdetox Sub-Agent: FIX Stage
 
+{memory_block}
 {dials_block}
+{deconfliction}
 
 ## Your Mission
 Fix the following {len(batch)} issues. Apply changes directly to the codebase.
@@ -477,4 +583,5 @@ Report the verification results:
 - Score before and after
 - Any new issues discovered
 - Overall assessment: is the interface clean of AI slop?
+- Yield a final CONFIDENCE: <0.0 - 1.0> score based on your certainty regarding the fixes.
 """

@@ -5,8 +5,24 @@ import os
 import tempfile
 from pathlib import Path
 
+import hashlib
+from typing import Any
 from uidetox.state import get_uidetox_dir, ensure_uidetox_dir
 from uidetox.utils import now_iso
+
+
+def _get_collection(name: str) -> Any:
+    """Get a ChromaDB collection for semantic memory search."""
+    try:
+        import chromadb
+        from chromadb.config import Settings
+        
+        db_path = get_uidetox_dir() / "chroma"
+        # Suppress telemetry and keep it quiet
+        client = chromadb.PersistentClient(path=str(db_path), settings=Settings(anonymized_telemetry=False))
+        return client.get_or_create_collection(name=name)
+    except ImportError:
+        return None
 
 
 MEMORY_FILE = "memory.json"
@@ -89,36 +105,100 @@ def get_reviewed_files() -> dict:
 
 
 def add_pattern(pattern: str, *, category: str = "general"):
-    """Record a learned pattern (e.g., 'this codebase uses Tailwind, not vanilla CSS')."""
+    """Record a learned pattern (e.g., 'this codebase uses Tailwind, not vanilla CSS').
+
+    Patterns are capped at 50 entries in JSON state, but all are embedded.
+    """
     mem = load_memory()
     mem["patterns"].append({
         "pattern": pattern,
         "category": category,
         "learned_at": _now_iso(),
     })
+    # Cap at 50 patterns — evict oldest
+    mem["patterns"] = mem["patterns"][-50:]
     save_memory(mem)
+    
+    collection = _get_collection("patterns")
+    if collection:
+        doc_id = hashlib.md5(pattern.encode("utf-8")).hexdigest()
+        collection.upsert(
+            documents=[pattern],
+            metadatas=[{"category": category}],
+            ids=[doc_id]
+        )
 
 
-def get_patterns() -> list[dict]:
-    """Return all learned patterns."""
+def get_patterns(query: str | None = None, limit: int = 15) -> list[dict]:
+    """Return learned patterns. Performs semantic search if query is provided."""
     mem = load_memory()
-    return mem.get("patterns", [])
+    patterns = mem.get("patterns", [])
+    
+    if query and patterns:
+        collection = _get_collection("patterns")
+        if collection:
+            cnt = collection.count() # type: ignore
+            if cnt > 0:
+                n = min(limit, cnt) # type: ignore
+                results = collection.query(query_texts=[query], n_results=n)
+                if results and results.get("documents") and results["documents"][0]:
+                    matched = []
+                    docs = results["documents"][0]
+                    metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
+                    for doc, meta in zip(docs, metas):
+                        matched.append({
+                            "pattern": doc,
+                            "category": meta.get("category", "general") if meta else "general"
+                        })
+                    return matched
+
+    return patterns[-limit:] if patterns else []
 
 
 def add_note(note: str):
-    """Store a free-form agent note for future reference."""
+    """Store a free-form agent note for future reference.
+
+    Notes are capped at 30 entries in JSON.
+    """
     mem = load_memory()
     mem["notes"].append({
         "note": note,
         "created_at": _now_iso(),
     })
+    # Cap at 30 notes — evict oldest
+    mem["notes"] = mem["notes"][-30:]
     save_memory(mem)
 
+    collection = _get_collection("notes")
+    if collection:
+        doc_id = hashlib.md5(note.encode("utf-8")).hexdigest()
+        collection.upsert(
+            documents=[note],
+            metadatas=[{"type": "note"}],
+            ids=[doc_id]
+        )
 
-def get_notes() -> list[dict]:
-    """Return all agent notes."""
+
+def get_notes(query: str | None = None, limit: int = 10) -> list[dict]:
+    """Return agent notes. Performs semantic search if query is provided."""
     mem = load_memory()
-    return mem.get("notes", [])
+    notes = mem.get("notes", [])
+    
+    if query and notes:
+        collection = _get_collection("notes")
+        if collection:
+            cnt = collection.count() # type: ignore
+            if cnt > 0:
+                n = min(limit, cnt) # type: ignore
+                results = collection.query(query_texts=[query], n_results=n)
+                if results and results.get("documents") and results["documents"][0]:
+                    matched = []
+                    docs = results["documents"][0]
+                    for doc in docs:
+                        matched.append({"note": doc})
+                    return matched
+
+    return notes[-limit:] if notes else []
 
 
 # ── Session & Progress (auto-save) ─────────────────────────────

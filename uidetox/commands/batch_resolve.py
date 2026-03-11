@@ -7,6 +7,7 @@ from pathlib import Path
 
 from uidetox.state import batch_remove_issues, get_issue, load_state, load_config
 from uidetox.memory import save_session, log_progress
+from uidetox.utils import safe_split_cmd
 
 
 def _run_verification(config: dict) -> bool:
@@ -26,9 +27,13 @@ def _run_verification(config: dict) -> bool:
         if cmd:
             print("  Running TypeScript check...")
             try:
-                res = subprocess.run(cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
+                res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 if res.returncode != 0:
                     print(f"  ⚠️  TypeScript errors remain. Fix before committing.")
+                    if res.stdout.strip():
+                        print(f"\n{res.stdout.strip()}\n")
+                    if res.stderr.strip():
+                        print(f"\n{res.stderr.strip()}\n")
                     passed = False
                 else:
                     print("  ✓ TypeScript passed")
@@ -41,8 +46,15 @@ def _run_verification(config: dict) -> bool:
         if fix_cmd:
             print("  Running linter auto-fix...")
             try:
-                subprocess.run(fix_cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
+                res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 print("  ✓ Linter auto-fix applied")
+                if res.returncode != 0:
+                    print(f"  ⚠️  Linter warned of remaining issues:")
+                    if res.stdout.strip():
+                        print(f"\n{res.stdout.strip()}\n")
+                    if res.stderr.strip():
+                        print(f"\n{res.stderr.strip()}\n")
+                    passed = False
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 print("  ⚠️  Linter auto-fix skipped (tool not found or timed out)")
 
@@ -52,8 +64,15 @@ def _run_verification(config: dict) -> bool:
         if fix_cmd:
             print("  Running formatter auto-fix...")
             try:
-                subprocess.run(fix_cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
+                res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 print("  ✓ Formatter auto-fix applied")
+                if res.returncode != 0:
+                    print(f"  ⚠️  Formatter warned of remaining issues:")
+                    if res.stdout.strip():
+                        print(f"\n{res.stdout.strip()}\n")
+                    if res.stderr.strip():
+                        print(f"\n{res.stderr.strip()}\n")
+                    passed = False
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 print("  ⚠️  Formatter auto-fix skipped (tool not found or timed out)")
 
@@ -106,7 +125,9 @@ def run(args: argparse.Namespace):
     # Pre-commit verification gate
     if not skip_verify:
         print("━━━ Pre-commit verification ━━━")
-        _run_verification(config)
+        if not _run_verification(config):
+            print("❌ Verification failed. Build is broken.", file=sys.stderr)
+            sys.exit(1)
         print()
 
     # Batch resolve
@@ -128,7 +149,29 @@ def run(args: argparse.Namespace):
         print(f"   [{r['tier']}] {r['id']}: {r['issue'][:60]}")
     print(f"   Component: {component}")
     print(f"   Note: {note}")
-    print(f"   Queue: {remaining} remaining | {resolved_total} resolved total")
+    print()
+
+    # ---- Progress snapshot ----
+    from uidetox.utils import compute_design_score
+    scores = compute_design_score(state)
+    target = config.get("target_score", 95)
+    filled = scores["blended_score"] // 5
+    bar = "█" * filled + "░" * (20 - filled)
+    print(f"   Score : [{bar}] {scores['blended_score']}/100  (target: {target})")
+    print(f"   Queue : {remaining} remaining | {resolved_total} resolved total")
+
+    # ---- Remaining issues in same component ----
+    remaining_in_component = [
+        i for i in state.get("issues", [])
+        if _derive_component_name([i.get("file", "")]) == component
+    ]
+    if remaining_in_component:
+        print(f"\n   ⚡ {len(remaining_in_component)} more issue(s) in {component}:")
+        for i in remaining_in_component[:5]:
+            short_file = Path(i.get("file", "")).name
+            print(f"      [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}: {i.get('issue', '?')[:55]}")
+        if len(remaining_in_component) > 5:
+            print(f"      ... +{len(remaining_in_component) - 5} more")
 
     # Git auto-commit (single commit for the entire batch)
     if config.get("auto_commit", False):
@@ -143,15 +186,23 @@ def run(args: argparse.Namespace):
                 ["git", "commit", "-m", commit_msg, "--no-verify"],
                 check=True, capture_output=True,
             )
-            print(f"   📦 Auto-committed: {commit_msg}")
+            print(f"\n   📦 Auto-committed: {commit_msg}")
         except subprocess.CalledProcessError:
-            print("   ⚠️  Warning: Git auto-commit failed.")
+            print("\n   ⚠️  Warning: Git auto-commit failed.")
         except FileNotFoundError:
-            print("   ⚠️  Warning: git not found. Skipping auto-commit.")
+            print("\n   ⚠️  Warning: git not found. Skipping auto-commit.")
 
+    # ---- Agent loop signal ----
     print()
     print("[AGENT LOOP SIGNAL]")
-    print("Run `uidetox status` to check score, then `uidetox next` to continue.")
+    if remaining_in_component:
+        print(f"Same component has {len(remaining_in_component)} more issues. Run `uidetox next` to continue.")
+    elif remaining > 0:
+        print(f"{remaining} issues remain in other components. Run `uidetox next` to continue.")
+    elif scores["blended_score"] >= target:
+        print("Queue empty and target reached! Run `uidetox finish`.")
+    else:
+        print(f"Queue empty but score {scores['blended_score']} < {target}. Run `uidetox rescan` for deeper analysis.")
 
     # Auto-save progress
     log_progress("batch-resolve", f"Detoxed {component}: {note} ({len(removed)} issues)")

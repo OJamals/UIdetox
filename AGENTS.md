@@ -23,7 +23,7 @@ The loop triggers `uidetox check --fix` to execute tsc → lint → format in se
 
 ### Phase 1: Exploration & Audit (The Scan)
 The loop triggers `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and performs:
-- **Static Slop Analysis:** A 41-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
+- **Static Slop Analysis:** A 50-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
 - **Design Audit:** The agent reads frontend files and evaluates against SKILL.md.
 - **Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs.
 
@@ -91,7 +91,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox status` | Health dashboard with blended Design Score (use `--json` for automation) |
 | `uidetox show [pattern]` | Filter/inspect issues by file, tier, or ID |
 | `uidetox autofix` | Batch all safe T1 fixes for the agent to apply (use `--dry-run` to preview only) |
-| `uidetox rescan` | Clear queue, run 41-rule static analyzer, re-audit from scratch |
+| `uidetox rescan` | Clear queue, run 50-rule static analyzer, re-audit from scratch |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly |
 | `uidetox exclude <path>` | Skip a directory during scanning |
 | `uidetox review` | LLM subjective UX quality review (use `--score N` to record assessment) |
@@ -176,7 +176,7 @@ UIdetox/
 │   ├── cli.py                    # Argparse router (30+ commands, dynamic slash-command loading)
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
-│   ├── analyzer.py               # 41-rule static slop detector (deterministic anti-pattern scan)
+│   ├── analyzer.py               # 50-rule static slop detector (deterministic anti-pattern scan)
 │   ├── history.py                # Run snapshot storage and progression tracking
 │   ├── memory.py                 # Persistent agent memory (reviewed files, patterns, notes)
 │   ├── subagent.py               # Sub-agent session infrastructure (5-stage pipeline)
@@ -204,7 +204,7 @@ UIdetox/
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **UIdetox** (311 symbols, 809 relationships, 19 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **UIdetox** (319 symbols, 846 relationships, 19 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

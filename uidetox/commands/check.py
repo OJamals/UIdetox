@@ -4,6 +4,7 @@ import argparse
 import subprocess
 from uidetox.tooling import detect_all
 from uidetox.state import load_config, save_config
+from uidetox.utils import safe_split_cmd
 from uidetox.commands import tsc as tsc_cmd
 from uidetox.commands import lint as lint_cmd
 from uidetox.commands import format_cmd
@@ -38,7 +39,7 @@ def run(args: argparse.Namespace):
                 cmd = tooling["formatter"].get("fix_cmd")
                 if cmd:
                     try:
-                        res = subprocess.run(cmd.split(), capture_output=True, text=True, cwd=".")
+                        res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".")
                         # If formatter changed files, it usually outputs file names or has exit code
                         if res.returncode != 0 or "fixed" in res.stdout.lower() or "formatted" in res.stdout.lower():
                             changed = True
@@ -49,7 +50,7 @@ def run(args: argparse.Namespace):
                 cmd = tooling["linter"].get("fix_cmd")
                 if cmd:
                     try:
-                        res = subprocess.run(cmd.split(), capture_output=True, text=True, cwd=".")
+                        res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".")
                         # If linter fixed files, it might still have exit code 1 if some remain
                         # We assume it changed things if the output mentions fixes, or just run max 3 times anyway
                         if "fixed" in res.stdout.lower() or "fixed" in res.stderr.lower():

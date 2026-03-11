@@ -1,15 +1,31 @@
 """History command: view run history and score progression."""
 
 import argparse
+import json
 from uidetox.history import load_run_history, compare_runs
 
 
 def run(args: argparse.Namespace):
     show_full = getattr(args, "full", False)
+    use_json = getattr(args, "json", False)
 
     runs = compare_runs()
     if not runs:
-        print("No run history found. Run 'uidetox scan' to create your first snapshot.")
+        if use_json:
+            print(json.dumps({"runs": [], "total": 0}))
+        else:
+            print("No run history found. Run 'uidetox scan' to create your first snapshot.")
+        return
+
+    if use_json:
+        payload = {
+            "runs": runs,
+            "total": len(runs),
+            "first_score": runs[0].get("score", 0) if runs else 0,
+            "latest_score": runs[-1].get("score", 0) if runs else 0,
+            "delta": (runs[-1].get("score", 0) - runs[0].get("score", 0)) if len(runs) >= 2 else 0,
+        }
+        print(json.dumps(payload, indent=2))
         return
 
     print("╔══════════════════════════════════════╗")

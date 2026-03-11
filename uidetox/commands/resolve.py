@@ -5,6 +5,7 @@ import sys
 import subprocess
 from uidetox.state import remove_issue, get_issue, load_state, load_config
 from uidetox.memory import save_session, log_progress
+from uidetox.commands.batch_resolve import _run_verification
 
 
 def run(args: argparse.Namespace):
@@ -13,6 +14,16 @@ def run(args: argparse.Namespace):
     if not issue:
         print(f"Error: Issue {issue_id} not found in the queue.", file=sys.stderr)
         sys.exit(1)
+
+    skip_verify = getattr(args, "skip_verify", False)
+    config = load_config()
+
+    if not skip_verify:
+        print("━━━ Pre-commit verification ━━━")
+        if not _run_verification(config):
+            print("❌ Verification failed. Build is broken. Fix it before resolving.", file=sys.stderr)
+            sys.exit(1)
+        print()
 
     success = remove_issue(issue_id, note=args.note)
     if success:

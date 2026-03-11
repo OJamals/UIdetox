@@ -6,6 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state
+from uidetox.utils import compute_design_score
 
 
 def _history_dir() -> Path:
@@ -29,10 +30,13 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
     """
     state = load_state()
     stamp = _stamp()
+    scores = compute_design_score(state)
     snapshot = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "trigger": trigger,
-        "design_score": _compute_score(state),
+        "design_score": scores["blended_score"],
+        "objective_score": scores["objective_score"],
+        "subjective_score": scores["subjective_score"],
         "pending_issues": len(state.get("issues", [])),
         "resolved_issues": len(state.get("resolved", [])),
         "total_found": state.get("stats", {}).get("total_found", 0),
@@ -78,25 +82,3 @@ def compare_runs() -> list[dict]:
         }
         for r in runs
     ]
-
-
-def _compute_score(state: dict) -> int:
-    """Compute design score using the same weighted slop-ratio as status.py."""
-    issues = state.get("issues", [])
-    resolved = state.get("resolved", [])
-
-    tier_weights = {"T1": 1, "T2": 3, "T3": 5, "T4": 10}
-    current_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in issues)
-    resolved_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in resolved)
-    total_slop = current_slop + resolved_slop
-
-    if total_slop == 0:
-        objective_score = 100
-    else:
-        objective_score = int(100 - ((current_slop / total_slop) * 100))
-        objective_score = max(0, min(100, objective_score))
-        
-    subjective_score = state.get("subjective", {}).get("score")
-    if subjective_score is not None:
-        return int(objective_score * 0.6 + subjective_score * 0.4)
-    return objective_score

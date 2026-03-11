@@ -1,8 +1,10 @@
-"""Status command: project health dashboard with smart scoring."""
+"""Status command: project health dashboard with smart scoring and velocity tracking."""
 
 import argparse
 import json
 from uidetox.state import load_state, load_config
+from uidetox.utils import compute_design_score
+from uidetox.memory import get_session
 
 
 # Recommended fix order hints per category
@@ -14,6 +16,11 @@ _CATEGORY_HINTS = {
     "materiality": "Replace glassmorphism and oversized shadows with solid surfaces.",
     "states": "Add loading/error/empty states — makes it feel finished.",
     "a11y": "Add focus indicators and ARIA labels — accessibility requirement.",
+    "duplication": "Extract repeated code into shared components or utility functions.",
+    "dead code": "Remove commented-out code, unused imports, and no-op handlers.",
+    "content": "Replace generic AI copy and placeholder names with real content.",
+    "code quality": "Fix lint suppressions, type safety issues, and semantic HTML.",
+    "components": "Replace generic icon/badge/dashboard patterns with intentional design.",
 }
 
 
@@ -33,64 +40,42 @@ def run(args: argparse.Namespace):
             tiers[tier] += 1
 
     # Category breakdown (infer from issue descriptions)
-    categories: dict[str, dict[str, list[str] | int]] = {
-        "typography": {"keywords": ["font", "typography", "inter", "roboto", "type scale"], "pending": 0, "resolved": 0},
-        "color": {"keywords": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "blue", "black"], "pending": 0, "resolved": 0},
-        "layout": {"keywords": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "viewport", "h-screen"], "pending": 0, "resolved": 0},
+    categories: dict[str, dict] = {
+        "typography": {"keywords": ["font", "typography", "inter", "roboto", "type scale", "line-height", "px font"], "pending": 0, "resolved": 0},
+        "color": {"keywords": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "blue", "black", "hex color"], "pending": 0, "resolved": 0},
+        "layout": {"keywords": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "viewport", "h-screen", "flex center"], "pending": 0, "resolved": 0},
         "motion": {"keywords": ["animation", "bounce", "pulse", "spin", "transition", "motion", "hover"], "pending": 0, "resolved": 0},
         "states": {"keywords": ["loading", "error", "empty", "skeleton", "disabled", "hover state", "focus"], "pending": 0, "resolved": 0},
-        "a11y": {"keywords": ["accessibility", "a11y", "aria", "alt text", "focus", "contrast ratio", "skip-to-content"], "pending": 0, "resolved": 0},
+        "a11y": {"keywords": ["accessibility", "a11y", "aria", "alt text", "focus", "contrast ratio", "skip-to-content", "htmlFor"], "pending": 0, "resolved": 0},
         "materiality": {"keywords": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow", "opacity"], "pending": 0, "resolved": 0},
-        "content": {"keywords": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme"], "pending": 0, "resolved": 0},
-        "code quality": {"keywords": ["div soup", "semantic", "z-index", "inline style", "import"], "pending": 0, "resolved": 0},
+        "content": {"keywords": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme", "emoji", "oops", "exclamation"], "pending": 0, "resolved": 0},
+        "code quality": {"keywords": ["div soup", "semantic", "z-index", "inline style", "import", "console", "todo", "fixme", "!important", "ternary", "any type", "ts-ignore", "eslint-disable"], "pending": 0, "resolved": 0},
+        "duplication": {"keywords": ["duplicate", "repeated", "copy-paste", "identical", "same hex", "same className"], "pending": 0, "resolved": 0},
+        "dead code": {"keywords": ["commented-out", "unused import", "unreachable", "empty handler", "empty css", "unused state", "deprecated", "dead code", "no-op"], "pending": 0, "resolved": 0},
     }
     for issue in issues:
         desc = issue.get("issue", "").lower()
         for cat_name, cat in categories.items():
-            kws = cat["keywords"]
-            if isinstance(kws, list) and any(kw in desc for kw in kws):
-                current: int = getattr(cat["pending"], "real", 0) if isinstance(cat["pending"], int) else 0 # type: ignore
-                cat["pending"] = current + 1
+            if any(kw in desc for kw in cat["keywords"]):
+                cat["pending"] += 1
                 break
     for issue in resolved:
         desc = issue.get("issue", "").lower()
         for cat_name, cat in categories.items():
-            kws = cat["keywords"]
-            if isinstance(kws, list) and any(kw in desc for kw in kws):
-                current: int = getattr(cat["resolved"], "real", 0) if isinstance(cat["resolved"], int) else 0 # type: ignore
-                cat["resolved"] = current + 1
+            if any(kw in desc for kw in cat["keywords"]):
+                cat["resolved"] += 1
                 break
 
-    # Smarter health score: blend objective (static analysis) + subjective (LLM review)
-    tier_weights = {"T1": 1, "T2": 3, "T3": 5, "T4": 10}
+    # Centralized scoring
+    scores = compute_design_score(state)
+    score = scores["blended_score"]
+    objective_score = scores["objective_score"]
+    subjective_score = scores["subjective_score"]
 
-    current_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in issues)
-    resolved_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in resolved)
-    total_slop = current_slop + resolved_slop
-
+    use_json = getattr(args, "json", False)
     total_resolved = len(resolved)
     total_found = stats.get("total_found", len(issues) + total_resolved)
 
-    # Objective score: based on slop ratio
-    if scans_run == 0 and total_slop == 0:
-        objective_score = 50  # Unknown quality — haven't scanned yet
-    elif total_slop == 0:
-        objective_score = 100
-    else:
-        objective_score = int(100 - ((current_slop / total_slop) * 100))
-        objective_score = max(0, min(100, objective_score))
-
-    # Subjective score: from LLM review (if available)
-    subjective = state.get("subjective", {})
-    subjective_score = subjective.get("score")
-
-    # Blended Design Score: 60% objective + 40% subjective (when available)
-    if subjective_score is not None:
-        score = int(objective_score * 0.6 + subjective_score * 0.4)
-    else:
-        score = objective_score
-
-    use_json = getattr(args, "json", False)
     if use_json:
         payload = {
             "design_score": score,
@@ -118,7 +103,7 @@ def run(args: argparse.Namespace):
     if subjective_score is not None:
         print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
         print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
-    elif scans_run == 0 and total_slop == 0:
+    elif scans_run == 0 and scores["total_slop"] == 0:
         print(f"  (Baseline — run 'uidetox scan' for an accurate score)")
     else:
         print(f"    Objective only — run 'uidetox review' for LLM subjective score")
@@ -147,14 +132,49 @@ def run(args: argparse.Namespace):
     auto_commit = config.get('auto_commit', False)
     print(f"  AUTO_COMMIT      : {'enabled' if auto_commit else 'disabled'}")
 
+    # ---- Velocity & Progression ----
+    subjective_history = state.get("subjective", {}).get("history", [])
+    if scans_run > 1 or total_resolved > 0:
+        print()
+        print("  ─── Velocity & Progression ───")
+        if total_found > 0:
+            print(f"  Fix rate        : {total_resolved}/{total_found} ({(total_resolved / total_found * 100):.0f}%)")
+        if scans_run > 0:
+            avg_per_scan = total_found / scans_run if total_found > 0 else 0
+            print(f"  Avg issues/scan : {avg_per_scan:.1f}")
+        if total_resolved > 0 and scans_run > 0:
+            velocity = total_resolved / scans_run
+            print(f"  Fix velocity    : {velocity:.1f} resolved/scan")
+
+        # Subjective score progression
+        if len(subjective_history) > 1:
+            scores_list = [h["score"] for h in subjective_history]
+            trend = scores_list[-1] - scores_list[0]
+            trend_arrow = "↑" if trend > 0 else ("↓" if trend < 0 else "→")
+            print(f"  Subjective trend: {scores_list[0]} → {scores_list[-1]} ({trend_arrow}{abs(trend)}pts over {len(scores_list)} reviews)")
+
+    # Session context
+    session = get_session()
+    if session:
+        phase = session.get('phase', 'unknown')
+        fixed = session.get('issues_fixed_this_session', 0)
+        last_component = session.get('last_component', '')
+        session_parts = []
+        session_parts.append(f"phase={phase}")
+        if fixed > 0:
+            session_parts.append(f"fixed={fixed}")
+        if last_component:
+            session_parts.append(f"last={last_component}")
+        print(f"  Session         : {', '.join(session_parts)}")
+
     # Category breakdown with actionable hints
-    active_cats = {k: v for k, v in categories.items() if int(v["pending"]) > 0 or int(v["resolved"]) > 0}
+    active_cats = {k: v for k, v in categories.items() if v["pending"] > 0 or v["resolved"] > 0}
     if active_cats:
         print()
         print("  ─── Category Breakdown ───")
         for cat_name, cat in active_cats.items():
-            pending_val = int(cat["pending"])
-            resolved_val = int(cat["resolved"])
+            pending_val = cat["pending"]
+            resolved_val = cat["resolved"]
             total_cat = pending_val + resolved_val
             if total_cat > 0:
                 cat_score = int((resolved_val / total_cat) * 100)
