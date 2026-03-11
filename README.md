@@ -1,37 +1,50 @@
-# 🧼 UIdetox
+# UIdetox
 
 **The anti-slop engine for AI-generated frontends.**
 
 [UIdetox](https://github.com/OJamals/UIdetox) is an agent harness that eliminates the "AI smell" from your UI. It transforms generic, LLM-generated code into hand-crafted, high-fidelity interfaces through a systematic **scan → fix loop** that enforces design taste and detects common AI anti-patterns.
 
-[Installation](#-installation) • [The Loop](#-the-loop) • [Commands](#-commands) • [Design Dials](#-design-dials)
+[Installation](#installation) • [Commands](#commands) • [Design Dials](#design-dials)
 
 ---
 
-## ✨ From "Vibe Coding" to "Vibe Design"
+## From "Vibe Coding" to "Vibe Design"
 
 AI coding tools are great at building things fast, but the results often scream "AI made this"—Inter font, purple gradients, glassmorphism, and generic hero dashboards. 
 
-**UIdetox** gives your agent a "Design Score" to optimize. It’s not a linter; it’s a standard. By knowing what *not* to do, your agent can finally produce code that makes people ask "Who made this?"—not "Which AI made this?"
+**UIdetox** gives your agent an objective "Design Score" to optimize. It’s not a linter; it’s a standard. By knowing what *not* to do, your agent can finally produce code that makes people ask "Who made this?"—not "Which AI made this?"
 
 ---
 
-## 🤖 The Agent Prompt
-**Paste this into your AI coding agent (Claude, Cursor, Windsurf, etc.) to begin:**
+## The Agent Prompt
 
-> I want you to eliminate "AI slop" from this codebase. Your goal is to reach a **Design Score of 95+**.
-> 
-> 1. **Setup:** Run `pip install uidetox && uidetox update-skill [your_agent_name] && uidetox setup --auto-commit`.
-> 2. **Audit:** Run `uidetox scan .` to generate the initial issue queue.
-> 3. **The Loop:** Run `uidetox next`. This batches issues for a single file. Fix them holistically using the provided `SKILL.md` rules.
-> 4. **Resolve:** After fixing, run `uidetox resolve <ID> --note "Description of design changes"`.
-> 5. **Repeat:** Continue running `next` until the queue is empty, then `uidetox rescan` to verify.
->
-> **Don't be lazy.** Replace entire components if they reek of AI slop. Use `uidetox polish` or `uidetox animate` for targeted passes.
+**Paste this into your AI coding agent (Cursor, Windsurf, Claude, etc.) to begin:**
+
+```text
+I want you to eliminate "AI slop" from this codebase and make the UI indistinguishable from hand-crafted design. Your goal is to reach a **Design Score of 95+**.
+
+To do this, use the UIdetox ecosystem (requires Python 3.11+). Run the following setup:
+pip install uidetox
+uidetox update-skill [your_agent_name]  # e.g., claude, cursor, windsurf, gemini
+uidetox setup --auto-commit
+
+THE LOOP
+This is a closed-loop system. Do not stop after one fix. Repeat this cycle until the strict score is maximized:
+1. Audit: Run `uidetox scan .` to queue anti-patterns.
+2. Fix: Run `uidetox next`. This batches issues for the highest-priority file. Fix them holistically. 
+3. Resolve: Run `uidetox resolve <ID> --note "What you changed"`.
+4. Run `uidetox next` again.
+5. Verification: When the queue empties, run `uidetox rescan` to re-audit with fresh eyes. Keep looping until `uidetox status` shows Score >= 95.
+
+RULES OF ENGAGEMENT
+1. Heavy Lifting: Don't be lazy. Large refactors and small detailed fixes — do both with equal energy. Replace entire components if they reek of AI slop. Fix things properly, not minimally.
+2. Subordinate Ego: `uidetox next` injects specific SKILL.md design rules into your context. Follow them strictly. Do not substitute your own analysis or rely on your baseline training data.
+3. Orchestrator Mode: For complex passes, use `uidetox loop --orchestrator`. Act as a manager: generate prompts with `uidetox subagent`, delegate to parallel subagents, and use MCP (Model Context Protocol) servers to read the filesystem and execute terminal commands directly.
+```
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ```bash
 pip install uidetox
@@ -43,7 +56,7 @@ uidetox setup --auto-commit    # Initializes design dials & git integration
 
 ---
 
-## 🛠 Commands
+## Commands
 
 ### The Engine (CLI)
 | Command | Action |
@@ -63,7 +76,7 @@ Use these for targeted improvements on specific files or directories:
 
 ---
 
-## 🎛 Design Dials
+## Design Dials
 Control the "aesthetic DNA" of the output by adjusting these values in `uidetox setup`:
 
 * **DESIGN_VARIANCE (1-10):** From clean/centered (1) to asymmetric/massive whitespace (10).
@@ -72,7 +85,7 @@ Control the "aesthetic DNA" of the output by adjusting these values in `uidetox 
 
 ---
 
-## 🚫 The Slop Checklist
+## The Slop Checklist
 UIdetox actively hunts and destroys:
 - [ ] Use of **Emojis** in text content
 - [ ] Overused **Inter** font stacks.
@@ -84,7 +97,7 @@ UIdetox actively hunts and destroys:
 
 ---
 
-### 📜 Credits & License
+### Credits & License
 Built on the shoulders of [desloppify](https://github.com/peteromallet/desloppify) and [impeccable](https://github.com/pbakaus/impeccable)
 
 MIT © [OJamals](https://github.com/OJamals)
