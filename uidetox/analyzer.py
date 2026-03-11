@@ -6,9 +6,14 @@ from pathlib import Path
 
 # Directories to always skip during traversal
 IGNORE_DIRS = {
-    ".git", "node_modules", "dist", "build", "out", ".next", 
+    ".git", "node_modules", "dist", "build", "out", ".next",
     ".nuxt", "coverage", ".uidetox", ".claude", ".cursor", "vendor"
 }
+
+# File extensions frequently scanned
+_FE_EXTS = {".css", ".scss", ".tsx", ".jsx", ".html", ".svelte", ".vue"}
+_JSX_EXTS = {".tsx", ".jsx", ".html", ".svelte", ".vue"}
+_ALL_FE_EXTS = _FE_EXTS | {".ts", ".js", ".less"}
 
 # The Anti-Pattern Rule Catalog
 RULES = [
@@ -152,29 +157,172 @@ RULES = [
         "id": "OPACITY_ABUSE_SLOP",
         "pattern": re.compile(r'(?:opacity-\d{1,2}|bg-.*?/\d{1,2})(?:.*(?:opacity-\d{1,2}|bg-.*?/\d{1,2})){4,}', re.DOTALL),
         "tier": "T2",
-        "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
+        "exts": _JSX_EXTS,
         "description": "Excessive opacity/transparency usage detected (glassmorphism cousin).",
         "command": "Use solid colors. Reserve transparency for overlays and modals only."
     },
+    # ──────────────────────────────────────────────
+    # NEW RULES (14 additional detections)
+    # ──────────────────────────────────────────────
+    {
+        "id": "VIEWPORT_HEIGHT_SLOP",
+        "pattern": re.compile(r'\bh-screen\b(?!.*min-h-)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "h-screen without min-h-[100dvh] — breaks on iOS Safari.",
+        "command": "Replace h-screen with min-h-[100dvh] for reliable full-height."
+    },
+    {
+        "id": "GRADIENT_TEXT_SLOP",
+        "pattern": re.compile(r'bg-clip-text.*?text-transparent|text-transparent.*?bg-clip-text', re.IGNORECASE | re.DOTALL),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Gradient text (bg-clip-text + text-transparent) — AI decoration cliche.",
+        "command": "Replace gradient text with solid color and intentional font weight."
+    },
+    {
+        "id": "NEON_GLOW_SLOP",
+        "pattern": re.compile(r'\b(shadow-\[0_0_|shadow-glow|shadow-neon|ring-.*glow|drop-shadow.*0_0_)\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _FE_EXTS,
+        "description": "Neon/outer glow shadow detected — cheap depth illusion.",
+        "command": "Replace with inner borders or tinted subtle shadows. Remove decorative glows."
+    },
+    {
+        "id": "PILL_BADGE_SLOP",
+        "pattern": re.compile(r'rounded-full[^"]*(?:badge|tag|chip|label|pill)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Pill-shaped badge/tag/chip detected — generic SaaS pattern.",
+        "command": "Use square badges (rounded-md), flags, or plain text indicators instead."
+    },
+    {
+        "id": "LOREM_IPSUM_SLOP",
+        "pattern": re.compile(r'\b(lorem ipsum|dolor sit amet|consectetur adipiscing)\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Lorem Ipsum placeholder text detected.",
+        "command": "Write real, contextual draft copy. No placeholder Latin text."
+    },
+    {
+        "id": "GENERIC_NAME_SLOP",
+        "pattern": re.compile(r'\b(John Doe|Jane (?:Smith|Doe)|Acme (?:Corp|Inc)|SmartFlow|NexusAI)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Generic AI placeholder name detected (John Doe / Acme Corp).",
+        "command": "Use diverse, realistic, creative names. Invent premium contextual brands."
+    },
+    {
+        "id": "AI_COPY_CLICHE_SLOP",
+        "pattern": re.compile(r'\b(Next-Gen|Game[- ]?changer|Cutting[- ]?edge|\bDelve\b|\bTapestry\b|Elevate your|Unleash the)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "AI copywriting cliche detected.",
+        "command": "Replace with specific, concrete, benefit-driven language. No buzzwords."
+    },
+    {
+        "id": "MISSING_FOCUS_SLOP",
+        "pattern": re.compile(r'<(?:button|a)\s[^>]*className=["\'][^"]*(?!focus:)[^"]*["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Interactive element without focus: state — accessibility gap.",
+        "command": "Add focus:ring or focus:outline states for keyboard accessibility."
+    },
+    {
+        "id": "DIV_SOUP_SLOP",
+        "pattern": re.compile(r'(?:<div[\s>])', re.IGNORECASE),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Div-heavy file with no semantic HTML elements detected.",
+        "command": "Replace generic divs with <nav>, <main>, <article>, <section>, <aside>, <header>, <footer>.",
+        "_custom_check": "div_soup"
+    },
+    {
+        "id": "CENTER_BIAS_SLOP",
+        "pattern": re.compile(r'text-center.*mx-auto|mx-auto.*text-center', re.IGNORECASE | re.DOTALL),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Centered hero layout detected — banned when DESIGN_VARIANCE > 4.",
+        "command": "Use split-screen, left-aligned, or asymmetric layouts instead of centered hero.",
+        "_requires_variance_gt": 4
+    },
+    {
+        "id": "CARD_NESTING_SLOP",
+        "pattern": re.compile(r'(?:card|Card)["\']?[^<]{0,200}(?:card|Card)', re.IGNORECASE | re.DOTALL),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Nested card pattern detected (card inside card).",
+        "command": "Flatten hierarchy. Use spacing, borders, or typography for inner grouping."
+    },
+    {
+        "id": "CSS_PURE_BLACK_SLOP",
+        "pattern": re.compile(r'(?:color|background(?:-color)?)\s*:\s*#000(?:000)?\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Pure black (#000) in CSS — rarely exists in nature.",
+        "command": "Replace with off-black tinted neutral (e.g., #0f0f0f, #1a1a2e, #0d1117)."
+    },
+    {
+        "id": "HARDCODED_ZINDEX_SLOP",
+        "pattern": re.compile(r'\b(z-index:\s*9{3,}|z-\[9{3,}\])\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Arbitrary z-index (9999+) detected — no z-index system.",
+        "command": "Create a semantic z-index scale (dropdown=10, sticky=20, modal=30, toast=40, tooltip=50)."
+    },
+    {
+        "id": "OVERPADDED_LAYOUT_SLOP",
+        "pattern": re.compile(r'(p-(?:8|10|12|16))(?:.*\1){3,}', re.DOTALL),
+        "tier": "T2",
+        "exts": _JSX_EXTS,
+        "description": "Excessive large padding repetition detected (overpadded layout).",
+        "command": "Reduce padding and vary spacing scale (p-4, p-5, p-6) for visual rhythm."
+    },
 ]
 
-def analyze_file(filepath: Path) -> list[dict]:
-    """Scan a single file against all slop rules."""
+def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
+    """Scan a single file against all slop rules.
+
+    Args:
+        filepath: File to scan.
+        design_variance: Current DESIGN_VARIANCE dial value (affects conditional rules).
+    """
     issues = []
     ext = filepath.suffix.lower()
-    
+
     # Filter rules that apply to this file extension
     applicable_rules = [r for r in RULES if ext in r["exts"]]
     if not applicable_rules:
         return issues
-        
+
     try:
         content = filepath.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
-        return issues # Skip binary or unreadable files
-        
+        return issues  # Skip binary or unreadable files
+
     for rule in applicable_rules:
-        # Prevent spam by only flagging a rule once per file
+        # Skip rules conditioned on DESIGN_VARIANCE if below threshold
+        variance_threshold = rule.get("_requires_variance_gt")
+        if variance_threshold is not None and design_variance <= variance_threshold:
+            continue
+
+        # Custom check: div_soup requires counting, not just pattern match
+        if rule.get("_custom_check") == "div_soup":
+            div_count = len(re.findall(r'<div[\s>]', content, re.IGNORECASE))
+            semantic_count = len(re.findall(
+                r'<(?:nav|main|article|section|aside|header|footer)[\s>]',
+                content, re.IGNORECASE
+            ))
+            if div_count > 20 and semantic_count == 0:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({div_count} divs, 0 semantic elements)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Standard regex match — flag once per file
         if rule["pattern"].search(content):
             issues.append({
                 "file": str(filepath.resolve()),
@@ -182,17 +330,19 @@ def analyze_file(filepath: Path) -> list[dict]:
                 "issue": rule["description"],
                 "command": rule["command"]
             })
-            
+
     return issues
 
 def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = None,
-                      zone_overrides: dict[str, str] | None = None) -> list[dict]:
+                      zone_overrides: dict[str, str] | None = None,
+                      design_variance: int = 8) -> list[dict]:
     """Walk directory and return a flat list of all detected slop issues.
 
     Args:
         root_path: Directory to scan.
         exclude_paths: Additional directory names/paths to skip (from ``uidetox exclude``).
         zone_overrides: File-to-zone mapping; files in 'vendor' or 'generated' zones are skipped.
+        design_variance: DESIGN_VARIANCE dial value passed to per-file analysis.
     """
     all_issues = []
     root = Path(root_path).resolve()
@@ -221,7 +371,7 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
             if zone_skip and str(file_path.resolve()) in zone_skip:
                 continue
 
-            found_issues = analyze_file(file_path)
+            found_issues = analyze_file(file_path, design_variance=design_variance)
             all_issues.extend(found_issues)
 
     return all_issues

@@ -140,7 +140,7 @@ def get_frontend_files() -> list[str]:
 def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     """Generate focused prompts for a specific sub-agent stage.
 
-    If parallel > 1, chunks files or issues into non-overlapping buckets 
+    If parallel > 1, chunks files or issues into non-overlapping buckets
     for massive AI swarm parallel execution.
     """
     state = load_state()
@@ -149,55 +149,66 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     resolved = state.get("resolved", [])
     tooling = config.get("tooling", {})
 
+    # Design dials — shared across all stage prompts
+    variance = config.get("DESIGN_VARIANCE", 8)
+    intensity = config.get("MOTION_INTENSITY", 6)
+    density = config.get("VISUAL_DENSITY", 4)
+    dials_block = f"""## Active Design Dials
+- DESIGN_VARIANCE  = {variance}  {'(asymmetric, masonry, massive whitespace)' if variance > 7 else '(varied sizes, offset margins)' if variance > 4 else '(clean, centered, standard grids)'}
+- MOTION_INTENSITY = {intensity}  {'(scroll-triggered, spring physics, magnetic)' if intensity > 7 else '(fade-ins, transitions, staggered entry)' if intensity > 5 else '(CSS hover/active only)'}
+- VISUAL_DENSITY   = {density}  {'(cockpit mode, dense data)' if density > 7 else '(standard web app spacing)' if density > 3 else '(art gallery, spacious, luxury)'}
+
+Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
+
     if stage == "observe":
         if parallel > 1:
             files = get_frontend_files()
             if not files:
-                return [_observe_prompt(tooling, [])]
+                return [_observe_prompt(tooling, [], dials_block)]
             chunk_size = max(1, len(files) // parallel)
             chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)]
             # Merge trailing chunk if rounding caused an extra bucket
             if len(chunks) > parallel:
                 chunks[parallel-1].extend(chunks.pop())
-            return [_observe_prompt(tooling, chunk) for chunk in chunks]
-        return [_observe_prompt(tooling, [])]
+            return [_observe_prompt(tooling, chunk, dials_block) for chunk in chunks]
+        return [_observe_prompt(tooling, [], dials_block)]
 
     elif stage == "diagnose":
-        return [_diagnose_prompt(issues)]
+        return [_diagnose_prompt(issues, dials_block)]
 
     elif stage == "prioritize":
         return [_prioritize_prompt(issues)]
 
     elif stage == "fix":
         if not issues:
-            return [_fix_prompt([])]
-            
+            return [_fix_prompt([], dials_block)]
+
         tiers_order = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
         # Safely group by file to prevent merge conflicts
         grouped = {}
         for issue in issues:
             grouped.setdefault(issue.get("file"), []).append(issue)
-            
+
         sorted_groups = sorted(
-            grouped.values(), 
+            grouped.values(),
             key=lambda group: min(tiers_order.get(i.get("tier", "T4"), 5) for i in group)
         )
-        
+
         # Take the most pressing file-groups to batch, up to parallel * 3
         top_groups = sorted_groups[:parallel * 3]
-        
+
         # Distribute file-groups into parallel buckets
         buckets = [[] for _ in range(parallel)]
         for i, group in enumerate(top_groups):
             buckets[i % parallel].extend(group)
-            
+
         # Strip empty buckets if there were fewer files than agents
         buckets = [b for b in buckets if b]
-        
-        if not buckets: # Fallback sanity check
+
+        if not buckets:  # Fallback sanity check
             buckets = [issues[:5]]
-            
-        return [_fix_prompt(bucket) for bucket in buckets]
+
+        return [_fix_prompt(bucket, dials_block) for bucket in buckets]
 
     elif stage == "verify":
         return [_verify_prompt(issues, resolved)]
@@ -205,7 +216,7 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     return [f"Unknown stage: {stage}"]
 
 
-def _observe_prompt(tooling: dict, files: list[str]) -> str:
+def _observe_prompt(tooling: dict, files: list[str], dials_block: str) -> str:
     # Build file target list if specific shard provided
     target_directive = "Systematically scan the codebase and catalog everything you see."
     if files:
@@ -214,17 +225,21 @@ def _observe_prompt(tooling: dict, files: list[str]) -> str:
 
     return f"""# UIdetox Sub-Agent: OBSERVE Stage
 
+{dials_block}
+
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
 
 ## What to Catalog
 For every frontend file, note:
-- **Typography**: Font families, sizes, weights, line heights
-- **Colors**: All color values (hex, rgb, hsl, named, CSS variables)
-- **Layout**: Grid systems, flex patterns, max-widths, padding/margin patterns
-- **Components**: UI patterns used (cards, modals, heroes, navbars, forms)
-- **Motion**: Animations, transitions, hover effects
+- **Typography**: Font families, sizes, weights, line heights, tracking
+- **Colors**: All color values (hex, rgb, hsl, oklch, named, CSS variables, Tailwind classes)
+- **Layout**: Grid systems, flex patterns, max-widths, padding/margin patterns, symmetry vs asymmetry
+- **Components**: UI patterns used (cards, modals, heroes, navbars, forms, accordions, pricing tables)
+- **Motion**: Animations, transitions, hover/focus/active effects, easing curves
 - **States**: Loading, error, empty, disabled state handling
+- **Accessibility**: ARIA labels, focus indicators, skip-to-content, lang attributes
+- **Content**: Placeholder data quality (names, numbers, dates, copy tone)
 
 ## Output Format
 For each file, output a structured observation:
@@ -236,6 +251,8 @@ LAYOUT: <what layout patterns you see>
 COMPONENTS: <what UI components you see>
 MOTION: <what animations/transitions you see>
 STATES: <what state handling you see>
+ACCESSIBILITY: <what a11y features are present or missing>
+CONTENT: <quality of placeholder data and copy>
 ```
 
 ## Rules
@@ -245,12 +262,14 @@ STATES: <what state handling you see>
 """
 
 
-def _diagnose_prompt(issues: list) -> str:
+def _diagnose_prompt(issues: list, dials_block: str) -> str:
     existing = "\n".join(
         f"- [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues[:20]
     ) if issues else "None yet."
 
     return f"""# UIdetox Sub-Agent: DIAGNOSE Stage
+
+{dials_block}
 
 ## Your Mission
 Compare the observations from the OBSERVE stage against SKILL.md rules.
@@ -259,14 +278,78 @@ Identify every AI slop pattern and design violation.
 ## Already Known Issues
 {existing}
 
-## What to Check (from SKILL.md)
-1. **AI Slop Fingerprints**: Inter font, purple-blue gradients, glassmorphism, card grids, hero metrics, bounce animations
-2. **Typography**: System defaults, single font, no scale hierarchy
-3. **Color**: Generic palettes, insufficient contrast, no dark mode consideration
-4. **Layout**: Centered single-column only, no max-width, inconsistent spacing
-5. **States**: Missing loading/error/empty/disabled states
-6. **Motion**: No hover effects, no transitions, or gratuitous bounce animations
-7. **Accessibility**: Missing ARIA labels, poor focus indicators, insufficient contrast
+## Systematic Audit Checklist (check ALL categories)
+
+### 1. Typography (consult reference/typography.md)
+- Banned fonts: Inter, Roboto, Arial, Open Sans, system-ui as primary
+- Missing type hierarchy (only Regular 400 and Bold 700 used)
+- Serif fonts on dashboards
+- Monospace as lazy "developer" vibe
+- Large icons above every heading
+
+### 2. Color & Contrast (consult reference/color-and-contrast.md)
+- Purple-blue gradients (the #1 AI fingerprint)
+- Cyan-on-dark palette
+- Pure black (#000000)
+- Gray text on colored backgrounds
+- Gradient text on headings
+- Oversaturated accents (> 80%)
+- Neon/outer glows
+- No dark mode support
+
+### 3. Layout & Spacing (consult reference/spatial-design.md)
+- Centered hero sections (banned when DESIGN_VARIANCE > 4)
+- 3-column card feature rows
+- h-screen instead of min-h-[100dvh]
+- No max-width container
+- Cards for everything / nested cards
+- Uniform spacing everywhere
+- Overpadded layouts
+
+### 4. Materiality & Surfaces
+- Glassmorphism (backdrop-blur + transparency)
+- Oversized border-radius (20-32px on everything)
+- Oversized shadows (2xl/3xl)
+- Pill-shaped badges
+
+### 5. Motion & Interaction (consult reference/motion-design.md)
+- Bounce/elastic easing
+- animate-bounce/pulse/spin
+- Missing hover, focus, active states
+- Transform animations on nav links
+
+### 6. States & UX Completeness
+- Missing loading states (or generic spinners instead of skeletons)
+- Missing error states
+- Missing empty states
+- Missing disabled states
+
+### 7. Content & Data Quality
+- Lorem Ipsum
+- Generic names (John Doe, Jane Smith, Acme Corp)
+- AI copy cliches (Elevate, Seamless, Unleash, Next-Gen)
+- Round placeholder numbers (99.99%, 50%)
+- Broken Unsplash links
+- Emojis in UI
+
+### 8. Code Quality & Semantics
+- Div soup (no semantic HTML)
+- Arbitrary z-index (9999)
+- Inline styles mixed with classes
+- Import hallucinations
+
+### 9. Accessibility
+- Missing focus indicators
+- No ARIA labels on icon-only buttons
+- Insufficient contrast ratios
+- No skip-to-content link
+
+### 10. Strategic Omissions
+- Missing 404 page
+- Missing legal links
+- Missing form validation
+- Missing favicon
+- Missing meta tags
 
 ## Output Format
 For each issue found, output:
@@ -311,7 +394,7 @@ Provide the recommended fix order as a numbered list with rationale for each gro
 """
 
 
-def _fix_prompt(batch: list) -> str:
+def _fix_prompt(batch: list, dials_block: str) -> str:
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
 
@@ -319,13 +402,29 @@ def _fix_prompt(batch: list) -> str:
         f"- [{i.get('id')}] [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in batch
     )
 
+    # Build inline context for the fix batch (same pattern as next.py)
+    from uidetox.commands.next import SKILL_CONTEXT, _get_relevant_context
+    contexts = _get_relevant_context(batch)
+    context_block = ""
+    if contexts:
+        lines = ["## Relevant SKILL.md Design Rules"]
+        for ctx, ref_file in contexts:
+            lines.append(f"- {ctx}")
+            if ref_file:
+                lines.append(f"  (Deep-dive: {ref_file})")
+        context_block = "\n".join(lines)
+
     return f"""# UIdetox Sub-Agent: FIX Stage
+
+{dials_block}
 
 ## Your Mission
 Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 ## Issues to Fix
 {batch_text}
+
+{context_block}
 
 ## Rules
 - Follow SKILL.md design rules for every change

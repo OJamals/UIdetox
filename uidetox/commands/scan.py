@@ -2,11 +2,33 @@
 
 import argparse
 import uuid
-from uidetox.analyzer import analyze_directory
+from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import add_issue, ensure_uidetox_dir, load_config, save_config, increment_scans
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
+
+
+# Categories auto-covered by static analyzer, mapped to rule IDs
+_AUTO_CATEGORIES = {
+    "typography": {"TYPOGRAPHY_SLOP"},
+    "color": {"COLOR_GRADIENT_SLOP", "COLOR_BLACK_SLOP", "CSS_GRADIENT_SLOP", "CSS_PURE_BLACK_SLOP"},
+    "layout": {"LAYOUT_MATH_SLOP", "CENTER_BIAS_SLOP", "CARD_NESTING_SLOP", "OVERPADDED_LAYOUT_SLOP", "VIEWPORT_HEIGHT_SLOP"},
+    "motion": {"BOUNCE_ANIMATION_SLOP"},
+    "materiality": {"GLASSMORPHISM_SLOP", "SHADOW_SLOP", "MATERIALITY_RADIUS_SLOP", "NEON_GLOW_SLOP", "OPACITY_ABUSE_SLOP", "GRADIENT_TEXT_SLOP"},
+    "states": {"MISSING_HOVER_STATES", "MISSING_FOCUS_SLOP", "MISSING_DARK_MODE"},
+    "content": {"GENERIC_COPY_SLOP", "AI_COPY_CLICHE_SLOP", "LOREM_IPSUM_SLOP", "GENERIC_NAME_SLOP", "EMOJI_HEAVY_SLOP"},
+    "code quality": {"DIV_SOUP_SLOP", "HARDCODED_ZINDEX_SLOP"},
+    "components": {"HERO_DASHBOARD_SLOP", "ICONOGRAPHY_SLOP", "PILL_BADGE_SLOP"},
+}
+
+# Categories that ALWAYS need manual agent audit (not automatable via regex)
+_MANUAL_CATEGORIES = {
+    "accessibility": "ARIA labels, contrast ratios, skip-to-content, keyboard nav",
+    "responsive": "Mobile collapse, container queries, fluid typography",
+    "forms & inputs": "Label placement, validation, error messaging, input states",
+    "strategic omissions": "404 page, legal links, back navigation, favicon",
+}
 
 
 def run(args: argparse.Namespace):
@@ -28,7 +50,22 @@ def run(args: argparse.Namespace):
     print("║      UIdetox Full Scan       ║")
     print("╚══════════════════════════════╝")
     print(f"Path: {args.path}")
-    print(f"Vibe: Variance={variance}, Motion={intensity}, Density={density}")
+    print(f"Dials: VARIANCE={variance}, MOTION={intensity}, DENSITY={density}")
+
+    # Dial-specific audit guidance
+    print(f"\n  Design Dial Effects on This Audit:")
+    if variance > 4:
+        print(f"    VARIANCE={variance} → Centered hero sections are BANNED. Force asymmetric layouts.")
+    if variance > 7:
+        print(f"    VARIANCE={variance} → Push for masonry, overlapping elements, offset margins.")
+    if intensity > 5:
+        print(f"    MOTION={intensity}  → Require entrance animations, staggered lists, spring physics.")
+    if intensity > 7:
+        print(f"    MOTION={intensity}  → Require scroll-triggered reveals, magnetic buttons, parallax.")
+    if density < 5:
+        print(f"    DENSITY={density}  → Art gallery mode. Generous whitespace, spacious layouts.")
+    if density > 7:
+        print(f"    DENSITY={density}  → Cockpit mode. Dense data, monospace numbers, compact spacing.")
 
     # Report detected tooling
     pm = tooling.get("package_manager")
@@ -61,35 +98,35 @@ def run(args: argparse.Namespace):
         print(f"No mechanical tools detected. Skipping to design audit.")
 
     # Design audit instructions
-    print(f"\n[STEP 2 — DESIGN AUDIT]")
-    print(f"Read all frontend files in '{args.path}'.")
-    
+    print(f"\n[STEP 1.5 — STATIC SLOP ANALYSIS]")
+
     # Enforce Zones and Suppressions
     ignore_patterns = config.get("ignore_patterns", [])
     if ignore_patterns:
         print("\n  [!] ACTIVE SUPPRESSIONS (Do NOT flag issues matching these patterns):")
         for p in ignore_patterns:
             print(f"      - {p}")
-    
+
     overrides = config.get("zone_overrides", {})
     if overrides:
         print(f"\n  [!] ACTIVE ZONE OVERRIDES ({len(overrides)}):")
         print("      Run 'uidetox zone show' for details.")
-        
+
     print("\n  [!] ZONING RULES:")
     print("      SKIP all files in 'vendor' or 'generated' zones (e.g., node_modules, dist, .next).")
     print("      ONLY audit 'production' and 'config' zones.")
-    
-    print(f"\nEvaluate against SKILL.md. Check for AI Slop:")
-    print(f"  - Inter/system fonts, purple-blue gradients, glassmorphism")
-    print(f"  - Card grids, hero metric dashboards, bounce animations")
-    print(f"  - Generic startup copy, gray text on colored backgrounds")
 
-    print(f"\n[!] RUNNING STATIC SLOP ANALYZER...")
+    print(f"\n[!] RUNNING STATIC SLOP ANALYZER ({len(RULES)} rules)...")
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
-    slop_issues = analyze_directory(args.path, exclude_paths=exclude_paths, zone_overrides=zone_overrides)
+    slop_issues = analyze_directory(
+        args.path,
+        exclude_paths=exclude_paths,
+        zone_overrides=zone_overrides,
+        design_variance=variance,
+    )
     queued_count = 0
+    triggered_rules: set[str] = set()
     for issue in slop_issues:
         if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
             issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
@@ -102,14 +139,39 @@ def run(args: argparse.Namespace):
             }
             add_issue(new_issue)
             queued_count += 1
-            
-    if queued_count > 0:
-        print(f"  ✓ Auto-queued {queued_count} deterministic AI slop anti-patterns.")
-    else:
-        print(f"  ✓ No deterministic AI slop detected by static analysis.")
+            # Track which rules fired for the coverage report
+            for rule in RULES:
+                if rule["description"] in issue["issue"]:
+                    triggered_rules.add(rule["id"])
 
-    print(f"\nFor each manual, subjective issue found by the agent, run:")
+    if queued_count > 0:
+        print(f"  Auto-queued {queued_count} deterministic AI slop anti-patterns.")
+    else:
+        print(f"  No deterministic AI slop detected by static analysis.")
+
+    # Category coverage report
+    print(f"\n  ─── Category Coverage Report ───")
+    for cat, rule_ids in _AUTO_CATEGORIES.items():
+        fired = rule_ids & triggered_rules
+        status = f"({len(fired)} hit)" if fired else "(clean)"
+        print(f"    {cat:<14} : auto-scanned {status}")
+    for cat, desc in _MANUAL_CATEGORIES.items():
+        print(f"    {cat:<14} : NEEDS MANUAL AUDIT — {desc}")
+
+    print(f"\n[STEP 2 — DESIGN AUDIT]")
+    print(f"Read all frontend files in '{args.path}'.")
+    print(f"Evaluate against SKILL.md. For each issue found by the agent, run:")
     print(f"  uidetox add-issue --file <path> --tier <T1-T4> --issue <description> --fix-command <cmd>")
+
+    # Reference files for the agent to consult
+    print(f"\n  Reference Files for Deep-Dive:")
+    print(f"    reference/typography.md       — Type scales, font pairing, loading")
+    print(f"    reference/color-and-contrast.md — OKLCH, tinted neutrals, dark mode")
+    print(f"    reference/spatial-design.md    — Grids, spacing systems, hierarchy")
+    print(f"    reference/motion-design.md     — Easing curves, timing, reduced motion")
+    print(f"    reference/interaction-design.md — Forms, focus, loading patterns")
+    print(f"    reference/anti-patterns.md     — Full banned pattern catalog")
+    print(f"    reference/creative-arsenal.md  — Advanced layout and motion concepts")
 
     # Full-stack integration instructions
     if backends or databases or apis:

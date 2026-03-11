@@ -63,11 +63,11 @@ uidetox setup --auto-commit    # Initializes design dials & git integration
 ### The Engine (CLI)
 | Command | Action |
 | :--- | :--- |
-| `uidetox scan` | Full audit: auto-detects tooling and runs the static slop analyzer. |
-| `uidetox next` | Batches the highest-priority issues with design context injection. |
-| `uidetox status` | View your **Design Score** and pending issue count. |
+| `uidetox scan` | Full audit: auto-detects tooling and runs the 32-rule static slop analyzer. |
+| `uidetox next` | Batches the highest-priority issues with dial-calibrated design context injection. |
+| `uidetox status` | View your **Design Score** and actionable per-category hints. |
 | `uidetox loop` | Enter autonomous mode (creates a session branch and loops fixes). |
-| `uidetox rescan` | Clears queue and re-audits with 18+ fresh anti-slop rules. |
+| `uidetox rescan` | Clears queue and re-audits with 32+ fresh anti-slop rules. |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly. |
 
 ### Design Skills (Slash Commands)
@@ -82,7 +82,7 @@ Use these for targeted improvements on specific files or directories:
 ## Design Dials
 Control the "aesthetic DNA" of the output by adjusting these values in `uidetox setup`:
 
-* **DESIGN_VARIANCE (1-10):** From clean/centered (1) to asymmetric/massive whitespace (10).
+* **DESIGN_VARIANCE (1-10):** From clean/centered (1) to asymmetric/massive whitespace (10). Drives structural layout generation patterns (Bento grids vs split-screens).
 * **MOTION_INTENSITY (1-10):** From CSS-only (1) to complex spring physics and reveals (10).
 * **VISUAL_DENSITY (1-10):** From spacious "art gallery" (1) to "cockpit mode" data density (10).
 
@@ -97,7 +97,9 @@ UIdetox actively hunts and destroys:
 - [ ] Identical **Card Grids** with no hierarchy.
 - [ ] Meaningless **Glassmorphism**.
 - [ ] Default **Lucide/Radix** patterns with zero customization.
-- [ ] "Generic Startup" copywriting.
+- [ ] "Generic Startup" copywriting (e.g. "Next-Gen", "Elevate").
+- [ ] **Div Soup** over semantic HTML.
+- [ ] Missing **Focus/Hover** accessibility states.
 
 ---
 
