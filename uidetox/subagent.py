@@ -5,9 +5,9 @@ import os
 import uuid
 from pathlib import Path
 
-from uidetox.analyzer import IGNORE_DIRS
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config
-from uidetox.utils import now_iso
+from uidetox.analyzer import IGNORE_DIRS # type: ignore
+from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
+from uidetox.utils import now_iso # type: ignore
 
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
@@ -24,7 +24,7 @@ def _now_iso() -> str:
 
 
 def _session_id() -> str:
-    return str(uuid.uuid4())[:8]
+    return str(uuid.uuid4()).split("-")[0]
 
 
 def create_session(stage: str, prompt: str) -> str:
@@ -130,7 +130,9 @@ def get_frontend_files() -> list[str]:
     files = []
     
     for dirpath, dirnames, filenames in os.walk("."):
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
+        new_dir = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
+        dirnames.clear()
+        dirnames.extend(new_dir)
         for filename in filenames:
             if Path(filename).suffix.lower() in frontend_exts:
                 files.append(os.path.join(dirpath, filename))
@@ -166,10 +168,10 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
             if not files:
                 return [_observe_prompt(tooling, [], dials_block)]
             chunk_size = max(1, len(files) // parallel)
-            chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)]
+            chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)] # type: ignore
             # Merge trailing chunk if rounding caused an extra bucket
             if len(chunks) > parallel:
-                chunks[parallel-1].extend(chunks.pop())
+                chunks[parallel-1].extend(chunks.pop()) # type: ignore
             return [_observe_prompt(tooling, chunk, dials_block) for chunk in chunks]
         return [_observe_prompt(tooling, [], dials_block)]
 
@@ -187,7 +189,10 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         # Safely group by file to prevent merge conflicts
         grouped = {}
         for issue in issues:
-            grouped.setdefault(issue.get("file"), []).append(issue)
+            f = issue.get("file")
+            if f not in grouped:
+                grouped[f] = []
+            grouped[f].append(issue)
 
         sorted_groups = sorted(
             grouped.values(),
@@ -195,7 +200,7 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         )
 
         # Take the most pressing file-groups to batch, up to parallel * 3
-        top_groups = sorted_groups[:parallel * 3]
+        top_groups = sorted_groups[:parallel * 3] # type: ignore
 
         # Distribute file-groups into parallel buckets
         buckets = [[] for _ in range(parallel)]
@@ -206,7 +211,7 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         buckets = [b for b in buckets if b]
 
         if not buckets:  # Fallback sanity check
-            buckets = [issues[:5]]
+            buckets = [issues[:5]] # type: ignore
 
         return [_fix_prompt(bucket, dials_block) for bucket in buckets]
 
@@ -229,6 +234,11 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str) -> str:
 
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
+
+## Tools Available
+Use GitNexus to map codebase flows before deep diving!
+- npx gitnexus analyze .
+- npx gitnexus query <concept>
 
 ## What to Catalog
 For every frontend file, note:
@@ -264,7 +274,7 @@ CONTENT: <quality of placeholder data and copy>
 
 def _diagnose_prompt(issues: list, dials_block: str) -> str:
     existing = "\n".join(
-        f"- [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues[:20]
+        f"- [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues[:20] # type: ignore
     ) if issues else "None yet."
 
     return f"""# UIdetox Sub-Agent: DIAGNOSE Stage
@@ -411,7 +421,7 @@ def _fix_prompt(batch: list, dials_block: str) -> str:
     )
 
     # Build inline context for the fix batch (same pattern as next.py)
-    from uidetox.commands.next import SKILL_CONTEXT, _get_relevant_context
+    from uidetox.commands.next import SKILL_CONTEXT, _get_relevant_context # type: ignore
     contexts = _get_relevant_context(batch)
     context_block = ""
     if contexts:
@@ -434,7 +444,8 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 {context_block}
 
-## Rules
+## Tools & Rules
+- Use `npx gitnexus impact <symbol>` before refactoring any exports
 - Follow SKILL.md design rules for every change
 - Fix ALL issues in one pass per component, then batch-resolve:
   `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`

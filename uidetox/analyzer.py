@@ -433,20 +433,29 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
             if zone in ("vendor", "generated"):
                 zone_skip.add(str(Path(fpath).resolve()))
 
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Mutate dirnames in-place to skip IGNORE_DIRS + user excludes
-        new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
-        dirnames.clear()
-        dirnames.extend(new_dir)
+    from concurrent.futures import ThreadPoolExecutor
 
-        for filename in filenames:
-            file_path = Path(dirpath) / filename
+    def _analyze_wrapper(fp: Path) -> list:
+        return analyze_file(fp, design_variance=design_variance) # type: ignore
 
-            # Respect zone overrides
-            if zone_skip and str(file_path.resolve()) in zone_skip:
-                continue
-
-            found_issues = analyze_file(file_path, design_variance=design_variance)
-            all_issues.extend(found_issues)
+    futures = []
+    with ThreadPoolExecutor() as executor:
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Mutate dirnames in-place to skip IGNORE_DIRS + user excludes
+            new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
+            dirnames.clear()
+            dirnames.extend(new_dir)
+    
+            for filename in filenames:
+                file_path = Path(dirpath) / filename
+    
+                # Respect zone overrides
+                if zone_skip and str(file_path.resolve()) in zone_skip:
+                    continue
+    
+                futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
+                
+        for future in futures:
+            all_issues.extend(future.result())
 
     return all_issues
