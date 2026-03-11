@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uidetox"
+version = "1.0.1"
+description = "Agent harness and CLI to eliminate AI slop from frontend code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "artmanuky"}
+]
+keywords = ["code-quality", "frontend", "design", "ai-slop", "agent", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/OJamals/UIdetox"
+Repository = "https://github.com/OJamals/UIdetox"
+Issues = "https://github.com/OJamals/UIdetox/issues"
+
+[project.scripts]
+uidetox = "uidetox.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["uidetox*"]
+
+[tool.setuptools.package-data]
+uidetox = [
+    "py.typed",
+    "data/*.md",
+    "data/commands/*.md",
+    "data/reference/*.md",
+    "data/docs/*.md",
+]

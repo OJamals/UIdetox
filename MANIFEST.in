@@ -1,0 +1,12 @@
+include README.md
+include SKILL.md
+include AGENTS.md
+include LICENSE
+recursive-include commands *.md
+recursive-include reference *.md
+recursive-include docs *.md
+
+# Exclude generated directories from package
+prune .uidetox
+prune .claude
+global-exclude *.egg-info
