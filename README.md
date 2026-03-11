@@ -2,7 +2,6 @@
 
 **The anti-slop engine for AI-generated frontends.**
 
-![UIdetox Flow](uidetox-flow.jpg)
 
 [UIdetox](https://github.com/OJamals/UIdetox) is an agent harness that eliminates the "AI smell" from your UI. It transforms generic, LLM-generated code into hand-crafted, high-fidelity interfaces through a systematic **scan → fix loop** that enforces design taste and detects common AI anti-patterns.
 
