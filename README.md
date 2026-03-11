@@ -1,4 +1,4 @@
-# UIdetox
+![UIdetox Banner](assets/banner.png)
 
 **The anti-slop harness for AI-generated frontends.**
 
@@ -14,7 +14,9 @@ It combines:
 
 ---
 
-## Why UIdetox exists
+### The AI Slop Problem
+
+![Slop vs Crafted](assets/slop-vs-crafted.png)
 
 AI tools can produce UI quickly, but often converge on the same visual clichés: default font stacks, purple-blue gradients, glass cards, repetitive metric blocks, and shallow interaction states.
 
@@ -34,7 +36,7 @@ This is not just linting. It is a structured quality system for frontend output.
 pip install uidetox
 
 # Install agent-specific skill assets
-uidetox update-skill claude    # also supports: cursor, gemini, windsurf, codex, copilot
+uidetox update-skill [agent]    # supports: claude, cursor, gemini, windsurf, codex, copilot
 
 # Initialize project dials + optional auto-commit flow
 uidetox setup --auto-commit
@@ -69,64 +71,28 @@ RULES:
   - Don't stop after one fix. Don't ask permission. Don't summarize between iterations.
   - When score ≥ 95 and queue is empty: uidetox finish
 ```
-
-### Why this prompt works
-
-1. **Closed-Loop System** — Defines a self-propagating cycle (`next → fix → resolve → status → repeat`) instead of a one-off request. The agent keeps iterating until the score target is met.
-
-2. **Quantifiable Metrics** — Shifts the goal from vague "clean code" to a numeric Design Score (60% static analysis + 40% subjective review) that can only improve by fixing real issues.
-
-3. **Permission for Heavy Lifting** — Explicitly counteracts LLM laziness: *"Rewrite entire files if needed"* gives permission for proper fixes over minimal snippet suggestions.
-
-4. **Agentic Architecture** — `uidetox loop` prints the full orchestration protocol (scan → plan → fix → verify → rescan). For large codebases, it auto-enables parallel sub-agent sharding.
-
-5. **Tool Authority Over AI Ego** — *"The tool's rules override your instincts"* forces the agent to trust deterministic analysis over its own biased training data.
-
 ---
 
-## The Autonomous Loop
+## The Autonomous Protocol
 
 `uidetox loop` drives a fully autonomous **scan → fix → verify** cycle. The loop continues until the Design Score meets the target (default 95) and the issue queue is empty.
 
-### Architecture Diagram
+### The Intelligence Layer
+UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
 
-```mermaid
-flowchart LR
-    LOOP["uidetox loop\n──────────\ndetect tooling\ngit branch\ninject memory"]
+![The Intelligence Layer](assets/intelligence.png)
 
-    SCAN["uidetox scan\n──────────\n60+ static rules\nLLM rubric\ntier classification"]
+### The Remediation Flow
+Each iteration follows a strict quality gate. Issues are batched by component, skill rules are injected, and fixes are verified against the project's build system before being committed.
 
-    NEXT["uidetox next\n──────────\npriority batch\nSKILL.md inject\ndesign dials"]
+![UIdetox Flow](assets/explained.png)
 
-    FIX["Agent fixes\n──────────\nfull rewrites\nskill commands\nno shortcuts"]
+> [!TIP]
+> **Self-Healing Mechanics**: If a fix breaks the build (TSC or Lint errors), UIdetox captures the compiler output, injects it back into the agent's context, and requires a fix before the issue can be resolved.
 
-    RESOLVE["batch-resolve\n──────────\nverify + commit\nupdate score\nauto-advance"]
+> [!TIP]
+> **Visual Regression Workflow**: Use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive`) to generate screenshot diffs that are surfaced inside `uidetox review`.
 
-    STATUS["uidetox status\n──────────\nblended score\nvelocity track\nqueue health"]
-
-    RESCAN["uidetox rescan\n──────────\nfresh analysis\nsmart dedup\nauto-escalate"]
-
-    REVIEW["uidetox review\n──────────\nsubjective score\n4 dimensions\ntrend history"]
-
-    FINISH["uidetox finish\n──────────\nsquash merge\nclean delivery"]
-
-    LOOP --> SCAN --> NEXT --> FIX --> RESOLVE --> STATUS
-
-    STATUS -- "queue non-empty" --> NEXT
-    STATUS -- "queue empty" --> RESCAN --> REVIEW --> STATUS
-
-    STATUS -- "score ≥ 95 &\nqueue empty" --> FINISH
-
-    style LOOP fill:#7c3aed,stroke:#6d28d9,color:#f5f3ff
-    style SCAN fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
-    style NEXT fill:#0f766e,stroke:#134e4a,color:#ccfbf1
-    style FIX fill:#b45309,stroke:#92400e,color:#fef3c7
-    style RESOLVE fill:#0f766e,stroke:#134e4a,color:#ccfbf1
-    style STATUS fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
-    style RESCAN fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
-    style REVIEW fill:#7c2d12,stroke:#7c2d12,color:#fed7aa
-    style FINISH fill:#065f46,stroke:#064e3b,color:#d1fae5
-```
 
 **Design Score** = Objective × 0.6 + Subjective × 0.4 — the agent keeps looping until this hits the target.
 
@@ -137,11 +103,12 @@ flowchart LR
 | Command | Purpose |
 | :--- | :--- |
 | `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
-| `uidetox scan` | Run 60+ rule static analysis + subjective rubric injection. |
+| `uidetox scan` | Run 60+ rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox next` | Get the highest-priority issue batch with SKILL.md context. |
 | `uidetox batch-resolve` | Resolve issues atomically with verification + auto-commit. |
 | `uidetox status` | Show blended Design Score, velocity, and queue health. |
 | `uidetox review` | Subjective quality scoring across 4 design dimensions. |
+| `uidetox capture` | Capture before/after screenshots and visual diffs (`--stage before/after`, `--responsive`). |
 | `uidetox rescan` | Fresh re-analysis with dedup and auto-escalation. |
 | `uidetox check --fix` | Mechanical gate: tsc → lint → format. |
 | `uidetox plan` | Attack plan grouped by component with effort estimates. |

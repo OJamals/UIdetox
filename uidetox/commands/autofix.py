@@ -105,32 +105,102 @@ def run(args: argparse.Namespace):
 
     import subprocess
     from pathlib import Path
-    
+
     transforms_dir = Path(__file__).parent.parent / "data" / "transforms"
-    
+
+    # Map categories to transform files (multiple categories can share transforms)
+    _TRANSFORM_MAP = {
+        "typography": "typography.js",
+        "color": "color.js",
+        "materiality": "color.js",       # Color transform handles materiality patterns too
+        "layout": "spacing.js",
+        "motion": "typography.js",        # Typography transform handles animation replacements
+        "states": "spacing.js",           # Spacing transform handles missing transitions
+        "code quality": "spacing.js",     # Spacing transform handles z-index, empty handlers
+    }
+
     applied_files = set()
+    transforms_run = set()
+
     for cat_name, cat_issues in grouped.items():
-        transform_file = transforms_dir / f"{cat_name}.js"
-        if transform_file.exists():
-            files_to_fix = list(set([i["file"] for i in cat_issues]))
-            print(f"\n⚙️  Applying {cat_name} transforms via jscodeshift on {len(files_to_fix)} file(s)...")
-            
-            for file_path in files_to_fix:
-                try:
-                    subprocess.run(
-                        ["npx", "jscodeshift", "-t", str(transform_file), file_path],
-                        capture_output=True, text=True, check=True
-                    )
+        # Check for exact category match, then mapped match
+        transform_name = _TRANSFORM_MAP.get(cat_name, f"{cat_name}.js")
+        transform_file = transforms_dir / transform_name
+
+        if not transform_file.exists():
+            continue
+
+        # Avoid running the same transform on the same files twice
+        transform_key = str(transform_file)
+        if transform_key in transforms_run:
+            continue
+
+        # Collect all files needing this transform
+        files_to_fix = []
+        for cn, ci in grouped.items():
+            mapped = _TRANSFORM_MAP.get(cn, f"{cn}.js")
+            if mapped == transform_name:
+                files_to_fix.extend([i["file"] for i in ci])
+        files_to_fix = list(set(files_to_fix))
+
+        # Only transform JS/TS files (jscodeshift doesn't handle CSS)
+        js_exts = {".tsx", ".jsx", ".ts", ".js"}
+        files_to_fix = [f for f in files_to_fix if Path(f).suffix.lower() in js_exts]
+
+        if not files_to_fix:
+            continue
+
+        print(f"\n⚙️  Applying {transform_name} transforms via jscodeshift on {len(files_to_fix)} file(s)...")
+        transforms_run.add(transform_key)
+
+        for file_path in files_to_fix:
+            try:
+                result = subprocess.run(
+                    ["npx", "jscodeshift", "-t", str(transform_file), "--parser", "tsx", file_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
                     applied_files.add(file_path)
-                except FileNotFoundError:
-                    print("    ⚠️  npx not found. Please install Node.js/npm.")
-                    break
-                except subprocess.CalledProcessError as e:
-                    print(f"    ⚠️  Failed to transform {file_path}: {e.stderr[:100]}...")
+                    # Check if file was actually modified
+                    if "0 unchanged" not in result.stdout and "0 ok" not in result.stdout:
+                        print(f"    ✓ {Path(file_path).name}")
+                else:
+                    stderr = result.stderr.strip()
+                    if stderr:
+                        print(f"    ⚠️  {Path(file_path).name}: {stderr[:80]}")
+            except FileNotFoundError:
+                print("    ⚠️  npx not found. Install Node.js/npm for mechanical auto-fixing.")
+                print("    Falling back to agent-assisted fixing.")
+                break
+            except subprocess.TimeoutExpired:
+                print(f"    ⚠️  Timeout transforming {Path(file_path).name}")
+            except subprocess.CalledProcessError as e:
+                print(f"    ⚠️  Failed to transform {Path(file_path).name}: {e.stderr[:100]}...")
 
     if applied_files:
-        print(f"\n✅ Automatically transformed {len(applied_files)} files using jscodeshift.")
+        print(f"\n✅ Automatically transformed {len(applied_files)} file(s) using jscodeshift.")
+
+        # Auto-commit the mechanical fixes if enabled
+        if config.get("auto_commit", False):
+            try:
+                for f in applied_files:
+                    subprocess.run(["git", "add", f], check=True, capture_output=True)
+                subprocess.run(
+                    ["git", "commit", "-m", f"[UIdetox] Autofix: mechanical T1 transforms ({len(applied_files)} files)", "--no-verify"],
+                    check=True, capture_output=True,
+                )
+                print(f"   📦 Auto-committed mechanical fixes to git.")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print(f"   ⚠️  Git auto-commit failed.")
+
         print(f"Run `uidetox rescan` to update the issue queue.")
+
+        # Mark the issues in transformed files as needing verification
+        remaining_t1 = [i for i in t1_issues if i["file"] not in applied_files]
+        if remaining_t1:
+            print(f"\n{len(remaining_t1)} T1 issue(s) in non-JS files need manual fixing:")
+            for issue in remaining_t1[:10]:
+                print(f"    [{issue['id']}] {issue['file']}: {issue['issue'][:60]}")
         return
 
     config = load_config()

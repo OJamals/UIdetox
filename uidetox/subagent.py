@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -80,23 +81,123 @@ def record_result(session_id: str, result: dict) -> bool:
     # Update meta
     meta_path = session_dir / "meta.json"
     meta = json.loads(meta_path.read_text())
-    
-    # Parse confidence score if provided
-    confidence = 1.0
-    text = result.get("note", "")
-    import re
-    m = re.search(r'CONFIDENCE:\s*(0\.\d+|1\.0)', text, re.IGNORECASE)
-    if m:
-        confidence = float(m.group(1))
 
-    meta["status"] = "completed_with_warnings" if confidence < 0.85 else "completed"
+    # Parse confidence score if provided (multiple formats supported)
+    confidence = _extract_confidence(result)
+
+    # Determine status based on confidence thresholds
+    if confidence < 0.6:
+        meta["status"] = "needs_human_review"
+        meta["review_reason"] = "Very low confidence — agent is uncertain about fix quality"
+    elif confidence < 0.85:
+        meta["status"] = "completed_with_warnings"
+        meta["review_reason"] = "Below confidence threshold — recommend verification"
+    else:
+        meta["status"] = "completed"
+        meta["review_reason"] = None
+
     meta["confidence"] = confidence
     meta["completed_at"] = _now_iso()
-    
+
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
+    # Flag low-confidence results for human review
+    if confidence < 0.85:
+        _flag_for_review(session_id, meta, confidence)
+
     return True
+
+
+def _extract_confidence(result: dict) -> float:
+    """Extract confidence score from result using multiple parsing strategies."""
+    confidence = 1.0
+
+    # Strategy 1: Explicit CONFIDENCE: field in the note
+    text = result.get("note", "")
+    m = re.search(r'CONFIDENCE:\s*(0\.\d+|1\.0|1)', text, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+
+    # Strategy 2: Check for confidence in structured result data
+    if "confidence" in result:
+        try:
+            return float(result["confidence"])
+        except (ValueError, TypeError):
+            pass
+
+    # Strategy 3: Parse from verification output
+    verify_text = result.get("verification", result.get("output", ""))
+    if verify_text:
+        m = re.search(r'(?:confidence|certainty|score)[\s:]*(?:is\s+)?(0\.\d+|1\.0)', verify_text, re.IGNORECASE)
+        if m:
+            return float(m.group(1))
+
+    # Strategy 4: Infer from error/warning signals in the result
+    all_text = json.dumps(result).lower()
+    warning_signals = ["unsure", "might not", "could break", "not certain", "unclear",
+                       "risky", "regression", "manual check", "verify manually"]
+    warning_count = sum(1 for sig in warning_signals if sig in all_text)
+    if warning_count >= 3:
+        confidence = 0.5
+    elif warning_count >= 2:
+        confidence = 0.7
+    elif warning_count >= 1:
+        confidence = 0.85
+
+    return confidence
+
+
+def _flag_for_review(session_id: str, meta: dict, confidence: float):
+    """Flag a low-confidence session for human review.
+
+    Creates a review request file and logs to memory for visibility.
+    """
+    session_dir = _sessions_dir() / f"session_{session_id}"
+
+    review_request = {
+        "session_id": session_id,
+        "stage": meta.get("stage", "unknown"),
+        "confidence": confidence,
+        "status": meta.get("status"),
+        "reason": meta.get("review_reason", "Below confidence threshold"),
+        "flagged_at": _now_iso(),
+        "action_required": (
+            "HUMAN_REVIEW_REQUIRED" if confidence < 0.6
+            else "REVIEW_RECOMMENDED"
+        ),
+    }
+
+    with open(session_dir / "review_request.json", "w", encoding="utf-8") as f:
+        json.dump(review_request, f, indent=2)
+
+    # Also log to memory for persistence
+    try:
+        from uidetox.memory import add_note
+        add_note(
+            f"[LOW CONFIDENCE] Session {session_id} ({meta.get('stage')}): "
+            f"confidence={confidence:.2f}. {meta.get('review_reason', '')}. "
+            f"Action: {review_request['action_required']}"
+        )
+    except Exception:
+        pass  # Non-critical
+
+
+def get_pending_reviews() -> list[dict]:
+    """Return all sessions flagged for human review."""
+    sessions_dir = _sessions_dir()
+    reviews = []
+    for session_dir in sorted(sessions_dir.iterdir()):
+        if not session_dir.is_dir():
+            continue
+        review_path = session_dir / "review_request.json"
+        if review_path.exists():
+            try:
+                review = json.loads(review_path.read_text())
+                reviews.append(review)
+            except (json.JSONDecodeError, OSError):
+                continue
+    return reviews
 
 
 def list_sessions() -> list[dict]:
@@ -139,7 +240,7 @@ def get_session(session_id: str) -> dict | None:
 def get_frontend_files() -> list[str]:
     frontend_exts = {".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte", ".ts", ".js"}
     files = []
-    
+
     for dirpath, dirnames, filenames in os.walk("."):
         new_dir = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
         dirnames.clear()
@@ -150,15 +251,17 @@ def get_frontend_files() -> list[str]:
     return sorted(files)
 
 
-def _build_memory_block(query: str = "") -> str:
+def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:
     """Build a memory injection block from persistent agent memory.
 
     Injects learned patterns, notes, and session context so sub-agents
     have continuity with prior work. If a query is provided, performs
-    a semantic search using ChromaDB.
+    a semantic search using ChromaDB. If files are provided, also injects
+    targeted embedding-matched context for those specific files.
     """
     try:
-        from uidetox.memory import get_patterns, get_notes, get_session as get_mem_session, get_last_scan
+        from uidetox.memory import (get_patterns, get_notes, get_session as get_mem_session,
+                                     get_last_scan, build_targeted_context)
     except ImportError:
         return ""
 
@@ -202,6 +305,15 @@ def _build_memory_block(query: str = "") -> str:
         if top:
             lines.append(f"- Hottest Files: {', '.join(top[:5])}")
         sections.append("\n".join(lines))
+
+    # ── Embedding-based targeted context (only if files provided) ──
+    if files:
+        try:
+            targeted = build_targeted_context(files, issue_text=query)
+            if targeted:
+                sections.append(targeted)
+        except Exception:
+            pass  # ChromaDB optional — gracefully degrade
 
     if not sections:
         return ""
@@ -251,10 +363,10 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
 Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
 
     if stage == "observe":
-        memory_block = _build_memory_block()
         if parallel > 1:
             files = get_frontend_files()
             if not files:
+                memory_block = _build_memory_block()
                 return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
             chunk_size = max(1, len(files) // parallel)
             chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)] # type: ignore
@@ -262,9 +374,11 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
             if len(chunks) > parallel:
                 chunks[parallel-1].extend(chunks.pop()) # type: ignore
             return [
-                _observe_prompt(tooling, chunk, dials_block, memory_block, idx, len(chunks))
+                _observe_prompt(tooling, chunk, dials_block,
+                                _build_memory_block(files=chunk), idx, len(chunks))
                 for idx, chunk in enumerate(chunks)
             ]
+        memory_block = _build_memory_block()
         return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
 
     elif stage == "diagnose":
@@ -531,9 +645,9 @@ def _fix_prompt(batch: list, dials_block: str,
                 lines.append(f"  (Deep-dive: {ref_file})")
         context_block = "\n".join(lines)
 
-    # Build memory and deconfliction blocks
-    memory_block = _build_memory_block(query=batch_text)
+    # Build memory and deconfliction blocks with targeted embedding context
     batch_files = list(set(i.get("file", "") for i in batch))
+    memory_block = _build_memory_block(query=batch_text, files=batch_files)
     deconfliction = _build_deconfliction_block(shard_index, total_shards, batch_files)
 
     return f"""# UIdetox Sub-Agent: FIX Stage
@@ -561,7 +675,18 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 
 def _verify_prompt(issues: list, resolved: list) -> str:
+    # Check for pending reviews
+    pending_reviews = get_pending_reviews()
+    review_block = ""
+    if pending_reviews:
+        lines = ["## Pending Review Requests (from prior low-confidence sessions)"]
+        for r in pending_reviews:
+            lines.append(f"- Session {r['session_id']} ({r['stage']}): confidence={r['confidence']}, action={r['action_required']}")
+        review_block = "\n".join(lines) + "\n"
+
     return f"""# UIdetox Sub-Agent: VERIFY Stage
+
+{review_block}
 
 ## Your Mission
 Re-scan the codebase to confirm improvements. Check that fixes actually improved the interface.
@@ -575,13 +700,48 @@ Re-scan the codebase to confirm improvements. Check that fixes actually improved
 2. Re-read every file that was modified during the FIX stage
 3. Confirm the fixes match SKILL.md rules
 4. Check for cascade effects (fixing one thing may reveal or create new issues)
-5. If new issues are found, queue them: `uidetox add-issue --file <path> --tier <tier> --issue "<desc>" --fix-command "<cmd>"`
-6. Run `uidetox status` again to see the updated score
+5. Run `uidetox check --fix` to verify no build errors were introduced
+6. If new issues are found, queue them: `uidetox add-issue --file <path> --tier <tier> --issue "<desc>" --fix-command "<cmd>"`
+7. Run `uidetox status` again to see the updated score
 
-## Output
-Report the verification results:
-- Score before and after
-- Any new issues discovered
-- Overall assessment: is the interface clean of AI slop?
-- Yield a final CONFIDENCE: <0.0 - 1.0> score based on your certainty regarding the fixes.
+## Confidence Scoring (MANDATORY)
+You MUST yield a confidence score at the end of your output.
+
+Rate your confidence on a 0.0 - 1.0 scale based on these criteria:
+
+| Score Range | Meaning | Action |
+|-------------|---------|--------|
+| 0.95 - 1.0  | Highly confident — fixes are correct, no regressions | Auto-resolve |
+| 0.85 - 0.94 | Confident — fixes look good, minor uncertainty | Auto-resolve |
+| 0.70 - 0.84 | Moderate — some fixes may need adjustment | Flag for review, resolve with warnings |
+| 0.50 - 0.69 | Low — significant uncertainty about fix quality | BLOCK resolution, require human review |
+| 0.0 - 0.49  | Very low — fixes may have broken things | BLOCK resolution, revert recommended |
+
+Consider these factors when scoring:
+- Did `uidetox check --fix` pass without errors?
+- Are there visual regressions (layout shifts, missing elements)?
+- Did any fix introduce new anti-patterns?
+- Were all cascade effects addressed?
+- Is the design score trending upward?
+
+## Output Format
+```
+VERIFICATION SUMMARY:
+- Score before: <N>
+- Score after: <N>
+- Files verified: <list>
+- New issues discovered: <count>
+- Build status: PASS | FAIL
+- Regressions found: <yes/no + details>
+
+CONFIDENCE: <0.0 - 1.0>
+RATIONALE: <1-2 sentence explanation of confidence level>
+```
+
+If CONFIDENCE < 0.85, explicitly list what needs human verification:
+```
+NEEDS_HUMAN_REVIEW:
+- <specific concern 1>
+- <specific concern 2>
+```
 """

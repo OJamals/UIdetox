@@ -4,7 +4,7 @@ import argparse
 import sys
 import subprocess
 from uidetox.state import remove_issue, get_issue, load_state, load_config
-from uidetox.memory import save_session, log_progress
+from uidetox.memory import save_session, log_progress, embed_fix_outcome
 from uidetox.commands.batch_resolve import _run_verification
 
 
@@ -35,7 +35,7 @@ def run(args: argparse.Namespace):
         print(f"   File: {issue['file']}")
         print(f"   Note: {args.note}")
         print(f"   Queue: {remaining} remaining | {resolved_total} resolved total")
-        
+
         # Git Auto-Commit Integration
         config = load_config()
         if config.get("auto_commit", False):
@@ -61,6 +61,17 @@ def run(args: argparse.Namespace):
         save_session(phase="fixing", last_command="resolve",
                      last_component=issue.get('file', ''),
                      issues_fixed=1, context=args.note)
+
+        # Embed fix outcome for future sub-agent context injection
+        try:
+            embed_fix_outcome(
+                file_path=issue.get("file", ""),
+                issue=issue.get("issue", ""),
+                fix=args.note,
+                outcome="resolved",
+            )
+        except Exception:
+            pass  # ChromaDB is optional — never block on embedding failure
     else:
         print(f"❌ Failed to remove {issue_id} from state.", file=sys.stderr)
         sys.exit(1)

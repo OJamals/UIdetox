@@ -18,10 +18,10 @@ import subprocess
 import sys
 import uuid
 
-from uidetox.state import load_config, save_config, load_state, ensure_uidetox_dir
-from uidetox.tooling import detect_all
-from uidetox.memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
-from uidetox.utils import compute_design_score
+from ..state import load_config, save_config, load_state, ensure_uidetox_dir
+from ..tooling import detect_all
+from ..memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
+from ..utils import compute_design_score
 
 
 def run(args: argparse.Namespace):

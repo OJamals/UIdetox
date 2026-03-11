@@ -5,8 +5,8 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state
-from uidetox.utils import compute_design_score
+from .state import get_uidetox_dir, ensure_uidetox_dir, load_state
+from .utils import compute_design_score
 
 
 def _history_dir() -> Path:

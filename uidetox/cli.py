@@ -48,7 +48,7 @@ def parse_args(args_list=None):
     # Command: setup
     setup_parser = subparsers.add_parser("setup", help="Gather project design context and configure dials")
     setup_parser.add_argument("--auto-commit", action="store_true", help="Enable automated git commits for resolved issues")
-    
+
     # Command: scan
     scan_parser = subparsers.add_parser("scan", help="Full diagnostic audit of frontend interface quality")
     scan_parser.add_argument("--path", default=".", help="Directory to scan")
@@ -76,15 +76,17 @@ def parse_args(args_list=None):
 
     # Command: plan
     plan_parser = subparsers.add_parser("plan", help="Reorder priorities or cluster related issues in the queue")
-    
+
     # Command: review
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
     review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
-    
+
     # Command: capture
-    capture_parser = subparsers.add_parser("capture", help="Capture a visual regression screenshot via Playwright")
+    capture_parser = subparsers.add_parser("capture", help="Capture visual regression screenshots via Playwright")
     capture_parser.add_argument("--url", type=str, help="URL of the local dev server (default: http://localhost:3000)")
-    
+    capture_parser.add_argument("--stage", choices=["before", "after"], help="Capture baseline (before) or post-fix (after) screenshot")
+    capture_parser.add_argument("--responsive", action="store_true", help="Capture at multiple viewports (mobile, tablet, desktop, wide)")
+
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
     update_parser.add_argument("agent", choices=["claude", "cursor", "gemini", "codex", "windsurf", "copilot"], help="Target AI agent")
@@ -208,30 +210,30 @@ def main():
         dynamic_skills = []
         if cmd_dir:
             dynamic_skills = [f.stem for f in cmd_dir.glob("*.md") if f.stem not in ["scan", "setup", "fix"]]
-            
+
         if args.command in dynamic_skills:
             command_name = "skill_cmd"
         else:
             command_name = args.command.replace("-", "_")
-            
+
         # Avoid collision with builtins and top-level modules
         name_map = {
-            "format": "format_cmd", 
-            "subagent": "subagent_cmd", 
+            "format": "format_cmd",
+            "subagent": "subagent_cmd",
             "history": "history_cmd",
             "memory": "memory_cmd",
             "tree": "viz" # route 'tree' to 'viz.py'
         }
         command_name = name_map.get(command_name, command_name)
         module = import_module(f"uidetox.commands.{command_name}")
-        
+
         if hasattr(module, "run"):
             # Pass args to the command runner
             module.run(args)
         else:
             print(f"Error: Command module for '{args.command}' lacks a run() function.", file=sys.stderr)
             sys.exit(1)
-            
+
     except KeyboardInterrupt:
         print("\n\nInterrupted. Run 'uidetox status' to see where you left off.")
         sys.exit(130)

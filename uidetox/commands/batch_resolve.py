@@ -14,12 +14,15 @@ def _run_verification(config: dict) -> bool:
     """Run tsc → lint --fix → format --fix as a pre-commit quality gate.
 
     Returns True if all checks pass (or no tooling detected).
+    Implements self-healing: captures error output and injects it into
+    agent context so the repo is never left in an unbuildable state.
     """
     tooling = config.get("tooling", {})
     if not tooling:
         return True
 
     passed = True
+    error_context: list[str] = []
 
     # TypeScript
     if tooling.get("typescript"):
@@ -30,10 +33,12 @@ def _run_verification(config: dict) -> bool:
                 res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 if res.returncode != 0:
                     print(f"  ⚠️  TypeScript errors remain. Fix before committing.")
-                    if res.stdout.strip():
-                        print(f"\n{res.stdout.strip()}\n")
-                    if res.stderr.strip():
-                        print(f"\n{res.stderr.strip()}\n")
+                    errors = res.stdout.strip() or res.stderr.strip()
+                    if errors:
+                        # Truncate to avoid context overflow but keep actionable info
+                        truncated = "\n".join(errors.splitlines()[:30])
+                        print(f"\n{truncated}\n")
+                        error_context.append(f"## TypeScript Errors\n```\n{truncated}\n```")
                     passed = False
                 else:
                     print("  ✓ TypeScript passed")
@@ -49,11 +54,12 @@ def _run_verification(config: dict) -> bool:
                 res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 print("  ✓ Linter auto-fix applied")
                 if res.returncode != 0:
-                    print(f"  ⚠️  Linter warned of remaining issues:")
-                    if res.stdout.strip():
-                        print(f"\n{res.stdout.strip()}\n")
-                    if res.stderr.strip():
-                        print(f"\n{res.stderr.strip()}\n")
+                    errors = res.stdout.strip() or res.stderr.strip()
+                    if errors:
+                        truncated = "\n".join(errors.splitlines()[:30])
+                        print(f"  ⚠️  Linter warned of remaining issues:")
+                        print(f"\n{truncated}\n")
+                        error_context.append(f"## Linter Errors\n```\n{truncated}\n```")
                     passed = False
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 print("  ⚠️  Linter auto-fix skipped (tool not found or timed out)")
@@ -67,14 +73,43 @@ def _run_verification(config: dict) -> bool:
                 res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
                 print("  ✓ Formatter auto-fix applied")
                 if res.returncode != 0:
-                    print(f"  ⚠️  Formatter warned of remaining issues:")
-                    if res.stdout.strip():
-                        print(f"\n{res.stdout.strip()}\n")
-                    if res.stderr.strip():
-                        print(f"\n{res.stderr.strip()}\n")
+                    errors = res.stdout.strip() or res.stderr.strip()
+                    if errors:
+                        truncated = "\n".join(errors.splitlines()[:30])
+                        print(f"  ⚠️  Formatter warned of remaining issues:")
+                        print(f"\n{truncated}\n")
+                        error_context.append(f"## Formatter Errors\n```\n{truncated}\n```")
                     passed = False
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 print("  ⚠️  Formatter auto-fix skipped (tool not found or timed out)")
+
+    # ── Self-Healing: inject error context for agent recovery ──
+    if not passed and error_context:
+        print()
+        print("━━━ SELF-HEALING CONTEXT (fix these errors before proceeding) ━━━")
+        print()
+        for block in error_context:
+            print(block)
+        print()
+        print("[AGENT INSTRUCTION] The build is broken after your fixes.")
+        print("Read the errors above, fix them in the affected files, then retry:")
+        print("  1. Fix the compilation/lint errors shown above")
+        print("  2. Run `uidetox check --fix` to re-verify")
+        print("  3. Retry `uidetox batch-resolve` or `uidetox resolve`")
+        print("DO NOT proceed to the next issue until the build is green.")
+        print()
+
+        # Persist the error context to memory so sub-agents can see it
+        try:
+            from uidetox.memory import add_note
+            error_summary = "; ".join(
+                line.strip() for block in error_context
+                for line in block.splitlines()
+                if line.strip() and not line.startswith("```") and not line.startswith("##")
+            )[:500]
+            add_note(f"[SELF-HEAL] Build broken after fix attempt: {error_summary}")
+        except Exception:
+            pass  # Non-critical
 
     return passed
 
@@ -209,3 +244,16 @@ def run(args: argparse.Namespace):
     save_session(phase="fixing", last_command="batch-resolve",
                  last_component=component,
                  issues_fixed=len(removed), context=note)
+
+    # Embed fix outcomes for future sub-agent context injection
+    try:
+        from uidetox.memory import embed_fix_outcome
+        for r in removed:
+            embed_fix_outcome(
+                file_path=r.get("file", ""),
+                issue=r.get("issue", ""),
+                fix=note,
+                outcome="resolved",
+            )
+    except Exception:
+        pass  # ChromaDB is optional — never block on embedding failure

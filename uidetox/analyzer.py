@@ -657,73 +657,284 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
     parser = _get_parser(ext)
     if not parser:
         return []
-        
+
     try:
         tree = parser.parse(content.encode("utf-8", errors="ignore"))
     except Exception:
         return []
-        
+
     issues = []
-    
+    fpath = str(filepath.resolve())
+
     if ext in {".tsx", ".jsx", ".js", ".ts"}:
-        state = {"div_count": 0, "semantic_count": 0, "nested_ternaries": 0, "cards": 0, "charts": 0}
-        
-        def walk(node):
+        state = {
+            "div_count": 0, "semantic_count": 0, "nested_ternaries": 0,
+            "cards": 0, "charts": 0,
+            # Deep prop drilling detection
+            "prop_pass_depth": 0,  # max depth of a prop passed through components
+            "prop_names_seen": {},  # prop name -> list of component names where it appears
+            # useState for animation detection
+            "usestate_for_animation": False,
+            # Identical sibling components (e.g., 4 KPI cards in a row)
+            "sibling_components": {},  # parent_id -> list of child component names
+            # Styled-component nesting depth
+            "styled_nesting_depth": 0,
+        }
+
+        def _node_text(node) -> str:
+            try:
+                return node.text.decode("utf-8", errors="ignore")
+            except AttributeError:
+                return str(node.text)
+
+        def walk(node, depth=0):
             if node.type in ("jsx_element", "jsx_self_closing_element"):
                 open_tag = node.child_by_field_name("open_tag") if node.type == "jsx_element" else node
                 if open_tag:
                     name_node = open_tag.child_by_field_name("name")
                     if name_node:
-                        try:
-                            tag_name = name_node.text.decode("utf-8", errors="ignore")
-                        except AttributeError:
-                            tag_name = str(name_node.text)
-                        
+                        tag_name = _node_text(name_node)
+
                         if tag_name == "div":
                             state["div_count"] += 1
                         elif tag_name in {"nav", "main", "article", "section", "aside", "header", "footer"}:
                             state["semantic_count"] += 1
-                            
+
                         # Detect Dashboard Slop
                         if "Card" in tag_name or "Stat" in tag_name or "Metric" in tag_name:
                             state["cards"] += 1
                         elif "Chart" in tag_name or "Graph" in tag_name or "Activity" in tag_name:
                             state["charts"] += 1
-                            
+
+                        # Track sibling component repetition for layout-level slop
+                        parent_id = id(node.parent) if node.parent else 0
+                        if tag_name[0:1].isupper():  # React component (capitalized)
+                            state["sibling_components"].setdefault(parent_id, []).append(tag_name)
+
+                        # Detect deep prop drilling: props passed through with same name
+                        for attr in (open_tag.children or []):
+                            if attr.type == "jsx_attribute":
+                                attr_name_node = attr.child_by_field_name("name")
+                                if attr_name_node:
+                                    attr_name = _node_text(attr_name_node)
+                                    state["prop_names_seen"].setdefault(attr_name, set()).add(tag_name)
+
             elif node.type == "ternary_expression":
                 for child in node.children:
                     if child.type == "ternary_expression":
                         state["nested_ternaries"] += 1
+
+            # Detect useState used for animation values (bad pattern)
+            elif node.type == "lexical_declaration":
+                text = _node_text(node)
+                if "useState" in text:
+                    animation_signals = ["opacity", "scale", "translate", "rotate", "transform",
+                                          "position", "top", "left", "right", "bottom",
+                                          "animat", "transit", "x", "y"]
+                    text_lower = text.lower()
+                    for sig in animation_signals:
+                        if sig in text_lower and "useState" in text:
+                            state["usestate_for_animation"] = True
+                            break
+
+            # Detect deeply nested styled-components tagged templates
+            elif node.type == "tagged_template_expression":
+                tag = node.child_by_field_name("function")
+                if tag:
+                    tag_text = _node_text(tag)
+                    if "styled" in tag_text or "css" in tag_text:
+                        # Count nesting depth of CSS selectors within
+                        tmpl = node.child_by_field_name("arguments") or node
+                        nesting = _node_text(tmpl).count("{")
+                        if nesting > state["styled_nesting_depth"]:
+                            state["styled_nesting_depth"] = nesting
+
             for child in node.children:
-                walk(child)
+                walk(child, depth + 1)
 
         walk(tree.root_node)
-        
+
         if state["div_count"] > 20 and state["semantic_count"] == 0:
             issues.append({
-                "file": str(filepath.resolve()),
+                "file": fpath,
                 "tier": "T2",
                 "issue": f"Div-heavy file with no semantic HTML elements detected via AST. ({state['div_count']} divs, 0 semantic elements)",
                 "command": "Replace generic divs with <nav>, <main>, <article>, <section>, <aside>, <header>, <footer>."
             })
-            
+
         if state["nested_ternaries"] >= 2:
             issues.append({
-                "file": str(filepath.resolve()),
+                "file": fpath,
                 "tier": "T2",
                 "issue": f"Nested ternary operator detected via AST — harms readability in JSX. ({state['nested_ternaries']} nested ternaries found)",
                 "command": "Extract nested ternaries into named variables or early returns for clarity."
             })
-            
+
         if state["cards"] >= 3 and state["charts"] >= 1:
             issues.append({
-                "file": str(filepath.resolve()),
+                "file": fpath,
                 "tier": "T3",
                 "issue": f"Hero metric dashboard pattern detected via AST ({state['cards']} cards, {state['charts']} charts) — cliché AI layout.",
                 "command": "Replace with contextual data visualization or inline metrics woven into the narrative flow."
             })
 
+        # ── AST: Deep prop drilling ──
+        drilled_props = [
+            name for name, components in state["prop_names_seen"].items()
+            if len(components) >= 4 and name not in {"className", "children", "key", "id", "style", "ref", "onClick", "onChange"}
+        ]
+        if drilled_props:
+            sample = ", ".join(sorted(drilled_props)[:5])
+            issues.append({
+                "file": fpath,
+                "tier": "T3",
+                "issue": f"Deep prop drilling detected via AST — prop(s) '{sample}' passed through 4+ components.",
+                "command": "Extract deeply drilled props into React Context, Zustand store, or composition pattern to reduce coupling."
+            })
+
+        # ── AST: useState for animation values ──
+        if state["usestate_for_animation"]:
+            issues.append({
+                "file": fpath,
+                "tier": "T2",
+                "issue": "React useState used for animation values — causes re-renders on every frame.",
+                "command": "Use CSS transitions/animations, Framer Motion, or useRef for animation state. Never drive 60fps animations through React state."
+            })
+
+        # ── AST: Identical sibling components (generic layout slop) ──
+        for parent_id, children in state["sibling_components"].items():
+            if len(children) >= 4:
+                from collections import Counter
+                counts = Counter(children)
+                for comp_name, count in counts.items():
+                    if count >= 4:
+                        issues.append({
+                            "file": fpath,
+                            "tier": "T3",
+                            "issue": f"Generic layout pattern detected via AST: {count} identical <{comp_name}/> siblings — dashboard/feature-grid slop.",
+                            "command": f"Vary the {comp_name} instances (different sizes, spans, emphasis) or replace with asymmetric layout. Identical cards = AI fingerprint."
+                        })
+                        break  # One issue per parent
+
+        # ── AST: Deeply nested styled-components ──
+        if state["styled_nesting_depth"] >= 5:
+            issues.append({
+                "file": fpath,
+                "tier": "T2",
+                "issue": f"Deeply nested styled-component selectors detected ({state['styled_nesting_depth']} levels) — specificity war.",
+                "command": "Flatten CSS nesting. Use component composition instead of deeply nested selectors."
+            })
+
     return issues
+
+
+def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[dict]:
+    """Component-level heuristic analysis for layout-level slop detection.
+
+    Analyzes entire file structure, not individual patterns, to detect:
+    - Generic dashboard layouts (N identical KPI cards + chart)
+    - Feature-grid slop (3-column identical items)
+    - Pricing table clichés
+    - Hero-section-heavy pages
+    - Component files with zero interactivity
+    """
+    issues = []
+    fpath = str(filepath.resolve())
+
+    if ext not in {".tsx", ".jsx"}:
+        return issues
+
+    lines = content.splitlines()
+    file_len = len(lines)
+
+    # ── Heuristic 1: KPI Card Dashboard Pattern ──
+    # Look for repeated card-like structures with metrics/numbers
+    card_patterns = re.findall(
+        r'(?:<(?:\w+Card|\w+Stat|\w+Metric|\w+KPI)\b[^>]*>)',
+        content, re.IGNORECASE
+    )
+    chart_patterns = re.findall(
+        r'(?:<(?:\w*Chart|\w*Graph|LineChart|BarChart|PieChart|AreaChart|ResponsiveContainer)\b)',
+        content, re.IGNORECASE
+    )
+    if len(card_patterns) >= 4 and len(chart_patterns) >= 1:
+        issues.append({
+            "file": fpath,
+            "tier": "T3",
+            "issue": f"Generic dashboard layout: {len(card_patterns)} KPI/stat cards + {len(chart_patterns)} chart(s) — classic AI dashboard slop.",
+            "command": "Replace identical card grid with varied sizes (span-2 hero metric, inline sparklines). Weave data into contextual narrative."
+        })
+
+    # ── Heuristic 2: Feature Grid Slop (identical feature items) ──
+    # Detect 3+ identical JSX blocks with icon + heading + description pattern
+    feature_block = re.findall(
+        r'(?:<(?:div|section|article|li)\s[^>]*>[\s\S]{30,300}?'
+        r'(?:<\w+Icon|<Icon\b|icon=|<svg\b)[\s\S]{10,200}?'
+        r'(?:<h[23456]|<(?:Title|Heading|CardTitle))'
+        r'[\s\S]{10,200}?'
+        r'(?:<p\b|<(?:Description|Text|CardDescription))'
+        r')',
+        content, re.IGNORECASE
+    )
+    if len(feature_block) >= 3:
+        issues.append({
+            "file": fpath,
+            "tier": "T3",
+            "issue": f"Feature grid slop: {len(feature_block)} identical icon+heading+description blocks — generic SaaS landing pattern.",
+            "command": "Vary feature presentations (alternate image/text, use different card sizes, stagger layouts). Break the 3-column monotony."
+        })
+
+    # ── Heuristic 3: Pricing Table Cliché ──
+    pricing_signals = len(re.findall(r'(?:\$\d+|/mo(?:nth)?|/yr|/year|popular|recommended|enterprise|pro|starter|basic|premium)', content, re.IGNORECASE))
+    pricing_cards = len(re.findall(r'(?:PricingCard|PricingTier|PricingPlan|price-card)', content, re.IGNORECASE))
+    if pricing_signals >= 6 or pricing_cards >= 3:
+        issues.append({
+            "file": fpath,
+            "tier": "T3",
+            "issue": "Pricing table cliché detected — 3-column pricing grid with 'Popular' badge is the #1 AI SaaS template.",
+            "command": "Design pricing as a comparison flow, slider, or interactive calculator. Vary card sizes. Make the recommended plan visually dominant, not just badged."
+        })
+
+    # ── Heuristic 4: Zero Interactivity File ──
+    has_interactivity = bool(re.search(
+        r'(?:onClick|onChange|onSubmit|onPress|onFocus|onBlur|onKeyDown|onMouseEnter|onHover|hover:|focus:|active:|useState|useReducer|motion\.|animate)',
+        content
+    ))
+    jsx_count = len(re.findall(r'<[A-Z]\w+', content))
+    if not has_interactivity and jsx_count >= 5 and file_len > 50:
+        issues.append({
+            "file": fpath,
+            "tier": "T2",
+            "issue": f"Static component detected: {jsx_count} JSX elements but zero interactivity (no handlers, no hover/focus, no animation).",
+            "command": "Add hover states, transitions, or micro-interactions. Static pages feel dead — every component should respond to user input."
+        })
+
+    # ── Heuristic 5: Hero Section Heavy Page ──
+    hero_count = len(re.findall(r'(?:hero|Hero|HERO)', content))
+    section_count = len(re.findall(r'<(?:section|Section)\b', content, re.IGNORECASE))
+    if hero_count >= 2 and section_count <= 3:
+        issues.append({
+            "file": fpath,
+            "tier": "T2",
+            "issue": "Hero-section-heavy page — multiple hero blocks without enough content sections.",
+            "command": "A page needs one hero at most. Replace additional heroes with content sections, testimonials, or data-driven blocks."
+        })
+
+    # ── Heuristic 6: Testimonial Grid Slop ──
+    testimonial_signals = len(re.findall(
+        r'(?:testimonial|review|quote|avatar.*?(?:name|title)|rating|stars?.*?(?:5|five))',
+        content, re.IGNORECASE
+    ))
+    if testimonial_signals >= 6:
+        issues.append({
+            "file": fpath,
+            "tier": "T2",
+            "issue": "Generic testimonial grid detected — avatar + quote + name pattern repeated.",
+            "command": "Use varied testimonial layouts: full-width quotes, video testimonials, inline social proof, or rotating carousel with real data."
+        })
+
+    return issues
+
 
 def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[str, str] | None = None) -> list[dict]:
     """Scan a single file against all slop rules.
@@ -749,7 +960,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
         # 1MB size guard to prevent regex engine freezing on massive bundled files
         if filepath.stat().st_size > 1_000_000:
             return issues
-            
+
         content = filepath.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return issues  # Skip binary or unreadable files
@@ -757,6 +968,10 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
     if HAS_AST:
         ast_issues = _analyze_ast(filepath, content, ext)
         issues.extend(ast_issues)
+
+    # Component-level layout heuristics (runs regardless of AST)
+    layout_issues = _analyze_component_layout(filepath, content, ext)
+    issues.extend(layout_issues)
 
     for rule in applicable_rules:
         # Skip rules conditioned on DESIGN_VARIANCE if below threshold
@@ -906,7 +1121,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 classes = m.group(1).split()
                 bg_color = None
                 text_color = None
-                
+
                 for c in classes:
                     if c.startswith("bg-"):
                         bg_name = c[3:].split('/')[0]
@@ -916,7 +1131,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                         text_name = c[5:].split('/')[0]
                         if text_name in dynamic_colors:
                             text_color = dynamic_colors[text_name]
-                            
+
                 if bg_color and text_color:
                     from uidetox.color_utils import contrast_ratio
                     ratio = contrast_ratio(text_color, bg_color)
@@ -1029,9 +1244,12 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
                 zone_skip.add(str(Path(fpath).resolve()))
 
     from concurrent.futures import ThreadPoolExecutor
-    from uidetox.color_utils import load_dynamic_colors
+    from uidetox.color_utils import load_dynamic_colors, audit_project_colors, find_color_config_sources
 
     dynamic_colors = load_dynamic_colors(root)
+    color_audit_violations = audit_project_colors(root)
+    color_sources = find_color_config_sources(root)
+    color_issue_file = str((color_sources[0] if color_sources else root).resolve())
 
     def _analyze_wrapper(fp: Path) -> list:
         return analyze_file(fp, design_variance=design_variance, dynamic_colors=dynamic_colors) # type: ignore
@@ -1043,17 +1261,30 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
             new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
             dirnames.clear()
             dirnames.extend(new_dir)
-    
+
             for filename in filenames:
                 file_path = Path(dirpath) / filename
-    
+
                 # Respect zone overrides
                 if zone_skip and str(file_path.resolve()) in zone_skip:
                     continue
-    
+
                 futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
-                
+
         for future in futures:
             all_issues.extend(future.result())
+
+    # Project-level dynamic color audit based on actual Tailwind/theme tokens.
+    # Cap output to keep the queue actionable rather than overwhelming.
+    for violation in color_audit_violations[:8]:
+        all_issues.append({
+            "file": color_issue_file,
+            "tier": "T1" if violation.get("severity") == "critical" else "T2",
+            "issue": (
+                f"Dynamic color audit: {violation['foreground']} on {violation['background']} "
+                f"fails WCAG AA ({violation['ratio']}:1 < {violation['required']}:1)."
+            ),
+            "command": "Adjust the theme token pair to meet WCAG AA contrast, then rescan to verify the updated palette."
+        })
 
     return all_issues

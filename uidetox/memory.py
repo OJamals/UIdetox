@@ -16,7 +16,7 @@ def _get_collection(name: str) -> Any:
     try:
         import chromadb
         from chromadb.config import Settings
-        
+
         db_path = get_uidetox_dir() / "chroma"
         # Suppress telemetry and keep it quiet
         client = chromadb.PersistentClient(path=str(db_path), settings=Settings(anonymized_telemetry=False))
@@ -118,7 +118,7 @@ def add_pattern(pattern: str, *, category: str = "general"):
     # Cap at 50 patterns — evict oldest
     mem["patterns"] = mem["patterns"][-50:]
     save_memory(mem)
-    
+
     collection = _get_collection("patterns")
     if collection:
         doc_id = hashlib.md5(pattern.encode("utf-8")).hexdigest()
@@ -133,7 +133,7 @@ def get_patterns(query: str | None = None, limit: int = 15) -> list[dict]:
     """Return learned patterns. Performs semantic search if query is provided."""
     mem = load_memory()
     patterns = mem.get("patterns", [])
-    
+
     if query and patterns:
         collection = _get_collection("patterns")
         if collection:
@@ -183,7 +183,7 @@ def get_notes(query: str | None = None, limit: int = 10) -> list[dict]:
     """Return agent notes. Performs semantic search if query is provided."""
     mem = load_memory()
     notes = mem.get("notes", [])
-    
+
     if query and notes:
         collection = _get_collection("notes")
         if collection:
@@ -273,3 +273,163 @@ def get_progress_log() -> list[dict]:
 def clear_memory():
     """Reset agent memory (used when starting fresh)."""
     save_memory(_default_memory())
+
+
+# ── Embedding-Based Context Injection ───────────────────────────
+
+
+def embed_file_context(file_path: str, context: str, *, category: str = "file_context"):
+    """Embed file-specific context into ChromaDB for semantic retrieval.
+
+    Use this to store observations, fix history, and design decisions per-file
+    so that future sub-agents working on the same component automatically get
+    relevant context without bloating the global prompt.
+    """
+    collection = _get_collection("file_contexts")
+    if not collection:
+        return
+
+    doc_id = hashlib.md5(f"{file_path}:{context[:100]}".encode("utf-8")).hexdigest()
+    collection.upsert(
+        documents=[context],
+        metadatas=[{
+            "file": file_path,
+            "category": category,
+            "embedded_at": _now_iso(),
+        }],
+        ids=[doc_id],
+    )
+
+
+def embed_fix_outcome(file_path: str, issue: str, fix: str, *, outcome: str = "resolved"):
+    """Embed a fix outcome so future agents can learn from past fixes.
+
+    This creates a semantic record: "For issue X in file Y, fix Z worked/failed."
+    Future sub-agents working on similar issues get this injected automatically.
+    """
+    doc = f"File: {file_path}\nIssue: {issue}\nFix applied: {fix}\nOutcome: {outcome}"
+
+    collection = _get_collection("fix_history")
+    if not collection:
+        return
+
+    doc_id = hashlib.md5(doc[:200].encode("utf-8")).hexdigest()
+    collection.upsert(
+        documents=[doc],
+        metadatas=[{
+            "file": file_path,
+            "outcome": outcome,
+            "embedded_at": _now_iso(),
+        }],
+        ids=[doc_id],
+    )
+
+
+def query_relevant_context(query: str, *, collections: list[str] | None = None,
+                           limit: int = 10) -> list[dict]:
+    """Semantic search across all memory collections for relevant context.
+
+    Searches patterns, notes, file_contexts, and fix_history unless
+    specific collections are provided. Returns ranked results with metadata.
+    """
+    target_collections = collections or ["patterns", "notes", "file_contexts", "fix_history"]
+    results: list[dict] = []
+
+    for coll_name in target_collections:
+        collection = _get_collection(coll_name)
+        if not collection:
+            continue
+
+        cnt = collection.count()
+        if cnt == 0:
+            continue
+
+        n = min(limit, cnt)
+        try:
+            search_results = collection.query(query_texts=[query], n_results=n)
+        except Exception:
+            continue
+
+        if not search_results or not search_results.get("documents"):
+            continue
+
+        docs = search_results["documents"][0]
+        metas = search_results.get("metadatas", [[]])[0]
+        distances = search_results.get("distances", [[]])[0]
+
+        for i, doc in enumerate(docs):
+            meta = metas[i] if i < len(metas) else {}
+            distance = distances[i] if i < len(distances) else 1.0
+            results.append({
+                "text": doc,
+                "collection": coll_name,
+                "metadata": meta if meta else {},
+                "relevance": max(0, 1.0 - distance),  # Convert distance to relevance
+            })
+
+    # Sort by relevance (highest first) and cap
+    results.sort(key=lambda r: r["relevance"], reverse=True)
+    return results[:limit]
+
+
+def build_targeted_context(files: list[str], *, issue_text: str = "",
+                           max_tokens_estimate: int = 2000) -> str:
+    """Build a targeted context block by querying embeddings for files and issues.
+
+    Instead of injecting ALL patterns and notes (which bloats prompts),
+    this returns only the most relevant context for the specific files
+    and issues being worked on. Keeps sub-agent prompts focused and efficient.
+    """
+    if not files and not issue_text:
+        return ""
+
+    # Build a composite query from file paths and issue descriptions
+    query_parts = []
+    for f in files[:5]:  # Cap to avoid overly long queries
+        query_parts.append(Path(f).stem)
+    if issue_text:
+        query_parts.append(issue_text[:200])
+
+    query = " ".join(query_parts)
+    if not query.strip():
+        return ""
+
+    results = query_relevant_context(query, limit=15)
+    if not results:
+        return ""
+
+    # Group by collection for clean presentation
+    sections: dict[str, list[str]] = {}
+    collection_labels = {
+        "patterns": "Relevant Design Patterns",
+        "notes": "Relevant Agent Notes",
+        "file_contexts": "Prior File Observations",
+        "fix_history": "Related Fix History",
+    }
+
+    char_count = 0
+    # Rough estimate: ~4 chars per token
+    char_limit = max_tokens_estimate * 4
+
+    for r in results:
+        if char_count >= char_limit:
+            break
+        coll = r["collection"]
+        label = collection_labels.get(coll, coll)
+        if label not in sections:
+            sections[label] = []
+        text = r["text"]
+        rel = r["relevance"]
+        entry = f"  - [{rel:.0%}] {text}"
+        sections[label].append(entry)
+        char_count += len(entry)
+
+    if not sections:
+        return ""
+
+    lines = ["## Targeted Context (embedding-matched)"]
+    for label, entries in sections.items():
+        lines.append(f"\n### {label}")
+        lines.extend(entries)
+
+    return "\n".join(lines) + "\n"

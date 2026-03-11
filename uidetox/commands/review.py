@@ -19,6 +19,11 @@ def run(args: argparse.Namespace):
         tooling.get("backend") or tooling.get("database") or tooling.get("api")
     )
 
+    # Check for visual snapshot
+    from uidetox.state import get_uidetox_dir
+    snapshot = get_uidetox_dir() / "snapshots" / "latest.png"
+    has_snapshot = snapshot.exists()
+
     print("+" + "=" * 58 + "+")
     print("| UIdetox Subjective Review                                |")
     print("+" + "=" * 58 + "+")
@@ -103,15 +108,85 @@ def run(args: argparse.Namespace):
     print("    86-95  : Excellent, intentional, polished")
     print("    96-100 : Exceptional — indistinguishable from expert human design")
     print()
+
+    if has_snapshot:
+        print("-" * 60)
+        print(f"📸 VISION CONTEXT: Snapshot detected at {snapshot}")
+        print("   Use this image to assess layout symmetry, typography hierarchy,")
+        print("   and overall visual rhythm objectively.")
+        print("-" * 60)
+        print()
+
+    # ── Visual diff context (if before/after capture was run) ──
+    diff_meta_path = get_uidetox_dir() / "snapshots" / "diff_meta.json"
+    before_path = get_uidetox_dir() / "snapshots" / "before.png"
+    after_path = get_uidetox_dir() / "snapshots" / "after.png"
+    has_visual_diff = diff_meta_path.exists()
+
+    if has_visual_diff:
+        try:
+            diff_meta = json.loads(diff_meta_path.read_text())
+            print("=" * 60)
+            print("🔍 VISUAL REGRESSION DIFF AVAILABLE")
+            print("=" * 60)
+            print(f"   Before: {before_path}")
+            print(f"   After:  {after_path}")
+            change_pct = diff_meta.get("change_percentage", "?")
+            severity = diff_meta.get("severity", "unknown")
+            print(f"   Pixel change: {change_pct}% ({severity})")
+            if diff_meta.get("diff_image"):
+                print(f"   Diff image: {diff_meta['diff_image']}")
+            print()
+            print("   INSTRUCTIONS FOR VISUAL DIFF REVIEW:")
+            print("   1. Open the BEFORE and AFTER screenshots side by side")
+            print("   2. Assess: Did the fixes IMPROVE visual quality?")
+            print("   3. Check for regressions: layout shifts, missing elements, broken alignment")
+            print("   4. Factor visual diff into your subjective score")
+            print()
+            if severity in ("major", "complete_redesign"):
+                print("   ⚠️  LARGE visual change detected — verify this is intentional!")
+            elif severity == "none":
+                print("   ℹ️  Minimal visual change — fixes may be code-only or subtle.")
+            print()
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # ── Responsive snapshots context ──
+    snapshots_dir = get_uidetox_dir() / "snapshots"
+    responsive_viewports = ["mobile", "tablet", "desktop", "wide"]
+    has_responsive = any(
+        (snapshots_dir / f"after_{vp}.png").exists()
+        for vp in responsive_viewports
+    )
+
+    if has_responsive:
+        print("=" * 60)
+        print("📱 RESPONSIVE SNAPSHOTS AVAILABLE")
+        print("=" * 60)
+        for vp in responsive_viewports:
+            before_vp = snapshots_dir / f"before_{vp}.png"
+            after_vp = snapshots_dir / f"after_{vp}.png"
+            if after_vp.exists():
+                status = "✅ before + after" if before_vp.exists() else "📸 after only"
+                print(f"   {vp:>8}: {status}")
+        print()
+        print("   Review each viewport for responsive design quality.")
+        print("   Check: breakpoint transitions, touch targets, readability, overflow.")
+        print()
+
     print("[AGENT INSTRUCTION]")
     print("1. Read every frontend file in the project.")
-    print("2. Optional: Run `uidetox capture` (if dev server is up) for visual regression.")
-    print("3. Score each of the 4 sections above (A, B, C, D) mentally.")
-    print("4. Sum them for a total (0-100).")
-    print("5. Store your score:  uidetox review --score <N>")
-    print("6. For any issues found, queue them:")
+    if has_visual_diff or has_responsive:
+        print("2. Review the visual snapshots above (before/after + responsive).")
+        print("3. Factor visual quality into your scoring.")
+    else:
+        print("2. Optional: Run `uidetox capture --stage before` (if dev server is up) for visual regression.")
+    print(f"{'3' if not (has_visual_diff or has_responsive) else '4'}. Score each of the 4 sections above (A, B, C, D) mentally.")
+    print(f"{'4' if not (has_visual_diff or has_responsive) else '5'}. Sum them for a total (0-100).")
+    print(f"{'5' if not (has_visual_diff or has_responsive) else '6'}. Store your score:  uidetox review --score <N>")
+    print(f"{'6' if not (has_visual_diff or has_responsive) else '7'}. For any issues found, queue them:")
     print('   uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
-    print("7. Then run: uidetox status")
+    print(f"{'7' if not (has_visual_diff or has_responsive) else '8'}. Then run: uidetox status")
 
 
 def _store_subjective_score(score: int):
