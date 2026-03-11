@@ -34,7 +34,7 @@ THE LOOP
 This is a closed-loop system. Do not stop after one fix. Repeat this cycle until the strict score is maximized.
 Run `uidetox loop` to bootstrap the full 5-phase protocol. The loop will guide you through:
 1. Phase 0: Mechanical fixes (`uidetox check --fix`)
-2. Phase 1: LLM-dynamic codebase exploration and design audit (`uidetox scan`)
+2. Phase 1: LLM-dynamic codebase exploration and mapping via GitNexus (`uidetox scan`)
 3. Phase 2: Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
 4. Phase 3: Subjective review (`uidetox review` → `uidetox review --score N`)
 5. Phase 4: Status check with blended Design Score (`uidetox status`)

@@ -72,7 +72,7 @@ def run(args: argparse.Namespace):
             ).stdout.strip()
 
             if not current_branch.startswith("uidetox-session-"):
-                session_id = uuid.uuid4().hex[:8]
+                session_id = str(uuid.uuid4()).split("-")[0]
                 branch_name = f"uidetox-session-{session_id}"
                 print(f"📦 Switching to temporary branch: {branch_name}")
                 print("All AI edits will be grouped here to protect your workspace.")
@@ -277,7 +277,6 @@ def run(args: argparse.Namespace):
     print("    → This runs the 41-rule deterministic analyzer and auto-queues anti-patterns.")
     print()
     
-    is_orchestrator = getattr(args, "orchestrator", False)
     
     if is_orchestrator:
         print("  Step 1.2: Orchestrator Mode — Parallel Sub-Agent Exploration")
@@ -289,7 +288,11 @@ def run(args: argparse.Namespace):
         print(f"    → Record them: uidetox subagent --record <session_id>")
         print()
     else:
-        print("  Step 1.2: LLM-driven codebase exploration")
+        print("  Step 1.2: LLM-driven codebase exploration & Code Intelligence")
+        print("    → Use GitNexus to map the UI architecture (if terminal is available):")
+        print("      1. Run `npx gitnexus analyze .` (or use the GitNexus MCP server)")
+        print("      2. Use `npx gitnexus query <concept>` to find relevant execution flows")
+        print("      3. Use `npx gitnexus impact <target>` before touching core components")
         print("    → Read EVERY frontend file in the project (tsx, jsx, css, html, vue, svelte)")
         print("    → For each file, systematically observe:")
         print("        • Typography: font families, sizes, weights, line heights")
@@ -300,6 +303,8 @@ def run(args: argparse.Namespace):
         print("        • States: loading, error, empty, disabled state handling")
         print("        • Accessibility: ARIA labels, focus indicators, semantic HTML")
         print("        • Content: placeholder data quality, copy tone, generic names")
+        print()
+        print("    → Verify changes are safe with `npx gitnexus detect_changes`")
         print()
         print("  Step 1.3: Design audit against SKILL.md")
         print("    → Read SKILL.md and compare your observations against its rules")

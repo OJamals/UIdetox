@@ -1,6 +1,8 @@
 """Persistent agent memory: tracks reviewed files, learned patterns, session progress, and continuation state."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from uidetox.state import get_uidetox_dir, ensure_uidetox_dir
@@ -47,10 +49,15 @@ def _default_memory() -> dict:
 
 
 def save_memory(memory: dict):
-    """Save agent memory to disk."""
-    ensure_uidetox_dir()
-    with open(_memory_path(), "w", encoding="utf-8") as f:
+    """Save agent memory to disk atomically to prevent corruption."""
+    d = ensure_uidetox_dir()
+    target = _memory_path()
+    fd, tmp_path = tempfile.mkstemp(dir=d, prefix="memory_", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(memory, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, target)
 
 
 # ── Reviewed Files ──────────────────────────────────────────────
@@ -152,7 +159,7 @@ def save_scan_summary(*, total_found: int, by_tier: dict, by_category: dict,
         "by_tier": by_tier,
         "by_category": by_category,
         "files_scanned": files_scanned,
-        "top_files": top_files[:10],  # Top 10 most affected files
+        "top_files": top_files[:10],  # type: ignore
     }
     save_memory(mem)
 

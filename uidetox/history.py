@@ -1,6 +1,8 @@
 """Run history: timestamped snapshots of each scan/rescan cycle."""
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state
@@ -38,10 +40,14 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
         "issues": state.get("issues", []),
         "resolved": state.get("resolved", []),
     }
-    path = _history_dir() / f"run_{stamp}.json"
-    with open(path, "w", encoding="utf-8") as f:
+    target = _history_dir() / f"run_{stamp}.json"
+    fd, tmp_path = tempfile.mkstemp(dir=_history_dir(), prefix="run_", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
-    return path
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, target)
+    return target
 
 
 def load_run_history() -> list[dict]:

@@ -24,31 +24,38 @@ def _run_verification(config: dict) -> bool:
     if tooling.get("typescript"):
         cmd = tooling["typescript"].get("run_cmd")
         if cmd:
+            print("  Running TypeScript check...")
             try:
                 res = subprocess.run(cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
                 if res.returncode != 0:
                     print(f"  ⚠️  TypeScript errors remain. Fix before committing.")
                     passed = False
+                else:
+                    print("  ✓ TypeScript passed")
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                print("  ⚠️  TypeScript check skipped (tool not found or timed out)")
 
     # Lint (auto-fix)
     if tooling.get("linter"):
         fix_cmd = tooling["linter"].get("fix_cmd")
         if fix_cmd:
+            print("  Running linter auto-fix...")
             try:
                 subprocess.run(fix_cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
+                print("  ✓ Linter auto-fix applied")
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                print("  ⚠️  Linter auto-fix skipped (tool not found or timed out)")
 
     # Format (auto-fix)
     if tooling.get("formatter"):
         fix_cmd = tooling["formatter"].get("fix_cmd")
         if fix_cmd:
+            print("  Running formatter auto-fix...")
             try:
                 subprocess.run(fix_cmd.split(), capture_output=True, text=True, cwd=".", timeout=120)
+                print("  ✓ Formatter auto-fix applied")
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                print("  ⚠️  Formatter auto-fix skipped (tool not found or timed out)")
 
     return passed
 
@@ -71,11 +78,12 @@ def _derive_component_name(files: list[str]) -> str:
         return "root"
 
     # Multiple directories — find deepest common ancestor
-    common = Path(dirs[0])
-    for d in dirs[1:]:
+    common: Path = Path(dirs[0])
+    for i in range(1, len(dirs)):
+        d = dirs[i]
         while not str(d).startswith(str(common)):
-            common = common.parent
-    name = common.name or "project"
+            common = common.parent # type: ignore
+    name = common.name or "project" # type: ignore
     return name
 
 

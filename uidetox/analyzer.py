@@ -355,11 +355,19 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
     ext = filepath.suffix.lower()
 
     # Filter rules that apply to this file extension
-    applicable_rules = [r for r in RULES if ext in r["exts"]]
+    applicable_rules = []
+    for r in RULES:
+        exts = r.get("exts", [])
+        if isinstance(exts, (list, set, tuple)) and ext in exts:
+            applicable_rules.append(r)
     if not applicable_rules:
         return issues
 
     try:
+        # 1MB size guard to prevent regex engine freezing on massive bundled files
+        if filepath.stat().st_size > 1_000_000:
+            return issues
+            
         content = filepath.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return issues  # Skip binary or unreadable files
@@ -367,7 +375,7 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
     for rule in applicable_rules:
         # Skip rules conditioned on DESIGN_VARIANCE if below threshold
         variance_threshold = rule.get("_requires_variance_gt")
-        if variance_threshold is not None and design_variance <= variance_threshold:
+        if isinstance(variance_threshold, (int, float)) and design_variance <= variance_threshold:
             continue
 
         # Custom check: div_soup requires counting, not just pattern match
@@ -387,7 +395,8 @@ def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:
             continue
 
         # Standard regex match — flag once per file
-        if rule["pattern"].search(content):
+        pattern = rule.get("pattern")
+        if isinstance(pattern, re.Pattern) and pattern.search(content):
             issues.append({
                 "file": str(filepath.resolve()),
                 "tier": rule["tier"],
@@ -426,7 +435,9 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
 
     for dirpath, dirnames, filenames in os.walk(root):
         # Mutate dirnames in-place to skip IGNORE_DIRS + user excludes
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
+        new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
+        dirnames.clear()
+        dirnames.extend(new_dir)
 
         for filename in filenames:
             file_path = Path(dirpath) / filename

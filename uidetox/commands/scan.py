@@ -73,6 +73,7 @@ def run(args: argparse.Namespace):
     ts = tooling.get("typescript")
     linter = tooling.get("linter")
     fmt = tooling.get("formatter")
+    frontends = tooling.get("frontend", [])
     backends = tooling.get("backend", [])
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
@@ -82,6 +83,8 @@ def run(args: argparse.Namespace):
     print(f"  TypeScript      : {ts['config_file'] if ts else 'no'}")
     print(f"  Linter          : {linter['name'] if linter else 'none'}")
     print(f"  Formatter       : {fmt['name'] if fmt else 'none'}")
+    if frontends:
+        print(f"  Frontend        : {', '.join(f['name'] for f in frontends)}")
     if backends:
         print(f"  Backend         : {', '.join(b['name'] for b in backends)}")
     if databases:
@@ -130,7 +133,7 @@ def run(args: argparse.Namespace):
     triggered_rules: set[str] = set()
     for issue in slop_issues:
         if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
-            issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
+            issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}" # type: ignore
             new_issue = {
                 "id": issue_id,
                 "file": issue['file'],
@@ -158,6 +161,12 @@ def run(args: argparse.Namespace):
         print(f"    {cat:<14} : auto-scanned {status}")
     for cat, desc in _MANUAL_CATEGORIES.items():
         print(f"    {cat:<14} : NEEDS MANUAL AUDIT — {desc}")
+
+    print(f"\n[STEP 1.7 — CODE INTELLIGENCE (optional)]")
+    print(f"Use GitNexus to build a knowledge graph before deep file reading:")
+    print(f"  npx gitnexus analyze .")
+    print(f"  npx gitnexus query <concept>   — find execution flows by concept")
+    print(f"  npx gitnexus impact <symbol>   — check blast radius before refactoring")
 
     print(f"\n[STEP 2 — DESIGN AUDIT]")
     print(f"Read all frontend files in '{args.path}'.")

@@ -29,20 +29,27 @@ class ProjectProfile:
     typescript: ToolInfo | None = None
     linter: ToolInfo | None = None
     formatter: ToolInfo | None = None
+    frontend: list[ToolInfo] = field(default_factory=list)
     backend: list[ToolInfo] = field(default_factory=list)
     database: list[ToolInfo] = field(default_factory=list)
     api: list[ToolInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        d = {}
-        d["root"] = self.root
+        d: dict = {}
+        d["root"] = str(self.root) if self.root else None
         d["package_manager"] = self.package_manager
-        d["typescript"] = asdict(self.typescript) if self.typescript else None
-        d["linter"] = asdict(self.linter) if self.linter else None
-        d["formatter"] = asdict(self.formatter) if self.formatter else None
-        d["backend"] = [asdict(t) for t in self.backend]
-        d["database"] = [asdict(t) for t in self.database]
-        d["api"] = [asdict(t) for t in self.api]
+        
+        ts = self.typescript
+        ln = self.linter
+        fm = self.formatter
+        
+        d["typescript"] = asdict(ts) if ts is not None else None # type: ignore
+        d["linter"] = asdict(ln) if ln is not None else None # type: ignore
+        d["formatter"] = asdict(fm) if fm is not None else None # type: ignore
+        d["frontend"] = [asdict(t) for t in self.frontend] # type: ignore
+        d["backend"] = [asdict(t) for t in self.backend] # type: ignore
+        d["database"] = [asdict(t) for t in self.database] # type: ignore
+        d["api"] = [asdict(t) for t in self.api] # type: ignore
         return d
 
 
@@ -50,7 +57,7 @@ def _find_any(root: Path, names: list[str]) -> str | None:
     """Return the first matching filename found in root."""
     for name in names:
         if name.endswith("*"):
-            prefix = name[:-1]
+            prefix = name[:-1] # type: ignore
             for f in root.iterdir():
                 if f.name.startswith(prefix) and f.is_file():
                     return f.name
@@ -163,6 +170,32 @@ def detect_formatter(root: Path) -> ToolInfo | None:
     return None
 
 
+def detect_frontend(root: Path) -> list[ToolInfo]:
+    """Detect frontend frameworks and tools."""
+    found = []
+    if _has_dep(root, "next"):
+        cfg = _find_any(root, ["next.config.js", "next.config.mjs", "next.config.ts"])
+        found.append(ToolInfo(name="next.js", config_file=cfg or "package.json", run_cmd="npx next build"))
+    elif _has_dep(root, "nuxt"):
+        found.append(ToolInfo(name="nuxt", config_file="nuxt.config.ts", run_cmd="npx nuxt build"))
+    elif _has_dep(root, "@sveltejs/kit"):
+        found.append(ToolInfo(name="sveltekit", config_file="svelte.config.js", run_cmd="npx vite build"))
+    elif _has_dep(root, "@remix-run/react"):
+        found.append(ToolInfo(name="remix", config_file="remix.config.js", run_cmd="npx remix build"))
+    elif _has_dep(root, "astro"):
+        cfg = _find_any(root, ["astro.config.mjs", "astro.config.js", "astro.config.ts"])
+        found.append(ToolInfo(name="astro", config_file=cfg or "package.json", run_cmd="npx astro check"))
+        
+    if _has_dep(root, "tailwindcss"):
+        cfg = _find_any(root, ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"])
+        found.append(ToolInfo(name="tailwindcss", config_file=cfg or "package.json", run_cmd="npx tailwindcss build"))
+    if _has_dep(root, "vite"):
+        cfg = _find_any(root, ["vite.config.js", "vite.config.ts"])
+        found.append(ToolInfo(name="vite", config_file=cfg or "package.json", run_cmd="npx vite build"))
+        
+    return found
+
+
 def detect_backend(root: Path) -> list[ToolInfo]:
     """Detect backend frameworks."""
     found = []
@@ -231,6 +264,7 @@ def detect_all(root: Path | None = None) -> ProjectProfile:
         typescript=detect_typescript(root),
         linter=detect_linter(root),
         formatter=detect_formatter(root),
+        frontend=detect_frontend(root),
         backend=detect_backend(root),
         database=detect_database(root),
         api=detect_api(root),

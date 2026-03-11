@@ -43,6 +43,10 @@ def run(args: argparse.Namespace):
     else:
         print("  Formatter       : not detected")
     
+    if getattr(profile, "frontend", []):
+        for f in profile.frontend:
+            print(f"  Frontend        : {f.name} ({f.config_file})")
+    
     if profile.backend:
         for b in profile.backend:
             print(f"  Backend         : {b.name} ({b.config_file})")
