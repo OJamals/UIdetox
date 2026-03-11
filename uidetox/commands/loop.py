@@ -278,12 +278,17 @@ def run(args: argparse.Namespace):
     print()
     
     
+    from uidetox.commands.subagent_cmd import _handle_stage_prompt # type: ignore
+
     if is_orchestrator:
         print("  Step 1.2: Orchestrator Mode — Parallel Sub-Agent Exploration")
         print("    → DO NOT manually read files. Act as a manager.")
-        print(f"    → Run: uidetox subagent --stage-prompt observe --parallel {auto_parallel}")
-        print(f"    → Launch {auto_parallel} sub-agents in parallel with the printed prompts.")
-        print(f"    → Wait for them to finish, then run: uidetox subagent --stage-prompt diagnose")
+        print("    → Launch the following sub-agents in parallel using the generated native prompts below:")
+        print()
+        _handle_stage_prompt("observe", auto_parallel)
+        print()
+        print(f"    → Wait for ALL sub-agents above to finish.")
+        print(f"    → Then run: uidetox subagent --stage-prompt diagnose")
         print(f"    → Launch the diagnosis agent. It will queue the issues.")
         print(f"    → Record them: uidetox subagent --record <session_id>")
         print()
@@ -344,9 +349,15 @@ def run(args: argparse.Namespace):
     print("          → Apply all safe T1 changes listed")
     print()
     print("  Step 3: Deep Work (component-level)")
-    print("          → Run `uidetox next`")
-    print("          → This yields a BATCH of all issues for a component/directory.")
-    print("          → Read ALL files in the component. Fix ALL issues in one pass.")
+    if is_orchestrator:
+        print(f"          → Orchestrator Mode: Distribute the queue across parallel fix agents.")
+        print(f"          → Run `uidetox subagent --stage-prompt fix --parallel {auto_parallel}`")
+        print(f"          → Launch {auto_parallel} sub-agents in parallel with the printed fix prompts.")
+        print(f"          → Wait for them to finish, then record them: `uidetox subagent --record <session_id>`")
+    else:
+        print("          → Run `uidetox next`")
+        print("          → This yields a BATCH of all issues for a component/directory.")
+        print("          → Read ALL files in the component. Fix ALL issues in one pass.")
     print("          → Follow SKILL.md design rules injected in the output.")
     print("          → Use targeted design skills as needed:")
     print("            uidetox normalize <target>  — align with design system")
