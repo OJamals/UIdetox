@@ -31,10 +31,12 @@ uidetox setup --auto-commit
 THE LOOP
 This is a closed-loop system. Do not stop after one fix. Repeat this cycle until the strict score is maximized:
 1. Audit: Run `uidetox scan .` to queue anti-patterns.
-2. Fix: Run `uidetox next`. This batches issues for the highest-priority file. Fix them holistically. 
+2. Fix: Run `uidetox next`. This batches issues for the highest-priority file. Fix them holistically (including fullstack boundaries). 
 3. Resolve: Run `uidetox resolve <ID> --note "What you changed"`.
-4. Run `uidetox next` again.
-5. Verification: When the queue empties, run `uidetox rescan` to re-audit with fresh eyes. Keep looping until `uidetox status` shows Score >= 95.
+4. Verify: Run `uidetox check --fix` to auto-commit formatting and catch/queue any new mechanical regressions incrementally.
+5. Loop: Run `uidetox next` again.
+6. Deep Verification: When the queue empties, run `uidetox rescan` to re-audit with fresh eyes. Keep looping until `uidetox status` shows Score >= 95.
+7. Finish: Once the target score is reached, run `uidetox finish` to squash the aesthetic fixes cleanly onto your main branch!
 
 RULES OF ENGAGEMENT
 1. Heavy Lifting: Don't be lazy. Large refactors and small detailed fixes — do both with equal energy. Replace entire components if they reek of AI slop. Fix things properly, not minimally.
@@ -64,8 +66,9 @@ uidetox setup --auto-commit    # Initializes design dials & git integration
 | `uidetox scan` | Full audit: auto-detects tooling and runs the static slop analyzer. |
 | `uidetox next` | Batches the highest-priority issues with design context injection. |
 | `uidetox status` | View your **Design Score** and pending issue count. |
-| `uidetox loop` | Enter autonomous mode (runs until score target is hit). |
+| `uidetox loop` | Enter autonomous mode (creates a session branch and loops fixes). |
 | `uidetox rescan` | Clears queue and re-audits with 18+ fresh anti-slop rules. |
+| `uidetox finish` | Squash merges the autonomous session branch cleanly. |
 
 ### Design Skills (Slash Commands)
 Use these for targeted improvements on specific files or directories:
@@ -87,6 +90,7 @@ Control the "aesthetic DNA" of the output by adjusting these values in `uidetox 
 
 ## The Slop Checklist
 UIdetox actively hunts and destroys:
+
 - [ ] Use of **Emojis** in text content
 - [ ] Overused **Inter** font stacks.
 - [ ] Generic **Purple-Blue** gradients.

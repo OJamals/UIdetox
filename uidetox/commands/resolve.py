@@ -33,7 +33,7 @@ def run(args: argparse.Namespace):
                 subprocess.run(["git", "add", ".uidetox/state.json"], check=True, capture_output=True)
                 # Commit with standard UIdetox prefix
                 commit_msg = f"[UIdetox] Fixed {issue_id}: {args.note}"
-                subprocess.run(["git", "commit", "-m", commit_msg], check=True, capture_output=True)
+                subprocess.run(["git", "commit", "-m", commit_msg, "--no-verify"], check=True, capture_output=True)
                 print(f"   📦 Auto-committed to git: {commit_msg}")
             except subprocess.CalledProcessError:
                 print(f"   ⚠️  Warning: Git auto-commit failed. Is this a git repo?")

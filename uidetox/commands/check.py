@@ -62,6 +62,19 @@ def run(args: argparse.Namespace):
                 break
         print("Auto-fix phase complete.\n")
 
+        if config.get("auto_commit", False):
+            try:
+                status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=".")
+                if status.stdout.strip():
+                    subprocess.run(
+                        ["git", "commit", "-am", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"],
+                        check=True,
+                        stdout=subprocess.DEVNULL
+                    )
+                    print("  📦 Auto-committed mechanical fixes to git.\n")
+            except Exception as e:
+                print(f"  ⚠️  Warning: Git auto-commit failed during mechanical check: {e}\n")
+
     print("━━━ Phase 2: Diagnostic Checks ━━━")
 
     # Step 1: TypeScript

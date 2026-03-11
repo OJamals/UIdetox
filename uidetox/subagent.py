@@ -329,7 +329,8 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 ## Rules
 - Follow SKILL.md design rules for every change
-- After fixing each issue, run: `uidetox resolve <ISSUE_ID>`
+- After fixing each issue, run: `uidetox resolve <ISSUE_ID> --note "what you changed"`
+- After resolving a batch, run: `uidetox check --fix` to catch regressions
 - Verify your fix doesn't break anything
 - Move to the next issue immediately after resolving
 """

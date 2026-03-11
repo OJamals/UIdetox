@@ -103,6 +103,9 @@ def parse_args(args_list=None):
     loop_parser.add_argument("--target", type=int, default=95, help="Target design score to reach (default 95)")
     loop_parser.add_argument("--orchestrator", action="store_true", help="Use sub-agent orchestrator mode (one agent per stage)")
 
+    # Command: finish
+    finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
+
     # Command: subagent
     sub_parser = subparsers.add_parser("subagent", help="Manage sub-agent sessions and generate stage prompts")
     sub_parser.add_argument("--stage-prompt", type=str, help="Generate prompt for a stage (observe/diagnose/prioritize/fix/verify)")

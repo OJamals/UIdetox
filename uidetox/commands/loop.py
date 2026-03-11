@@ -11,6 +11,9 @@ import argparse
 from uidetox.state import load_config, save_config, load_state, ensure_uidetox_dir
 from uidetox.tooling import detect_all
 from uidetox.memory import get_patterns, get_notes
+import subprocess
+import uuid
+import sys
 
 
 def run(args: argparse.Namespace):
@@ -43,6 +46,27 @@ def run(args: argparse.Namespace):
     print("          UIdetox Autonomous Loop — Full Bootstrap             ")
     print("================================================================")
     print()
+
+    # --- Git Workspace Isolation ---
+    if config.get("auto_commit"):
+        try:
+            current_branch = subprocess.run(
+                ["git", "branch", "--show-current"], 
+                capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+            if not current_branch.startswith("uidetox-session-"):
+                session_id = uuid.uuid4().hex[:8]
+                branch_name = f"uidetox-session-{session_id}"
+                print(f"📦 Switching to temporary branch: {branch_name}")
+                print("All AI edits will be grouped here to protect your workspace.")
+                subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+            else:
+                print(f"📦 Resuming active session branch: {current_branch}")
+        except subprocess.CalledProcessError:
+            print("⚠️  Warning: Git is not initialized or branching failed. Proceeding without isolation.")
+    # -------------------------------
+
     print(f"  Target Score : {target}")
     print(f"  Current Queue: {len(issues)} issue(s)")
     print(f"  Resolved     : {resolved} so far")
@@ -81,6 +105,28 @@ def run(args: argparse.Namespace):
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print()
 
+    backends = tooling.get("backend", [])
+    databases = tooling.get("database", [])
+    apis = tooling.get("api", [])
+    has_fullstack = backends or databases or apis
+
+    if has_fullstack:
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("      [ FULL-STACK INTEGRATION ]         ")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("The following layers were detected in this project:")
+        if backends: print(f"  Backend: {', '.join(b['name'] for b in backends)}")
+        if databases: print(f"  Database: {', '.join(d['name'] for d in databases)}")
+        if apis: print(f"  API: {', '.join(a['name'] for a in apis)}")
+        print()
+        print("During your deep work, you MUST ensure integration across these layers:")
+        print("  - DTO shapes match exactly between frontend and backend")
+        print("  - Frontend forms respect database constraints and types")
+        print("  - Backend errors are properly surfaced in UI (loading/error/empty states)")
+        print("  - API network boundaries are type-safe")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print()
+
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
     if auto_commit:
@@ -106,7 +152,7 @@ def run(args: argparse.Namespace):
     print()
     print("  Step 1: Check baseline")
     print(f"          → Run `uidetox status`")
-    print(f"          → Score >= {target} AND Queue Empty? → DONE. Exit loop.")
+    print(f"          → Score >= {target} AND Queue Empty? → DONE. Run `uidetox finish` to squash changes.")
     print(f"          → Queue Empty but Score < {target}?  → Run `uidetox rescan`")
     print()
     print("  Step 2: Clear the easy wins")
@@ -119,7 +165,13 @@ def run(args: argparse.Namespace):
     print("          → Read the file. Fix ALL issues in the batch in one go. Follow SKILL.md.")
     print("          → Verify no regressions.")
     print("          → Run `uidetox resolve <ID> --note \"...\"` for each issue in the batch.")
-    print("  Step 4: GOTO Step 1. No pauses. No questions.")
+    print("  Step 4: Incremental Quality Check")
+    print("          → Run `uidetox check --fix`")
+    print("          → This auto-fixes formatting/linting and queues any new TypeScript/Lint errors introduced.")
+    print("          → Note: The resolver and check commands will auto-commit changes if enabled.")
+    print("  Step 5: Loop")
+    print("          → Run `uidetox next` again")
+    print("          → GOTO Step 1. No pauses. No questions.")
     print()
     print("PHASE 3 — DEEP REVIEW (when queue is empty but score < target)")
     print("  Run: uidetox review")

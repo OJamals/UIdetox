@@ -65,10 +65,11 @@ Run `uidetox plan` to view the queue. The recommended fix order:
 Run `uidetox next`. The CLI batches all pending issues for the highest-priority file and injects relevant SKILL.md design rules directly into the output.
 1. Read the file and all issues listed
 2. Follow the injected SKILL.md context rules for each issue type
-3. Fix ALL issues in one pass
+3. Fix ALL issues in one pass (including DTO/Schema alignment if fullstack is detected)
 4. Verify the fixes don't break functionality
 5. Run `uidetox resolve <issue_id> --note "what you changed"` for each issue
-6. Run `uidetox next` to loop (self-propagating).
+6. Run `uidetox check --fix` to verify mechanical quality and queue new errors incrementally
+7. Run `uidetox next` to loop (self-propagating).
 
 Use the design skills directly from the CLI for targeted work:
 - `uidetox normalize <target>` for design system alignment
@@ -132,6 +133,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox show [pattern]` | Filter/inspect issues by file, tier, or ID |
 | `uidetox autofix` | Batch all safe T1 fixes for the agent to apply (use `--dry-run` to preview only) |
 | `uidetox rescan` | Clear queue, run 18-rule static analyzer, re-audit from scratch |
+| `uidetox finish` | Squash merges the autonomous session branch cleanly |
 | `uidetox exclude <path>` | Skip a directory during scanning |
 | `uidetox review` | Prompt a subjective UX quality review |
 | `uidetox update-skill <agent>` | Install SKILL.md, AGENTS.md, commands/, reference/ for claude/cursor/gemini/codex/windsurf/copilot |
@@ -227,7 +229,7 @@ UIdetox/
 │   └── commands/                 # Command implementations
 │       ├── scan.py, next.py, resolve.py, plan.py
 │       ├── setup.py, review.py, update_skill.py
-│       ├── status.py, show.py, autofix.py, loop.py
+│       ├── status.py, show.py, autofix.py, loop.py, finish.py
 │       ├── exclude.py, rescan.py, add_issue.py
 │       ├── detect.py, check.py, tsc.py, lint.py, format_cmd.py
 │       ├── subagent_cmd.py, history_cmd.py
