@@ -63,11 +63,11 @@ uidetox setup --auto-commit    # Initializes design dials & git integration
 ### The Engine (CLI)
 | Command | Action |
 | :--- | :--- |
-| `uidetox scan` | Full audit: auto-detects tooling and runs the 32-rule static slop analyzer. |
+| `uidetox scan` | Full audit: auto-detects tooling and runs the 40-rule static slop analyzer. |
 | `uidetox next` | Batches the highest-priority issues with dial-calibrated design context injection. |
 | `uidetox status` | View your **Design Score** and actionable per-category hints. |
 | `uidetox loop` | Enter autonomous mode (creates a session branch and loops fixes). |
-| `uidetox rescan` | Clears queue and re-audits with 32+ fresh anti-slop rules. |
+| `uidetox rescan` | Clears queue and re-audits with 40+ fresh anti-slop rules. |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly. |
 
 ### Design Skills (Slash Commands)

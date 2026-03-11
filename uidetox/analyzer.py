@@ -278,6 +278,70 @@ RULES = [
         "description": "Excessive large padding repetition detected (overpadded layout).",
         "command": "Reduce padding and vary spacing scale (p-4, p-5, p-6) for visual rhythm."
     },
+    {
+        "id": "SOLID_DIVIDER_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*border-(?:gray|slate|zinc|neutral|stone)-(?:200|300|700|800)(?!\/\d+)[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Solid opaque borders for dividers detected. Harsh on the eyes.",
+        "command": "Use opacity (e.g., border-gray-200/50 or border-white/10) for softer blending."
+    },
+    {
+        "id": "HARDCODED_PX_FONT_SLOP",
+        "pattern": re.compile(r'(?:font-size:\s*\d+px|text-\[\d+px\])', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Hardcoded px font sizes break accessible scaling.",
+        "command": "Use rem or Tailwind text-sm/text-lg scale for accessibility."
+    },
+    {
+        "id": "UGLY_SCROLLBAR_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*overflow-[xy]-(?:auto|scroll)(?![^"\']*scrollbar)[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Scrollable container without scrollbar styling or hiding.",
+        "command": "Add scrollbar-hide or custom CSS scrollbar for polish."
+    },
+    {
+        "id": "TIGHT_LINE_HEIGHT_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*(?:text-(?:sm|xs|base)[^"\']*leading-(?:none|tight)|leading-(?:none|tight)[^"\']*text-(?:sm|xs|base))[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Overly tight line-height on body text reduces readability.",
+        "command": "Use leading-relaxed or leading-normal for paragraphs."
+    },
+    {
+        "id": "MISSING_TRANSITION_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'](?:(?!transition-).)*?hover:(?:(?!transition-).)*?["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Interactive element with hover states but missing transition class.",
+        "command": "Add 'transition-colors' or 'transition-all' with duration (e.g., duration-200) for smooth easing."
+    },
+    {
+        "id": "ORPHANED_LABEL_SLOP",
+        "pattern": re.compile(r'<label\b(?![^>]*htmlFor=)[^>]*>', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Accessible forms require 'htmlFor' on <label>.",
+        "command": "Add htmlFor attribute to <label> pointing to the input ID."
+    },
+    {
+        "id": "LAZY_FLEX_CENTER_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*flex(?:\s+)justify-center(?:\s+)items-center[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _JSX_EXTS,
+        "description": "Verbose flex centering detected.",
+        "command": "Use 'grid place-items-center' instead of 'flex items-center justify-center' for cleaner markup."
+    },
+    {
+        "id": "RAW_COLOR_SLOP",
+        "pattern": re.compile(r'(?:color|background-color):\s*(?:red|blue|green|purple|orange|yellow)\b\s*[;}]', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Using basic named CSS colors (red, blue). Looks unpolished.",
+        "command": "Use a curated hex/hsl palette or Tailwind colors (e.g. text-blue-500) instead."
+    },
 ]
 
 def analyze_file(filepath: Path, design_variance: int = 8) -> list[dict]:

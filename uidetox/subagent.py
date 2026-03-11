@@ -286,6 +286,8 @@ Identify every AI slop pattern and design violation.
 - Serif fonts on dashboards
 - Monospace as lazy "developer" vibe
 - Large icons above every heading
+- Hardcoded px font sizes instead of rem (accessibility)
+- Overly tight leading/line-height on body paragraphs
 
 ### 2. Color & Contrast (consult reference/color-and-contrast.md)
 - Purple-blue gradients (the #1 AI fingerprint)
@@ -296,6 +298,7 @@ Identify every AI slop pattern and design violation.
 - Oversaturated accents (> 80%)
 - Neon/outer glows
 - No dark mode support
+- Raw CSS named colors (red, blue, green) instead of palette
 
 ### 3. Layout & Spacing (consult reference/spatial-design.md)
 - Centered hero sections (banned when DESIGN_VARIANCE > 4)
@@ -305,24 +308,28 @@ Identify every AI slop pattern and design violation.
 - Cards for everything / nested cards
 - Uniform spacing everywhere
 - Overpadded layouts
+- Custom flex centering instead of grid place-items-center
 
 ### 4. Materiality & Surfaces
 - Glassmorphism (backdrop-blur + transparency)
 - Oversized border-radius (20-32px on everything)
 - Oversized shadows (2xl/3xl)
 - Pill-shaped badges
+- Solid opaque borders for dividers (missing /50 opacity)
 
 ### 5. Motion & Interaction (consult reference/motion-design.md)
 - Bounce/elastic easing
 - animate-bounce/pulse/spin
 - Missing hover, focus, active states
 - Transform animations on nav links
+- Hover states missing transition-all/colors
 
 ### 6. States & UX Completeness
 - Missing loading states (or generic spinners instead of skeletons)
 - Missing error states
 - Missing empty states
 - Missing disabled states
+- Native browser scrollbars (missing custom styling/hiding)
 
 ### 7. Content & Data Quality
 - Lorem Ipsum
@@ -343,6 +350,7 @@ Identify every AI slop pattern and design violation.
 - No ARIA labels on icon-only buttons
 - Insufficient contrast ratios
 - No skip-to-content link
+- Labels missing htmlFor attributes linking to inputs
 
 ### 10. Strategic Omissions
 - Missing 404 page

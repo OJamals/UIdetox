@@ -140,6 +140,31 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "INTERACTION RULES: Every interactive element needs hover, focus, and active states. Hover: subtle scale, color shift, or shadow change. Active: -translate-y-[1px] or scale-[0.98]. Focus: visible keyboard focus ring. Use transition-colors duration-150.",
         "reference/interaction-design.md",
     ),
+    "htmlfor": (
+        "ACCESSIBILITY RULES: All <label> elements must have an 'htmlFor' attribute linking to the target input ID. Unlinked labels break screen readers.",
+        "reference/interaction-design.md",
+    ),
+    # Micro-polish
+    "scrollbar": (
+        "POLISH RULES: Native scrollbars are ugly. Hide them entirely using scrollbar-hide or use a minimal custom-styled track/thumb.",
+        "reference/interaction-design.md",
+    ),
+    "border": (
+        "MATERIALITY RULES: Never use solid opaque borders (border-gray-200) for dividers. Use opacity (border-gray-200/50, border-white/10) to blend subtly into the background.",
+        "reference/color-and-contrast.md",
+    ),
+    "line-height": (
+        "TYPOGRAPHY RULES: Body text (text-sm/text-base) must use open leading (leading-relaxed/leading-normal). Tight leading is for large display headers only.",
+        "reference/typography.md",
+    ),
+    "px": (
+        "TYPOGRAPHY RULES: Never hardcode px for font sizes. Always use responsive rem units or Tailwind scale (text-sm, text-lg) for user accessibility scaling.",
+        "reference/typography.md",
+    ),
+    "flex center": (
+        "LAYOUT RULES: 'flex justify-center items-center' is verbose. Use 'grid place-items-center' for simple centering blocks.",
+        "reference/spatial-design.md",
+    ),
     "focus": (
         "ACCESSIBILITY RULES: Every interactive element MUST have visible focus indicators. Missing focus states = accessibility failure. Use focus:ring-2 focus:ring-offset-2 or custom focus:outline patterns.",
         "reference/interaction-design.md",
