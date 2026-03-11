@@ -74,6 +74,7 @@ Control the "aesthetic DNA" of the output by adjusting these values in `uidetox 
 
 ## 🚫 The Slop Checklist
 UIdetox actively hunts and destroys:
+- [ ] Use of **Emojis** in text content
 - [ ] Overused **Inter** font stacks.
 - [ ] Generic **Purple-Blue** gradients.
 - [ ] Identical **Card Grids** with no hierarchy.
