@@ -3,14 +3,15 @@
 This command bootstraps the full UIdetox loop:
 1. Auto-detects tooling (if not already done)
 2. Runs mechanical checks with iterative auto-fix
-3. Triggers a full scan
-4. Enters the autonomous fix loop until target score is reached
+3. Triggers LLM-driven codebase exploration and design audit
+4. Enters the autonomous fix loop with component-level batch commits
+5. Deep review with subjective scoring
 """
 
 import argparse
 from uidetox.state import load_config, save_config, load_state, ensure_uidetox_dir
 from uidetox.tooling import detect_all
-from uidetox.memory import get_patterns, get_notes
+from uidetox.memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
 import subprocess
 import uuid
 import sys
@@ -37,7 +38,7 @@ def run(args: argparse.Namespace):
     state = load_state()
     issues = state.get("issues", [])
     resolved = len(state.get("resolved", []))
-    
+
     # Auto-calculate optimal parallel count from unique files in queue
     unique_files = len(set(i.get("file", "") for i in issues))
     auto_parallel = max(1, min(5, unique_files))  # 1-5 based on file spread
@@ -51,7 +52,7 @@ def run(args: argparse.Namespace):
     if config.get("auto_commit"):
         try:
             current_branch = subprocess.run(
-                ["git", "branch", "--show-current"], 
+                ["git", "branch", "--show-current"],
                 capture_output=True, text=True, check=True
             ).stdout.strip()
 
@@ -83,6 +84,33 @@ def run(args: argparse.Namespace):
     print("        THE AUTONOMOUS LOOP PROTOCOL     ")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print()
+
+    # ── Continuation Context (auto-loaded from memory) ──
+    session = get_session()
+    last_scan = get_last_scan()
+    has_prior_session = bool(session)
+
+    if has_prior_session or last_scan:
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("      [ CONTINUATION CONTEXT ]           ")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        if session:
+            print(f"  Last Phase     : {session.get('phase', 'unknown')}")
+            print(f"  Last Command   : {session.get('last_command', 'none')}")
+            if session.get("last_component"):
+                print(f"  Last Component : {session['last_component']}")
+            print(f"  Issues Fixed   : {session.get('issues_fixed_this_session', 0)} this session")
+            if session.get("context"):
+                print(f"  Context        : {session['context']}")
+        if last_scan:
+            print(f"  Last Scan      : {last_scan.get('timestamp', 'unknown')[:19]}")
+            print(f"  Issues Found   : {last_scan.get('total_found', 0)}")
+            top = last_scan.get("top_files", [])
+            if top:
+                print(f"  Hottest Files  : {', '.join(top[:3])}")
+        print("  Resume: skip completed phases and pick up where you left off.")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print()
 
     tooling = config.get("tooling", {})
     has_mechanical = tooling.get("typescript") or tooling.get("linter") or tooling.get("formatter")
@@ -124,60 +152,230 @@ def run(args: argparse.Namespace):
         print("  - Frontend forms respect database constraints and types")
         print("  - Backend errors are properly surfaced in UI (loading/error/empty states)")
         print("  - API network boundaries are type-safe")
+        print("  - NEVER hallucinate data structures — read actual backend source files")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print()
 
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
     if auto_commit:
-        print("📦 AUTO-COMMIT is ON — every `uidetox resolve` atomically commits the fix to git.")
+        print("📦 AUTO-COMMIT is ON — `batch-resolve` creates one coherent commit per component.")
         print()
 
+    # ================================================================
+    # COMPLETE COMMAND REFERENCE
+    # ================================================================
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("      [ AVAILABLE COMMANDS ]             ")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print()
+    print("  DISCOVERY & ANALYSIS:")
+    print("    uidetox scan --path .          Static analysis (41 rules) + design audit prompt")
+    print("    uidetox detect                 Auto-detect project tooling")
+    print("    uidetox show [pattern]         Filter issues by file, tier, or ID")
+    print("    uidetox viz                    Generate HTML heatmap of issues")
+    print("    uidetox tree                   Terminal tree of issue density")
+    print("    uidetox zone show              View file zone classifications")
+    print()
+    print("  MECHANICAL FIXES:")
+    print("    uidetox check --fix            Run tsc → lint → format (auto-fix)")
+    print("    uidetox tsc                    TypeScript compiler check")
+    print("    uidetox lint --fix             Run linter with auto-fix")
+    print("    uidetox format --fix           Run formatter with auto-fix")
+    print("    uidetox autofix                Batch-apply all safe T1 quick fixes")
+    print()
+    print("  ISSUE MANAGEMENT:")
+    print('    uidetox add-issue --file <f> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+    print("    uidetox plan                   View/reorder issue queue")
+    print("    uidetox next                   Get next component batch with SKILL.md context")
+    print('    uidetox resolve <id> --note "..."         Resolve single issue')
+    print('    uidetox batch-resolve ID1 ID2 --note "..."  Resolve batch (1 commit)')
+    print("    uidetox suppress <pattern>     Permanently silence matching issues")
+    print()
+    print("  DESIGN SKILLS (invoke for targeted work):")
+    print("    uidetox audit <target>         Technical quality checks (a11y, perf, theming)")
+    print("    uidetox critique <target>      UX design review (hierarchy, emotion)")
+    print("    uidetox normalize <target>     Align with design system standards")
+    print("    uidetox polish <target>        Final pre-ship quality pass")
+    print("    uidetox distill <target>       Strip to essence, remove complexity")
+    print("    uidetox clarify <target>       Improve unclear UX copy")
+    print("    uidetox optimize <target>      Performance improvements")
+    print("    uidetox harden <target>        Error handling, i18n, edge cases")
+    print("    uidetox animate <target>       Add purposeful motion")
+    print("    uidetox colorize <target>      Introduce strategic color")
+    print("    uidetox bolder <target>        Amplify boring designs")
+    print("    uidetox quieter <target>       Tone down overly bold designs")
+    print("    uidetox delight <target>       Add moments of joy")
+    print("    uidetox extract <target>       Pull into reusable components")
+    print("    uidetox adapt <target>         Adapt for different devices")
+    print("    uidetox onboard <target>       Design onboarding flows")
+    print()
+    print("  SCORING & REVIEW:")
+    print("    uidetox status                 Health dashboard with blended Design Score")
+    print("    uidetox status --json          Machine-readable status output")
+    print("    uidetox review                 LLM subjective quality review prompt")
+    print("    uidetox review --score <N>     Record subjective score (0-100)")
+    print("    uidetox history                View score progression over time")
+    print()
+    print("  SESSION MANAGEMENT:")
+    print("    uidetox memory show            View persistent memory bank")
+    print('    uidetox memory pattern "..."   Save an architectural pattern')
+    print('    uidetox memory note "..."      Save a persistent note')
+    print("    uidetox rescan                 Clear queue + fresh static analysis")
+    print("    uidetox finish                 Squash-merge session branch")
+    print()
+    print("  ORCHESTRATOR (sub-agent pipeline):")
+    print(f"    uidetox subagent --stage-prompt <stage> --parallel {auto_parallel}")
+    print("    uidetox subagent --list        List all sub-agent sessions")
+    print("    uidetox subagent --show <id>   Show session details")
+    print("    uidetox subagent --record <id> Mark session completed")
+    print()
+    print("  You may invoke ANY of these commands at any point during the loop")
+    print("  based on your analysis of the codebase. Use design skills when")
+    print("  specific components need targeted attention.")
+    print()
+
+    # ================================================================
+    # PHASE 0: MECHANICAL FIX
+    # ================================================================
     if has_mechanical:
-        print("PHASE 0 — MECHANICAL FIX (run once at start)")
+        print("╔═══════════════════════════════════════════════════╗")
+        print("║ PHASE 0 — MECHANICAL FIX (run once at start)     ║")
+        print("╚═══════════════════════════════════════════════════╝")
         print("  Run: uidetox check --fix")
         print("  This iteratively auto-fixes formatting and lint errors,")
         print("  then queues remaining compiler/lint errors as T1 issues.")
         print()
 
-    if len(issues) == 0:
-        print("PHASE 1 — INITIAL SCAN (queue is empty, need issues)")
-        print("  Run: uidetox scan --path .")
-        print("  Read every frontend file. Check SKILL.md anti-patterns.")
-        print("  For each issue found:")
-        print("    uidetox add-issue --file <path> --tier <T1-T4> --issue <desc> --fix-command <cmd>")
+    # ================================================================
+    # PHASE 1: EXPLORE & AUDIT (LLM-Dynamic Analysis)
+    # ================================================================
+    print("╔═══════════════════════════════════════════════════╗")
+    print("║ PHASE 1 — EXPLORE & AUDIT (LLM-dynamic analysis) ║")
+    print("╚═══════════════════════════════════════════════════╝")
+    print()
+    print("  This is the CRITICAL phase that differentiates good detoxing from surface-level fixes.")
+    print("  You MUST systematically read and analyze the codebase BEFORE fixing anything.")
+    print()
+    print("  Step 1.1: Run static analysis")
+    print("    → Run: uidetox scan --path .")
+    print("    → This runs the 41-rule deterministic analyzer and auto-queues anti-patterns.")
+    print()
+    print("  Step 1.2: LLM-driven codebase exploration")
+    print("    → Read EVERY frontend file in the project (tsx, jsx, css, html, vue, svelte)")
+    print("    → For each file, systematically observe:")
+    print("        • Typography: font families, sizes, weights, line heights")
+    print("        • Colors: all color values (hex, rgb, hsl, oklch, CSS vars, Tailwind classes)")
+    print("        • Layout: grid systems, flex patterns, max-widths, padding/margin patterns")
+    print("        • Components: UI patterns used (cards, modals, heroes, navbars, forms)")
+    print("        • Motion: animations, transitions, hover/focus/active effects")
+    print("        • States: loading, error, empty, disabled state handling")
+    print("        • Accessibility: ARIA labels, focus indicators, semantic HTML")
+    print("        • Content: placeholder data quality, copy tone, generic names")
+    print()
+    print("  Step 1.3: Design audit against SKILL.md")
+    print("    → Read SKILL.md and compare your observations against its rules")
+    print("    → For EACH issue found that wasn't caught by static analysis:")
+    print('      uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+    print()
+    print("  Step 1.4: Targeted design skill audits")
+    print("    → Run design skills on components that need deep attention:")
+    print("      uidetox audit <target>     — Technical quality (a11y, perf, theming)")
+    print("      uidetox critique <target>  — UX review (hierarchy, emotion, composition)")
+    print("    → Queue any additional issues found")
+    print()
+
+    if has_fullstack:
+        print("  Step 1.5: Full-stack integration audit")
+        print("    → Read backend source files, API routes, and database schemas")
+        print("    → Check DTO alignment, type safety across boundaries")
+        print("    → Run: uidetox harden <target> for edge cases and error handling")
+        print("    → Queue mismatches as issues")
         print()
 
-    print("PHASE 2 — THE FIX LOOP (repeat until done)")
+    # Orchestrator: sub-agent parallel exploration
+    print("  Step 1.6: OPTIONAL — Parallel sub-agent exploration")
+    print(f"    → For large codebases, spawn parallel observers:")
+    print(f"      uidetox subagent --stage-prompt observe --parallel {auto_parallel}")
+    print(f"    → Launch {auto_parallel} sub-agents with the printed prompts.")
+    print(f"    → Then run diagnosis: uidetox subagent --stage-prompt diagnose")
+    print(f"    → Record each: uidetox subagent --record <session_id>")
+    print()
+
+    # ================================================================
+    # PHASE 2: FIX LOOP (Component-Level)
+    # ================================================================
+    print("╔═══════════════════════════════════════════════════╗")
+    print("║ PHASE 2 — THE FIX LOOP (component-level commits) ║")
+    print("╚═══════════════════════════════════════════════════╝")
     print()
     print("  Step 1: Check baseline")
     print(f"          → Run `uidetox status`")
-    print(f"          → Score >= {target} AND Queue Empty? → DONE. Run `uidetox finish` to squash changes.")
+    print(f"          → Score >= {target} AND Queue Empty? → GOTO PHASE 4.")
     print(f"          → Queue Empty but Score < {target}?  → Run `uidetox rescan`")
     print()
     print("  Step 2: Clear the easy wins")
     print("          → Run `uidetox autofix`")
-    print("          → Apply all safe T1 changes listed, then `uidetox resolve <ID> --note \"...\"`")
+    print("          → Apply all safe T1 changes listed")
     print()
-    print("  Step 3: Deep Work")
+    print("  Step 3: Deep Work (component-level)")
     print("          → Run `uidetox next`")
-    print("          → This yields a BATCH of issues for a specific file.")
-    print("          → Read the file. Fix ALL issues in the batch in one go. Follow SKILL.md.")
+    print("          → This yields a BATCH of all issues for a component/directory.")
+    print("          → Read ALL files in the component. Fix ALL issues in one pass.")
+    print("          → Follow SKILL.md design rules injected in the output.")
+    print("          → Use targeted design skills as needed:")
+    print("            uidetox normalize <target>  — align with design system")
+    print("            uidetox polish <target>     — final quality pass")
+    print("            uidetox animate <target>    — add motion")
+    print("            uidetox colorize <target>   — introduce strategic color")
+    print("            uidetox harden <target>     — error handling, edge cases")
+    print("            uidetox distill <target>    — simplify over-complex components")
+    print("            uidetox bolder <target>     — amplify boring designs")
     print("          → Verify no regressions.")
-    print("          → Run `uidetox resolve <ID> --note \"...\"` for each issue in the batch.")
-    print("  Step 4: Incremental Quality Check")
-    print("          → Run `uidetox check --fix`")
-    print("          → This auto-fixes formatting/linting and queues any new TypeScript/Lint errors introduced.")
-    print("          → Note: The resolver and check commands will auto-commit changes if enabled.")
-    print("  Step 5: Loop")
-    print("          → Run `uidetox next` again")
-    print("          → GOTO Step 1. No pauses. No questions.")
     print()
-    print("PHASE 3 — DEEP REVIEW (when queue is empty but score < target)")
-    print("  Run: uidetox review")
-    print("  The agent must perform a subjective UX quality review.")
-    print("  Check: visual hierarchy, emotional tone, composition balance.")
-    print("  Queue any new design issues found, then re-enter PHASE 2.")
+    print("  Step 4: Pre-Commit Quality Gate")
+    print("          → Run `uidetox check --fix`")
+    print("          → This auto-fixes formatting/linting and queues any new errors.")
+    print()
+    print("  Step 5: Batch Resolve (single coherent commit)")
+    print('          → Run `uidetox batch-resolve ID1 ID2 ID3 ... --note "what you changed"`')
+    print("          → This resolves all issues in the component and makes ONE git commit.")
+    print()
+    print("  Step 6: Record pattern knowledge")
+    print('          → If you discovered a recurring pattern: uidetox memory pattern "description"')
+    print('          → If you want to note something for future loops: uidetox memory note "note"')
+    print()
+    print("  Step 7: Loop")
+    print("          → Run `uidetox next` again → GOTO Step 1. No pauses. No questions.")
+    print()
+
+    # ================================================================
+    # PHASE 3: DEEP REVIEW
+    # ================================================================
+    print("╔═══════════════════════════════════════════════════╗")
+    print("║ PHASE 3 — DEEP REVIEW (queue empty, score < tgt) ║")
+    print("╚═══════════════════════════════════════════════════╝")
+    print("  Step 1: Re-read every modified file and verify fixes match SKILL.md")
+    print("  Step 2: Run `uidetox rescan` for fresh static analysis")
+    print("  Step 3: Run targeted design skills on the weakest areas:")
+    print("          uidetox critique <target>  — subjective UX review")
+    print("          uidetox audit <target>     — technical quality audit")
+    print("  Step 4: Run `uidetox review` — perform LLM subjective quality assessment")
+    print("  Step 5: Record your score: `uidetox review --score <N>` (0-100)")
+    print("  Step 6: Check `uidetox status` for the blended Design Score")
+    print(f"  Step 7: Score >= {target}? → GOTO PHASE 4. Otherwise queue new issues → GOTO PHASE 2.")
+    print()
+
+    # ================================================================
+    # PHASE 4: FINALIZE
+    # ================================================================
+    print("╔═══════════════════════════════════════════════════╗")
+    print("║ PHASE 4 — FINALIZE                               ║")
+    print("╚═══════════════════════════════════════════════════╝")
+    print("  Step 1: Run `uidetox status` — confirm score and empty queue")
+    print("  Step 2: Run `uidetox history` — review score progression")
+    print("  Step 3: Run `uidetox finish` — squash-merge session branch")
+    print("  Step 4: DONE. Exit the loop.")
     print()
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print()
@@ -185,44 +383,6 @@ def run(args: argparse.Namespace):
     if has_mechanical:
         print("Agent: Begin with PHASE 0. Run `uidetox check --fix` now.")
     elif len(issues) == 0:
-        print("Agent: Begin with PHASE 1. Run `uidetox scan --path .` now.")
+        print("Agent: Begin with PHASE 1. Run `uidetox scan --path .` now, then systematically read every frontend file.")
     else:
         print("Agent: Begin with PHASE 2 Step 1. Run `uidetox status` now.")
-
-    # Orchestrator mode: use sub-agents
-    orchestrator = getattr(args, "orchestrator", False)
-    if orchestrator:
-        print()
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("      ORCHESTRATOR MODE ENABLED          ")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print()
-        print("Instead of fixing everything directly, you will launch")
-        print("ONE sub-agent per stage. This isolates concerns and improves quality.")
-        print()
-        print("For each stage (observe → diagnose → prioritize → fix → verify):")
-        print()
-        print(f"  1. Generate the stage prompt(s):")
-        print(f"     uidetox subagent --stage-prompt <stage> --parallel {auto_parallel}")
-        print()
-        print(f"  2. Launch up to {auto_parallel} sub-agents (Agent tools) with the printed prompts.")
-        print("     Each sub-agent gets completely isolated context — don't combine stages.")
-        print("     Run them concurrently! Do not wait for Agent 1 to finish before launching Agent 2.")
-        print()
-        print(f"  3. When all {auto_parallel} sub-agents finish, record the results sequentially:")
-        print("     uidetox subagent --record <session_id>")
-        print()
-        print("  4. Check progress and proceed to next stage:")
-        print("     uidetox status")
-        print()
-        print("  5. Repeat for the next stage.")
-        print()
-        print("Key rules:")
-        print("  - Launch massive parallel subagents simultaneously whenever multiple prompts are generated.")
-        print("  - Check `uidetox status` between stages.")
-        print("  - The FIX stage sub-agents safely avoid merge-conflicts since files are sharded across buckets.")
-        print("  - The VERIFY stage should re-scan and confirm improvements.")
-        print("  - After all 5 stages, check if target is met; if not, loop again.")
-        print()
-        print(f"Agent: Start by spawning a highly parallel scan swarm: uidetox subagent --stage-prompt observe --parallel {auto_parallel}")
-

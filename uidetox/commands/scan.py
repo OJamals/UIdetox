@@ -7,6 +7,7 @@ from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import add_issue, ensure_uidetox_dir, load_config, save_config, increment_scans
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
+from uidetox.memory import save_scan_summary, save_session, log_progress
 
 
 # Categories auto-covered by static analyzer, mapped to rule IDs
@@ -189,3 +190,59 @@ def run(args: argparse.Namespace):
     print(f"\nWhen finished, run 'uidetox plan' then 'uidetox next'.")
     increment_scans()
     save_run_snapshot(trigger="scan")
+
+    # Auto-save scan summary and session progress
+    _save_scan_to_memory(slop_issues, queued_count, triggered_rules, args.path)
+    save_session(phase="scan_complete", last_command="scan",
+                 context=f"Found {queued_count} issues in {args.path}")
+    log_progress("scan", f"Scanned {args.path}: {queued_count} issues queued")
+
+
+def _save_scan_to_memory(slop_issues: list, queued_count: int,
+                         triggered_rules: set, scan_path: str):
+    """Auto-save scan results to memory for review without re-scanning."""
+    # Count by tier
+    by_tier: dict[str, int] = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
+    by_category: dict[str, int] = {}
+    file_counts: dict[str, int] = {}
+
+    for issue in slop_issues:
+        tier = issue.get("tier", "T4")
+        by_tier[tier] = by_tier.get(tier, 0) + 1
+
+        # Infer category from issue text
+        desc = issue.get("issue", "").lower()
+        cat = _infer_category(desc)
+        by_category[cat] = by_category.get(cat, 0) + 1
+
+        f = issue.get("file", "")
+        file_counts[f] = file_counts.get(f, 0) + 1
+
+    # Sort files by issue count
+    top_files = sorted(file_counts.keys(), key=lambda f: file_counts[f], reverse=True)
+
+    save_scan_summary(
+        total_found=queued_count,
+        by_tier=by_tier,
+        by_category=by_category,
+        files_scanned=len(file_counts),
+        top_files=top_files,
+    )
+
+
+def _infer_category(desc: str) -> str:
+    """Infer issue category from description text."""
+    category_keywords = {
+        "typography": ["font", "typography", "inter", "type scale"],
+        "color": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "black"],
+        "layout": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center"],
+        "motion": ["animation", "bounce", "pulse", "spin", "transition", "motion"],
+        "materiality": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow"],
+        "states": ["loading", "error", "empty", "skeleton", "disabled", "hover", "focus"],
+        "content": ["copy", "lorem", "generic", "placeholder", "cliche", "emoji"],
+        "code quality": ["div soup", "semantic", "z-index", "inline style"],
+    }
+    for cat, keywords in category_keywords.items():
+        if any(kw in desc for kw in keywords):
+            return cat
+    return "other"

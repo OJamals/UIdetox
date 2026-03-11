@@ -9,14 +9,6 @@
 
 2. Copy the design skill to Codex's skill directory:
    ```bash
-   mkdir -p ~/.codex/skills/uidetox
-   cp SKILL.md ~/.codex/skills/uidetox/
-   cp -r reference/ ~/.codex/skills/uidetox/
-   cp -r commands/ ~/.codex/prompts/
-   ```
-
-   Or use the built-in command:
-   ```bash
    uidetox update-skill codex
    ```
 
@@ -28,24 +20,29 @@
 ## Workflow
 
 ```bash
-# Scan the codebase for AI slop
-uidetox scan --path .
-
-# Fix issues one file at a time
-uidetox next
-
-# Or enter the autonomous loop
+# Enter the autonomous loop (full 5-phase protocol)
 uidetox loop
+
+# Or scan first, then fix manually
+uidetox scan --path .
+uidetox next
 ```
 
 ## Key Commands
 
 | Command | Purpose |
 |---------|---------|
-| `uidetox scan` | Full audit with static slop detection |
-| `uidetox next` | Get next file batch with SKILL.md context |
-| `uidetox resolve <id> --note "..."` | Mark issue fixed |
-| `uidetox loop` | Autonomous fix loop |
-| `uidetox status` | Health dashboard |
+| `uidetox loop` | Full autonomous loop (scan → fix → review → finalize) |
+| `uidetox scan` | Static slop detection + design audit prompt |
+| `uidetox next` | Get next component batch with SKILL.md context |
+| `uidetox batch-resolve ID1 ID2 --note "..."` | Resolve batch with single coherent commit |
+| `uidetox check --fix` | Pre-commit quality gate (tsc → lint → format) |
+| `uidetox review` | LLM subjective quality review |
+| `uidetox review --score N` | Record subjective score (0-100) |
+| `uidetox status` | Blended Design Score (60% static + 40% LLM review) |
+| `uidetox memory show` | View session progress and last scan summary |
+| `uidetox finish` | Squash-merge session branch |
 
 See `uidetox --help` for the full command list.
+
+**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.

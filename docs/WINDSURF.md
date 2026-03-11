@@ -14,16 +14,23 @@ Because Windsurf uses Global Rules and Workspace Rules, we recommend placing the
 # UI Directives (Anti-Slop)
 Before writing any frontend code (React, Vue, HTML/CSS), you MUST refer to `SKILL.md` to avoid generic AI aesthetics.
 Specifically: DO NOT use purple/blue default gradients, Inter fonts, or bouncy excessive animations. Adhere to the Design Variance, Motion Intensity, and Visual Density scores defined in `.uidetox/config.json`.
+
+**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
 ```
 
 ### 2. Autonomous Loop
 
-Windsurf’s Cascade agents can easily chain terminal commands. Paste this prompt:
+Run `uidetox loop` to dispatch Windsurf's Cascade into the full 5-phase protocol:
 
-> We are running a UIdetox cleanup on this repository.
-> 1. Run `uidetox scan` to assess the frontend tier.
-> 2. Run `uidetox autofix` first to clear out T1 formatting/linting mechanical issues. Record resolutions using `uidetox resolve <ID> --note "..."`.
-> 3. Run `uidetox next` to retrieve a batch of design issues for a specific file.
-> 4. Modify the file using your Cascade editing tools to align the UI with our SKILL bounds.
-> 5. Resolve the batch with notes, and run `uidetox status` to monitor progress.
-> 6. Cascade this loop autonomously until we hit a Design Score greater than 95.
+```bash
+uidetox loop
+```
+
+The loop guides the agent through:
+1. Mechanical fixes (`uidetox check --fix`)
+2. LLM-dynamic codebase exploration + design audit (`uidetox scan`)
+3. Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
+4. Subjective review with blended Design Score (`uidetox review` → `uidetox status`)
+5. Finalize (`uidetox finish`)
+
+Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.

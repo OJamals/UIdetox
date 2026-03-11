@@ -4,6 +4,7 @@ import argparse
 import sys
 import subprocess
 from uidetox.state import remove_issue, get_issue, load_state, load_config
+from uidetox.memory import save_session, log_progress
 
 
 def run(args: argparse.Namespace):
@@ -43,6 +44,12 @@ def run(args: argparse.Namespace):
         print()
         print("[AGENT LOOP SIGNAL]")
         print("Run `uidetox status` now to check score and continue the loop.")
+
+        # Auto-save progress
+        log_progress("resolve", f"Fixed {issue_id}: {args.note}")
+        save_session(phase="fixing", last_command="resolve",
+                     last_component=issue.get('file', ''),
+                     issues_fixed=1, context=args.note)
     else:
         print(f"❌ Failed to remove {issue_id} from state.", file=sys.stderr)
         sys.exit(1)

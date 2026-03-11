@@ -436,10 +436,10 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 ## Rules
 - Follow SKILL.md design rules for every change
-- After fixing each issue, run: `uidetox resolve <ISSUE_ID> --note "what you changed"`
-- After resolving a batch, run: `uidetox check --fix` to catch regressions
-- Verify your fix doesn't break anything
-- Move to the next issue immediately after resolving
+- Fix ALL issues in one pass per component, then batch-resolve:
+  `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`
+- Run `uidetox check --fix` BEFORE batch-resolve to catch regressions
+- Move to the next component immediately after resolving
 """
 
 

@@ -68,11 +68,18 @@ def parse_args(args_list=None):
     resolve_parser.add_argument("issue_id", help="The ID of the issue to resolve (e.g. SCAN-001)")
     resolve_parser.add_argument("--note", required=True, help="Mandatory explanation of the fix applied")
 
+    # Command: batch-resolve
+    batch_resolve_parser = subparsers.add_parser("batch-resolve", help="Resolve multiple issues with a single coherent commit")
+    batch_resolve_parser.add_argument("issue_ids", nargs="+", help="Issue IDs to resolve (e.g. SCAN-001 SCAN-002 SCAN-003)")
+    batch_resolve_parser.add_argument("--note", required=True, help="Mandatory explanation of fixes applied")
+    batch_resolve_parser.add_argument("--skip-verify", action="store_true", help="Skip pre-commit verification gate")
+
     # Command: plan
     plan_parser = subparsers.add_parser("plan", help="Reorder priorities or cluster related issues in the queue")
     
     # Command: review
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
+    review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
     
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
@@ -174,6 +181,11 @@ def parse_args(args_list=None):
             if skill_name not in ["scan", "setup", "fix"]:
                 skill_parser = subparsers.add_parser(skill_name, help=f"Execute the '{skill_name}' UX design skill")
                 skill_parser.add_argument("target", nargs="?", default=".", help="Target file, directory, or component pattern")
+
+    # Catch common mistake: uidetox --check → redirect to uidetox check
+    if args_list is None and len(sys.argv) > 1 and sys.argv[1] == "--check":
+        print("Did you mean 'uidetox check'? Run 'uidetox check --fix' for mechanical fixes.")
+        sys.exit(0)
 
     return parser.parse_args(args_list)
 

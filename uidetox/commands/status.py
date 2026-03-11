@@ -57,7 +57,7 @@ def run(args: argparse.Namespace):
                 cat["resolved"] += 1
                 break
 
-    # Smarter health score: Strict Slop Ratio with baseline penalty
+    # Smarter health score: blend objective (static analysis) + subjective (LLM review)
     tier_weights = {"T1": 1, "T2": 3, "T3": 5, "T4": 10}
 
     current_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in issues)
@@ -67,19 +67,31 @@ def run(args: argparse.Namespace):
     total_resolved = len(resolved)
     total_found = stats.get("total_found", len(issues) + total_resolved)
 
-    # Baseline penalty: never-scanned projects start at 50, not 100
+    # Objective score: based on slop ratio
     if scans_run == 0 and total_slop == 0:
-        score = 50  # Unknown quality — haven't scanned yet
+        objective_score = 50  # Unknown quality — haven't scanned yet
     elif total_slop == 0:
-        score = 100
+        objective_score = 100
     else:
-        score = int(100 - ((current_slop / total_slop) * 100))
-        score = max(0, min(100, score))
+        objective_score = int(100 - ((current_slop / total_slop) * 100))
+        objective_score = max(0, min(100, objective_score))
+
+    # Subjective score: from LLM review (if available)
+    subjective = state.get("subjective", {})
+    subjective_score = subjective.get("score")
+
+    # Blended Design Score: 60% objective + 40% subjective (when available)
+    if subjective_score is not None:
+        score = int(objective_score * 0.6 + subjective_score * 0.4)
+    else:
+        score = objective_score
 
     use_json = getattr(args, "json", False)
     if use_json:
         payload = {
             "design_score": score,
+            "objective_score": objective_score,
+            "subjective_score": subjective_score,
             "total_issues": len(issues),
             "total_resolved": total_resolved,
             "total_found": total_found,
@@ -99,8 +111,13 @@ def run(args: argparse.Namespace):
     filled = score // 5
     bar = "█" * filled + "░" * (20 - filled)
     print(f"\n  Design Score : [{bar}] {score}/100")
-    if scans_run == 0 and total_slop == 0:
+    if subjective_score is not None:
+        print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
+        print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
+    elif scans_run == 0 and total_slop == 0:
         print(f"  (Baseline — run 'uidetox scan' for an accurate score)")
+    else:
+        print(f"    Objective only — run 'uidetox review' for LLM subjective score")
     print()
 
     # Issue summary

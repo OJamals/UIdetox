@@ -22,12 +22,12 @@ Run `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, bi
 
 **Step 1 — Mechanical Checks:** Run `uidetox check` to execute tsc → lint → format in sequence. Errors are automatically queued as T1 issues.
 
-**Step 1.5 — Static Slop Analysis:** A 18-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.). Detected violations are auto-queued with appropriate tiers.
+**Step 1.5 — Static Slop Analysis:** A 41-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.). Detected violations are auto-queued with appropriate tiers.
 
 **Step 2 — Design Audit:** The agent reads frontend files and evaluates against SKILL.md. For each issue found:
 `uidetox add-issue --file <path> --tier <T1-T4> --issue <description> --fix-command <command>`
 
-**Step 3 — Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries.
+**Step 3 — Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs. Hallucinating data structures or ignoring actual backend schema is strictly forbidden.
 
 The issues cover:
 - TypeScript compilation errors
@@ -60,35 +60,43 @@ Run `uidetox plan` to view the queue. The recommended fix order:
 6. Add loading, empty, and error states — makes it feel finished
 7. Polish typography scale and spacing — the premium final touch
 
-### Phase 3: Execute — fix issues file by file
+### Phase 3: Execute — fix issues by component
 
-Run `uidetox next`. The CLI batches all pending issues for the highest-priority file and injects relevant SKILL.md design rules directly into the output.
-1. Read the file and all issues listed
+Run `uidetox next`. The CLI batches all pending issues for the highest-priority **component/directory** and injects relevant SKILL.md design rules directly into the output.
+1. Read ALL files in the component that have issues
 2. Follow the injected SKILL.md context rules for each issue type
 3. Fix ALL issues in one pass (including DTO/Schema alignment if fullstack is detected)
-4. Verify the fixes don't break functionality
-5. Run `uidetox resolve <issue_id> --note "what you changed"` for each issue
-6. Run `uidetox check --fix` to verify mechanical quality and queue new errors incrementally
-7. Run `uidetox next` to loop (self-propagating).
-
-Use the design skills directly from the CLI for targeted work:
-- `uidetox normalize <target>` for design system alignment
-- `uidetox polish <target>` for final quality pass
-- `uidetox animate <target>` for motion work
-- `uidetox colorize <target>` for color introduction
-- `uidetox harden <target>` for edge cases and resilience
-- `uidetox distill <target>` for simplification
-- See full command list below
+4. Use targeted design skills as needed:
+   - `uidetox normalize <target>` for design system alignment
+   - `uidetox polish <target>` for final quality pass
+   - `uidetox animate <target>` for motion work
+   - `uidetox colorize <target>` for color introduction
+   - `uidetox harden <target>` for edge cases and resilience
+   - `uidetox distill <target>` for simplification
+   - `uidetox bolder <target>` to amplify boring designs
+   - See full command list below
+5. Verify the fixes don't break functionality
+6. Run `uidetox check --fix` as a pre-commit quality gate
+7. Run `uidetox batch-resolve ID1 ID2 ... --note "what you changed"` for a single coherent commit
+8. Record patterns discovered: `uidetox memory pattern "description"`
+9. Run `uidetox next` to loop (self-propagating).
 
 ### Phase 4: Verify — confirm improvement
 
-Run `uidetox rescan` to clear old issues and re-audit the project. `rescan` automatically runs the 18-rule static slop analyzer and queues any detected anti-patterns before the agent begins its fresh design audit. Run `uidetox status` to see your Design Score. The interface should now:
+Run `uidetox rescan` to clear old issues and re-audit the project. `rescan` automatically runs the 41-rule static slop analyzer and queues any detected anti-patterns before the agent begins its fresh design audit. Run `uidetox review` to perform an LLM-driven subjective quality assessment across 4 dimensions (Consistency, Cohesion, Craft, Identity), then `uidetox review --score <N>` to record it. Run `uidetox status` to see your blended Design Score (60% objective static analysis + 40% subjective LLM review). For large codebases, use sub-agent orchestration:
+  `uidetox subagent --stage-prompt observe --parallel 3`
+
+The interface should now:
 - Pass the AI Slop Test (no obvious AI tells)
 - Have consistent typography with intentional font choices
 - Use a cohesive, non-generic color palette
 - Have proper interaction states (hover, focus, active, loading, error, empty)
 - Be responsive and accessible
 - Feel designed, not generated
+
+### Phase 5: Finalize — clean exit
+
+Run `uidetox history` to review score progression. Run `uidetox finish` to squash-merge the session branch.
 
 ## 3. Skills
 
@@ -122,20 +130,21 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox format` | Run detected formatter (biome/prettier), auto-fix with --fix |
 | `uidetox add-issue` | Queue a detected issue with tier and fix command |
 | `uidetox plan` | View and reorder the issue queue by priority |
-| `uidetox next` | Batch issues for top-priority file with SKILL.md context injection |
-| `uidetox resolve <id> --note "..."` | Mark an issue as fixed (note is mandatory) |
-| `uidetox loop` | Enter autonomous self-propagation fix loop |
+| `uidetox next` | Batch issues for top-priority component/directory with SKILL.md context injection |
+| `uidetox resolve <id> --note "..."` | Mark a single issue as fixed (note is mandatory) |
+| `uidetox batch-resolve ID1 ID2 ... --note "..."` | Resolve multiple issues with a single coherent commit |
+| `uidetox loop` | Enter autonomous self-propagation fix loop with LLM-dynamic analysis |
 | `uidetox loop --orchestrator` | Sub-agent mode with auto-parallel (1-5) and memory injection |
 | `uidetox subagent` | Manage sub-agent sessions and generate stage prompts |
 | `uidetox memory` | Read/write persistent agent memory (patterns, notes, reviewed files) |
 | `uidetox history` | View run history and score progression (use `--full` for deep inspection) |
-| `uidetox status` | Health dashboard with Design Score (1-100) (use `--json` for automation) |
+| `uidetox status` | Health dashboard with blended Design Score (use `--json` for automation) |
 | `uidetox show [pattern]` | Filter/inspect issues by file, tier, or ID |
 | `uidetox autofix` | Batch all safe T1 fixes for the agent to apply (use `--dry-run` to preview only) |
-| `uidetox rescan` | Clear queue, run 18-rule static analyzer, re-audit from scratch |
+| `uidetox rescan` | Clear queue, run 41-rule static analyzer, re-audit from scratch |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly |
 | `uidetox exclude <path>` | Skip a directory during scanning |
-| `uidetox review` | Prompt a subjective UX quality review |
+| `uidetox review` | LLM subjective UX quality review (use `--score N` to record assessment) |
 | `uidetox update-skill <agent>` | Install SKILL.md, AGENTS.md, commands/, reference/ for claude/cursor/gemini/codex/windsurf/copilot |
 | `uidetox viz` | Generate an HTML heatmap of codebase issues |
 | `uidetox tree` | Print a terminal tree of codebase issue density |
@@ -217,7 +226,7 @@ UIdetox/
 │   ├── cli.py                    # Argparse router (30+ commands, dynamic slash-command loading)
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
-│   ├── analyzer.py               # 18-rule static slop detector (deterministic anti-pattern scan)
+│   ├── analyzer.py               # 41-rule static slop detector (deterministic anti-pattern scan)
 │   ├── history.py                # Run snapshot storage and progression tracking
 │   ├── memory.py                 # Persistent agent memory (reviewed files, patterns, notes)
 │   ├── subagent.py               # Sub-agent session infrastructure (5-stage pipeline)

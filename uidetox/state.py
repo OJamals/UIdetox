@@ -146,3 +146,31 @@ def clear_issues():
     state = load_state()
     state["issues"] = []
     save_state(state)
+
+
+def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
+    """Remove multiple issues atomically in a single state update.
+
+    Args:
+        issue_ids: List of issue IDs to resolve.
+        note: Resolution note applied to all issues.
+
+    Returns:
+        List of removed issue dicts (empty if none found).
+    """
+    state = load_state()
+    id_set = set(issue_ids)
+    removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
+    state["issues"] = [i for i in state.get("issues", []) if i.get("id") not in id_set]
+
+    for r in removed:
+        r["resolved_at"] = _now_iso()
+        if note:
+            r["note"] = note
+        state.setdefault("resolved", []).append(r)
+
+    state.setdefault("stats", {})
+    state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
+    save_state(state)
+    return removed
+

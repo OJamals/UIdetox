@@ -15,20 +15,24 @@ Because Gemini CLI uses a persistent configuration file, ensure your project's `
 
 # UI Directives
 You are enforcing the Anti-Slop catalog defined in SKILL.md. Do not generate generic startup UI.
+
+**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
 ```
 
 ### 2. Autonomous Loop
 
-Gemini models perform best with clear, structured multi-step contexts. Paste this prompt to trigger the loop:
+Run `uidetox loop` to dispatch Gemini into the full 5-phase protocol:
 
-> We are running UIdetox to clean this codebase.
-> Initialize by running `uidetox setup` and `uidetox scan`.
-> Read `.uidetox/state.json` or run `uidetox status` to view our starting Design Score.
-> 
-> YOUR PROTOCOL:
-> 1. Run `uidetox autofix` to clear safe T1 mechanical issues. Resolve them via `uidetox resolve <ID> --note "reason"`.
-> 2. Run `uidetox next` to get a file-batch of pending issues.
-> 3. Edit the file to apply the design fixes (e.g., swapping layouts, injecting color).
-> 4. Resolve the batch.
-> 5. Print out the current `uidetox status`.
-> Continue this protocol iteratively until our score reaches 95+.
+```bash
+uidetox loop
+```
+
+The loop bootstraps with auto-detected tooling, continuation context from memory, and component-level batch commits. Gemini will:
+1. Run `uidetox check --fix` to clear mechanical issues
+2. Run `uidetox scan --path .` then systematically read every frontend file
+3. Fix issues by component using `uidetox next` → fix all → `uidetox batch-resolve ID1 ID2 ... --note "..."`
+4. Run `uidetox review` + `uidetox review --score N` for subjective quality assessment
+5. Check `uidetox status` for blended Design Score (60% static + 40% LLM review)
+6. Run `uidetox finish` to squash-merge the session branch
+
+Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.

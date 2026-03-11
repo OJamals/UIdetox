@@ -16,11 +16,13 @@ description: UIdetox Anti-Slop Guidelines
 globs: *.tsx, *.jsx, *.ts, *.js, *.css
 ---
 Before generating frontend code, ALWAYS cross-reference the anti-patterns listed in `SKILL.md` at the project root. DO NOT output purple-blue gradients, generic Inter typography, or arbitrary glassmorphism.
+
+**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
 ```
 
 ### 2. The UIdetox Cursor Agent
 
-Instead of a standard prompt, define a UIdetox agent in `.cursor/agents/uidetox.md`:
+Define a UIdetox agent in `.cursor/agents/uidetox.md`:
 
 ```markdown
 ---
@@ -31,7 +33,19 @@ tools:
   - read_file
   - edit_file
 ---
-Your entire job is executing the UIdetox loop. Run `uidetox scan`, then repeatedly hit `uidetox next`. Fix the batched errors in the topmost file. Run `uidetox resolve <ID> --note "..."` for every fix. Run `uidetox status` to check your Design Score. Do not stop until the score is 95+.
+Your entire job is executing the UIdetox loop. Run `uidetox loop` to bootstrap the full 5-phase protocol.
+
+The loop will guide you through:
+1. Mechanical fixes (`uidetox check --fix`)
+2. LLM-dynamic codebase exploration and design audit (`uidetox scan`)
+3. Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
+4. Subjective review (`uidetox review` → `uidetox review --score N`)
+5. Status check with blended Design Score (`uidetox status`)
+6. Finalize (`uidetox finish`)
+
+Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.
+
+**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs.
 ```
 
 Open Cursor Chat, switch to the `uidetox` agent, and type "Start the loop."

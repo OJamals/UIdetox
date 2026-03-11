@@ -278,20 +278,19 @@ def run(args: argparse.Namespace):
     # Get the file of the highest priority issue
     target_file = sorted_issues[0].get("file")
 
-    # Gather all issues for this file (limit batch to 5 to avoid overwhelming the agent)
-    batch = [i for i in sorted_issues if i.get("file") == target_file][:5]
+    # Group issues by directory (component) for coherent batches
+    target_dir = str(Path(target_file).parent)
+    batch = [i for i in sorted_issues if str(Path(i.get("file", "")).parent) == target_dir][:15]
 
-    remaining = len(issues) - len(batch)
-    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
-    for i in issues:
-        t = i.get("tier", "T4")
-        if t in tiers:
-            tiers[t] += 1
+    # Derive component name
+    batch_files = list(set(i.get("file", "") for i in batch))
+    component = target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
 
     print("╔═════════════════════════════════════════════╗")
-    print(f"║ Next Target: {target_file}")
+    print(f"║ Next Component: {component} ({len(batch_files)} file(s))")
     print("╚═════════════════════════════════════════════╝")
-    print(f"  Batching {len(batch)} issue(s) for this file:")
+    print(f"  Directory: {target_dir}")
+    print(f"  Batching {len(batch)} issue(s) across {len(batch_files)} file(s):")
     print()
 
     for idx, iss in enumerate(batch):
@@ -348,21 +347,37 @@ def run(args: argparse.Namespace):
         print(f"  Full design rules: {skill_path}")
         print()
 
+    remaining = len(issues) - len(batch)
+    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
+    for i in issues:
+        t = i.get("tier", "T4")
+        if t in tiers:
+            tiers[t] += 1
+
     print(f"  Queue : {remaining} remaining after this batch")
     print(f"  Stats : {tiers['T1']}xT1, {tiers['T2']}xT2, {tiers['T3']}xT3, {tiers['T4']}xT4 | {resolved_count} resolved so far")
     print()
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
+    batch_ids = " ".join(iss["id"] for iss in batch)
 
     print("[AGENT INSTRUCTION]")
-    print(f"1. Read the file: {target_file}")
+    print(f"1. Read all files in {target_dir}/ that have issues:")
+    for f in batch_files:
+        print(f"     {f}")
     if skill_path:
         print(f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
-    print(f"{'3' if skill_path else '2'}. Fix ALL {len(batch)} issue(s) listed above following the SKILL.md rules shown.")
-    print(f"{'4' if skill_path else '3'}. Verify the fixes don't break functionality.")
-    print(f"{'5' if skill_path else '4'}. Run the resolve command for each issue, adding a mandatory --note:")
-    for iss in batch:
-        print(f"   uidetox resolve {iss['id']} --note \"what you changed\"")
+    step = 3 if skill_path else 2
+    print(f"{step}. Fix ALL {len(batch)} issue(s) listed above in ONE pass, following SKILL.md rules.")
+    step += 1
+    print(f"{step}. Verify fixes don't break functionality.")
+    step += 1
+    print(f"{step}. Run pre-commit quality gate:")
+    print(f"     uidetox check --fix")
+    step += 1
+    print(f"{step}. Batch-resolve all issues with a single coherent commit:")
+    print(f'     uidetox batch-resolve {batch_ids} --note "describe what you changed"')
     if auto_commit:
-        print("   AUTO-COMMIT is ON — each resolve atomically commits the fix to git.")
-    print(f"{'6' if skill_path else '5'}. Then immediately run: uidetox next")
+        print("     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit.")
+    step += 1
+    print(f"{step}. Then immediately run: uidetox next")

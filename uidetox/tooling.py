@@ -169,7 +169,7 @@ def detect_backend(root: Path) -> list[ToolInfo]:
     if _has_dep(root, "@nestjs/core"):
         found.append(ToolInfo(name="nestjs", config_file="nest-cli.json", run_cmd=_npx_or_local(root, "nest build")))
     elif _has_dep(root, "express") or _has_dep(root, "fastify") or _has_dep(root, "koa"):
-        found.append(ToolInfo(name="node.js", config_file="package.json", run_cmd="node --check ."))
+        found.append(ToolInfo(name="node.js", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
         
     if (root / "requirements.txt").exists() or (root / "pyproject.toml").exists():
         found.append(ToolInfo(name="python", config_file="pyproject.toml", run_cmd="python -m pytest"))

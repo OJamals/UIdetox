@@ -31,19 +31,19 @@ uidetox update-skill [your_agent_name]  # e.g., claude, cursor, windsurf, gemini
 uidetox setup --auto-commit
 
 THE LOOP
-This is a closed-loop system. Do not stop after one fix. Repeat this cycle until the strict score is maximized:
-1. Audit: Run `uidetox scan .` to queue anti-patterns.
-2. Fix: Run `uidetox next`. This batches issues for the highest-priority file. Fix them holistically (including fullstack boundaries). 
-3. Resolve: Run `uidetox resolve <ID> --note "What you changed"`.
-4. Verify: Run `uidetox check --fix` to auto-commit formatting and catch/queue any new mechanical regressions incrementally.
-5. Loop: Run `uidetox next` again.
-6. Deep Verification: When the queue empties, run `uidetox rescan` to re-audit with fresh eyes. Keep looping until `uidetox status` shows Score >= 95.
-7. Finish: Once the target score is reached, run `uidetox finish` to squash the aesthetic fixes cleanly onto your main branch!
+This is a closed-loop system. Do not stop after one fix. Repeat this cycle until the strict score is maximized.
+Run `uidetox loop` to bootstrap the full 5-phase protocol. The loop will guide you through:
+1. Phase 0: Mechanical fixes (`uidetox check --fix`)
+2. Phase 1: LLM-dynamic codebase exploration and design audit (`uidetox scan`)
+3. Phase 2: Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
+4. Phase 3: Subjective review (`uidetox review` → `uidetox review --score N`)
+5. Phase 4: Status check with blended Design Score (`uidetox status`)
+6. Phase 5: Finalize (`uidetox finish`)
 
 RULES OF ENGAGEMENT
 1. Heavy Lifting: Don't be lazy. Large refactors and small detailed fixes — do both with equal energy. Replace entire components if they reek of AI slop. Fix things properly, not minimally.
 2. Subordinate Ego: `uidetox next` injects specific SKILL.md design rules into your context. Follow them strictly. Do not substitute your own analysis or rely on your baseline training data.
-3. Orchestrator Mode: For complex passes, use `uidetox loop --orchestrator`. Act as a manager: generate prompts with `uidetox subagent`, delegate to parallel subagents, and use MCP (Model Context Protocol) servers to read the filesystem and execute terminal commands directly.
+3. Orchestrator: For massive codebases, the loop will prompt you to run `uidetox subagent` to spawn parallel observers. Act as a manager.
 ```
 
 ---
@@ -65,10 +65,11 @@ uidetox setup --auto-commit    # Initializes design dials & git integration
 ### The Engine (CLI)
 | Command | Action |
 | :--- | :--- |
-| `uidetox scan` | Full audit: auto-detects tooling and runs the 40-rule static slop analyzer. |
-| `uidetox next` | Batches the highest-priority issues with dial-calibrated design context injection. |
-| `uidetox status` | View your **Design Score** and actionable per-category hints. |
-| `uidetox loop` | Enter autonomous mode (creates a session branch and loops fixes). |
+| `uidetox loop` | Enter autonomous protocol (creates session branch, guides scan → fix loop). |
+| `uidetox scan` | Full audit: auto-detects tooling and runs 40-rule static analyzer + dynamic prompt. |
+| `uidetox next` | Batches the highest-priority component issues with SKILL.md context injection. |
+| `uidetox batch-resolve` | Resolves a batch of issues with a single coherent commit |
+| `uidetox status` | View your **Blended Design Score** (60% static + 40% LLM review) and hints. |
 | `uidetox rescan` | Clears queue and re-audits with 40+ fresh anti-slop rules. |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly. |
 
