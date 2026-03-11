@@ -10,7 +10,7 @@ It combines:
 - mechanical tooling checks,
 - and autonomous issue batching with memory-aware continuation.
 
-[Quick Start](#quick-start) • [Autonomous Loop](#the-autonomous-loop) • [Commands](#commands) • [Diagram Prompt](#diagram-prompt-for-readme)
+[Quick Start](#quick-start) • [Autonomous Loop](#the-autonomous-loop) • [Commands](#commands)
 
 ---
 
@@ -47,354 +47,112 @@ uidetox loop
 
 ## Agent Bootstrap Prompt
 
-Paste this into your coding agent to kick off a full detox pass. This prompt is designed to establish a **closed-loop agentic system** — not a one-off request. It gives the AI a repeatable cycle, quantifiable targets, permission to do heavy work, and the discipline to trust the tool over its own biases.
+Paste this into your coding agent to kick off a full detox pass:
 
 ```text
-I want you to eliminate AI slop from this codebase and make the frontend feel hand-crafted
-and cohesive. Target Design Score: 95+.
+Eliminate AI slop from this codebase. Make the frontend feel hand-crafted. Target: Design Score 95+.
 
-═══════════════════════════════════════════════════════════════
- 1. BOOTSTRAP — Install the harness and load your skill manual
-═══════════════════════════════════════════════════════════════
+BOOTSTRAP:
+  pip install uidetox
+  uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
+  uidetox setup --auto-commit
+  uidetox loop                        # prints the full protocol — follow it
 
-pip install uidetox
-uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
-uidetox setup --auto-commit
-uidetox loop
+THE LOOP (repeat until score ≥ 95 and queue is empty):
+  1. uidetox next                     # get highest-priority batch + SKILL.md context
+  2. Fix every issue properly          # full rewrites, not snippets — read files first
+  3. uidetox batch-resolve IDs --note "..." && uidetox check --fix && uidetox status
 
-`update-skill` installs SKILL.md (the design rule book), AGENTS.md (your operating
-instructions), commands/, and reference/ into the correct location for your platform.
-Read SKILL.md immediately — it is your workflow guide and anti-hallucination anchor.
-
-═══════════════════════════════════════════════════════════════
- 2. THE CLOSED LOOP — The only workflow that matters
-═══════════════════════════════════════════════════════════════
-
-This is not a one-shot prompt. You are entering a self-propagating remediation cycle:
-
-  ┌─────────────────────────────────────────────────────────┐
-  │  ACTION:       uidetox next                             │
-  │                (get the highest-priority component batch │
-  │                 with SKILL.md rules injected)            │
-  │                                                         │
-  │  IMPLEMENT:    Fix every issue in the batch properly.   │
-  │                Read ALL files in the component first.   │
-  │                Large refactors and small detail fixes —  │
-  │                do both with equal energy.                │
-  │                                                         │
-  │  VERIFY:       uidetox batch-resolve ID1 ID2 ... \      │
-  │                  --note "what changed"                   │
-  │                uidetox check --fix                       │
-  │                uidetox status                            │
-  │                                                         │
-  │  LOOP:         Score < 95 or queue non-empty?            │
-  │                → Run uidetox next again. No pauses.      │
-  │                  No questions. No summaries.             │
-  └─────────────────────────────────────────────────────────┘
-
-Keep iterating until the Design Score is maximized AND the queue is empty.
-Do NOT stop after one minor fix. The loop continues until `uidetox finish`.
-
-═══════════════════════════════════════════════════════════════
- 3. QUANTIFIABLE METRICS — Your objective target
-═══════════════════════════════════════════════════════════════
-
-The Design Score is a blended metric (60% objective static analysis + 40% subjective
-LLM review). This shifts the goal from vague "clean code" to a number you can only
-improve by actually fixing real issues. Check it constantly:
-
-  uidetox status          # blended score + queue health
-  uidetox review          # subjective quality assessment (4 dimensions)
-  uidetox review --score N  # record your assessment
-  uidetox history         # score progression over time
-
-═══════════════════════════════════════════════════════════════
- 4. EXECUTION RULES — Permission for heavy lifting
-═══════════════════════════════════════════════════════════════
-
-Don't be lazy. Standard LLMs tend toward minimal fixes and snippet suggestions.
-This prompt explicitly overrides that tendency:
-
-- Fix things PROPERLY, not minimally. Rewrite entire files if necessary.
-- Large refactors and small detailed fixes — do both with equal energy.
-- Never leave a // TODO or "I'll handle this later" — handle it NOW.
-- Don't generate snippets. Generate complete, working, production-grade code.
-- Every component you touch must be fully resolved before moving on.
-
-The scan output includes agent instructions — follow them exactly.
-Do NOT substitute your own analysis for the tool's deterministic rules.
-Trust the 50-rule analyzer and SKILL.md over your training data biases.
-
-═══════════════════════════════════════════════════════════════
- 5. AGENTIC ARCHITECTURE — You are a manager, not just a coder
-═══════════════════════════════════════════════════════════════
-
-Think of yourself as an orchestrator that delegates to specialized sub-routines:
-
-- ANALYSIS:  uidetox scan --path . (deterministic 50-rule anti-pattern detection)
-- PLANNING:  uidetox plan / uidetox next (prioritized component batching)
-- EXECUTION: Fix code → uidetox batch-resolve (atomic component-level commits)
-- TESTING:   uidetox check --fix (tsc → lint → format mechanical gate)
-- REVIEW:    uidetox review / uidetox critique / uidetox audit
-- MEMORY:    uidetox memory pattern "..." / uidetox memory note "..."
-
-For large codebases (>15 frontend files), use orchestrator mode to spawn
-parallel sub-agents that divide the queue into shards:
-
-  uidetox loop --orchestrator
-  uidetox subagent --stage-prompt observe --parallel 3
-  uidetox subagent --stage-prompt fix --parallel 3
-
-Each sub-agent gets a distinct shard — no merge conflicts. The 5-stage pipeline
-(observe → diagnose → prioritize → fix → verify) runs as a managed workflow.
-
-If GitNexus MCP is available, use it to map the codebase before touching anything:
-
-  npx gitnexus analyze --embeddings
-  npx gitnexus query "component architecture"
-  npx gitnexus impact <target>      # blast radius BEFORE editing
-  npx gitnexus detect_changes       # scope check BEFORE committing
-
-═══════════════════════════════════════════════════════════════
- 6. DESIGN SKILLS — Targeted refinement commands
-═══════════════════════════════════════════════════════════════
-
-When a component needs deeper attention beyond issue resolution, invoke
-targeted design skills directly:
-
-  uidetox polish <target>     # final pre-ship quality pass
-  uidetox animate <target>    # add purposeful motion
-  uidetox colorize <target>   # introduce strategic color
-  uidetox harden <target>     # error handling, i18n, edge cases
-  uidetox normalize <target>  # align with design system
-  uidetox bolder <target>     # amplify boring designs
-  uidetox distill <target>    # strip over-complex components
-
-These are not suggestions. Use them proactively when your analysis warrants it.
-
-═══════════════════════════════════════════════════════════════
- TL;DR — The contract
-═══════════════════════════════════════════════════════════════
-
-1. Install the harness. Load your skill manual. Trust it.
-2. Enter the closed loop: next → fix → resolve → verify → repeat.
-3. Don't stop until Design Score ≥ 95 and queue is empty.
-4. Don't be lazy. Don't be minimal. Don't ask permission.
-5. The tool's rules override your instincts. Follow SKILL.md exactly.
-6. For large projects, think like a manager — use sub-agents and shards.
-7. When done: uidetox finish.
+RULES:
+  - Don't be lazy. Rewrite entire files if needed. No TODOs, no "I'll handle this later."
+  - The tool's rules override your instincts. Trust the analyzer and SKILL.md over your biases.
+  - Don't stop after one fix. Don't ask permission. Don't summarize between iterations.
+  - When score ≥ 95 and queue is empty: uidetox finish
 ```
 
 ### Why this prompt works
 
-The bootstrap prompt above is engineered around five principles that make AI agents dramatically more effective:
+1. **Closed-Loop System** — Defines a self-propagating cycle (`next → fix → resolve → status → repeat`) instead of a one-off request. The agent keeps iterating until the score target is met.
 
-1. **Closed-Loop System** — Most prompts are one-off requests ("refactor this function"). This prompt defines *The Loop*: action (`uidetox next`) → implementation (fix properly) → verification (`batch-resolve` + `status`). The repeatable cycle ensures the AI doesn't stop after one minor fix but continues until the Design Score is maximized.
+2. **Quantifiable Metrics** — Shifts the goal from vague "clean code" to a numeric Design Score (60% static analysis + 40% subjective review) that can only improve by fixing real issues.
 
-2. **Quantifiable Metrics** — It shifts the goal from subjective "clean code" to an objective Design Score. This gives the AI a numeric target it can only improve by actually fixing real issues — not by gaming the system.
+3. **Permission for Heavy Lifting** — Explicitly counteracts LLM laziness: *"Rewrite entire files if needed"* gives permission for proper fixes over minimal snippet suggestions.
 
-3. **Permission for Heavy Lifting** — Standard LLMs are "lazy" — they tend toward minimal fixes and snippet suggestions to save tokens. The prompt explicitly counteracts this: *"Don't be lazy. Large refactors and small detailed fixes — do both with equal energy."* This gives the AI permission to rewrite entire files rather than suggesting a `// TODO` comment.
+4. **Agentic Architecture** — `uidetox loop` prints the full orchestration protocol (scan → plan → fix → verify → rescan). For large codebases, it auto-enables parallel sub-agent sharding.
 
-4. **Agentic Architecture** — The prompt uses sophisticated orchestration language: parallel sub-agents for sharded work, MCP (Model Context Protocol) integration via GitNexus for filesystem-aware code intelligence, and a 5-stage pipeline (observe → diagnose → prioritize → fix → verify) that the AI manages as a workflow, not a checklist.
-
-5. **Tool Authority Over AI Ego** — The critical instruction *"The scan output includes agent instructions — follow them, don't substitute your own analysis"* forces the AI to trust the tool's deterministic rules over its own potentially biased training data, ensuring consistency across a large codebase.
+5. **Tool Authority Over AI Ego** — *"The tool's rules override your instincts"* forces the agent to trust deterministic analysis over its own biased training data.
 
 ---
 
 ## The Autonomous Loop
 
-`uidetox loop` drives a fully autonomous **scan → fix → verify** cycle across three stages. The loop continues until the Design Score meets the target (default 95) and the issue queue is empty.
+`uidetox loop` drives a fully autonomous **scan → fix → verify** cycle. The loop continues until the Design Score meets the target (default 95) and the issue queue is empty.
 
 ### Architecture Diagram
 
 ```mermaid
-flowchart TB
-    %% ── Entry ──────────────────────────────────────────────
-    START(["🚀 uidetox loop"])
-    START --> BOOT
+flowchart LR
+    LOOP["uidetox loop\n──────────\ndetect tooling\ngit branch\ninject memory"]
 
-    subgraph BOOT["⚙️ Bootstrap"]
-        direction LR
-        B1["Auto-detect\ntooling"] --> B2["Size codebase\n& set parallel"]
-        B2 --> B3["Git branch\nisolation"]
-        B3 --> B4["Inject memory\nbank & session"]
-    end
+    SCAN["uidetox scan\n──────────\n60+ static rules\nLLM rubric\ntier classification"]
 
-    BOOT --> ORCH_CHECK{"> 15 files?"}
-    ORCH_CHECK -- "Yes" --> ORCH_MODE["Enable\nOrchestrator Mode"]
-    ORCH_CHECK -- "No" --> STAGE1
-    ORCH_MODE --> STAGE1
+    NEXT["uidetox next\n──────────\npriority batch\nSKILL.md inject\ndesign dials"]
 
-    %% ── Stage 1: Scan ─────────────────────────────────────
-    subgraph STAGE1["📡 STAGE 1 — Discovery & Analysis"]
-        direction TB
-        S1_CHECK["uidetox check --fix\n─────────────────\ntsc → lint → format\n(iterative auto-fix)"]
-        S1_CHECK --> S1_SCAN
+    FIX["Agent fixes\n──────────\nfull rewrites\nskill commands\nno shortcuts"]
 
-        subgraph S1_SCAN["uidetox scan --path ."]
-            direction LR
-            MECH["🔬 Part 1: Mechanical\n─────────────────\n60+ static rules\nThreadPool analysis\nTier classification\nSuppression filter"] --> SUBJ["🎨 Part 2: Subjective\n─────────────────\nLLM rubric injection\nA. Visual Design (0-40)\nB. Design System (0-30)\nC. Interaction (0-20)\nD. Architecture (0-10)"]
-        end
+    RESOLVE["batch-resolve\n──────────\nverify + commit\nupdate score\nauto-advance"]
 
-        S1_SCAN --> S1_ORCH
+    STATUS["uidetox status\n──────────\nblended score\nvelocity track\nqueue health"]
 
-        subgraph S1_ORCH["Orchestrator Path (optional)"]
-            direction LR
-            OBS["subagent observe\n(parallel file shards)"] --> DIAG["subagent diagnose\n(systematic audit)"]
-        end
-    end
+    RESCAN["uidetox rescan\n──────────\nfresh analysis\nsmart dedup\nauto-escalate"]
 
-    STAGE1 --> S1_OUT["Issues queued\nScan summary saved\nRun snapshot created"]
-    S1_OUT --> PLAN
+    REVIEW["uidetox review\n──────────\nsubjective score\n4 dimensions\ntrend history"]
 
-    %% ── Planning ───────────────────────────────────────────
-    subgraph PLAN["📋 Smart Planning"]
-        direction LR
-        PL1["uidetox plan\n─────────────────\nComponent grouping\nEffort estimation\nImpact scoring\nAttack order"] --> PL2["uidetox autofix\n─────────────────\nT1-first triage\n12 category guidance\nQuick-win targeting"]
-    end
+    FINISH["uidetox finish\n──────────\nsquash merge\nclean delivery"]
 
-    PLAN --> STAGE2
+    LOOP --> SCAN --> NEXT --> FIX --> RESOLVE --> STATUS
 
-    %% ── Stage 2: Fix Loop ──────────────────────────────────
-    subgraph STAGE2["🔧 STAGE 2 — Fix Loop"]
-        direction TB
+    STATUS -- "queue non-empty" --> NEXT
+    STATUS -- "queue empty" --> RESCAN --> REVIEW --> STATUS
 
-        NEXT["uidetox next\n─────────────────\nPriority sort (T1→T4)\nComponent batch (≤15)\nSKILL.md context inject\n50+ keyword→rule maps\nDesign dials inject\nReference file pointers"]
+    STATUS -- "score ≥ 95 &\nqueue empty" --> FINISH
 
-        NEXT --> FIX["🛠 Agent Applies Fixes\n─────────────────\nFull file rewrites\nDesign skill commands:\npolish · animate · colorize\nharden · normalize · bolder\ndistill · clarify"]
-
-        FIX --> RESOLVE["uidetox batch-resolve\n─────────────────\nPre-commit verification\nAtomic batch state update\nScore progress bar\nRemaining-in-component\nGit auto-commit\nAuto-advance signal"]
-
-        RESOLVE --> STATUS_INNER["uidetox status\n─────────────────\nBlended score check\nVelocity tracking\nCategory breakdown"]
-
-        STATUS_INNER --> LOOP_CHECK{"Queue empty?"}
-        LOOP_CHECK -- "No, same component\nissues remain" --> NEXT
-        LOOP_CHECK -- "Yes" --> STAGE3
-    end
-
-    %% ── Stage 3: Re-Scan & Score ───────────────────────────
-    subgraph STAGE3["🔁 STAGE 3 — Re-Scan & Verify"]
-        direction TB
-        RESCAN["uidetox rescan\n─────────────────\nClear queue\nFresh 60+ rule analysis\nSmart dedup (resolved keys)\nAuto-escalation\n(recur ≥2× → tier bump)"]
-
-        RESCAN --> REVIEW["uidetox review\n─────────────────\nFull 4-section rubric\n→ score 0-100"]
-
-        REVIEW --> SCORE_RECORD["uidetox review --score N\n─────────────────\nStore subjective score\nAppend to trend history"]
-
-        SCORE_RECORD --> STATUS_FINAL["uidetox status\n─────────────────\nBlended = obj×0.6 + subj×0.4\nVelocity & fix rate\nSubjective trend (↑↓→)\nCategory progress bars"]
-    end
-
-    STATUS_FINAL --> SCORE_GATE{"Score ≥ target\n& queue empty?"}
-    SCORE_GATE -- "No" --> NEXT
-    SCORE_GATE -- "Yes" --> FINISH
-
-    FINISH["✅ uidetox finish\n─────────────────\nSquash merge\nsession → main\nDelete session branch"]
-
-    %% ── Persistence Layer (side) ───────────────────────────
-    subgraph PERSIST["💾 Persistence Layer"]
-        direction TB
-        STATE_JSON[".uidetox/state.json\n─────────────────\nissues[] · resolved[]\nstats · subjective\natomic writes"]
-        MEMORY_JSON[".uidetox/memory.json\n─────────────────\npatterns (50 cap)\nnotes (30 cap)\nsession checkpoint\nprogress log (50 cap)"]
-        HISTORY[".uidetox/history/\n─────────────────\nTimestamped snapshots\nScore progression\nRun comparison"]
-        CONFIG[".uidetox/config.json\n─────────────────\nDesign dials\nAuto-commit flag\nTooling profile"]
-    end
-
-    %% ── Connections to persistence ─────────────────────────
-    S1_OUT -.-> STATE_JSON
-    S1_OUT -.-> MEMORY_JSON
-    S1_OUT -.-> HISTORY
-    RESOLVE -.-> STATE_JSON
-    RESOLVE -.-> MEMORY_JSON
-    SCORE_RECORD -.-> STATE_JSON
-    RESCAN -.-> STATE_JSON
-    RESCAN -.-> HISTORY
-
-    %% ── Styling ────────────────────────────────────────────
-    classDef stageBox fill:#1a1a2e,stroke:#16213e,color:#e2e8f0
-    classDef bootBox fill:#0f3460,stroke:#16213e,color:#e2e8f0
-    classDef persistBox fill:#1e293b,stroke:#334155,color:#94a3b8
-    classDef gate fill:#312e81,stroke:#4338ca,color:#e2e8f0
-    classDef finish fill:#065f46,stroke:#059669,color:#ecfdf5
-    classDef start fill:#7c3aed,stroke:#6d28d9,color:#f5f3ff
-
-    class START start
-    class BOOT bootBox
-    class STAGE1,STAGE2,STAGE3 stageBox
-    class PERSIST persistBox
-    class ORCH_CHECK,LOOP_CHECK,SCORE_GATE gate
-    class FINISH finish
+    style LOOP fill:#7c3aed,stroke:#6d28d9,color:#f5f3ff
+    style SCAN fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
+    style NEXT fill:#0f766e,stroke:#134e4a,color:#ccfbf1
+    style FIX fill:#b45309,stroke:#92400e,color:#fef3c7
+    style RESOLVE fill:#0f766e,stroke:#134e4a,color:#ccfbf1
+    style STATUS fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
+    style RESCAN fill:#1e40af,stroke:#1e3a8a,color:#dbeafe
+    style REVIEW fill:#7c2d12,stroke:#7c2d12,color:#fed7aa
+    style FINISH fill:#065f46,stroke:#064e3b,color:#d1fae5
 ```
 
-### Flow Summary
-
-| Stage | Purpose | Key Enhancement |
-| :--- | :--- | :--- |
-| **Bootstrap** | Tooling detection, git isolation, memory injection | Auto-phase detection resumes from exact stop point |
-| **Stage 1 — Scan** | Mechanical checks + 60-rule static analysis + LLM rubric | Concurrent ThreadPool analysis, category coverage reporting |
-| **Planning** | Component grouping, effort estimation, impact scoring | Smart attack order: highest impact first, effort as tiebreaker |
-| **Stage 2 — Fix** | Priority batching → fix → verify → resolve loop | SKILL.md context injection (50+ mappings), auto-advance signals |
-| **Stage 3 — Rescan** | Fresh analysis, subjective review, blended scoring | Smart dedup, auto-escalation (recur ≥2× → tier bump), velocity tracking |
-| **Finish** | Squash merge session branch into main | Clean single-commit delivery |
-
-### Scoring System
-
-```
-Design Score = Objective × 0.6 + Subjective × 0.4
-
-Objective (0-100):  Weighted slop ratio from static analyzer
-                    Tier weights: T1=1, T2=3, T3=5, T4=10
-
-Subjective (0-100): LLM review across 4 dimensions
-                    A. Visual Design (0-40)
-                    B. Design System (0-30)
-                    C. Interaction  (0-20)
-                    D. Architecture (0-10)
-```
-
-For large codebases (>15 frontend files), the loop auto-enables **orchestrator mode** with parallel sub-agent sharding across a 5-stage pipeline: `observe → diagnose → prioritize → fix → verify`.
+**Design Score** = Objective × 0.6 + Subjective × 0.4 — the agent keeps looping until this hits the target.
 
 ---
 
 ## Commands
 
-### Core engine
-
 | Command | Purpose |
 | :--- | :--- |
-| `uidetox loop` | Starts guided autonomous workflow with continuation context and auto-phase detection. |
-| `uidetox scan` | Detects tooling and runs 60+ rule deterministic static analysis + subjective rubric injection. |
-| `uidetox plan` | Groups issues by component, estimates effort, scores impact, produces optimized attack order. |
-| `uidetox next` | Batches highest-priority component issues with SKILL.md context injection (50+ keyword maps). |
-| `uidetox batch-resolve` | Resolves a batch atomically with pre-commit verification, auto-commit, and auto-advance signals. |
-| `uidetox status` | Blended Design Score, velocity tracking, category breakdown with progress bars. |
-| `uidetox review` | Performs and records subjective UX quality scoring across 4 dimensions. |
-| `uidetox rescan` | Fresh re-analysis with smart deduplication and auto-escalation of recurring issues. |
-| `uidetox autofix` | T1-first guidance workflow across 12 expanded categories. |
-| `uidetox finish` | Squash-merges session branch after loop completion. |
-
-### Useful support commands
-
-| Command | Purpose |
-| :--- | :--- |
-| `uidetox detect` | Show detected linters/formatters/frameworks/backend/db/api tooling. |
-| `uidetox check --fix` | Mechanical gate for compiler/lint/format quality. |
-| `uidetox autofix` | Applies safe T1-first guidance workflow. |
-| `uidetox subagent ...` | Generate/manage stage prompts for parallelized work. |
-| `uidetox history` | View score progression over runs (`--json` available). |
-| `uidetox memory` | Persist/reuse patterns, notes, and continuation state. |
-| `uidetox viz` / `uidetox tree` | Visualize issue hotspots by file/directory. |
+| `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
+| `uidetox scan` | Run 60+ rule static analysis + subjective rubric injection. |
+| `uidetox next` | Get the highest-priority issue batch with SKILL.md context. |
+| `uidetox batch-resolve` | Resolve issues atomically with verification + auto-commit. |
+| `uidetox status` | Show blended Design Score, velocity, and queue health. |
+| `uidetox review` | Subjective quality scoring across 4 design dimensions. |
+| `uidetox rescan` | Fresh re-analysis with dedup and auto-escalation. |
+| `uidetox check --fix` | Mechanical gate: tsc → lint → format. |
+| `uidetox plan` | Attack plan grouped by component with effort estimates. |
+| `uidetox autofix` | T1-first quick-win guidance across 12 categories. |
+| `uidetox finish` | Squash-merge session branch into main. |
 
 ### Design skill commands
 
-For targeted refinement on a path/component:
+Targeted refinement — use when a component needs deeper attention:
 
-- `uidetox audit`
-- `uidetox critique`
-- `uidetox normalize`
-- `uidetox polish`
-- `uidetox animate`
-- `uidetox colorize`
-- `uidetox harden`
+`uidetox polish` · `animate` · `colorize` · `harden` · `normalize` · `bolder` · `distill` · `audit` · `critique`
 
 ---
 
@@ -446,16 +204,6 @@ Each rule is classified into **tiers** with estimated effort:
 | **T2** | ~8 min | 3 pts | Add hover states, fix layout pattern, extract duplicate |
 | **T3** | ~20 min | 5 pts | Redesign component layout, implement dark mode |
 | **T4** | ~45 min | 10 pts | Major component restructure, full accessibility pass |
-
----
-
-## Diagram Source
-
-The architecture diagram above is embedded as a [Mermaid](https://mermaid.js.org/) code block and renders natively on GitHub.
-
-An editable Excalidraw source is also available:
-
-- `docs/diagrams/uidetox-autonomous-loop.excalidraw`
 
 ---
 
