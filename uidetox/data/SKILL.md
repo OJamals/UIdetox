@@ -283,10 +283,10 @@ Do not default to generic UI. Pull from this library when building visually stri
 
 ## 7. REDESIGN PROTOCOL (Existing Projects)
 
-When upgrading an existing project, follow this sequence:
+When upgrading an existing project, run `uidetox loop` to automatically orchestrate this sequence, or follow it manually:
 
-### Step 1: Scan
-Read the codebase. Identify framework, styling method, and current design patterns.
+### Step 1: Scan (`uidetox scan`)
+Read the codebase. Identify framework, styling method, and current design patterns. Run the static analyzer.
 
 ### Step 2: Diagnose
 Run through the full audit checklist:
@@ -300,7 +300,7 @@ Run through the full audit checklist:
 - Code quality (div soup, inline styles, broken imports)
 - Strategic omissions (legal links, 404, form validation, skip-to-content)
 
-### Step 3: Fix (Priority Order)
+### Step 3: Fix (`uidetox next` → `uidetox batch-resolve`)
 1. Font swap — biggest instant improvement, lowest risk
 2. Color palette cleanup — remove AI-purple, oversaturation
 3. Hover and active states — makes interface feel alive
@@ -313,7 +313,7 @@ Run through the full audit checklist:
 - Work with the existing tech stack. Do not migrate frameworks.
 - Do not break existing functionality. Test after every change.
 - Check dependencies before importing new libraries.
-- Keep changes reviewable and focused.
+- Execute fixes at the component-level using `uidetox batch-resolve` to maintain atomic history.
 
 ---
 
@@ -418,6 +418,72 @@ For deep-dive guidance, consult these reference files:
 | [anti-patterns](reference/anti-patterns.md) | Consolidated AI slop ban list |
 | [color-palettes](reference/color-palettes.md) | Curated dark/light color schemes |
 | [creative-arsenal](reference/creative-arsenal.md) | Advanced design concepts |
+
+---
+
+## 12. LAYOUT GENERATION PATTERNS
+
+Positive guidance: what TO generate (not just what to avoid). Choose based on DESIGN_VARIANCE.
+
+### Layout Archetypes by Variance
+
+**VARIANCE 1-3 (Clean):** Centered container, standard stacking, simple grids
+```css
+.page { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 5vw, 3rem); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+```
+
+**VARIANCE 4-7 (Dynamic):** Split-screen hero, asymmetric grids, varied column widths
+```css
+/* Split-screen hero */
+.hero { display: grid; grid-template-columns: 1.2fr 0.8fr; min-height: 80dvh; align-items: center; }
+/* Asymmetric feature grid */
+.features { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1.5rem; }
+.features > :first-child { grid-row: span 2; }
+```
+
+**VARIANCE 8-10 (Experimental):** Bento grid, masonry, overlapping, offset margins
+```css
+/* Bento grid */
+.bento { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 180px; gap: 1rem; }
+.bento .wide { grid-column: span 2; }
+.bento .tall { grid-row: span 2; }
+.bento .featured { grid-column: span 2; grid-row: span 2; }
+/* Offset margin editorial */
+.editorial-block { margin-left: 15%; max-width: 70%; }
+.editorial-block:nth-child(even) { margin-left: 5%; margin-right: 15%; }
+```
+
+### Responsive Collapse Strategy
+
+All high-variance layouts MUST collapse gracefully:
+```css
+@media (max-width: 768px) {
+  .hero { grid-template-columns: 1fr; }           /* Stack vertically */
+  .features { grid-template-columns: 1fr; }        /* Single column */
+  .bento { grid-template-columns: repeat(2, 1fr); } /* 2-col mobile */
+  .editorial-block { margin-left: 0; max-width: 100%; }
+}
+```
+
+### Container Query Patterns
+
+Use container queries for component-level responsiveness:
+```css
+.card-container { container-type: inline-size; }
+@container (min-width: 400px) { .card { flex-direction: row; } }
+@container (min-width: 600px) { .card { grid-template-columns: 1fr 2fr; } }
+```
+
+### Common Page Structures
+
+| Page Type | Recommended Layout | Grid |
+|-----------|-------------------|------|
+| Landing | Split-screen hero → bento features → testimonial slider | `1.2fr 0.8fr` → `2fr 1fr 1fr` |
+| Dashboard | Sidebar (220px) + main content with card grid | `220px 1fr` → `auto-fit minmax(300px, 1fr)` |
+| Blog/Content | Left-aligned prose (65ch) + sticky sidebar | `minmax(0, 65ch) 280px` |
+| Settings | Tab nav + stacked form sections | Single column, max-width 640px |
+| Pricing | Asymmetric card row (small, featured, small) | `1fr 1.3fr 1fr` |
 
 ---
 

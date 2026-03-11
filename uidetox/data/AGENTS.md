@@ -4,8 +4,6 @@ An agent harness that eliminates "AI slop" from frontend code and enforces quali
 
 UIdetox is created as an effective agent harness for UI/frontend work by serving as an amalgamation of four pioneering projects:
 - **desloppify** — The original inspiration for systematic AI-slop removal and workflow automation
-- **taste-skill** — Generative design rules, creative arsenal, and motion engine
-- **Uncodixfy** — Comprehensive anti-AI-aesthetic pattern catalog
 - **impeccable** — Frontend design commands, references, and quality guidelines
 
 ## 1. Philosophy
@@ -16,87 +14,39 @@ UIdetox fights that bias. Its instructions teach the agent what NOT to do (anti-
 
 The goal is frontend code that makes someone ask "how was this made?" — not "which AI made this?"
 
-## 2. The Loop
+## 2. The Autonomous Loop
 
-Run `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and guides the agent through four steps:
+Run `uidetox loop` to bootstrap the full 5-phase protocol. The loop automatically orchestrates the following flow, guiding the agent step-by-step:
 
-**Step 1 — Mechanical Checks:** Run `uidetox check` to execute tsc → lint → format in sequence. Errors are automatically queued as T1 issues.
+### Phase 0: Mechanical Checks
+The loop triggers `uidetox check --fix` to execute tsc → lint → format in sequence. Errors are automatically queued as T1 issues and auto-fixed where possible.
 
-**Step 1.5 — Static Slop Analysis:** A 41-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.). Detected violations are auto-queued with appropriate tiers.
+### Phase 1: Exploration & Audit (The Scan)
+The loop triggers `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and performs:
+- **Static Slop Analysis:** A 41-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
+- **Design Audit:** The agent reads frontend files and evaluates against SKILL.md.
+- **Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs.
 
-**Step 2 — Design Audit:** The agent reads frontend files and evaluates against SKILL.md. For each issue found:
-`uidetox add-issue --file <path> --tier <T1-T4> --issue <description> --fix-command <command>`
+The issues cover TypeScript errors, anti-pattern detection, typography, color/contrast, motion, and backend integration. Issues are tiered T1 (quick fix) to T4 (major redesign).
 
-**Step 3 — Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs. Hallucinating data structures or ignoring actual backend schema is strictly forbidden.
-
-The issues cover:
-- TypeScript compilation errors
-- Lint and formatting violations
-- Anti-pattern detection (AI slop fingerprints)
-- Typography audit
-- Color and contrast review
-- Layout and spacing analysis
-- Motion and interaction quality
-- Responsiveness
-- Accessibility
-- Frontend→Backend→Database integration
-- Code quality
-
-The scan generates a prioritized issue list. Issues are tiered:
-- **T1**: Quick fix (font swap, color replacement, spacing adjustment)
-- **T2**: Targeted refactor (component pattern replacement, state additions)
-- **T3**: Design judgment call (layout restructure, interaction rethinking)
-- **T4**: Major redesign (full section or page overhaul)
-
-### Phase 2: Plan — decide what to fix first
-
-Run `uidetox plan` to view the queue. The recommended fix order:
-
-1. Font swap — biggest instant improvement, lowest risk
-2. Color palette cleanup — remove clashing or oversaturated colors
-3. Hover and active states — makes the interface feel alive
-4. Layout and spacing — proper grid, max-width, consistent padding
-5. Replace generic components — swap cliché patterns for modern alternatives
-6. Add loading, empty, and error states — makes it feel finished
-7. Polish typography scale and spacing — the premium final touch
-
-### Phase 3: Execute — fix issues by component
-
-Run `uidetox next`. The CLI batches all pending issues for the highest-priority **component/directory** and injects relevant SKILL.md design rules directly into the output.
+### Phase 2: Component-Level Fixes
+The loop repeatedly triggers `uidetox next`. The CLI batches all pending issues for the highest-priority **component/directory** and injects relevant SKILL.md design rules directly into the context.
 1. Read ALL files in the component that have issues
 2. Follow the injected SKILL.md context rules for each issue type
-3. Fix ALL issues in one pass (including DTO/Schema alignment if fullstack is detected)
-4. Use targeted design skills as needed:
-   - `uidetox normalize <target>` for design system alignment
-   - `uidetox polish <target>` for final quality pass
-   - `uidetox animate <target>` for motion work
-   - `uidetox colorize <target>` for color introduction
-   - `uidetox harden <target>` for edge cases and resilience
-   - `uidetox distill <target>` for simplification
-   - `uidetox bolder <target>` to amplify boring designs
-   - See full command list below
-5. Verify the fixes don't break functionality
-6. Run `uidetox check --fix` as a pre-commit quality gate
-7. Run `uidetox batch-resolve ID1 ID2 ... --note "what you changed"` for a single coherent commit
-8. Record patterns discovered: `uidetox memory pattern "description"`
-9. Run `uidetox next` to loop (self-propagating).
+3. Fix ALL issues in one pass
+4. Use targeted design skills as needed (`uidetox polish <target>`, `uidetox animate <target>`, etc.)
+5. Batch-resolve the issues with a single coherent commit: `uidetox batch-resolve ID1 ID2 ... --note "what you changed"`
+(The loop auto-saves progress to memory, so `uidetox loop` can resume anywhere if interrupted).
 
-### Phase 4: Verify — confirm improvement
+### Phase 3: Subjective Review
+Run `uidetox review` to perform an LLM-driven subjective quality assessment across 4 dimensions (Consistency, Cohesion, Craft, Identity), then `uidetox review --score <N>` to record it.
 
-Run `uidetox rescan` to clear old issues and re-audit the project. `rescan` automatically runs the 41-rule static slop analyzer and queues any detected anti-patterns before the agent begins its fresh design audit. Run `uidetox review` to perform an LLM-driven subjective quality assessment across 4 dimensions (Consistency, Cohesion, Craft, Identity), then `uidetox review --score <N>` to record it. Run `uidetox status` to see your blended Design Score (60% objective static analysis + 40% subjective LLM review). For large codebases, use sub-agent orchestration:
-  `uidetox subagent --stage-prompt observe --parallel 3`
+### Phase 4: Verification & Status
+The loop triggers `uidetox status` to view your blended Design Score (60% objective static analysis + 40% subjective LLM review). If the score is below 95, the loop continues.
+For large codebases, the loop supports Orchestrator Mode via `uidetox loop --orchestrator`, splitting work into sub-agents (`uidetox subagent --stage-prompt observe`).
 
-The interface should now:
-- Pass the AI Slop Test (no obvious AI tells)
-- Have consistent typography with intentional font choices
-- Use a cohesive, non-generic color palette
-- Have proper interaction states (hover, focus, active, loading, error, empty)
-- Be responsive and accessible
-- Feel designed, not generated
-
-### Phase 5: Finalize — clean exit
-
-Run `uidetox history` to review score progression. Run `uidetox finish` to squash-merge the session branch.
+### Phase 5: Finalize
+Once the target score is reached, the loop triggers `uidetox finish` to squash-merge the autonomous session branch cleanly.
 
 ## 3. Skills
 

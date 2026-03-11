@@ -283,10 +283,10 @@ Do not default to generic UI. Pull from this library when building visually stri
 
 ## 7. REDESIGN PROTOCOL (Existing Projects)
 
-When upgrading an existing project, follow this sequence:
+When upgrading an existing project, run `uidetox loop` to automatically orchestrate this sequence, or follow it manually:
 
-### Step 1: Scan
-Read the codebase. Identify framework, styling method, and current design patterns.
+### Step 1: Scan (`uidetox scan`)
+Read the codebase. Identify framework, styling method, and current design patterns. Run the static analyzer.
 
 ### Step 2: Diagnose
 Run through the full audit checklist:
@@ -300,7 +300,7 @@ Run through the full audit checklist:
 - Code quality (div soup, inline styles, broken imports)
 - Strategic omissions (legal links, 404, form validation, skip-to-content)
 
-### Step 3: Fix (Priority Order)
+### Step 3: Fix (`uidetox next` → `uidetox batch-resolve`)
 1. Font swap — biggest instant improvement, lowest risk
 2. Color palette cleanup — remove AI-purple, oversaturation
 3. Hover and active states — makes interface feel alive
@@ -313,7 +313,7 @@ Run through the full audit checklist:
 - Work with the existing tech stack. Do not migrate frameworks.
 - Do not break existing functionality. Test after every change.
 - Check dependencies before importing new libraries.
-- Keep changes reviewable and focused.
+- Execute fixes at the component-level using `uidetox batch-resolve` to maintain atomic history.
 
 ---
 
