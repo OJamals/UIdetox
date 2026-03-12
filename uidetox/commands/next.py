@@ -317,11 +317,29 @@ def _get_relevant_context(batch: list) -> list[tuple[str, str | None]]:
     return contexts
 
 
+def _truncate_text(value: str, limit: int) -> str:
+    text = str(value or "").strip()
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)] + "…"
+
+
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
     issues = state.get("issues", [])
     resolved_count = len(state.get("resolved", []))
+    compact = bool(getattr(args, "compact", False))
+    try:
+        batch_size = int(getattr(args, "batch_size", 15) or 15)
+    except (TypeError, ValueError):
+        batch_size = 15
+    batch_size = max(1, min(30, batch_size))
+    try:
+        max_issue_chars = int(getattr(args, "max_issue_chars", 180) or 180)
+    except (TypeError, ValueError):
+        max_issue_chars = 180
+    max_issue_chars = max(80, min(800, max_issue_chars))
 
     if not issues:
         print("Queue is empty. No pending issues.")
@@ -346,84 +364,107 @@ def run(args: argparse.Namespace):
 
     # Group issues by directory (component) for coherent batches
     target_dir = str(Path(target_file).parent)
-    batch = [i for i in sorted_issues if str(Path(i.get("file", "")).parent) == target_dir][:15]
+    batch = [i for i in sorted_issues if str(Path(i.get("file", "")).parent) == target_dir][:batch_size]
 
     # Derive component name
     batch_files = list(set(i.get("file", "") for i in batch))
     component = target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
 
     print("╔═════════════════════════════════════════════╗")
-    print(f"║ Next Component: {component} ({len(batch_files)} file(s))")
+    if compact:
+        print(f"║ Next Component (compact): {component} ({len(batch_files)} file(s))")
+    else:
+        print(f"║ Next Component: {component} ({len(batch_files)} file(s))")
     print("╚═════════════════════════════════════════════╝")
     print(f"  Directory: {target_dir}")
     print(f"  Batching {len(batch)} issue(s) across {len(batch_files)} file(s):")
     print()
 
     for idx, iss in enumerate(batch):
-        print(f"  [{idx+1}] ID: {iss['id']} | Tier: {iss['tier']}")
-        print(f"      Issue  : {iss['issue']}")
-        print(f"      Action : {iss.get('command', 'manual fix')}")
+        issue_preview = _truncate_text(iss.get("issue", ""), max_issue_chars)
+        action_preview = _truncate_text(str(iss.get("command", "manual fix")), max_issue_chars)
+        file_path = iss.get("file", "?")
+        if compact:
+            print(f"  [{idx+1}] {iss['id']} | {iss['tier']} | {file_path}")
+            print(f"      {issue_preview}")
+        else:
+            print(f"  [{idx+1}] ID: {iss['id']} | Tier: {iss['tier']}")
+            print(f"      Issue  : {issue_preview}")
+            print(f"      Action : {action_preview}")
         print()
 
     # Inject design dials — critical for calibrating fixes
-    print(f"  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
-    print(f"  DESIGN_VARIANCE  = {variance}  ", end="")
-    if variance <= 3:
-        print("(clean, centered, standard grids)")
-    elif variance <= 7:
-        print("(varied sizes, offset margins, overlapping elements)")
+    if compact:
+        print("  DESIGN DIALS:")
+        print(f"    variance={variance} | motion={intensity} | density={density}")
     else:
-        print("(asymmetric, masonry, massive whitespace zones)")
-    print(f"  MOTION_INTENSITY = {intensity}  ", end="")
-    if intensity <= 3:
-        print("(CSS hover/active only)")
-    elif intensity <= 7:
-        print("(fade-ins, transitions, staggered entry)")
-    else:
-        print("(scroll-triggered, spring physics, magnetic effects)")
-    print(f"  VISUAL_DENSITY   = {density}  ", end="")
-    if density <= 3:
-        print("(art gallery, spacious, luxury)")
-    elif density <= 7:
-        print("(standard web app spacing)")
-    else:
-        print("(cockpit mode, dense data, monospace numbers)")
+        print(f"  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
+        print(f"  DESIGN_VARIANCE  = {variance}  ", end="")
+        if variance <= 3:
+            print("(clean, centered, standard grids)")
+        elif variance <= 7:
+            print("(varied sizes, offset margins, overlapping elements)")
+        else:
+            print("(asymmetric, masonry, massive whitespace zones)")
+        print(f"  MOTION_INTENSITY = {intensity}  ", end="")
+        if intensity <= 3:
+            print("(CSS hover/active only)")
+        elif intensity <= 7:
+            print("(fade-ins, transitions, staggered entry)")
+        else:
+            print("(scroll-triggered, spring physics, magnetic effects)")
+        print(f"  VISUAL_DENSITY   = {density}  ", end="")
+        if density <= 3:
+            print("(art gallery, spacious, luxury)")
+        elif density <= 7:
+            print("(standard web app spacing)")
+        else:
+            print("(cockpit mode, dense data, monospace numbers)")
     print()
 
     # Inject relevant SKILL.md context with reference file pointers
     contexts = _get_relevant_context(batch)
     if contexts:
-        print("  ━━━ SKILL.md DESIGN RULES (relevant to this batch) ━━━")
         seen_refs: set[str] = set()
-        for ctx, ref_file in contexts:
-            print(f"  > {ctx}")
-        print()
-
-        # Collect unique reference file pointers
         ref_files: list[str] = []
         for _, ref in contexts:
             if ref and ref not in seen_refs:
                 seen_refs.add(ref)
                 ref_files.append(ref)
-        if ref_files:
-            print("  Deep-dive references:")
-            for ref in ref_files:
-                print(f"    {ref}")
+        if compact:
+            print(f"  Relevant design-rule snippets: {len(contexts)}")
+            if ref_files:
+                print("  Deep-dive references:")
+                for ref in ref_files[:5]:
+                    print(f"    {ref}")
+                if len(ref_files) > 5:
+                    print(f"    ... (+{len(ref_files) - 5} more)")
             print()
+        else:
+            print("  ━━━ SKILL.md DESIGN RULES (relevant to this batch) ━━━")
+            for ctx, _ in contexts:
+                print(f"  > {ctx}")
+            print()
+            if ref_files:
+                print("  Deep-dive references:")
+                for ref in ref_files:
+                    print(f"    {ref}")
+                print()
 
     # Inject semantic memory context based on current issues
-    try:
-        from uidetox.subagent import _build_memory_block # type: ignore
-        query_text = " ".join([i.get("issue", "") + " " + i.get("command", "") for i in batch])
-        memory_block = _build_memory_block(query=query_text)
-        if memory_block:
-            print("  ━━━ PERSISTENT AGENT MEMORY (semantically matched) ━━━")
-            for line in memory_block.split("\n"):
-                if line.strip():
-                    print(f"  {line}")
-            print()
-    except Exception:
-        pass
+    if not compact:
+        try:
+            from uidetox.subagent import _build_memory_block # type: ignore
+            query_text = " ".join([i.get("issue", "") + " " + i.get("command", "") for i in batch])
+            memory_block = _build_memory_block(query=query_text)
+            if memory_block:
+                print("  ━━━ PERSISTENT AGENT MEMORY (semantically matched) ━━━")
+                for line in memory_block.split("\n"):
+                    if line.strip():
+                        print(f"  {line}")
+                print()
+        except Exception:
+            pass
 
     # Point the agent to the full SKILL.md for deeper reference
     skill_path = _get_skill_path()
@@ -435,11 +476,14 @@ def run(args: argparse.Namespace):
     skill_recs = recommend_skills_for_issues(batch, config=config, phase="fix", limit=5)
     if skill_recs:
         print("  ━━━ RECOMMENDED SKILLS (invoke before fixing) ━━━")
-        print("  These skills match the issues in this batch. Run them on")
-        print(f"  the target directory to inject domain-specific rules:")
+        if compact:
+            print(f"  Top {min(3, len(skill_recs))} skills for this batch:")
+        else:
+            print("  These skills match the issues in this batch. Run them on")
+            print(f"  the target directory to inject domain-specific rules:")
         print()
         formatted = format_skill_recommendations(
-            skill_recs,
+            skill_recs[:3] if compact else skill_recs,
             indent="    ",
             show_commands=True,
             target=target_dir,
@@ -468,11 +512,15 @@ def run(args: argparse.Namespace):
     print("  ━━━ GITNEXUS IMPACT ANALYSIS (run BEFORE fixing) ━━━")
     print("  Run these commands to understand blast radius and dependencies:")
     print()
-    for bf in batch_files[:5]:  # Cap at 5 to avoid prompt overload
+    file_cap = 3 if compact else 5
+    for bf in batch_files[:file_cap]:  # Cap to avoid prompt overload
         fname = Path(bf).stem
         print(f"    npx gitnexus context \"{fname}\"")
         print(f"      → callers, callees, execution flows for {fname}")
     print()
+    if len(batch_files) > file_cap:
+        print(f"    ... (+{len(batch_files) - file_cap} additional file(s) in this batch)")
+        print()
     print("    npx gitnexus impact \"<symbol>\" --direction upstream")
     print("      → blast radius: who breaks if you change <symbol>?")
     print()
@@ -495,14 +543,17 @@ def run(args: argparse.Namespace):
     print("[AGENT INSTRUCTION]")
     step = 1
     print(f"{step}. Run GitNexus impact analysis on batch targets (see above):")
-    for bf in batch_files[:5]:
+    for bf in batch_files[:file_cap]:
         fname = Path(bf).stem
         print(f"     npx gitnexus context \"{fname}\"")
     print(f"     Review callers and cross-layer dependencies before editing.")
     step += 1
     print(f"{step}. Read all files in {target_dir}/ that have issues:")
-    for f in batch_files:
+    files_to_print = batch_files[:file_cap] if compact else batch_files
+    for f in files_to_print:
         print(f"     {f}")
+    if compact and len(batch_files) > file_cap:
+        print(f"     ... (+{len(batch_files) - file_cap} more in this batch)")
     if skill_path:
         step += 1
         print(f"{step}. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")

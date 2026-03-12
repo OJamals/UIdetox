@@ -363,6 +363,22 @@ class TestReviewDomains:
         assert "api_data_coherence" in names
         assert "performance_vitals" in names
 
+    def test_api_data_coherence_enforces_contract_and_database_alignment(self):
+        domain = next(d for d in REVIEW_DOMAINS if d["name"] == "api_data_coherence")
+        checklist_text = " ".join(domain.get("checklist", [])).lower()
+        thresholds = domain.get("thresholds", {})
+        deductions_text = " ".join(domain.get("deductions", [])).lower()
+
+        assert "contract" in checklist_text
+        assert "database" in checklist_text
+        assert "contract_artifact_coverage" in thresholds
+        assert "endpoint_mapping_coverage" in thresholds
+        assert "stale" in deductions_text or "invalidate" in deductions_text
+
+    def test_perfection_gate_checks_contract_drift(self):
+        checklist = [str(item).lower() for item in PERFECTION_GATE.get("checklist", [])]
+        assert any("contract drift" in item or "api/db" in item for item in checklist)
+
     def test_wave_assignments_correct(self):
         """Wave 1 domains should have wave=1, wave 2 should have wave=2."""
         for d in REVIEW_WAVE_1:

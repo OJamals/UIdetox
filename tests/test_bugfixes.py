@@ -665,3 +665,93 @@ class TestLoopGitNexusScopeFallback:
 
         assert cmd == "git diff --name-status"
         assert "fallback" in reason.lower()
+
+
+class TestAutofixReviewSafety:
+    """Autofix must not auto-resolve subjective review findings."""
+
+    def test_autofix_skips_review_origin_t1_issues(self, monkeypatch, capsys):
+        from uidetox.commands import autofix as autofix_cmd
+
+        monkeypatch.setattr(
+            autofix_cmd,
+            "load_state",
+            lambda: {
+                "issues": [
+                    {
+                        "id": "REV-1",
+                        "file": "src/components/Hero.tsx",
+                        "tier": "T1",
+                        "issue": "Review finding: gradient contrast fails WCAG.",
+                        "command": "manual fix",
+                        "phase": "subagent_review",
+                    }
+                ]
+            },
+        )
+
+        removed_calls: list[list[str]] = []
+        monkeypatch.setattr(
+            autofix_cmd,
+            "batch_remove_issues",
+            lambda issue_ids, note="": removed_calls.append(list(issue_ids)) or [],
+        )
+
+        autofix_cmd.run(SimpleNamespace(dry_run=False))
+        output = capsys.readouterr().out
+
+        assert "Skipping 1 review-origin T1 issue(s)" in output
+        assert "No autofix-eligible T1 issues remain" in output
+        assert not removed_calls
+
+    def test_design_transforms_do_not_auto_resolve_issue_ids(self, monkeypatch, capsys, tmp_path):
+        from uidetox.commands import autofix as autofix_cmd
+
+        monkeypatch.setattr(
+            autofix_cmd,
+            "load_state",
+            lambda: {
+                "issues": [
+                    {
+                        "id": "DES-1",
+                        "file": "src/components/Card.tsx",
+                        "tier": "T1",
+                        "issue": "Remove purple-blue gradient and raw color literals.",
+                        "command": "manual fix",
+                    }
+                ]
+            },
+        )
+        monkeypatch.setattr(autofix_cmd, "load_config", lambda: {"auto_commit": False})
+        monkeypatch.setattr(autofix_cmd, "_ensure_tooling", lambda config: {})
+        monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+        monkeypatch.setattr(autofix_cmd, "_collect_snapshot_files", lambda *a, **k: [])
+        monkeypatch.setattr(
+            autofix_cmd,
+            "_run_jscodeshift_transforms",
+            lambda grouped: {"src/components/Card.tsx"},
+        )
+        monkeypatch.setattr(
+            autofix_cmd,
+            "_run_lint_fixes",
+            lambda *a, **k: autofix_cmd._FixPhaseStats(),
+        )
+        monkeypatch.setattr(
+            autofix_cmd,
+            "_run_format_fixes",
+            lambda *a, **k: autofix_cmd._FixPhaseStats(),
+        )
+        monkeypatch.setattr(autofix_cmd, "_verify_no_regressions", lambda *a, **k: True)
+
+        removed_calls: list[list[str]] = []
+        monkeypatch.setattr(
+            autofix_cmd,
+            "batch_remove_issues",
+            lambda issue_ids, note="": removed_calls.append(list(issue_ids)) or [],
+        )
+
+        autofix_cmd.run(SimpleNamespace(dry_run=False))
+        output = capsys.readouterr().out
+
+        assert "left pending for manual verification + explicit resolve" in output
+        assert not removed_calls

@@ -1164,6 +1164,7 @@ def _build_autopilot_plan(
         # ── Pre-analysis mechanical gate ──
         if has_mechanical:
             plan.append(("uidetox check --fix", "clear mechanical issues before deeper analysis"))
+        plan.append(("uidetox detect", "refresh tooling + contract artifact detection before scan"))
 
         # ── GitNexus codebase intelligence (enriches agent context) ──
         # Run BEFORE rescan/audit so the agent has architectural
@@ -1209,21 +1210,9 @@ def _build_autopilot_plan(
         for rec in review_recs[:3]:
             plan.append((f"uidetox {rec['skill']} .", f"review skill: {rec.get('reason', 'recommended')}"))
 
-        # ── Parallel domain-sharded subjective review ──
-        # The subjective score carries 70% weight in the blended Design Score.
-        # Use scored domains for shard count; perfection gate has max_score=0.
-        from uidetox.subagent import SCORED_REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
-        review_parallel = len(SCORED_REVIEW_DOMAINS)
-        plan.append((
-            f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
-            (
-                "parallel domain-sharded subjective review "
-                f"({review_parallel} scored domains; wave1={len(REVIEW_WAVE_1)}, "
-                f"wave2={len(REVIEW_WAVE_2)}, 70% of blended score)"
-            ),
-        ))
-
         # ── Full-stack cross-layer validation (only for full-stack projects) ──
+        # Must run BEFORE review prompt generation so the review shard
+        # commands are informed by fresh cross-layer context.
         if is_fullstack:
             plan.append((
                 _gitnexus_cmd("query", '"API endpoint route handler DTO"', gitnexus_repo),
@@ -1243,26 +1232,27 @@ def _build_autopilot_plan(
             ))
 
         # ── Codebase coupling & impact snapshot ──
-        # Gives the agent awareness of tightly-coupled modules so the
-        # review and fix phases can prioritize high-impact areas.
+        # Run before review prompt generation so review subagents inherit
+        # the dependency graph context.
         plan.append((
             _gitnexus_cmd("query", '"import dependency coupling circular"', gitnexus_repo),
             "dependency analysis: detect tightly-coupled modules for targeted fixes",
         ))
 
-        plan.append(("uidetox status", "check blended score and queue after domain reviews"))
-
-        # ── Post-review: parallel implementation subagents for new issues ──
-        # Scale implementation subagents with scored review shard count.
-        fix_parallel = max(1, min(len(SCORED_REVIEW_DOMAINS), max(auto_parallel, len(SCORED_REVIEW_DOMAINS))))
-        if is_orchestrator:
-            plan.append((
-                f"uidetox subagent --stage-prompt fix --parallel {fix_parallel}",
-                f"parallel implementation subagents ({fix_parallel} shards) for review-discovered issues",
-            ))
-
-        # ── Post-fix verification ──
-        plan.append(("uidetox status", "check blended score and queue"))
+        # ── Parallel domain-sharded subjective review ──
+        # The subjective score carries 70% weight in the blended Design Score.
+        # Use scored domains for shard count; perfection gate has max_score=0.
+        from uidetox.subagent import SCORED_REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+        review_parallel = len(SCORED_REVIEW_DOMAINS)
+        plan.append(("uidetox status", "checkpoint score + queue before subjective review"))
+        plan.append((
+            f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
+            (
+                "parallel domain-sharded subjective review "
+                f"({review_parallel} scored domains; wave1={len(REVIEW_WAVE_1)}, "
+                f"wave2={len(REVIEW_WAVE_2)}, 70% of blended score)"
+            ),
+        ))
 
         if blended >= target and freshness["target_ready"]:
             plan.append(("uidetox finish", "target reached with empty queue"))
@@ -1272,22 +1262,26 @@ def _build_autopilot_plan(
     # STAGE 2 / FIX LOOP (queue has issues)
     # ──────────────────────────────────────────────────────────────
     #
-    # Intentionally focused: mechanical gate + impact analysis + next.
-    # ``next`` already outputs the full batch context, skill
-    # recommendations, design dials, and [AGENT INSTRUCTION] steps.
-    # The autopilot halts after ``next`` so the agent can focus on
-    # fixing ONE batch, then re-enters the loop for the next batch.
+    # Intentionally focused: verification + mechanical gates + impact
+    # analysis + one execution context dump (either `next` or parallel
+    # `subagent --stage-prompt fix` in orchestrator mode).  The
+    # autopilot halts after that execution-context command so the agent
+    # can focus on fixing ONE batch, then re-enter the loop for the next.
     #
-    # GitNexus queries run BEFORE next to give the agent dependency
-    # and impact awareness for the files it is about to modify.
+    # GitNexus queries run BEFORE the execution-context command to give
+    # the agent dependency and impact awareness for files it will modify.
     #
     # Discovery (rescan) and subjective review run in STAGE 1 once
     # the queue is drained.  This ensures the agent does focused
     # fix work in STAGE 2 without distractions.
 
+    # Verify previous fixes before starting a new fix batch.
+    plan.append(("uidetox subagent --stage-prompt verify", "post-fix verification context (regression + confidence pass)"))
+
     # Pre-fix mechanical gate — auto-fix lint/format/tsc ONCE
     if has_mechanical:
         plan.append(("uidetox check --fix", "mechanical quality gate — auto-fix lint/format before manual fixes"))
+    plan.append(("uidetox autofix", "safe T1 remediation pass before targeted batch fixes"))
 
     # ── GitNexus pre-fix impact analysis ──
     # Query the call graph for the batch's target files so the agent
@@ -1313,10 +1307,36 @@ def _build_autopilot_plan(
             _gitnexus_cmd("query", '"fetch request mutation query"', gitnexus_repo),
             "pre-fix full-stack: verify data-fetching alignment before modifying components",
         ))
+        plan.append((
+            _gitnexus_cmd("query", '"DTO type interface response schema"', gitnexus_repo),
+            "pre-fix full-stack: verify frontend types against backend contracts",
+        ))
+        plan.append((
+            _gitnexus_cmd("query", '"database model entity table relation prisma"', gitnexus_repo),
+            "pre-fix full-stack: verify database alignment for mapped surfaces",
+        ))
+        plan.append((
+            _gitnexus_cmd("query", '"openapi graphql zod valibot contract schema validator"', gitnexus_repo),
+            "pre-fix full-stack: verify contract artifact mapping before implementation",
+        ))
+        plan.append((
+            _gitnexus_cmd("query", '"status code exception validation error payload"', gitnexus_repo),
+            "pre-fix full-stack: verify status/error payload handling coverage",
+        ))
 
-    # Context dump — prints batch issues, skill rules, design dials,
-    # and full [AGENT INSTRUCTION] steps.  Autopilot halts here.
-    plan.append(("uidetox next", "prioritized batch with full context — agent must fix ALL issues shown, then re-enter loop"))
+    # Context dump — prints implementation prompts/context and halts
+    # for agent execution before the loop re-enters.
+    if is_orchestrator and auto_parallel > 1:
+        fix_parallel = max(2, min(5, auto_parallel))
+        plan.append((
+            f"uidetox subagent --stage-prompt fix --parallel {fix_parallel}",
+            f"orchestrator fix execution: parallel implementation shards ({fix_parallel})",
+        ))
+    else:
+        plan.append((
+            "uidetox next --batch-size 8 --compact --max-issue-chars 220",
+            "prioritized compact batch context — iterate in manageable chunks, then re-enter loop",
+        ))
 
     return plan
 
@@ -1649,21 +1669,30 @@ def _print_manual_protocol(
     print("    1b. Run `npx gitnexus query \"frontend components\"` (map codebase)")
     if has_mechanical:
         print("    1c. Run `uidetox check --fix`  (tsc -> lint -> format)")
-    print("    1d. Run `uidetox scan --path .`")
-    print("    1e. Run `uidetox audit .`  (comprehensive quality audit)")
+    print("    1d. Run `uidetox detect`  (refresh tooling + contract artifacts)")
+    print("    1e. Run `uidetox rescan --path .`")
+    print("    1f. Run `uidetox scan --path .`")
+    print("    1g. Run `uidetox audit .`  (comprehensive quality audit)")
     if is_orchestrator:
-        print(f"    1f. `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`")
+        print(f"    1h. `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`")
         print(f"        `uidetox subagent --stage-prompt diagnose`")
     print()
 
     # ---- STAGE 2 ----
     print("  STAGE 2: FIX LOOP (repeat until queue empty)")
     print("  " + "-" * 40)
-    print("    2a. `uidetox next`              — get batch + skills")
-    print("    2b. Apply fixes following SKILL.md rules")
-    print("    2c. `uidetox check --fix`       — tsc/lint/format BEFORE commit")
-    print("    2d. `uidetox batch-resolve IDs --note '...'`")
-    print("    2e. `uidetox status`            — check score")
+    print("    2a. `uidetox subagent --stage-prompt verify`  — verify previous fixes")
+    print("    2b. `uidetox check --fix`       — tsc/lint/format BEFORE commit")
+    print("    2c. `uidetox autofix`           — safe T1 auto-remediation pass")
+    if is_orchestrator and auto_parallel > 1:
+        fix_parallel = max(2, min(5, auto_parallel))
+        print(f"    2d. `uidetox subagent --stage-prompt fix --parallel {fix_parallel}`")
+        print("        → parallel implementation shards for queued issues")
+    else:
+        print("    2d. `uidetox next`              — get prioritized batch + skills")
+    print("    2e. Apply fixes following SKILL.md rules")
+    print("    2f. `uidetox batch-resolve IDs --note '...'`")
+    print("    2g. `uidetox status`            — check score")
     print("    Loop back to 2a until queue is empty.")
     print()
 

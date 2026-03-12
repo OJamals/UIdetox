@@ -71,6 +71,9 @@ def parse_args(args_list=None):
 
     # Command: next
     next_parser = subparsers.add_parser("next", help="Picks the next highest-priority issue from the scan queue")
+    next_parser.add_argument("--batch-size", type=int, default=15, help="Max issues to include in the next batch (default: 15)")
+    next_parser.add_argument("--compact", action="store_true", help="Print a compact next-batch prompt (lower output volume)")
+    next_parser.add_argument("--max-issue-chars", type=int, default=180, help="Max issue/action preview length in next output")
 
     # Command: resolve
     resolve_parser = subparsers.add_parser("resolve", help="Mark a specific issue as resolved")

@@ -41,6 +41,8 @@ _TRANSFORM_MAP: dict[str, str] = {
     "code quality": "spacing.js",
 }
 
+_MECHANICAL_FIX_COMMANDS = {"lint-fix", "format-fix", "format", "tsc-fix"}
+
 class _FixPhaseStats:
     """Execution stats for a mechanical fix phase."""
 
@@ -278,6 +280,19 @@ def _is_repo_wide_fix_cmd(cmd: str) -> bool:
     )
 
 
+def _is_review_origin_issue(issue: dict) -> bool:
+    """Return True when an issue was produced by subjective review flow."""
+    phase = str(issue.get("phase", "") or "").strip().lower()
+    if not phase:
+        return False
+    return phase == "review" or phase.startswith("subagent_review") or "review" in phase
+
+
+def _is_mechanical_issue(issue: dict) -> bool:
+    command = str(issue.get("command", "") or "").strip().lower()
+    return command in _MECHANICAL_FIX_COMMANDS
+
+
 def _collect_snapshot_files(t1_issues: list[dict], tooling: dict, project_root: str) -> list[str]:
     """Capture issue files plus tracked repo files for repo-wide fix commands."""
     files = {str(i.get("file")) for i in t1_issues if i.get("file")}
@@ -411,10 +426,25 @@ def _verify_no_regressions(tooling: dict, project_root: str) -> bool:
 def run(args: argparse.Namespace):
     state = load_state()
     issues = state.get("issues", [])
-    t1_issues = [i for i in issues if i.get("tier") == "T1"]
+    all_t1_issues = [i for i in issues if i.get("tier") == "T1"]
 
-    if not t1_issues:
+    if not all_t1_issues:
         print("No T1 (quick fix) issues found. Nothing to autofix.")
+        return
+
+    # Review-origin findings must never be auto-resolved by autofix.
+    # They require explicit implementation + verification in the fix loop.
+    review_locked_ids = {str(i.get("id", "")) for i in all_t1_issues if _is_review_origin_issue(i)}
+    t1_issues = [i for i in all_t1_issues if str(i.get("id", "")) not in review_locked_ids]
+    review_locked_count = len(review_locked_ids)
+    if review_locked_count:
+        print(
+            f"Skipping {review_locked_count} review-origin T1 issue(s) "
+            "(manual implementation required)."
+        )
+    if not t1_issues:
+        print("No autofix-eligible T1 issues remain after review-origin safety filter.")
+        print("Run `uidetox next` to implement and verify those findings manually.")
         return
 
     dry_run = getattr(args, "dry_run", False)
@@ -423,7 +453,11 @@ def run(args: argparse.Namespace):
     lint_issues = [i for i in t1_issues if i.get("command") == "lint-fix"]
     format_issues = [i for i in t1_issues if i.get("command") in ("format-fix", "format")]
     tsc_issues = [i for i in t1_issues if i.get("command") == "tsc-fix"]
-    mechanical_ids = {i["id"] for i in lint_issues + format_issues + tsc_issues}
+    mechanical_ids = {
+        str(i.get("id", ""))
+        for i in t1_issues
+        if _is_mechanical_issue(i)
+    }
     design_issues = [i for i in t1_issues if i["id"] not in mechanical_ids]
 
     # Group design issues by category for jscodeshift + guidance
@@ -548,13 +582,16 @@ def run(args: argparse.Namespace):
                 print()
             else:
                 print("  ✓ No regressions detected — transforms are safe.")
+                touched_candidates = 0
                 for cat_issues in transformable.values():
                     for issue in cat_issues:
                         if issue["file"] in fixed_files:
-                            resolved_ids.append(issue["id"])
-                            total_fixed += 1
-                if auto_commit:
-                    _auto_commit(fixed_files, project_root, "design-pattern transforms")
+                            touched_candidates += 1
+                if touched_candidates:
+                    print(
+                        f"  ℹ️  Touched {touched_candidates} design issue candidate(s); "
+                        "left pending for manual verification + explicit resolve."
+                    )
         print()
 
     # ── Phase 4: Final verification pass ──

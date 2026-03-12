@@ -534,22 +534,29 @@ REVIEW_DOMAINS: list[dict] = [
         "references": ["reference/interaction-design.md", "reference/responsive-design.md"],
         "rubric": "D.API & DATA COHERENCE (0-10) = 10 pts",
         "max_score": 10,
-        "focus": "Frontend-backend alignment, DTO field matching, data flow "
-                 "architecture, caching strategy, optimistic updates, "
-                 "error/loading/empty state coherence with actual API behavior, "
-                 "type safety across boundaries, database schema alignment.",
+        "focus": "Frontend-backend alignment, DTO/contract field matching, API "
+                 "mapping, request/response schema fidelity, caching strategy, "
+                 "optimistic updates, error/loading/empty state coherence with "
+                 "actual API behavior, type safety across boundaries, and "
+                 "database schema alignment.",
         "checklist": [
             "Frontend types match backend DTOs field-for-field (no phantom fields)",
             "Nullable/optional fields handled explicitly (not assumed non-null)",
             "All API responses have defined TypeScript types (never 'any')",
+            "Frontend request payload keys match backend contracts (no dropped/unknown keys)",
+            "OpenAPI/GraphQL/Prisma/Zod/contract artifacts are reflected in frontend mappings",
             "Loading states reflect actual backend latency (skeleton screens, not spinners)",
             "Error states handle ALL backend status codes (400, 401, 403, 404, 422, 500)",
+            "Structured backend error payloads map to field-level UI feedback where applicable",
             "Empty states match zero-result API responses (not just generic 'No data')",
             "Form validation mirrors backend constraints (length, format, range, required)",
             "Pagination/sort/filter params align with backend query API",
             "Optimistic updates have rollback on server rejection",
             "Data caching strategy is deliberate (SWR/React Query/RTK Query with stale times)",
+            "Mutation side effects invalidate/refetch dependent queries to prevent stale UI",
             "Enum values synchronized between frontend and backend/database",
+            "ID and foreign-key types stay consistent across frontend/API/database boundaries",
+            "Decimal/money precision handling aligns with backend/database types (no float drift)",
             "Date/time format handling consistent (ISO 8601, timezone-aware)",
         ],
         "thresholds": {
@@ -557,15 +564,21 @@ REVIEW_DOMAINS: list[dict] = [
             "error_handling": "All 4xx and 5xx codes handled with user-facing messages",
             "state_completeness": "100% of data-fetching surfaces handle loading/error/empty",
             "validation_alignment": "100% of form fields validate client-side matching server rules",
+            "contract_artifact_coverage": "100% of detected contract artifacts mapped to frontend request/response usage",
+            "endpoint_mapping_coverage": "100% of consumed endpoints have explicit request/response + status mapping",
         },
         "deductions": [
             "-3 pts: 'any' type used for API responses",
             "-3 pts: no error handling on data-fetching surfaces",
             "-2 pts: frontend types have fields the backend doesn't send (phantom fields)",
+            "-2 pts: frontend sends request payload keys backend doesn't accept",
             "-2 pts: generic 'Something went wrong' for all API errors",
             "-2 pts: no loading states on data-fetching components",
+            "-2 pts: mutation results are not invalidated/refetched, causing stale data in UI",
             "-1 pt: nullable fields assumed non-null without runtime guards",
             "-1 pt: no caching strategy (fresh fetch every render)",
+            "-1 pt: ID/foreign-key type mismatch across frontend/API/database",
+            "-1 pt: decimal/currency fields treated as imprecise float values",
             "-1 pt: date handling inconsistent (mixing formats, no timezone handling)",
             "-1 pt: pagination not synchronized with backend API",
         ],
@@ -647,7 +660,7 @@ REVIEW_DOMAINS: list[dict] = [
             "ALL heading hierarchy is sequential (single h1, no skipped levels)",
             "ALL images optimized (srcset, lazy loading, next-gen formats or size-adjust)",
             "ALL API responses have typed interfaces (no 'any' for data)",
-            "ZERO phantom types (frontend interfaces with fields backend doesn't send)",
+            "ZERO contract drift: no phantom types, endpoint mismatches, or frontend assumptions that contradict API/DB schemas",
             "prefers-reduced-motion media query present",
             "prefers-color-scheme media query present (or CSS custom-property toggle)",
             "Skip-to-content link present",
@@ -1576,7 +1589,10 @@ _DOMAIN_GITNEXUS_QUERIES: dict[str, list[str]] = {
     "api_data_coherence": [
         'npx gitnexus query "fetch request mutation query API endpoint"',
         'npx gitnexus query "DTO type interface response schema"',
+        'npx gitnexus query "database model entity table relation prisma"',
+        'npx gitnexus query "openapi graphql zod valibot contract schema validator"',
         'npx gitnexus query "loading error empty state skeleton"',
+        'npx gitnexus query "status code exception validation error payload"',
         'npx gitnexus query "validation constraint required enum"',
     ],
     "performance_vitals": [
@@ -1685,7 +1701,12 @@ _ISSUE_DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "architecture_responsive": ["responsive", "breakpoint", "mobile", "import", "semantic", "html", "div"],
     "design_elegance": ["cohesion", "aesthetic", "craft", "elegance", "harmony", "visual", "rhythm", "detail", "micro"],
     "accessibility": ["aria", "a11y", "screen reader", "landmark", "heading", "alt", "keyboard", "tab", "wcag", "lang"],
-    "api_data_coherence": ["api", "fetch", "dto", "schema", "endpoint", "response", "cache", "mutation", "query", "data"],
+    "api_data_coherence": [
+        "api", "fetch", "dto", "schema", "endpoint", "response", "cache",
+        "mutation", "query", "data", "database", "prisma", "openapi",
+        "graphql", "contract", "validator", "zod", "valibot", "status code",
+        "nullable", "enum", "foreign key", "id type", "payload",
+    ],
     "performance_vitals": ["performance", "lazy", "bundle", "image", "optimize", "render", "vitals", "lcp", "cls", "split"],
 }
 
