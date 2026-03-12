@@ -55,15 +55,15 @@ def run(args: argparse.Namespace):
     print()
 
     # ── Print the full reference-driven rubric from REVIEW_DOMAINS ──
-    from uidetox.subagent import REVIEW_DOMAINS
+    from uidetox.subagent import REVIEW_DOMAINS, SCORED_REVIEW_DOMAINS, PERFECTION_GATE
 
-    total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+    total_max = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
 
-    # Group domains by rubric section letter for display
-    section_a = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("A.")]
-    section_b = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("B.")]
-    section_c = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("C.")]
-    section_d = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("D.")]
+    # Group scored domains by rubric section letter for display
+    section_a = [d for d in SCORED_REVIEW_DOMAINS if d["rubric"].startswith("A.")]
+    section_b = [d for d in SCORED_REVIEW_DOMAINS if d["rubric"].startswith("B.")]
+    section_c = [d for d in SCORED_REVIEW_DOMAINS if d["rubric"].startswith("C.")]
+    section_d = [d for d in SCORED_REVIEW_DOMAINS if d["rubric"].startswith("D.")]
 
     section_groups = [
         ("A. VISUAL DESIGN & AESTHETICS", section_a),
@@ -112,10 +112,36 @@ def run(args: argparse.Namespace):
     print("     0-30  : Heavy AI slop, generic, inconsistent — multiple critical failures")
     print("    31-50  : Some personality but obvious AI tells remain — several deductions")
     print("    51-70  : Competent design with minor slop traces — some checklist failures")
-    print("    71-85  : Good design, mostly clean of AI fingerprints — few deductions")
-    print("    86-95  : Excellent, intentional, polished — nearly all checklists pass")
-    print("    96-100 : Exceptional — all checklists pass, zero deductions")
+    print("    71-84  : Good design, mostly clean of AI fingerprints — few deductions")
+    print("    85-89  : Very good, intentional design — minor checklist gaps remain")
+    print("    90-94  : Excellent — nearly all checklists pass, ≤2 minor deductions")
+    print("    95-97  : Near-perfect — ALL checklists pass, ZERO deductions, queue EMPTY")
+    print("    98-100 : Flawless — zero deductions, zero pending issues, zero suppressions,")
+    print("             every threshold measured and passing, every reference file satisfied")
     print()
+    print("  ⚠️  SCORING INTEGRITY RULES:")
+    print("    • A diminishing-returns curve compresses your raw score above 70.")
+    print("      Raw 90 → effective ~85. Raw 95 → effective ~92. Only 100 → 100.")
+    print("    • Pending issues in the queue AUTO-DEDUCT from your effective score.")
+    print("    • If ANY issues remain in the queue, effective subjective is CAPPED at 85.")
+    print("    • If objective score < 90, effective subjective is CAPPED at 80.")
+    print("    • You CANNOT reach 95+ blended without: empty queue, 100% objective,")
+    print("      AND a raw subjective score of ~98+.")
+    print("    • Do NOT inflate your score — the curve will expose it.")
+    print()
+
+    # ── Perfection Gate display ──
+    if PERFECTION_GATE:
+        print("  " + "=" * 50)
+        print("  PERFECTION GATE (must pass ALL to exceed 90)")
+        print("  " + "=" * 50)
+        print()
+        for item in PERFECTION_GATE.get("checklist", []):
+            print(f"    □ {item}")
+        print()
+        for ded in PERFECTION_GATE.get("deductions", []):
+            print(f"    ⚠️  {ded}")
+        print()
 
     if has_snapshot:
         print("-" * 60)
@@ -218,14 +244,14 @@ def run(args: argparse.Namespace):
     print(f"  {step}. For any issues found, queue them:")
     print('     uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
     step += 1
-    print(f"  {step}. Then run: uidetox status")
+    print(f"  {step}. Then run: uidetox loop")
     print()
     print("  NOTE: Subjective score = 70% of final blended score. Be thorough.")
     print("        Use checklist/threshold/deduction protocol for consistency.")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    print("After scoring, run `uidetox review --score <N>` then `uidetox status`.")
-    print("DO NOT STOP. Continue the autonomous loop.")
+    print("After scoring with `uidetox review --score <N>`, run `uidetox loop` immediately.")
+    print("DO NOT STOP. DO NOT run individual commands — the loop handles everything.")
 
 
 def _store_subjective_score(score: int):
@@ -252,40 +278,72 @@ def _store_subjective_score(score: int):
 
     save_state(state)
 
-    print(f"✅ Subjective design score recorded: {score}/100")
+    # ── Compute effective score (post-curve + penalties) ──
+    from uidetox.utils import compute_design_score, _apply_subjective_curve
+    fresh_state = load_state()
+    pending = fresh_state.get("issues", [])
+    effective = _apply_subjective_curve(score, pending)
+
+    # Cross-gate: if objective < 90, cap at 80
+    scores_snapshot = compute_design_score(fresh_state)
+    obj = scores_snapshot.get("objective_score")
+    if obj is not None and obj < 90:
+        effective = min(effective, 80)
+
+    blended = scores_snapshot["blended_score"]
+
+    print(f"✅ Subjective design score recorded: {score}/100 (raw)")
+    print(f"   Effective (after curve + penalties): {effective}/100")
+    if effective < score:
+        print(f"   Δ compression: -{score - effective} pts (diminishing-returns curve")
+        if pending:
+            print(f"     + {len(pending)} pending-issue penalty")
+        if obj is not None and obj < 90:
+            print(f"     + objective cross-gate cap [obj={obj} < 90]")
+        print("   )")
+    print(f"   Blended Design Score: {blended}/100")
     print()
 
     # Domain-aware feedback with checklist/threshold context
-    if score >= 86:
+    if effective >= 95:
+        print("   Outstanding — near-perfect across all domains. Verify with uidetox status.")
+    elif effective >= 86:
         print("   Excellent — nearly all domain checklists pass, minimal deductions.")
-    elif score >= 71:
+    elif effective >= 71:
         print("   Good — some checklist failures remain. Review deductions applied.")
         print("   Focus areas: check which domains scored lowest and target those.")
-    elif score >= 51:
+    elif effective >= 51:
         print("   Moderate — multiple threshold violations and AI fingerprints detected.")
         print("   Priority: fix identity/consistency deductions first (highest impact).")
-    elif score >= 31:
+    elif effective >= 31:
         print("   Below average — significant deductions across multiple domains.")
         print("   Action: run `uidetox review --parallel 10` for detailed domain breakdown.")
     else:
         print("   Heavy slop — critical failures in most domains.")
         print("   Action: address typography + color + identity deductions first.")
 
+    # Warn when raw vs effective gap is large
+    if score >= 90 and effective < 85:
+        print()
+        print("   ⚠️  Your raw score is high but the effective score is low.")
+        print("   This means pending issues or the objective cross-gate are dragging it down.")
+        print("   Clear the queue and re-scan before expecting 95+ blended.")
+
     # Show progression trend if history exists
     if len(history) >= 2:
         prev = history[-2]["score"]
         delta = score - prev
         if delta > 0:
-            print(f"\n   📈 Trend: +{delta} pts from previous score ({prev} → {score})")
+            print(f"\n   📈 Trend: +{delta} pts raw ({prev} → {score})")
         elif delta < 0:
-            print(f"\n   📉 Trend: {delta} pts from previous score ({prev} → {score})")
+            print(f"\n   📉 Trend: {delta} pts raw ({prev} → {score})")
         else:
-            print(f"\n   ➡️  No change from previous score ({prev})")
+            print(f"\n   ➡️  No change from previous raw score ({prev})")
 
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    print("Run `uidetox status` NOW to see the blended Design Score.")
-    print("DO NOT STOP. The loop continues automatically.")
+    print("Run `uidetox loop` NOW to continue the autonomous cycle.")
+    print("DO NOT STOP. DO NOT run individual commands — the loop handles everything.")
 
 
 def _run_parallel_review(parallel: int):
@@ -339,7 +397,8 @@ def _run_parallel_review(parallel: int):
     print(f"  4. Normalize: final_score = round(sum / {total_max} × 100)")
     print("  5. Run `uidetox check --fix` — verify code is clean (tsc → lint → format)")
     print("  6. Record the normalized score: `uidetox review --score <NORMALIZED>`")
-    print("  7. Run `uidetox status` to see the blended Design Score")
+    print("  7. Run `uidetox loop` to continue the autonomous cycle")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    print("After scoring, continue the autonomous loop. DO NOT STOP.")
+    print("After scoring, run `uidetox loop` immediately. DO NOT STOP.")
+    print("DO NOT run individual commands — the loop handles everything.")

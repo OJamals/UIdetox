@@ -2,6 +2,9 @@ import argparse
 import subprocess
 import sys
 
+from uidetox.state import load_state, load_config
+from uidetox.utils import compute_design_score, get_score_freshness
+
 
 def _detect_main_branch() -> str:
     """Detect the primary branch (main, master, develop) reliably.
@@ -54,6 +57,34 @@ def run(args: argparse.Namespace):
         sys.exit(1)
 
     target_branch = _detect_main_branch()
+
+    # ── Score validation gate ──
+    force = getattr(args, "force", False)
+    state = load_state()
+    config = load_config()
+    scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
+    blended = scores["blended_score"]
+    target = config.get("target_score", 95)
+    queue_size = len(state.get("issues", []))
+
+    if not force:
+        blocked = False
+        if blended < target:
+            print(f"⚠️  Design Score {blended}/100 has NOT reached target {target}.")
+            blocked = True
+        if queue_size > 0:
+            print(f"⚠️  Queue still has {queue_size} pending issue(s).")
+            blocked = True
+        if not freshness["target_ready"]:
+            print("⚠️  Score is stale — needs fresh scan + review.")
+            for r in freshness.get("reasons", [])[:3]:
+                print(f"     - {r}")
+            blocked = True
+        if blocked:
+            print()
+            print("Run `uidetox loop` to reach the target, or `uidetox finish --force` to override.")
+            sys.exit(1)
 
     # Check for uncommitted changes before switching branches
     try:
@@ -108,6 +139,25 @@ def run(args: argparse.Namespace):
         print("║  SESSION COMPLETE — UIdetox autonomous loop done.   ║")
         print("║  All fixes merged. Design quality target achieved.  ║")
         print("╚══════════════════════════════════════════════════════╝")
+        print()
+        # Final score summary
+        obj = scores.get("objective_score")
+        raw_sub = scores.get("subjective_score")
+        eff_sub = scores.get("effective_subjective")
+        print("  ─── Final Score Summary ───")
+        print(f"  Blended Design Score : {blended}/100  (target: {target})")
+        if obj is not None:
+            print(f"  Objective            : {obj}/100  (static analysis — 30%)")
+        if raw_sub is not None and eff_sub is not None:
+            if eff_sub != raw_sub:
+                print(f"  Subjective           : {eff_sub}/100 effective  (raw {raw_sub} → curve + penalties)")
+                print(f"  Compression          : -{raw_sub - eff_sub} pts")
+            else:
+                print(f"  Subjective           : {raw_sub}/100  (LLM review — 70%)")
+        elif raw_sub is not None:
+            print(f"  Subjective           : {raw_sub}/100  (LLM review — 70%)")
+        print(f"  Queue                : {queue_size} pending issue(s)")
+        print()
     except subprocess.CalledProcessError as e:
         print(f"❌ Error during finish operation: {e}")
         print(f"   You may need to manually resolve the merge and delete branch '{current_branch}'.")

@@ -34,4 +34,11 @@ The loop bootstraps the full 5-phase autonomous protocol. Windsurf will:
 5. Continue iterating until Design Score ≥ 95
 6. Squash-merge the session branch when complete
 
+Operating contract for Windsurf during the loop:
+- Treat UIdetox as a closed-loop system: `scan → fix → verify → rescan` until the score target is achieved.
+- Use the full toolchain, including terminal commands, screenshots/browser checks when relevant, parallel subagents, and MCP systems such as GitNexus.
+- You have permission for heavy lifting: large refactors and tiny detail fixes should both be executed with equal energy.
+- Fix root causes properly, not minimally.
+- If loop, scan, or subagent output gives concrete instructions, follow them exactly instead of replacing them with your own shortcut analysis.
+
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.

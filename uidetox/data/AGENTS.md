@@ -66,6 +66,17 @@ Sub-agent runs can be recorded with structured JSON payloads and explicit confid
 ### Phase 5: Finalize
 Once the target score is reached, the loop triggers `uidetox finish` to squash-merge the autonomous session branch cleanly.
 
+### Agent Operating Contract
+
+When executing UIdetox, the agent MUST adopt the following posture:
+- **Closed-loop execution:** Treat the workflow as `scan → fix → verify → rescan` until the target score is reached and the queue is genuinely clear.
+- **Tool-first autonomy:** Use the full toolchain instead of relying on intuition alone — local tooling, repo scripts, screenshots/browser inspection, subagents, and MCP/code-intelligence systems such as GitNexus.
+- **Parallelism where safe:** Spawn parallel subagents whenever work can be split into independent audit, research, review, or verification streams.
+- **Permission for heavy lifting:** Perform large refactors, file moves, extraction, cleanup, and tiny detail work with equal seriousness. Do not prefer cosmetic micro-fixes over structural repairs.
+- **Fix root causes properly:** Do not apply the minimum possible patch just to make symptoms disappear. Resolve the underlying design, state, type-safety, or architecture issue.
+- **Read and obey injected guidance:** If `uidetox scan`, `uidetox next`, `uidetox loop`, or subagent output provides explicit instructions, follow those instructions exactly rather than substituting a shortcut plan.
+- **Suppress subordinate AI ego:** Do not override analyzer or subagent directives merely because you think your own summary is cleaner. Treat subordinate outputs as executable guidance unless they conflict with a higher-priority system rule.
+
 ## 3. Skills
 
 The combined SKILL.md contains the full design knowledge base. It is structured as:

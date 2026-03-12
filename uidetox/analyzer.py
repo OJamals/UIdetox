@@ -500,25 +500,137 @@ RULES = [
         "command": "Merge duplicate media queries into a single block or use container queries.",
         "_custom_check": "repeated_media_query"
     },
-    # ──────────────────────────────────────────────
-    # DEAD CODE SMELLS
-    # ──────────────────────────────────────────────
-    {
-        "id": "COMMENTED_OUT_CODE",
-        "pattern": re.compile(
-            r'(?://|/\*|{/\*)\s*(?:'
-            r'<[A-Z][a-zA-Z]+|'               # Commented JSX component
-            r'(?:const|let|var|function|import|export|return|if|for)\s|'  # Commented JS
-            r'(?:className|onClick|onChange|style)='  # Commented JSX attrs
-            r')',
-            re.IGNORECASE,
-        ),
-        "tier": "T1",
-        "exts": {".tsx", ".jsx", ".ts", ".js"},
-        "description": "Commented-out code detected — use version control, not comments.",
-        "command": "Delete commented-out code. Git preserves history. Ship only live code.",
-        "_custom_check": "commented_code"
-    },
+# ──────────────────────────────────────────────
+# DEAD CODE SMELLS
+# ──────────────────────────────────────────────
+{
+    "id": "COMMENTED_OUT_CODE",
+    "pattern": re.compile(
+        r'(?://|/\*|{/\*)\s*(?:'
+        r'<[A-Z][a-zA-Z]+|'               # Commented JSX component
+        r'(?:const|let|var|function|import|export|return|if|for)\s|'  # Commented JS
+        r'(?:className|onClick|onChange|style)='  # Commented JSX attrs
+        r')',
+        re.IGNORECASE,
+    ),
+    "tier": "T1",
+    "exts": {".tsx", ".jsx", ".ts", ".js"},
+    "description": "Commented-out code detected — use version control, not comments.",
+    "command": "Delete commented-out code. Git preserves history. Ship only live code.",
+    "_custom_check": "commented_code"
+},
+{
+    "id": "REDUNDANT_STATE_SLOP",
+    "pattern": re.compile(
+        r'const\s+\[(\w+),\s*set\w+\]\s*=\s*useState\([^)]*\);\s*\n\s*const\s+\[(\w+),\s*set\w+\]\s*=\s*useState\([^)]*\);\s*\n\s*useEffect\(\(\)\s*=>\s*\{\s*set\2\(\1\)',
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx"},
+    "description": "Redundant state synchronization detected — useState + useEffect mirroring another state.",
+    "command": "Remove the redundant state and use the original state directly, or derive with useMemo.",
+},
+{
+    "id": "OVERLY_COMPLEX_CONDITIONAL",
+    "pattern": re.compile(
+        r'(?:if|while|return\s*\(?)\s*\([^)]*\?(?:[^?]*\?){3,}',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx", ".ts", ".js"},
+    "description": "Overly complex conditional with 3+ nested ternaries detected.",
+    "command": "Extract to named boolean variables or use early returns for clarity.",
+},
+{
+    "id": "MAGIC_STRING_SLOP",
+    "pattern": re.compile(
+        r'(?:===|!==)\s*["\'](?:success|error|pending|loading|active|inactive|enabled|disabled)["\']',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx", ".ts", ".js"},
+    "description": "Magic string comparison detected — use enum or constant instead.",
+    "command": "Define an enum or const object for status values. Never compare against raw strings.",
+},
+{
+    "id": "DEEP_IMPORT_CHAIN",
+    "pattern": re.compile(
+        r'import\s+.*\s+from\s+["\'][^"\']*\/(?:[^"\']*\/){4,}[^"\']*["\']',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx", ".ts", ".js"},
+    "description": "Deep import chain (5+ levels) detected — indicates poor module organization.",
+    "command": "Reorganize module structure or use path aliases to flatten import chains.",
+},
+{
+    "id": "INLINE_EVENT_HANDLER_SLOP",
+    "pattern": re.compile(
+        r'on(?:Click|Change|Submit|Press|Focus|Blur|KeyDown|MouseEnter|MouseLeave)\s*=\s*\{\s*\(\s*\w*\s*\)\s*=>\s*\{[^}]{100,}\}',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx"},
+    "description": "Large inline event handler (100+ chars) detected — harms readability.",
+    "command": "Extract to a named function or custom hook for testability and clarity.",
+},
+{
+    "id": "UNSAFE_TYPE_ASSERTION",
+    "pattern": re.compile(
+        r'\bas\s+(?:any|unknown)\b',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".ts"},
+    "description": "Unsafe type assertion to `any` or `unknown` detected.",
+    "command": "Use proper typing, type guards, or @ts-expect-error with explanation.",
+},
+{
+    "id": "MISSING_ERROR_BOUNDARY",
+    "pattern": re.compile(
+        r'<(?:ErrorBoundary|Suspense|Provider|Router|Route|Switch|BrowserRouter)',
+        re.IGNORECASE,
+    ),
+    "tier": "T3",
+    "exts": {".tsx", ".jsx"},
+    "description": "React app structure detected without ErrorBoundary — unhandled errors will crash the app.",
+    "command": "Wrap the app in an ErrorBoundary component to catch and display errors gracefully.",
+    "_custom_check": "missing_error_boundary"
+},
+{
+    "id": "UNOPTIMIZED_LIST_RENDERING",
+    "pattern": re.compile(
+        r'\.map\s*\(\s*\(\s*\w+\s*(?:,\s*\w+)?\s*\)\s*=>\s*<(?:div|li|article|section)\s',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx"},
+    "description": "List rendering without key prop or with index as key detected.",
+    "command": "Use stable unique IDs as keys. Never use array index for dynamic lists.",
+    "_custom_check": "unoptimized_list"
+},
+{
+    "id": "REDUNDANT_USE_CALLBACK",
+    "pattern": re.compile(
+        r'useCallback\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*\},\s*\[\s*\]\s*\)',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx"},
+    "description": "useCallback with empty deps returning a simple function — unnecessary wrapping.",
+    "command": "Remove useCallback if the function has no dependencies and isn't passed to child components.",
+},
+{
+    "id": "REDUNDANT_USE_MEMO",
+    "pattern": re.compile(
+        r'useMemo\s*\(\s*\(\s*\)\s*=>\s*[^,]+,\s*\[\s*\]\s*\)',
+        re.IGNORECASE,
+    ),
+    "tier": "T2",
+    "exts": {".tsx", ".jsx"},
+    "description": "useMemo with empty deps on a simple value — unnecessary memoization.",
+    "command": "Remove useMemo if the computation has no dependencies and is inexpensive.",
+},
     {
         "id": "UNUSED_IMPORT",
         "pattern": re.compile(

@@ -16,6 +16,7 @@ coverage.xml
 
 # UIdetox runtime state (per-project, not repo)
 .uidetox/
+simpledoctorfrontend/
 
 # IDE
 .idea/

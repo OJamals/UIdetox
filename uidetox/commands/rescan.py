@@ -15,7 +15,7 @@ from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import load_state, load_config, clear_issues, batch_add_issues, increment_scans
 from uidetox.history import save_run_snapshot
-from uidetox.utils import compute_design_score
+from uidetox.utils import compute_design_score, get_score_freshness
 from uidetox.memory import log_progress
 
 
@@ -157,6 +157,7 @@ def run(args: argparse.Namespace):
     log_progress("rescan", f"Rescanned {path}: {queued_count} issues queued, {dedup_skipped} deduped, {escalated_count} escalated")
     state = load_state()
     scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
     score = scores["blended_score"]
     if score is None:
         score = 0
@@ -167,16 +168,28 @@ def run(args: argparse.Namespace):
     filled = max(0, score // 5)
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score: [{bar}] {score}/100  (target: {target})")
+    # Score breakdown
+    obj = scores.get("objective_score")
+    raw_sub = scores.get("subjective_score")
+    eff_sub = scores.get("effective_subjective")
+    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+        print(f"    Objective  : {obj}/100  |  Subjective: {eff_sub}/100 effective (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
+    elif raw_sub is not None and obj is not None:
+        print(f"    Objective  : {obj}/100  |  Subjective: {raw_sub}/100")
     print(f"  Queue: {queue_size} issue(s)")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    if score >= target and queue_size == 0:
+    if score >= target and queue_size == 0 and freshness["target_ready"]:
         print(f"TARGET REACHED (score {score} >= {target}, queue empty).")
-        print("Run `uidetox finish` NOW.")
+        print("Run `uidetox loop` NOW — it will finish the session.")
     elif queue_size > 0:
-        print(f"Queue refilled with {queue_size} issue(s). Run `uidetox next` NOW.")
-        print("DO NOT STOP. Continue the autonomous fix loop immediately.")
+        print(f"Queue refilled with {queue_size} issue(s).")
+        print("Run `uidetox loop` NOW — it will fix them automatically.")
     else:
-        print("Queue empty. Complete subjective review, then `uidetox review --score <N>`.")
-        print("Then run `uidetox status` to check if target is met.")
+        print("Queue empty, but finish is blocked until objective + subjective analysis are fresh.")
+        if freshness.get("reasons"):
+            for reason in freshness["reasons"][:2]:
+                print(f"  - {reason}")
+        print("Run `uidetox loop` NOW — it will run the review cycle.")
+    print("DO NOT STOP. DO NOT run individual commands — the loop handles everything.")
     print()

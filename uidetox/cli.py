@@ -144,6 +144,7 @@ def parse_args(args_list=None):
 
     # Command: finish
     finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
+    finish_parser.add_argument("--force", action="store_true", help="Bypass score validation gate (merge even if target not met)")
 
     # Command: subagent
     sub_parser = subparsers.add_parser("subagent", help="Manage sub-agent sessions and generate stage prompts")

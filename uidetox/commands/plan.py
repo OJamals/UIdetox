@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score, categorize_issue
+from uidetox.utils import compute_design_score, get_score_freshness, categorize_issue
 
 # Effort estimate per tier (minutes)
 _TIER_EFFORT = {"T1": 2, "T2": 8, "T3": 20, "T4": 45}
@@ -130,6 +130,7 @@ def run(args: argparse.Namespace):
 
     # ---- Score context ----
     scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
     target = config.get("target_score", 95)
     blended = scores["blended_score"]
     if blended is None:
@@ -138,6 +139,20 @@ def run(args: argparse.Namespace):
     filled = max(0, blended // 5)
     bar = "█" * filled + "░" * (20 - filled)
     print(f"  Current: [{bar}] {blended}/100  (target: {target})")
+    # Score breakdown
+    obj = scores.get("objective_score")
+    raw_sub = scores.get("subjective_score")
+    eff_sub = scores.get("effective_subjective")
+    if obj is not None:
+        print(f"  Objective  : {obj}/100")
+    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+        print(f"  Subjective : {eff_sub}/100 effective (raw {raw_sub}, Δ-{raw_sub - eff_sub} curve)")
+    elif raw_sub is not None:
+        print(f"  Subjective : {raw_sub}/100")
+    if not freshness["target_ready"]:
+        print("  ⚠️  Score is STALE:")
+        for r in freshness.get("reasons", [])[:3]:
+            print(f"     - {r}")
     if blended < target:
         gap = target - blended
         print(f"  Gap: {gap} points to target")

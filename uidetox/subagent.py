@@ -431,11 +431,58 @@ REVIEW_DOMAINS: list[dict] = [
             "-1 pt: hover relied upon for core functionality",
         ],
     },
+    # ── Cross-Cutting Perfection Gate ─────────────────────────────
+    #
+    # This domain is NOT scored independently — it acts as a multiplier
+    # gate that caps the final normalized score.  If ANY gate condition
+    # fails, the reviewer MUST cap the final score at 90 maximum.
+    # If 2+ conditions fail, cap at 85.  Only when ALL conditions pass
+    # can the final score exceed 90.
+    {
+        "name": "perfection_gate",
+        "label": "Perfection Gate (ceiling enforcer)",
+        "wave": 0,  # evaluated last, across all waves
+        "references": [],
+        "rubric": "GATE — not scored; caps total when conditions fail",
+        "max_score": 0,  # no additive points
+        "focus": "Cross-cutting quality gates that MUST all pass before the "
+                 "final score can exceed 90.  These are non-negotiable "
+                 "perfection requirements — a single failure here means "
+                 "the codebase is NOT perfect, regardless of domain scores.",
+        "checklist": [
+            "ZERO pending issues in `uidetox status` queue",
+            "ZERO lint errors or TypeScript errors (`uidetox check` passes clean)",
+            "ZERO console.log / console.warn remaining in production code",
+            "ZERO TODO/FIXME comments remaining",
+            "ZERO commented-out code blocks",
+            "ZERO unused imports",
+            "ZERO AI slop fingerprints (Inter font, purple gradient, glassmorphism combo)",
+            "ALL interactive elements have hover + focus + active + disabled states",
+            "ALL images have alt text (decorative → alt='')",
+            "ALL forms have visible labels (not placeholder-as-label)",
+            "prefers-reduced-motion media query present",
+            "prefers-color-scheme media query present (or CSS custom-property toggle)",
+            "Skip-to-content link present",
+            "Favicon present",
+            "Meta tags present (title, description, og:image)",
+            "Custom 404 page exists",
+            "No hardcoded px for font sizes (rem/em only)",
+        ],
+        "thresholds": {},
+        "deductions": [
+            "GATE FAIL: cap at 90 if 1 condition fails",
+            "GATE FAIL: cap at 85 if 2-3 conditions fail",
+            "GATE FAIL: cap at 80 if 4+ conditions fail",
+        ],
+    },
 ]
 
-# Quick lookup: how many domains per wave
+# Quick lookup: how many domains per wave (excludes perfection gate wave 0)
 REVIEW_WAVE_1 = [d for d in REVIEW_DOMAINS if d.get("wave") == 1]
 REVIEW_WAVE_2 = [d for d in REVIEW_DOMAINS if d.get("wave") == 2]
+# Scored domains only (excludes the perfection gate which has max_score=0)
+SCORED_REVIEW_DOMAINS = [d for d in REVIEW_DOMAINS if d.get("max_score", 0) > 0]
+PERFECTION_GATE = next((d for d in REVIEW_DOMAINS if d.get("name") == "perfection_gate"), None)
 
 
 def _coerce_parallel(parallel: int) -> int:
@@ -689,55 +736,80 @@ def record_result(session_id: str, result: dict) -> bool:
     """
     session_dir = _sessions_dir() / f"session_{session_id}"
     if not session_dir.exists():
+        logger.warning(f"Session directory not found: {session_dir}")
         return False
 
-    # Write result atomically
-    _atomic_write_json(session_dir / "result.json", result, dir=session_dir)
-
-    # Update meta
-    meta_path = session_dir / "meta.json"
     try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        # Corrupt or missing meta.json — rebuild minimal metadata
-        meta = {
-            "session_id": session_id,
-            "stage": "unknown",
-            "status": "pending",
-            "created_at": now_iso(),
-            "completed_at": None,
-            "_recovered": True,
-            "_recovery_reason": str(exc),
-        }
+        # Write result atomically
+        _atomic_write_json(session_dir / "result.json", result, dir=session_dir)
 
-    # Parse confidence score if provided (multiple formats supported)
-    confidence = _extract_confidence(result)
+        # Update meta
+        meta_path = session_dir / "meta.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # Corrupt or missing meta.json — rebuild minimal metadata
+            meta = {
+                "session_id": session_id,
+                "stage": "unknown",
+                "status": "pending",
+                "created_at": now_iso(),
+                "completed_at": None,
+                "_recovered": True,
+                "_recovery_reason": str(exc),
+            }
 
-    # Determine status based on confidence thresholds
-    if confidence < 0.6:
-        meta["status"] = "needs_human_review"
-        meta["review_reason"] = "Very low confidence — agent is uncertain about fix quality"
-    elif confidence < 0.85:
-        meta["status"] = "completed_with_warnings"
-        meta["review_reason"] = "Below confidence threshold — recommend verification"
-    else:
-        meta["status"] = "completed"
-        meta["review_reason"] = None
+        # Parse confidence score if provided (multiple formats supported)
+        confidence = _extract_confidence(result)
 
-    meta["confidence"] = confidence
-    meta["completed_at"] = now_iso()
+        # Determine status based on confidence thresholds
+        if confidence < 0.6:
+            meta["status"] = "needs_human_review"
+            meta["review_reason"] = "Very low confidence — agent is uncertain about fix quality"
+        elif confidence < 0.85:
+            meta["status"] = "completed_with_warnings"
+            meta["review_reason"] = "Below confidence threshold — recommend verification"
+        else:
+            meta["status"] = "completed"
+            meta["review_reason"] = None
 
-    _atomic_write_json(meta_path, meta, dir=session_dir)
+        meta["confidence"] = confidence
+        meta["completed_at"] = now_iso()
 
-    review_request_path = session_dir / "review_request.json"
+        # Track issues found and fixed for progress metrics
+        if "issues_found" in result:
+            meta["issues_found"] = result["issues_found"]
+        if "issues_fixed" in result:
+            meta["issues_fixed"] = result["issues_fixed"]
+        if "files_modified" in result:
+            meta["files_modified"] = result["files_modified"]
 
-    # Flag low-confidence results for human review
-    if confidence < 0.85:
-        _flag_for_review(session_id, meta, confidence)
-    elif review_request_path.exists():
-        review_request_path.unlink(missing_ok=True)
+        _atomic_write_json(meta_path, meta, dir=session_dir)
 
-    return True
+        review_request_path = session_dir / "review_request.json"
+
+        # Flag low-confidence results for human review
+        if confidence < 0.85:
+            _flag_for_review(session_id, meta, confidence)
+        elif review_request_path.exists():
+            review_request_path.unlink(missing_ok=True)
+
+        # Log to memory for persistence
+        try:
+            from uidetox.memory import add_note
+            add_note(
+                f"[SESSION {session_id}] Stage: {meta.get('stage')}, "
+                f"Confidence: {confidence:.2f}, Status: {meta['status']}, "
+                f"Issues found: {meta.get('issues_found', 0)}, "
+                f"Issues fixed: {meta.get('issues_fixed', 0)}"
+            )
+        except Exception:
+            pass  # Non-critical
+
+        return True
+    except Exception as e:
+        logger.error(f"Failed to record session result for {session_id}: {e}")
+        return False
 
 
 def _extract_confidence(result: dict) -> float:

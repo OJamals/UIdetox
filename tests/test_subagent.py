@@ -6,6 +6,8 @@ from uidetox import state as state_module
 from uidetox.state import ensure_uidetox_dir
 from uidetox.subagent import (
     REVIEW_DOMAINS,
+    SCORED_REVIEW_DOMAINS,
+    PERFECTION_GATE,
     REVIEW_WAVE_1,
     REVIEW_WAVE_2,
     _issue_group_workload,
@@ -125,10 +127,14 @@ def test_record_result_clears_stale_review_request_when_confidence_recovers():
 
 
 class TestReviewDomains:
-    """Verify the 10 review domains (2 waves of 5) and parallel prompt generation."""
+    """Verify the 10 scored review domains (2 waves of 5) plus perfection gate."""
 
-    def test_review_domains_has_ten_entries(self):
-        assert len(REVIEW_DOMAINS) == 10
+    def test_review_domains_has_eleven_entries(self):
+        """10 scored domains + 1 perfection gate = 11 total."""
+        assert len(REVIEW_DOMAINS) == 11
+
+    def test_scored_review_domains_has_ten_entries(self):
+        assert len(SCORED_REVIEW_DOMAINS) == 10
 
     def test_wave_1_has_five_entries(self):
         assert len(REVIEW_WAVE_1) == 5
@@ -136,9 +142,9 @@ class TestReviewDomains:
     def test_wave_2_has_five_entries(self):
         assert len(REVIEW_WAVE_2) == 5
 
-    def test_waves_cover_all_domains(self):
-        """Wave 1 + Wave 2 should equal all domains."""
-        assert len(REVIEW_WAVE_1) + len(REVIEW_WAVE_2) == len(REVIEW_DOMAINS)
+    def test_waves_cover_all_scored_domains(self):
+        """Wave 1 + Wave 2 should equal all scored domains."""
+        assert len(REVIEW_WAVE_1) + len(REVIEW_WAVE_2) == len(SCORED_REVIEW_DOMAINS)
 
     def test_each_domain_has_required_keys(self):
         required = {"name", "label", "references", "rubric", "focus", "wave",
@@ -146,24 +152,31 @@ class TestReviewDomains:
         for domain in REVIEW_DOMAINS:
             assert required <= set(domain.keys()), f"Missing keys in {domain.get('name')}"
 
-    def test_each_domain_has_positive_max_score(self):
-        for domain in REVIEW_DOMAINS:
+    def test_perfection_gate_exists(self):
+        assert PERFECTION_GATE is not None
+        assert PERFECTION_GATE["name"] == "perfection_gate"
+        assert PERFECTION_GATE["max_score"] == 0
+        assert PERFECTION_GATE["wave"] == 0
+        assert len(PERFECTION_GATE["checklist"]) >= 10
+
+    def test_each_scored_domain_has_positive_max_score(self):
+        for domain in SCORED_REVIEW_DOMAINS:
             assert domain.get("max_score", 0) > 0, f"{domain['name']} has no max_score"
 
-    def test_domain_max_scores_sum_to_expected(self):
-        """All domain max scores should sum to 100 for proper normalization."""
-        total = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+    def test_scored_domain_max_scores_sum_to_expected(self):
+        """All scored domain max scores should sum to 100 for proper normalization."""
+        total = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
         assert total == 100, f"Total max scores = {total}, expected 100"
 
-    def test_each_domain_has_non_empty_checklist(self):
-        for domain in REVIEW_DOMAINS:
+    def test_each_scored_domain_has_non_empty_checklist(self):
+        for domain in SCORED_REVIEW_DOMAINS:
             checklist = domain.get("checklist", [])
             assert len(checklist) >= 3, (
                 f"{domain['name']} has only {len(checklist)} checklist items"
             )
 
-    def test_each_domain_has_deductions(self):
-        for domain in REVIEW_DOMAINS:
+    def test_each_scored_domain_has_deductions(self):
+        for domain in SCORED_REVIEW_DOMAINS:
             deductions = domain.get("deductions", [])
             assert len(deductions) >= 2, (
                 f"{domain['name']} has only {len(deductions)} deduction rules"
@@ -266,9 +279,17 @@ class TestScoringWeight:
             "subjective": {"score": 80},
         }
         scores = compute_design_score(state)
-        # Objective = 100 (all resolved), Subjective = 80
-        # Blended = 100 * 0.3 + 80 * 0.7 = 30 + 56 = 86
-        assert scores["blended_score"] == 86
+        # Objective = 100 (all resolved), Subjective raw = 80
+        # Curve compresses raw 80: effective ≈ 74
+        # Blended = 100 * 0.3 + effective * 0.7 < 86
+        assert scores["blended_score"] < 86, (
+            f"Curve should compress: raw sub 80 -> effective "
+            f"{scores.get('effective_subjective')}, blended {scores['blended_score']}"
+        )
+        # But still reasonable (not catastrophically low)
+        assert scores["blended_score"] >= 75
+        # Objective should still be 100
+        assert scores["objective_score"] == 100
         assert scores["objective_score"] == 100
         assert scores["subjective_score"] == 80
 

@@ -1,13 +1,16 @@
-"""Check command: runs tsc → lint → format in sequence."""
+"""Check command: runs tsc → lint → format in sequence with retry logic."""
 
 import argparse
 import subprocess
+import logging
 from uidetox.tooling import detect_all  # type: ignore
-from uidetox.state import load_config, save_config, get_project_root  # type: ignore
+from uidetox.state import load_config, save_config, get_project_root, log_error  # type: ignore
 from uidetox.utils import run_tool  # type: ignore
 from uidetox.commands import tsc as tsc_cmd  # type: ignore
 from uidetox.commands import lint as lint_cmd  # type: ignore
 from uidetox.commands import format_cmd  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 # Patterns that indicate a formatter/linter actually changed files.
 # Avoids false positives from output like "0 files formatted".
@@ -20,10 +23,40 @@ _CHANGE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Retry configuration
+_MAX_RETRIES = 2
+_RETRY_DELAY = 1  # seconds
+
 
 def _tool_made_changes(output: str) -> bool:
     """Return True if tool output indicates files were actually modified."""
     return bool(_CHANGE_PATTERNS.search(output))
+
+
+def _is_recoverable_error(output: str) -> bool:
+    """Determine if an error is recoverable via retry.
+    
+    Recoverable errors include:
+    - File locks / resource busy
+    - Network timeouts
+    - Temporary file system issues
+    - Process conflicts
+    """
+    recoverable_patterns = [
+        r'EBUSY',
+        r'resource busy',
+        r'timed?\s*out',
+        r'timeout',
+        r'lock\s*(?:file|resource)',
+        r'cannot\s+(?:access|open|read|write).*(?:busy|lock)',
+        r'process\s+(?:alive|running|exists)',
+        r'EPERM',
+        r'EAGAIN',
+        r'EMFILE',  # Too many open files
+        r'ENFILE',  # File table overflow
+    ]
+    pattern = '|'.join(recoverable_patterns)
+    return bool(re.search(pattern, output, re.IGNORECASE))
 
 
 def _git_changed_paths(project_root: str) -> set[str]:
@@ -95,21 +128,71 @@ def run(args: argparse.Namespace):
                 seen_cmds.add(cmd)
                 deduped_tools.append(tool)
 
-        for iteration in range(1, 4):
+        for iteration in range(1, 3):
             print(f"Iteration {iteration}...")
             changed = False
+            iteration_errors = []
 
             for tool in deduped_tools:
                 cmd = tool.get("fix_cmd")
+                tool_name = tool.get("name", "unknown")
                 if not cmd:
                     continue
-                try:
-                    res = run_tool(cmd, cwd=project_root)
-                    combined = (res.stdout + res.stderr).lower()
-                    if res.returncode != 0 or _tool_made_changes(combined):
-                        changed = True
-                except FileNotFoundError:
-                    print(f"Warning: Command not found ({cmd})")
+                
+                # Retry logic for transient failures
+                for attempt in range(1, _MAX_RETRIES + 1):
+                    try:
+                        res = run_tool(cmd, cwd=project_root)
+                        combined = (res.stdout + res.stderr).lower()
+                        
+                        if res.returncode != 0:
+                            # Check if this is a recoverable error
+                            if _is_recoverable_error(combined):
+                                if attempt < _MAX_RETRIES:
+                                    logger.warning(f"{tool_name} failed (attempt {attempt}/{_MAX_RETRIES}), retrying...")
+                                    import time
+                                    time.sleep(_RETRY_DELAY)
+                                    continue
+                                else:
+                                    iteration_errors.append(f"{tool_name}: max retries exceeded")
+                                    log_error("check_fix", f"{tool_name} failed after {_MAX_RETRIES} attempts", {
+                                        "command": cmd,
+                                        "output": combined[:500],
+                                    })
+                            else:
+                                # Non-recoverable error
+                                iteration_errors.append(f"{tool_name}: {combined[:200]}")
+                                log_error("check_fix", f"{tool_name} non-recoverable error", {
+                                    "command": cmd,
+                                    "output": combined[:500],
+                                })
+                        elif _tool_made_changes(combined):
+                            changed = True
+                            logger.info(f"{tool_name} made changes")
+                        
+                        break  # Success or non-retryable failure
+                    except FileNotFoundError:
+                        print(f"Warning: Command not found ({cmd})")
+                        log_error("check_fix", f"Command not found: {cmd}", {"tool": tool_name})
+                        break
+                    except Exception as e:
+                        if attempt < _MAX_RETRIES:
+                            logger.warning(f"{tool_name} exception (attempt {attempt}/{_MAX_RETRIES}): {e}")
+                            import time
+                            time.sleep(_RETRY_DELAY)
+                        else:
+                            iteration_errors.append(f"{tool_name}: {str(e)}")
+                            log_error("check_fix", f"{tool_name} exception after retries", {
+                                "command": cmd,
+                                "error": str(e),
+                            })
+                            break
+
+            if iteration_errors:
+                print(f"  ⚠️  Errors in iteration {iteration}:")
+                for err in iteration_errors:
+                    print(f"    - {err}")
+                print()
 
             if not changed:
                 print("Code is clean or no more auto-fixes available.\n")
@@ -178,7 +261,6 @@ def run(args: argparse.Namespace):
     print(f"Ran {steps_run} mechanical check(s).")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    print("Mechanical checks complete. Continue the autonomous loop:")
-    print("  → Run `uidetox next` to fix the next batch of issues.")
-    print("  → Or run `uidetox loop` to re-enter the full autonomous cycle.")
-    print("DO NOT STOP.")
+    print("Mechanical checks complete. Re-enter the autonomous loop:")
+    print("  → Run `uidetox loop` to continue the autonomous cycle.")
+    print("DO NOT STOP. DO NOT run `uidetox next` directly — the loop handles it.")

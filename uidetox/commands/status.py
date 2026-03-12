@@ -3,7 +3,7 @@
 import argparse
 import json
 from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score, categorize_issue, ISSUE_CATEGORY_KEYWORDS
+from uidetox.utils import compute_design_score, get_score_freshness, categorize_issue, ISSUE_CATEGORY_KEYWORDS
 from uidetox.memory import get_session
 
 
@@ -62,6 +62,7 @@ def run(args: argparse.Namespace):
 
     # Centralized scoring
     scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
     score = scores["blended_score"]
     objective_score = scores["objective_score"]
     subjective_score = scores["subjective_score"]
@@ -100,8 +101,17 @@ def run(args: argparse.Namespace):
     else:
         print(f"\n  Design Score : [{bar}] {score}/100")
     if subjective_score is not None:
+        effective_sub = scores.get("effective_subjective")
         print(f"    Objective  : {objective_score}/100  (static analysis — 30% weight)")
-        print(f"    Subjective : {subjective_score}/100  (LLM review — 70% weight)")
+        if effective_sub is not None and effective_sub != subjective_score:
+            print(f"    Subjective : {effective_sub}/100 effective  (raw {subjective_score} → curve + penalties)")
+        else:
+            print(f"    Subjective : {subjective_score}/100  (LLM review — 70% weight)")
+        if effective_sub is not None and subjective_score is not None and subjective_score > effective_sub:
+            delta = subjective_score - effective_sub
+            print(f"    Compression: -{delta} pts  (diminishing-returns curve + objective anchoring)")
+        if len(issues) == 0 and not freshness["target_ready"]:
+            print("    Score state: STALE — re-run loop before trusting target reached")
     elif scans_run == 0 and scores["total_slop"] == 0:
         print(f"  (Baseline — run 'uidetox scan' for an accurate score)")
     else:
@@ -184,8 +194,10 @@ def run(args: argparse.Namespace):
                     print(f"                 ^ {_CATEGORY_HINTS[cat_name]}")
 
     # Verdict — use display_score for safe comparisons (never None)
-    if display_score >= 95 and len(issues) == 0:
+    if display_score >= 95 and len(issues) == 0 and freshness["target_ready"]:
         print("\n  EXCELLENT — Interface is clean of AI slop. Queue is empty.")
+    elif display_score >= 95 and len(issues) == 0:
+        print("\n  Score is high, but it is stale — objective and/or subjective analysis must re-run.")
     elif display_score >= 95:
         print("\n  Score is high, but some issues remain in the queue.")
     elif display_score >= 80:
@@ -201,14 +213,22 @@ def run(args: argparse.Namespace):
     target = config.get("target_score", 95)
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    if display_score >= target and len(issues) == 0:
+    if display_score >= target and len(issues) == 0 and freshness["target_ready"]:
         print(f"TARGET REACHED (score {display_score} >= {target}, queue empty).")
-        print("Run `uidetox finish` to complete the session.")
+        print("Run `uidetox loop` — it will finish the session.")
+    elif display_score >= target and len(issues) == 0:
+        print(f"Score: {display_score} (>= {target}), queue empty, but finish is blocked.")
+        print("Run `uidetox loop` NOW — it will refresh objective + subjective analysis.")
+        if freshness.get("reasons"):
+            for reason in freshness["reasons"][:2]:
+                print(f"  - {reason}")
     elif len(issues) == 0:
         print(f"Queue empty but score {display_score} < {target}.")
-        print("DO NOT STOP. Run `uidetox rescan` to discover deeper issues.")
-        print("Then run review skills: `uidetox critique .` and `uidetox polish .`")
+        print("Run `uidetox loop` NOW — it will run objective + subjective analysis.")
+        if freshness.get("reasons"):
+            for reason in freshness["reasons"][:2]:
+                print(f"  - {reason}")
     else:
         print(f"Score: {display_score}, Queue: {len(issues)} issue(s).")
-        print("DO NOT STOP. Run `uidetox next` to continue fixing.")
-        print("The loop is fully autonomous — keep executing.")
+        print("Run `uidetox loop` NOW — it will fix them automatically.")
+    print("DO NOT STOP. DO NOT run individual commands — the loop handles everything.")

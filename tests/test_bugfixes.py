@@ -15,7 +15,71 @@ Covers:
 import pytest
 from pathlib import Path
 
-from uidetox.utils import compute_design_score
+from uidetox.utils import compute_design_score, _apply_subjective_curve
+
+
+class TestSubjectiveCurve:
+    """Verify the diminishing-returns curve and objective-anchored penalties."""
+
+    def test_zero_returns_zero(self):
+        assert _apply_subjective_curve(0, []) == 0
+
+    def test_below_threshold_is_linear(self):
+        """Scores at or below 70 pass through unchanged."""
+        assert _apply_subjective_curve(50, []) == 50
+        assert _apply_subjective_curve(70, []) == 70
+
+    def test_raw_100_maps_to_100(self):
+        """Only a raw 100 with no pending issues maps to effective 100."""
+        assert _apply_subjective_curve(100, []) == 100
+
+    def test_raw_90_compressed_below_90(self):
+        """Raw 90 should be compressed below 90 by the curve."""
+        effective = _apply_subjective_curve(90, [])
+        assert effective < 90, f"Expected < 90, got {effective}"
+        assert effective >= 80, f"Expected >= 80, got {effective}"
+
+    def test_raw_95_compressed_below_95(self):
+        """Raw 95 should be compressed below 95."""
+        effective = _apply_subjective_curve(95, [])
+        assert effective < 95, f"Expected < 95, got {effective}"
+        assert effective >= 88, f"Expected >= 88, got {effective}"
+
+    def test_pending_issues_deduct(self):
+        """Pending issues cause automatic deductions."""
+        no_issues = _apply_subjective_curve(85, [])
+        with_t1 = _apply_subjective_curve(85, [{"tier": "T1"}])
+        with_t4 = _apply_subjective_curve(85, [{"tier": "T4"}])
+        assert with_t1 < no_issues, "T1 issue should reduce score"
+        # T4 penalty is only 0.5 — may round to same int at some raw values
+        assert with_t4 <= no_issues, "T4 issue should not INCREASE score"
+        assert with_t1 < with_t4, "T1 deduction should be larger than T4"
+
+    def test_pending_t2_deducts_meaningfully(self):
+        """A T2 issue (2pt penalty) should clearly reduce the effective score."""
+        no_issues = _apply_subjective_curve(90, [])
+        with_t2 = _apply_subjective_curve(90, [{"tier": "T2"}])
+        assert with_t2 < no_issues, "T2 issue should reduce score"
+
+    def test_pending_issues_cap_at_85(self):
+        """With any pending issues, effective is capped at 85."""
+        effective = _apply_subjective_curve(100, [{"tier": "T4"}])
+        assert effective <= 85, f"Expected <= 85 with pending issues, got {effective}"
+
+    def test_many_issues_capped_penalty(self):
+        """Penalty from issues should be capped (not unbounded)."""
+        many_issues = [{"tier": "T1"} for _ in range(50)]
+        effective = _apply_subjective_curve(100, many_issues)
+        assert effective >= 0, "Score should never go negative"
+
+    def test_curve_is_monotonic(self):
+        """Higher raw scores should always map to equal or higher effective scores."""
+        for raw in range(1, 100):
+            lower = _apply_subjective_curve(raw, [])
+            higher = _apply_subjective_curve(raw + 1, [])
+            assert higher >= lower, (
+                f"Curve not monotonic: raw {raw}→{lower}, raw {raw+1}→{higher}"
+            )
 
 
 class TestTierWeightsFix:
@@ -60,6 +124,37 @@ class TestTierWeightsFix:
         }
         scores = compute_design_score(state)
         assert scores["blended_score"] == 100
+
+    def test_effective_subjective_in_output(self):
+        """compute_design_score should include effective_subjective."""
+        state = {
+            "issues": [],
+            "resolved": [{"tier": "T1"}],
+            "stats": {"scans_run": 1},
+            "subjective": {"score": 90},
+        }
+        scores = compute_design_score(state)
+        assert "effective_subjective" in scores
+        # With no pending issues, effective should be curve-compressed < raw
+        assert scores["effective_subjective"] is not None
+        assert scores["effective_subjective"] <= 90
+        assert scores["subjective_score"] == 90
+
+    def test_blended_uses_effective_not_raw(self):
+        """Blended score should use effective (post-curve) subjective, not raw."""
+        state = {
+            "issues": [],
+            "resolved": [{"tier": "T1"}],
+            "stats": {"scans_run": 1},
+            "subjective": {"score": 95},
+        }
+        scores = compute_design_score(state)
+        # If blended used raw 95, it would be: 100*0.3 + 95*0.7 = 96
+        # With curve, effective < 95, so blended should be < 96
+        assert scores["blended_score"] < 96, (
+            f"Blended {scores['blended_score']} should be < 96 "
+            f"(effective_sub={scores['effective_subjective']})"
+        )
 
     def test_no_scans_returns_none(self):
         state = {"issues": [], "resolved": [], "stats": {"scans_run": 0}}

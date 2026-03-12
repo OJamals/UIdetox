@@ -11,7 +11,7 @@ from pathlib import Path
 
 from uidetox.state import batch_remove_issues, get_issue, load_state, load_config, get_project_root
 from uidetox.memory import save_session, log_progress
-from uidetox.utils import run_tool, compute_design_score
+from uidetox.utils import run_tool, compute_design_score, get_score_freshness
 
 
 def _run_tool_step(*, cmd: str, label: str, action_label: str,
@@ -252,6 +252,7 @@ def run(args: argparse.Namespace):
 
     # ---- Progress snapshot ----
     scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
     target = config.get("target_score", 95)
     blended = scores["blended_score"]
     if blended is None:
@@ -259,6 +260,14 @@ def run(args: argparse.Namespace):
     filled = max(0, blended // 5)
     bar = "█" * filled + "░" * (20 - filled)
     print(f"   Score : [{bar}] {blended}/100  (target: {target})")
+    # Score breakdown
+    raw_sub = scores.get("subjective_score")
+    eff_sub = scores.get("effective_subjective")
+    obj = scores.get("objective_score")
+    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+        print(f"   Detail: obj={obj} | sub={eff_sub}eff (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
+    elif raw_sub is not None and obj is not None:
+        print(f"   Detail: obj={obj} | sub={raw_sub}")
     print(f"   Queue : {remaining} remaining | {resolved_total} resolved total")
 
     # ---- Remaining issues in same component ----
@@ -299,16 +308,19 @@ def run(args: argparse.Namespace):
     # ---- Agent loop signal ----
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    print("DO NOT STOP. Proceed immediately:")
+    print("DO NOT STOP. Run `uidetox loop` NOW.")
     if remaining_in_component:
-        print(f"  → {len(remaining_in_component)} more issues in {component}. Run `uidetox next` NOW.")
+        print(f"  → {len(remaining_in_component)} more issues in {component} — loop will fix them.")
     elif remaining > 0:
-        print(f"  → {remaining} issues in other components. Run `uidetox next` NOW.")
-    elif blended >= target:
-        print("  → Queue empty, target reached! Run `uidetox finish` NOW.")
+        print(f"  → {remaining} issues in other components — loop will fix them.")
+    elif blended >= target and freshness["target_ready"]:
+        print("  → Queue empty, target reached — loop will finish the session.")
     else:
-        print(f"  → Queue empty but score {blended} < {target}. Run `uidetox rescan` NOW.")
-    print("The loop is fully autonomous. Keep executing without pausing.")
+        if blended >= target:
+            print(f"  → Queue empty and score {blended} >= {target}, but finish is blocked until analysis/review are fresh.")
+        else:
+            print(f"  → Queue empty but score {blended} < {target} — loop will run review cycle.")
+    print("The loop is fully autonomous. DO NOT run individual commands.")
 
     # Auto-save progress
     log_progress("batch-resolve", f"Detoxed {component}: {note} ({len(removed)} issues)")

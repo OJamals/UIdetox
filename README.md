@@ -71,10 +71,17 @@ THE PROTOCOL (runs automatically until score ≥ 95):
   Phase 5: Squash-merge when complete
 
 YOUR JOB:
+  - Treat this as a closed-loop system: scan → fix → verify → rescan until the target score is reached.
   - Follow the loop's instructions precisely
+  - Use the full toolchain, not just your own reasoning: local tooling, repo scripts, browser/devtools, screenshots, and MCP/code-intelligence systems like GitNexus.
+  - Use parallel subagents whenever work can be safely split across independent audit, research, or review tasks.
   - Read ALL files in a component before fixing anything
+  - You have permission for heavy lifting: do large refactors, structural cleanup, file moves, and tiny detailed fixes with equal energy.
+  - Do not be lazy. Fix things properly, not minimally. Remove root causes, not just visible symptoms.
   - Rewrite entire files — no snippets, no TODOs, no "I'll handle this later"
   - Trust SKILL.md over your instincts. The analyzer knows AI slop patterns.
+  - When scan output, loop output, or subagent output includes instructions, follow them exactly instead of substituting your own shortcut analysis.
+  - Use GitNexus and other MCP tools to understand dependencies, blast radius, execution flows, and affected contracts before changing shared code.
   - Never stop after one fix. Never ask permission. Never summarize between iterations.
 
 DESIGN PRINCIPLES:

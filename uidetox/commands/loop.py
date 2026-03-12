@@ -27,10 +27,14 @@ import subprocess
 import sys
 import uuid
 
-from ..state import load_config, save_config, load_state
+from ..state import (
+    load_config, save_config, load_state,
+    save_checkpoint, get_recent_checkpoints, get_recent_errors,
+    log_error, get_loop_progress,
+)
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, log_progress
-from ..utils import compute_design_score
+from ..utils import compute_design_score, get_score_freshness
 from ..skills import (
     recommend_skills_for_issues,
     recommend_review_skills,
@@ -47,6 +51,11 @@ from ..gitnexus_cache import (
 # Maximum iterations to prevent infinite loops in edge cases
 _MAX_LOOP_ITERATIONS = 20
 _QUEUE_EMPTY_ONLY_TAG = "[queue-empty-only]"
+
+# Circuit breaker thresholds
+_MAX_CONSECUTIVE_SAME_SCORE = 5  # Stop if score doesn't change for N iterations
+_MAX_ERROR_RATE = 10  # Stop if more than N errors in last 5 iterations
+_RECOVERY_COOLDOWN = 3  # Wait N iterations before retrying after failure
 
 
 def run(args: argparse.Namespace):
@@ -153,17 +162,37 @@ def _run_iteration(
     print("  UIdetox Autonomous Loop")
     print("=" * 60)
     print(f"  Target: {target}  |  Score: {blended}  |  Queue: {queue_size}  |  Resolved: {resolved}")
+    # Show score breakdown so agent understands the curve
+    raw_sub = scores.get("subjective_score")
+    eff_sub = scores.get("effective_subjective")
+    obj_s = scores.get("objective_score")
+    score_parts = []
+    if obj_s is not None:
+        score_parts.append(f"obj={obj_s}")
+    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+        score_parts.append(f"sub={eff_sub}eff (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
+    elif raw_sub is not None:
+        score_parts.append(f"sub={raw_sub}")
+    if score_parts:
+        print(f"  Score breakdown: {' | '.join(score_parts)}")
     print(f"  Files: {frontend_count}  |  Orchestrator: {'ON' if is_orchestrator else 'off'}")
     print(f"  Mode: {'AUTOPILOT' if not is_manual else 'MANUAL'}  |  Iteration: {iteration + 1}")
     print()
 
     # ---- IMMEDIATE TERMINATION CHECK ----
-    if blended >= target and queue_size == 0:
+    freshness = get_score_freshness(state)
+    if blended >= target and queue_size == 0 and freshness["target_ready"]:
         print("  ✅ TARGET REACHED — Score {blended} >= {target}, Queue EMPTY.".format(blended=blended, target=target))
         print("  Finishing session...")
         _exec_cmd("uidetox finish", "target reached — finishing session", dry_run=dry_run)
         log_progress("loop_complete", f"target={target}, score={blended}, iterations={iteration + 1}")
         return
+    elif blended >= target and queue_size == 0:
+        print("  ⚠️  High score detected, but finish is blocked because the score is stale.")
+        for reason in freshness.get("reasons", [])[:2]:
+            print(f"     - {reason}")
+        print("  Re-running analysis/review before allowing finish.")
+        print()
 
     # ---- ITERATION GUARD ----
     if iteration >= _MAX_LOOP_ITERATIONS:
@@ -171,7 +200,86 @@ def _run_iteration(
         print(f"  Score: {blended}, Queue: {queue_size}")
         print("  Run `uidetox status` to review, then `uidetox loop` to resume.")
         log_progress("loop_max_iterations", f"score={blended}, queue={queue_size}")
+        log_error("loop_max_iterations", f"Max iterations reached", {
+            "iteration": iteration,
+            "score": blended,
+            "queue": queue_size,
+        })
         return
+
+    # ---- SAVE CHECKPOINT ----
+    save_checkpoint(iteration, blended, queue_size, f"Iteration {iteration + 1}")
+
+    # ---- CIRCUIT BREAKER: Score Stagnation ----
+    recent_checkpoints = get_recent_checkpoints(limit=_MAX_CONSECUTIVE_SAME_SCORE + 1)
+    if len(recent_checkpoints) >= _MAX_CONSECUTIVE_SAME_SCORE:
+        recent_scores = [cp.get("score", 0) for cp in recent_checkpoints[-_MAX_CONSECUTIVE_SAME_SCORE:]]
+        if len(set(recent_scores)) == 1 and recent_scores[0] < target:
+            print(f"  ╔══════════════════════════════════════════════════════╗")
+            print(f"  ║  🛑 CIRCUIT BREAKER: Score Stagnation Detected       ║")
+            print(f"  ╚══════════════════════════════════════════════════════╝")
+            print(f"  Score stuck at {recent_scores[0]} for {_MAX_CONSECUTIVE_SAME_SCORE} iterations.")
+            print(f"  This indicates the current approach is not making progress.")
+            print()
+            print("  RECOVERY ACTIONS:")
+            print("    1. Review the lowest-scoring subjective review domains")
+            print("    2. Read reference/*.md files for deeper improvement criteria")
+            print("    3. Consider a different fix strategy (not just cosmetic tweaks)")
+            print("    4. Run `uidetox status` to see detailed breakdown")
+            print("    5. Run `uidetox loop` to resume after making changes")
+            print()
+            log_progress("circuit_breaker_stagnation", f"score={recent_scores[0]}, iterations={iteration + 1}")
+            log_error("circuit_breaker", "Score stagnation detected", {
+                "score": recent_scores[0],
+                "iterations": _MAX_CONSECUTIVE_SAME_SCORE,
+                "total_iterations": iteration + 1,
+            })
+            return
+
+    # ---- CIRCUIT BREAKER: High Error Rate ----
+    recent_errors = get_recent_errors(limit=10)
+    recent_loop_errors = [e for e in recent_errors if e.get("type", "").startswith(("loop_", "circuit_breaker", "check_fix"))]
+    if len(recent_loop_errors) >= _MAX_ERROR_RATE:
+        print(f"  ╔══════════════════════════════════════════════════════╗")
+        print(f"  ║  🛑 CIRCUIT BREAKER: High Error Rate Detected        ║")
+        print(f"  ╚══════════════════════════════════════════════════════╝")
+        print(f"  {len(recent_loop_errors)} errors in recent iterations.")
+        print(f"  This indicates systemic issues that need attention.")
+        print()
+        print("  RECOVERY ACTIONS:")
+        print("    1. Review error log: `uidetox status` shows recent errors")
+        print("    2. Check tooling configuration: `uidetox detect`")
+        print("    3. Verify project builds: `uidetox check --fix`")
+        print("    4. Clear errors and retry: `uidetox memory clear`")
+        print("    5. Run `uidetox loop` to resume after fixing issues")
+        print()
+        log_progress("circuit_breaker_errors", f"error_count={len(recent_loop_errors)}, iterations={iteration + 1}")
+        return
+
+    # ---- Stale review detection ----
+    # If we're re-entering STAGE 1 (queue empty) and a subjective score
+    # already exists, check if it's stale (unchanged for 2+ reviews).
+    # Provide targeted domain guidance to break the plateau.
+    subj_data = state.get("subjective", {})
+    subj_score = subj_data.get("score")
+    subj_history = subj_data.get("history", [])
+    if queue_size == 0 and subj_score is not None and blended < target:
+        is_stale = (
+            len(subj_history) >= 2
+            and subj_history[-1].get("score") == subj_history[-2].get("score")
+        )
+        if is_stale:
+            print("  ╔══════════════════════════════════════════════════════╗")
+            print("  ║  ⚠️  STALE REVIEW DETECTED — Score hasn't improved  ║")
+            print("  ╚══════════════════════════════════════════════════════╝")
+            print(f"  Subjective score stuck at {subj_score}/100 (target: {target}).")
+            print()
+            print("  TO BREAK THE PLATEAU:")
+            print("    1. Focus fixes on the LOWEST-SCORING review domains")
+            print("    2. Read reference/*.md files for specific improvement criteria")
+            print("    3. Apply deeper design changes, not superficial tweaks")
+            print("    4. The review must find NEW issues to queue — look harder")
+            print()
 
     # ---- Autonomous directive ----
     print("  ╔══════════════════════════════════════════════════════╗")
@@ -331,42 +439,112 @@ def _post_execution_checkpoint(
     filled = max(0, blended // 5)
     bar = "█" * filled + "░" * (20 - filled)
     print(f"  Score: [{bar}] {blended}/100  (target: {target})")
+    # Score breakdown for agent curve awareness
+    raw_sub = scores.get("subjective_score")
+    eff_sub = scores.get("effective_subjective")
+    obj_s = scores.get("objective_score")
+    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+        print(f"  Breakdown: obj={obj_s} | sub={eff_sub}eff (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
+    elif raw_sub is not None and obj_s is not None:
+        print(f"  Breakdown: obj={obj_s} | sub={raw_sub}")
     print(f"  Queue: {queue_size} pending  |  {resolved_total} resolved")
 
     # ── OUTCOME 1: Target reached ──
-    if blended >= target and queue_size == 0:
+    freshness = get_score_freshness(state)
+    if blended >= target and queue_size == 0 and freshness["target_ready"]:
         print()
         print("  ✅ TARGET REACHED. Finishing session...")
         _exec_cmd("uidetox finish", "target reached", dry_run=dry_run)
         return
+    elif blended >= target and queue_size == 0:
+        print()
+        print("  ⚠️  Score is above target, but finish is blocked until analysis/review are fresh.")
+        for reason in freshness.get("reasons", [])[:2]:
+            print(f"     - {reason}")
 
-    # ── OUTCOME 2: Automated commands changed state → refresh context ──
     state_changed = (queue_size != pre_queue) or (resolved_total != pre_resolved)
     can_recurse = iteration + 1 < _MAX_LOOP_ITERATIONS
 
-    if state_changed and can_recurse:
-        print()
-        print("  ⟳  State changed (automated commands did work). Refreshing context...")
-        print()
-        # Signal the iterative loop in run() to continue rather than
-        # recursively calling run() (which can stack-overflow and wastes memory).
-        args._continue = True  # type: ignore[attr-defined]
-        return
+    # ── OUTCOME 2: Autopilot halted on an agent-action command ──
+    # These MUST be handled BEFORE the state-changed auto-continuation
+    # because the agent needs to act on the printed prompts/context
+    # regardless of whether state changed.  Without this ordering the
+    # review and fix directives were swallowed by auto-continuation,
+    # causing the agent to spin without executing them.
 
-    # ── OUTCOME 3: Agent must apply manual fixes or subjective review ──
+    if subagent_halt_stage == "next":
+        # ``next`` already printed the full batch context, skill rules,
+        # design dials, and [AGENT INSTRUCTION] steps.  The agent must
+        # now fix ALL issues in that batch before re-entering the loop.
+        if queue_size == 0:
+            # Queue was drained by check --fix — move to discovery/review
+            if can_recurse:
+                print()
+                print("  ⟳  Queue drained — continuing to discovery + review phase...")
+                print()
+                args._continue = True  # type: ignore[attr-defined]
+                return
+        else:
+            print()
+            print("  ╔══════════════════════════════════════════════════════╗")
+            print("  ║  AGENT DIRECTIVE — FIX THE BATCH SHOWN ABOVE       ║")
+            print("  ║  `uidetox next` printed the issues + instructions.  ║")
+            print("  ║  Follow the [AGENT INSTRUCTION] steps above.        ║")
+            print("  ╚══════════════════════════════════════════════════════╝")
+            print()
+            print(f"  {queue_size} issue(s) pending. The batch above is your focus.")
+            print()
+            print("  STEPS (already shown by `next`, reinforced here):")
+            print("    1. Read the listed files")
+            print("    2. Fix ALL issues in the batch in ONE pass")
+            print("    3. uidetox check --fix")
+            print('    4. uidetox batch-resolve <IDs> --note "what you changed"')
+            print("    5. uidetox loop")
+            print()
+            print("  DO NOT run format/lint separately — `check --fix` does tsc→lint→format.")
+            print("  DO NOT run `uidetox next` again — the batch is already shown above.")
+            print("  Fix ALL issues in the batch, not just one file.")
+            print()
+            return
 
-    # ── OUTCOME 3a: Autopilot halted on a subagent review/fix prompt ──
-    # The subagent command printed prompts above but the agent must now
-    # EXECUTE them — read files, score domains, queue issues, apply fixes.
     if subagent_halt_stage == "review":
         from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
         total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+
+        # Check for existing objective issues already in the queue
+        # (from rescan/scan/audit that ran BEFORE the review)
+        obj_issues_note = ""
+        if queue_size > 0:
+            obj_issues_note = (
+                f"\n  NOTE: {queue_size} objective issue(s) are already in the queue"
+                f"\n  from the static analysis phase. These will be fixed in STAGE 2"
+                f"\n  after you complete this review and re-enter the loop.\n"
+            )
+
+        # Check for stale reviews (score unchanged)
+        subj_hist = state.get("subjective", {}).get("history", [])
+        stale_warning = ""
+        if (
+            len(subj_hist) >= 2
+            and subj_hist[-1].get("score") == subj_hist[-2].get("score")
+        ):
+            prev_score = subj_hist[-1].get("score", "?")
+            stale_warning = (
+                f"\n  ⚠️  STALE REVIEW WARNING: Score stuck at {prev_score}/100."
+                f"\n  You MUST find NEW issues this time. Focus on the lowest-scoring"
+                f"\n  domains and apply deeper design changes, not superficial tweaks.\n"
+            )
+
         print()
         print("  ╔══════════════════════════════════════════════════════╗")
         print("  ║  AGENT DIRECTIVE — EXECUTE SUBJECTIVE REVIEW NOW    ║")
         print("  ║  The review prompts are printed above.              ║")
         print("  ║  You MUST perform the review, not just read them.   ║")
         print("  ╚══════════════════════════════════════════════════════╝")
+        if obj_issues_note:
+            print(obj_issues_note)
+        if stale_warning:
+            print(stale_warning)
         print()
         print(f"  The subjective score is 70% of the blended Design Score.")
         print(f"  {len(REVIEW_DOMAINS)} domains, {total_max} total points, organized in 2 waves of 5.")
@@ -452,7 +630,17 @@ def _post_execution_checkpoint(
             print()
         return
 
-    # ── OUTCOME 3b: Standard agent directive (no subagent halt) ──
+    # ── OUTCOME 3: Automated commands changed state → refresh context ──
+    # This is checked AFTER halt-stage handling so that agent directives
+    # are never swallowed by auto-continuation.
+    if state_changed and can_recurse:
+        print()
+        print("  ⟳  State changed (automated commands did work). Refreshing context...")
+        print()
+        args._continue = True  # type: ignore[attr-defined]
+        return
+
+    # ── OUTCOME 4: Standard agent directive (no halt, no state change) ──
     print()
     print("  ╔══════════════════════════════════════════════════════╗")
     print("  ║  AGENT DIRECTIVE — Apply fixes, then re-enter loop  ║")
@@ -470,7 +658,7 @@ def _post_execution_checkpoint(
         print("       Obey SKILL.md rules and design dials shown in the output.")
         print()
         print("    3. Run:  uidetox check --fix")
-        print("       → MUST pass (tsc → lint → format) BEFORE committing.")
+        print("       → Runs tsc → lint → format. Do NOT run these separately.")
         print()
         print('    4. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
         print("       → Marks issues resolved, auto-commits if enabled.")
@@ -588,6 +776,7 @@ def _build_autopilot_plan(
         queue_size = len(issues)
     if tooling is None:
         tooling = config.get("tooling", {})
+    freshness = get_score_freshness(load_state())
     is_fullstack = bool(
         tooling.get("backend") or tooling.get("database") or tooling.get("api")
     )
@@ -653,9 +842,6 @@ def _build_autopilot_plan(
                 "full-stack gate: map frontend data-fetching surfaces",
             ))
 
-        # ── Pre-score verification gate ──
-        if has_mechanical:
-            plan.append(("uidetox check --fix", "lint/format/typecheck before scoring"))
         plan.append(("uidetox status", "check blended score and queue after domain reviews"))
 
         # ── Post-review: parallel implementation subagents for new issues ──
@@ -670,94 +856,38 @@ def _build_autopilot_plan(
             ))
 
         # ── Post-fix verification ──
-        if has_mechanical:
-            plan.append(("uidetox check --fix", "verify code is clean after implementation"))
-        plan.append(("uidetox subagent --stage-prompt verify", "verification subagent: confirm improvements"))
         plan.append(("uidetox status", "check blended score and queue"))
 
-        if blended >= target:
+        if blended >= target and freshness["target_ready"]:
             plan.append(("uidetox finish", "target reached with empty queue"))
         return plan
 
     # ──────────────────────────────────────────────────────────────
     # STAGE 2 / FIX LOOP (queue has issues)
     # ──────────────────────────────────────────────────────────────
+    #
+    # Intentionally minimal: only 2 commands per iteration.
+    # ``next`` already outputs the full batch context, skill
+    # recommendations, design dials, and [AGENT INSTRUCTION] steps.
+    # The autopilot halts after ``next`` so the agent can focus on
+    # fixing ONE batch, then re-enters the loop for the next batch.
+    #
+    # Previous plan had 10-15 commands (skills, subagent fix, extra
+    # next rounds, rescan, review) which created a non-productive
+    # loop where the agent fixed ~1 file → format → lint → format →
+    # next → repeat without making real progress.
+    #
+    # Discovery (rescan) and subjective review run in STAGE 1 once
+    # the queue is drained.  This ensures the agent does focused
+    # fix work in STAGE 2 without distractions.
 
-    # Pre-fix mechanical gate
+    # Pre-fix mechanical gate — auto-fix lint/format/tsc ONCE
     if has_mechanical:
         plan.append(("uidetox check --fix", "mechanical quality gate — auto-fix lint/format before manual fixes"))
 
-    # Get next batch context (prints issue details + skill rules + design dials)
-    plan.append(("uidetox next", "context dump: prioritized batch + skill recommendations + design dials"))
-
-    # Skill commands matched to current issues (inject domain-specific rules)
-    fix_recs = recommend_skills_for_issues(issues, config=config, phase="fix", limit=4)
-    for rec in fix_recs:
-        plan.append((
-            f"uidetox {rec['skill']} {target_path}",
-            f"skill context: {rec.get('reason', 'issue-matched')}",
-        ))
-
-    # Orchestrator: parallel fix prompts
-    if is_orchestrator and auto_parallel > 1:
-        plan.append((
-            f"uidetox subagent --stage-prompt fix --parallel {auto_parallel}",
-            "orchestrator: generate parallel fix prompts for sub-agents",
-        ))
-
-    # Status check for trajectory awareness
-    plan.append(("uidetox status", "show current score + queue state for trajectory awareness"))
-
-    # ── Additional context rounds for large queues ──
-    # Each `uidetox next` prints the next component batch so the agent
-    # has full awareness of everything that needs fixing.
-    dirs_with_issues: set[str] = set()
-    for iss in issues:
-        f = iss.get("file", "")
-        if f:
-            dirs_with_issues.add(str(pathlib.Path(f).parent))
-
-    extra_cycles = min(3, max(0, len(dirs_with_issues) - 1))
-    for cycle in range(extra_cycles):
-        plan.append(("uidetox next", f"context dump: batch {cycle + 2} of {len(dirs_with_issues)}"))
-
-    # ── Full-stack cross-layer validation after fixes ──
-    if is_fullstack:
-        plan.append((
-            "npx gitnexus detect_changes",
-            "full-stack gate: verify changes only affect expected symbols",
-        ))
-        plan.append((
-            'npx gitnexus query "DTO type interface schema"',
-            "full-stack gate: verify frontend types still match backend DTOs after fixes",
-        ))
-
-    # ── Post-fix quality gate — MUST pass before committing ──
-    if has_mechanical:
-        plan.append(("uidetox check --fix", "quality gate: tsc → lint → format BEFORE any commit"))
-
-    # Final rescan to discover deeper issues after fixes
-    plan.append(("uidetox rescan --path .", "rescan after fix phase — discover deeper issues"))
-    plan.append(("uidetox status", "post-rescan status — check score trajectory"))
-
-    # ── Seamless objective→subjective transition ──
-    # After the fix loop, immediately trigger subjective review to assess
-    # improvements. Use 10 parallel domain-sharded review subagents (2 waves of 5).
-    # NOTE: Review MUST run even if queue still has issues — the review assesses
-    # design quality of fixed components and discovers new issues to queue.
-    from uidetox.subagent import REVIEW_DOMAINS
-    review_parallel = len(REVIEW_DOMAINS)  # 10 domains
-    if is_orchestrator:
-        plan.append((
-            f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
-            f"parallel domain-sharded subjective review ({review_parallel} domains, 2 waves of 5, 70% weight) — runs after fixes to assess improvements",
-        ))
-    else:
-        plan.append(("uidetox review", "subjective review (70% weight) — runs after fixes to assess improvements"))
-
-    if has_mechanical:
-        plan.append(("uidetox check --fix", "final quality gate before scoring"))
-    plan.append(("uidetox status", "final score check — blended objective + subjective"))
+    # Context dump — prints batch issues, skill rules, design dials,
+    # and full [AGENT INSTRUCTION] steps.  Autopilot halts here.
+    plan.append(("uidetox next", "prioritized batch with full context — agent must fix ALL issues shown, then re-enter loop"))
 
     return plan
 
@@ -941,10 +1071,11 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
 
         print()
 
-        # ── Halt after subagent review/fix prompts ──
-        # The prompts were just printed; the agent needs to ACT on them
-        # before the loop continues.  Return the stage name so the
-        # checkpoint can print the appropriate agent directive.
+        # ── Halt after agent-action commands ──
+        # These commands print context/prompts the agent MUST execute.
+        # Halt the autopilot so the checkpoint can instruct the agent.
+
+        # Subagent review/fix: prompts the agent must act on
         if _subagent_action_stage in ("review", "fix"):
             remaining = len(effective) - idx
             if remaining > 0:
@@ -953,6 +1084,15 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
                 print(f"      before the loop can continue.  Re-enter with `uidetox loop`.")
                 print()
             return _subagent_action_stage
+
+        # ``next``: the batch context + fix instructions were just printed.
+        # Halt so the agent focuses on fixing THIS batch before moving on.
+        if cmd_name == "next" and proc.returncode == 0:
+            remaining = len(effective) - idx
+            if remaining > 0:
+                print(f"  ⏸  Autopilot paused — fix the batch above, then re-enter with `uidetox loop`.")
+                print()
+            return "next"
 
     return None
 

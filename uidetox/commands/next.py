@@ -327,13 +327,9 @@ def run(args: argparse.Namespace):
         print("Queue is empty. No pending issues.")
         print()
         print("[AUTONOMOUS LOOP SIGNAL]")
-        print("Queue drained. The autonomous loop will now:")
-        print("  1. Run `uidetox rescan` to discover deeper issues")
-        print("  2. Run review skills (critique, polish) for quality pass")
-        print("  3. Check `uidetox status` for score")
-        print("  4. Re-enter `uidetox loop` to continue until target")
-        print()
-        print("DO NOT STOP. Proceed to rescan immediately.")
+        print("Queue drained — the loop will now run objective + subjective analysis.")
+        print("Run `uidetox loop` NOW.")
+        print("DO NOT STOP. DO NOT run individual commands — the loop handles everything.")
         sys.exit(0)  # exit 0 so autopilot chain continues
 
     # Design dials
@@ -493,7 +489,7 @@ def run(args: argparse.Namespace):
     if auto_commit:
         print("     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit.")
     step += 1
-    print(f"{step}. Then immediately run: uidetox next")
+    print(f"{step}. Then immediately run: uidetox loop")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
     print("DO NOT STOP after fixing. DO NOT ask for permission.")

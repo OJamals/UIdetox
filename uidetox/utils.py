@@ -15,6 +15,87 @@ def now_iso_filename() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
 
 
+def _parse_iso(ts: str | None) -> datetime | None:
+    """Parse an ISO timestamp safely, returning ``None`` on failure."""
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _latest_issue_activity(state: dict) -> datetime | None:
+    """Return the most recent queue mutation timestamp.
+
+    Pending issues contribute ``created_at`` timestamps; resolved issues
+    contribute ``resolved_at`` timestamps.
+    """
+    latest: datetime | None = None
+    for issue in state.get("issues", []):
+        created_at = _parse_iso(issue.get("created_at"))
+        if created_at is not None and (latest is None or created_at > latest):
+            latest = created_at
+    for issue in state.get("resolved", []):
+        resolved_at = _parse_iso(issue.get("resolved_at"))
+        if resolved_at is not None and (latest is None or resolved_at > latest):
+            latest = resolved_at
+    return latest
+
+
+def get_score_freshness(state: dict) -> dict:
+    """Return whether score data is fresh enough to permit finishing.
+
+    High blended scores are not sufficient on their own: the loop should
+    only finish after a fresh objective analysis AND a fresh subjective
+    review that both post-date the latest queue mutations.
+    """
+    last_scan_at = _parse_iso(state.get("last_scan"))
+    latest_issue_activity = _latest_issue_activity(state)
+
+    subjective = state.get("subjective", {})
+    review_history = subjective.get("history", [])
+    latest_review_at: datetime | None = None
+    for entry in review_history:
+        reviewed_at = _parse_iso(entry.get("timestamp"))
+        if reviewed_at is not None and (latest_review_at is None or reviewed_at > latest_review_at):
+            latest_review_at = reviewed_at
+
+    objective_fresh = bool(
+        last_scan_at is not None
+        and (latest_issue_activity is None or last_scan_at >= latest_issue_activity)
+    )
+    subjective_fresh = bool(
+        latest_review_at is not None
+        and last_scan_at is not None
+        and latest_review_at >= last_scan_at
+        and (latest_issue_activity is None or latest_review_at >= latest_issue_activity)
+    )
+
+    reasons: list[str] = []
+    if last_scan_at is None:
+        reasons.append("no objective scan recorded")
+    elif latest_issue_activity is not None and last_scan_at < latest_issue_activity:
+        reasons.append("objective analysis predates the latest fixes or queue changes")
+
+    if latest_review_at is None:
+        reasons.append("no timestamped subjective review recorded")
+    elif last_scan_at is not None and latest_review_at < last_scan_at:
+        reasons.append("subjective review predates the latest scan")
+    elif latest_issue_activity is not None and latest_review_at < latest_issue_activity:
+        reasons.append("subjective review predates the latest fixes or queue changes")
+
+    return {
+        "objective_fresh": objective_fresh,
+        "subjective_fresh": subjective_fresh,
+        "target_ready": objective_fresh and subjective_fresh,
+        "last_scan": state.get("last_scan"),
+        "latest_review": latest_review_at.isoformat() if latest_review_at else None,
+        "latest_issue_activity": latest_issue_activity.isoformat() if latest_issue_activity else None,
+        "reasons": reasons,
+    }
+
+
 def safe_split_cmd(cmd: str) -> list[str]:
     """Split a shell command string safely, handling paths with spaces.
 
@@ -54,16 +135,72 @@ def run_tool(
     )
 
 
+def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
+    """Apply diminishing-returns curve and objective-anchored penalties.
+
+    Makes 95-100 achievable only when the codebase is genuinely perfect:
+
+    1. **Exponential compression above 70** — raw 95 → effective ~92.
+       Only a raw 100 maps to an effective 100.
+    2. **Auto-deductions for pending issues** — each unresolved issue
+       mechanically lowers the effective subjective score so the agent
+       cannot self-assess perfection while known issues remain.
+    3. **Hard ceiling when issues remain** — effective subjective is
+       capped at 85 as long as the queue is non-empty.
+    4. **Objective cross-gate** — if the objective score is below 90
+       the effective subjective is capped at 80, preventing a high
+       self-score from masking real problems.
+
+    The curve is: ``effective = 70 + 30 × ((raw − 70) / 30)^1.8``
+    for raw > 70.  Below 70 the mapping is linear (1:1).
+    """
+    if raw_score <= 0:
+        return 0
+
+    # ── Step 1: Exponential compression above 70 ──
+    CURVE_THRESHOLD = 70
+    CURVE_EXPONENT = 1.8
+    CURVE_RANGE = 100 - CURVE_THRESHOLD  # 30
+
+    if raw_score <= CURVE_THRESHOLD:
+        effective = float(raw_score)
+    else:
+        overshoot = min((raw_score - CURVE_THRESHOLD) / CURVE_RANGE, 1.0)
+        effective = CURVE_THRESHOLD + CURVE_RANGE * (overshoot ** CURVE_EXPONENT)
+
+    # ── Step 2: Auto-deductions for pending issues ──
+    PENALTY_WEIGHTS = {"T1": 3.0, "T2": 2.0, "T3": 1.0, "T4": 0.5}
+    MAX_PENALTY = 25.0
+
+    penalty = 0.0
+    for issue in pending_issues:
+        tier = issue.get("tier", "T4")
+        penalty += PENALTY_WEIGHTS.get(tier, 0.5)
+    penalty = min(penalty, MAX_PENALTY)
+    effective -= penalty
+
+    # ── Step 3: Hard ceiling when issues are pending ──
+    if pending_issues:
+        effective = min(effective, 85.0)
+
+    return max(0, min(100, int(effective)))
+
+
 def compute_design_score(state: dict) -> dict:
     """Compute the blended design score from state.
 
     Returns a dict with:
       - objective_score: int (0-100) from static analysis slop ratio
-      - subjective_score: int | None from LLM review
+      - subjective_score: int | None — raw LLM self-assessment
+      - effective_subjective: int | None — after curve + penalties
       - blended_score: int (0-100) final blended score
       - current_slop: weighted slop points remaining
       - resolved_slop: weighted slop points resolved
       - total_slop: total weighted slop points
+
+    The blended score uses the *effective* subjective (post-curve),
+    not the raw self-assessment, so 95-100 is only reachable when
+    the codebase is genuinely clean.
     """
     issues = state.get("issues", [])
     resolved = state.get("resolved", [])
@@ -89,16 +226,25 @@ def compute_design_score(state: dict) -> dict:
 
     subjective_score = state.get("subjective", {}).get("score")
 
+    # Apply the diminishing-returns curve + objective-anchored penalties
+    effective_subjective: int | None = None
+    if subjective_score is not None:
+        effective_subjective = _apply_subjective_curve(subjective_score, issues)
+        # Cross-gate: if objective < 90, cap effective subjective at 80
+        if objective_score is not None and objective_score < 90:
+            effective_subjective = min(effective_subjective, 80)
+
     if objective_score is None:
-        blended = subjective_score if subjective_score is not None else 0
-    elif subjective_score is not None:
-        blended = int(objective_score * 0.3 + subjective_score * 0.7)
+        blended = effective_subjective if effective_subjective is not None else 0
+    elif effective_subjective is not None:
+        blended = int(objective_score * 0.3 + effective_subjective * 0.7)
     else:
         blended = objective_score
 
     return {
         "objective_score": objective_score,
         "subjective_score": subjective_score,
+        "effective_subjective": effective_subjective,
         "blended_score": blended,
         "current_slop": current_slop,
         "resolved_slop": resolved_slop,

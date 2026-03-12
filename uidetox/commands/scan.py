@@ -19,7 +19,7 @@ from uidetox.state import (
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
 from uidetox.memory import save_scan_summary, save_session, log_progress
-from uidetox.utils import compute_design_score, categorize_issue
+from uidetox.utils import compute_design_score, get_score_freshness, categorize_issue
 from uidetox.contracts import (
     parse_all_schemas, parse_schema, validate_frontend_contracts, save_contract_artifacts,
 )
@@ -614,6 +614,19 @@ def run(args: argparse.Namespace):
     print("  When review is complete, record your subjective score:")
     print("    uidetox review --score <N>   (0-100, sum of A+B+C+D above)")
     print()
+    print("  ⚠️  SCORE INTEGRITY (enforced automatically):")
+    print("    • Your raw score passes through a diminishing-returns curve.")
+    print("      Raw 90 → effective ~85.  Raw 95 → effective ~92.  Only 100 → 100.")
+    print("    • Pending issues in the queue AUTO-DEDUCT from your effective score.")
+    print("    • If ANY issues remain, effective subjective is CAPPED at 85.")
+    print("    • If objective < 90, effective subjective is CAPPED at 80.")
+    print("    • You CANNOT reach 95+ blended without: empty queue, 100% objective,")
+    print("      AND a raw subjective of ~98+.")
+    print("    • A Perfection Gate enforces: zero TODO/FIXME, zero console.log,")
+    print("      zero AI slop fingerprints, all states present, skip-to-content,")
+    print("      favicon, meta tags, custom 404 — run `uidetox review` for full list.")
+    print("    • Do NOT inflate — the curve, penalties, and gate WILL expose it.")
+    print()
 
     # ===========================================================
     # SCORE CHECK: Target reached?
@@ -629,6 +642,7 @@ def run(args: argparse.Namespace):
     # Compute current score and show target check
     state = load_state()
     scores = compute_design_score(state)
+    freshness = get_score_freshness(state)
     score = scores["blended_score"]
     if score is None:
         score = 0  # No scan history yet
@@ -642,7 +656,7 @@ def run(args: argparse.Namespace):
     print(f"  Design Score : [{bar}] {score}/100  (target: {target})")
     print(f"  Queue        : {queue_size} issue(s)")
 
-    if score >= target and queue_size == 0:
+    if score >= target and queue_size == 0 and freshness["target_ready"]:
         print()
         print(f"  TARGET REACHED -- Score >= {target} and queue is empty.")
         print("  -> Run `uidetox finish` to finalize.")
@@ -657,14 +671,14 @@ def run(args: argparse.Namespace):
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
-    if score >= target and queue_size == 0:
+    if score >= target and queue_size == 0 and freshness["target_ready"]:
         print("TARGET REACHED. Run `uidetox finish` NOW.")
     elif queue_size > 0:
         print(f"Scan complete: {queue_size} issues queued. Run `uidetox next` NOW.")
         print("DO NOT STOP. Begin the autonomous fix loop immediately.")
     else:
-        print("Scan complete with empty queue. Complete subjective review above,")
-        print("then `uidetox review --score <N>` followed by `uidetox status`.")
+        print("Scan complete with empty queue, but the score is not fresh enough to finish.")
+        print("Complete subjective review above, then `uidetox review --score <N>` followed by `uidetox status`.")
     print()
 
 

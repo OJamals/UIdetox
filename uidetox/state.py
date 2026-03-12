@@ -6,6 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+import logging
 
 try:
     import fcntl  # type: ignore[attr-defined]
@@ -16,10 +17,16 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 from uidetox.utils import now_iso
 
+logger = logging.getLogger(__name__)
+
 UIDETOX_DIR = ".uidetox"
 CONFIG_FILE = "config.json"
 STATE_FILE = "state.json"
+BACKUP_DIR = "backups"
 _TIER_PRIORITY = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
+
+# Maximum number of state backups to retain
+_MAX_BACKUPS = 10
 
 
 def _atomic_write_json(target: Path, data: dict, *, dir: Path | None = None) -> None:
@@ -29,6 +36,7 @@ def _atomic_write_json(target: Path, data: dict, *, dir: Path | None = None) -> 
     leaks on disk.
     """
     write_dir = dir or target.parent
+    write_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=write_dir, prefix=target.stem + "_", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -43,6 +51,38 @@ def _atomic_write_json(target: Path, data: dict, *, dir: Path | None = None) -> 
         except OSError:
             pass
         raise
+
+
+def _create_backup(target: Path) -> None:
+    """Create a timestamped backup of the target file."""
+    if not target.exists():
+        return
+    
+    backup_dir = target.parent / BACKUP_DIR
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = now_iso().replace(":", "-").replace("T", "_")[:19]
+    backup_path = backup_dir / f"{target.stem}_{timestamp}{target.suffix}"
+    
+    try:
+        import shutil
+        shutil.copy2(target, backup_path)
+        logger.debug(f"Created backup: {backup_path}")
+    except Exception as e:
+        logger.warning(f"Failed to create backup: {e}")
+        return
+    
+    # Rotate old backups
+    try:
+        backups = sorted(
+            [b for b in backup_dir.glob(f"{target.stem}_*{target.suffix}")],
+            key=lambda b: b.stat().st_mtime,
+        )
+        if len(backups) > _MAX_BACKUPS:
+            for old_backup in backups[: len(backups) - _MAX_BACKUPS]:
+                old_backup.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Failed to rotate backups: {e}")
 
 
 # ── File-based locking for safe concurrent state mutations ──────
@@ -106,18 +146,26 @@ def load_config() -> dict:
     default_config = {
         "DESIGN_VARIANCE": 8,
         "MOTION_INTENSITY": 6,
-        "VISUAL_DENSITY": 4
+        "VISUAL_DENSITY": 4,
+        "auto_commit": False,
+        "target_score": 95,
     }
     if not config_path.exists():
         return default_config
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+            config = json.load(f)
+            # Merge with defaults for any missing keys
+            for key, value in default_config.items():
+                config.setdefault(key, value)
+            return config
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load config, using defaults: {e}")
         return default_config
 
 def save_config(config: dict):
     d = ensure_uidetox_dir()
+    _create_backup(d / CONFIG_FILE)
     _atomic_write_json(d / CONFIG_FILE, config, dir=d)
 
 def load_state() -> dict:
@@ -127,7 +175,10 @@ def load_state() -> dict:
       "last_scan": "2024-01-01T00:00:00Z",
       "issues": [...],
       "resolved": [...],
-      "stats": { "total_found": 0, "total_resolved": 0, "scans_run": 0 }
+      "stats": { "total_found": 0, "total_resolved": 0, "scans_run": 0 },
+      "subjective": { "score": 85, "history": [...] },
+      "checkpoints": [...],  # Loop iteration checkpoints for recovery
+      "errors": [...],  # Error log for debugging
     }
     """
     state_path = get_uidetox_dir() / STATE_FILE
@@ -136,13 +187,20 @@ def load_state() -> dict:
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load state, using defaults: {e}")
+        # Try to load from backup
+        backup_state = _try_load_backup()
+        if backup_state:
+            return backup_state
         data = _default_state()
         
     # Ensure new fields exist for backwards compat
     data.setdefault("resolved", [])
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
     data.setdefault("subjective", {})
+    data.setdefault("checkpoints", [])
+    data.setdefault("errors", [])
     return data
 
 def _default_state() -> dict:
@@ -151,10 +209,39 @@ def _default_state() -> dict:
         "issues": [],
         "resolved": [],
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
+        "subjective": {},
+        "checkpoints": [],
+        "errors": [],
     }
+
+def _try_load_backup() -> dict | None:
+    """Try to load state from the most recent backup."""
+    backup_dir = get_uidetox_dir() / BACKUP_DIR
+    if not backup_dir.exists():
+        return None
+    
+    try:
+        backups = sorted(
+            [b for b in backup_dir.glob(f"{Path(STATE_FILE).stem}_*.json")],
+            key=lambda b: b.stat().st_mtime,
+            reverse=True,
+        )
+        for backup in backups:
+            try:
+                with open(backup, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    logger.info(f"Loaded state from backup: {backup}")
+                    return data
+            except (json.JSONDecodeError, OSError):
+                continue
+    except Exception as e:
+        logger.warning(f"Failed to load backup: {e}")
+    
+    return None
 
 def save_state(state: dict):
     d = ensure_uidetox_dir()
+    _create_backup(d / STATE_FILE)
     _atomic_write_json(d / STATE_FILE, state, dir=d)
 
 
@@ -359,3 +446,95 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
         save_state(state)
         return removed
 
+
+def save_checkpoint(iteration: int, score: int, queue_size: int, description: str = ""):
+    """Save a loop iteration checkpoint for recovery and progress tracking."""
+    with _locked_file("state"):
+        state = load_state()
+        checkpoints = state.setdefault("checkpoints", [])
+        checkpoint = {
+            "iteration": iteration,
+            "score": score,
+            "queue_size": queue_size,
+            "timestamp": now_iso(),
+            "description": description,
+        }
+        checkpoints.append(checkpoint)
+        # Keep only last 50 checkpoints
+        if len(checkpoints) > 50:
+            state["checkpoints"] = checkpoints[-50:]
+        save_state(state)
+
+
+def log_error(error_type: str, message: str, context: dict | None = None):
+    """Log an error for debugging and recovery."""
+    with _locked_file("state"):
+        state = load_state()
+        errors = state.setdefault("errors", [])
+        error_entry = {
+            "type": error_type,
+            "message": message,
+            "timestamp": now_iso(),
+            "context": context or {},
+        }
+        errors.append(error_entry)
+        # Keep only last 100 errors
+        if len(errors) > 100:
+            state["errors"] = errors[-100:]
+        save_state(state)
+
+
+def get_recent_checkpoints(limit: int = 10) -> list[dict]:
+    """Get recent loop checkpoints."""
+    state = load_state()
+    checkpoints = state.get("checkpoints", [])
+    return checkpoints[-limit:] if checkpoints else []
+
+
+def get_recent_errors(limit: int = 20) -> list[dict]:
+    """Get recent errors."""
+    state = load_state()
+    errors = state.get("errors", [])
+    return errors[-limit:] if errors else []
+
+
+def clear_errors():
+    """Clear error log."""
+    with _locked_file("state"):
+        state = load_state()
+        state["errors"] = []
+        save_state(state)
+
+
+def get_loop_progress() -> dict:
+    """Get summary of loop progress for status display."""
+    state = load_state()
+    config = load_config()
+    
+    checkpoints = state.get("checkpoints", [])
+    errors = state.get("errors", [])
+    
+    # Calculate progress metrics
+    total_iterations = len(checkpoints)
+    recent_checkpoints = checkpoints[-5:] if checkpoints else []
+    
+    # Score progression
+    score_progression = [cp.get("score", 0) for cp in recent_checkpoints]
+    score_trend = "stable"
+    if len(score_progression) >= 2:
+        if score_progression[-1] > score_progression[0]:
+            score_trend = "improving"
+        elif score_progression[-1] < score_progression[0]:
+            score_trend = "declining"
+    
+    # Error rate
+    recent_errors = [e for e in errors if e.get("timestamp", "") > now_iso()[:10]]  # Today's errors
+    error_rate = len(recent_errors)
+    
+    return {
+        "total_iterations": total_iterations,
+        "score_trend": score_trend,
+        "error_rate": error_rate,
+        "last_checkpoint": recent_checkpoints[-1] if recent_checkpoints else None,
+        "target_score": config.get("target_score", 95),
+    }
