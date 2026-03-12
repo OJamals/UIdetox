@@ -58,6 +58,46 @@ _MAX_ERROR_RATE = 10  # Stop if more than N errors in last 5 iterations
 _RECOVERY_COOLDOWN = 3  # Wait N iterations before retrying after failure
 
 
+def _resolve_gitnexus_repo(config: dict) -> str | None:
+    """Resolve GitNexus repo name for CLI commands in multi-index environments."""
+    configured = str(config.get("gitnexus_repo", "")).strip()
+    if configured:
+        return configured
+
+    try:
+        status = subprocess.run(
+            ["npx", "gitnexus", "status"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if status.returncode == 0:
+            for line in status.stdout.splitlines():
+                if line.startswith("Repository:"):
+                    repo_path = line.split(":", 1)[1].strip()
+                    if repo_path:
+                        name = pathlib.Path(repo_path).name.strip()
+                        if name:
+                            return name
+    except Exception:
+        pass
+
+    try:
+        return pathlib.Path.cwd().resolve().name.strip() or None
+    except Exception:
+        return None
+
+
+def _gitnexus_cmd(subcommand: str, arg: str, repo: str | None) -> str:
+    """Build GitNexus CLI command with explicit repo when supported."""
+    base = f"npx gitnexus {subcommand}"
+    if repo and subcommand in {"query", "context", "impact", "cypher"}:
+        base += f" -r {shlex.quote(repo)}"
+    if arg:
+        base += f" {arg}"
+    return base
+
+
 def run(args: argparse.Namespace):
     target = getattr(args, "target", 95)
     is_manual = getattr(args, "manual", False)
@@ -128,6 +168,7 @@ def _run_iteration(
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))
     is_orchestrator = bool(getattr(args, "orchestrator", True))
+    gitnexus_repo = _resolve_gitnexus_repo(config)
 
     # ---- GitNexus codebase indexing (early — before any analysis) ----
     # Advance the GitNexus cache iteration so stale entries are pruned.
@@ -143,6 +184,8 @@ def _run_iteration(
     rc = _exec_cmd("npx gitnexus analyze", "pre-phase codebase indexing", dry_run=dry_run)
     if rc != 0:
         print("  ℹ  GitNexus not available or index refresh failed — continuing without it.")
+    elif gitnexus_repo:
+        print(f"  GitNexus repo target: {gitnexus_repo}")
     print()
 
     # ---- Git workspace isolation ----
@@ -351,6 +394,7 @@ def _run_iteration(
             auto_parallel=auto_parallel,
             queue_size=queue_size,
             tooling=tooling,
+            gitnexus_repo=gitnexus_repo,
         )
 
         print("=" * 60)
@@ -839,6 +883,7 @@ def _build_autopilot_plan(
     auto_parallel: int,
     queue_size: int | None = None,
     tooling: dict | None = None,
+    gitnexus_repo: str | None = None,
 ) -> list[tuple[str, str]]:
     """Build an ordered command plan for autonomous loop execution.
 
@@ -869,15 +914,15 @@ def _build_autopilot_plan(
         # Run BEFORE rescan/audit so the agent has architectural
         # awareness when interpreting static analysis results.
         plan.append((
-            'npx gitnexus query "component page route layout view"',
+            _gitnexus_cmd("query", '"component page route layout view"', gitnexus_repo),
             "codebase analysis: map frontend component architecture via call graph",
         ))
         plan.append((
-            'npx gitnexus query "shared utility hook context provider store"',
+            _gitnexus_cmd("query", '"shared utility hook context provider store"', gitnexus_repo),
             "codebase analysis: map shared infrastructure and state management",
         ))
         plan.append((
-            'npx gitnexus query "export default function interface type"',
+            _gitnexus_cmd("query", '"export default function interface type"', gitnexus_repo),
             "impact mapping: identify public API surfaces for blast-radius awareness",
         ))
 
@@ -924,19 +969,19 @@ def _build_autopilot_plan(
         # ── Full-stack cross-layer validation (only for full-stack projects) ──
         if is_fullstack:
             plan.append((
-                'npx gitnexus query "API endpoint route handler DTO"',
+                _gitnexus_cmd("query", '"API endpoint route handler DTO"', gitnexus_repo),
                 "full-stack gate: map backend surface for cross-layer validation",
             ))
             plan.append((
-                'npx gitnexus query "fetch request mutation query"',
+                _gitnexus_cmd("query", '"fetch request mutation query"', gitnexus_repo),
                 "full-stack gate: map frontend data-fetching surfaces",
             ))
             plan.append((
-                'npx gitnexus query "validation constraint required schema"',
+                _gitnexus_cmd("query", '"validation constraint required schema"', gitnexus_repo),
                 "full-stack gate: map validation rules for frontend↔backend alignment",
             ))
             plan.append((
-                'npx gitnexus query "error status code exception boundary"',
+                _gitnexus_cmd("query", '"error status code exception boundary"', gitnexus_repo),
                 "full-stack gate: map error-handling surfaces across layers",
             ))
 
@@ -944,7 +989,7 @@ def _build_autopilot_plan(
         # Gives the agent awareness of tightly-coupled modules so the
         # review and fix phases can prioritize high-impact areas.
         plan.append((
-            'npx gitnexus query "import dependency coupling circular"',
+            _gitnexus_cmd("query", '"import dependency coupling circular"', gitnexus_repo),
             "dependency analysis: detect tightly-coupled modules for targeted fixes",
         ))
 
@@ -998,19 +1043,19 @@ def _build_autopilot_plan(
         # Query context for the primary target component
         primary = batch_files[0]
         plan.append((
-            f'npx gitnexus context "{primary}"',
+            _gitnexus_cmd("context", f'"{primary}"', gitnexus_repo),
             f"pre-fix context: trace callers/callees for {primary}",
         ))
         # Impact analysis on the primary symbol
         plan.append((
-            f'npx gitnexus impact "{primary}" --direction upstream',
+            _gitnexus_cmd("impact", f'"{primary}" --direction upstream', gitnexus_repo),
             f"pre-fix impact: blast radius check for {primary}",
         ))
 
     # Full-stack alignment check for the batch being fixed
     if is_fullstack and batch_files:
         plan.append((
-            'npx gitnexus query "fetch request mutation query"',
+            _gitnexus_cmd("query", '"fetch request mutation query"', gitnexus_repo),
             "pre-fix full-stack: verify data-fetching alignment before modifying components",
         ))
 
