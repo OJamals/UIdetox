@@ -54,24 +54,38 @@ uidetox loop
 Paste this into your coding agent to kick off a full detox pass:
 
 ```text
-Eliminate AI slop from this codebase. Make the frontend feel hand-crafted. Target: Design Score 95+.
+Transform this frontend from AI-generated slop into hand-crafted design work. Target: Design Score 95+.
 
 BOOTSTRAP:
   pip install uidetox
   uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
   uidetox setup --auto-commit
-  uidetox loop                        # prints the full protocol — follow it
+  uidetox loop                        # autonomous 5-phase protocol — follow it
 
-THE LOOP (repeat until score ≥ 95 and queue is empty):
-  1. uidetox next                     # get highest-priority batch + SKILL.md context
-  2. Fix every issue properly          # full rewrites, not snippets — read files first
-  3. uidetox batch-resolve IDs --note "..." && uidetox check --fix && uidetox status
+THE PROTOCOL (runs automatically until score ≥ 95):
+  Phase 0: Mechanical fixes (tsc → lint → format)
+  Phase 1: Scan codebase with 60+ anti-pattern rules
+  Phase 2: Fix issues component-by-component with design context
+  Phase 3: Subjective quality review across 10 design dimensions
+  Phase 4: Verify score, iterate if below 95
+  Phase 5: Squash-merge when complete
 
-RULES:
-  - Don't be lazy. Rewrite entire files if needed. No TODOs, no "I'll handle this later."
-  - The tool's rules override your instincts. Trust the analyzer and SKILL.md over your biases.
-  - Don't stop after one fix. Don't ask permission. Don't summarize between iterations.
-  - When score ≥ 95 and queue is empty: uidetox finish
+YOUR JOB:
+  - Follow the loop's instructions precisely
+  - Read ALL files in a component before fixing anything
+  - Rewrite entire files — no snippets, no TODOs, no "I'll handle this later"
+  - Trust SKILL.md over your instincts. The analyzer knows AI slop patterns.
+  - Never stop after one fix. Never ask permission. Never summarize between iterations.
+
+DESIGN PRINCIPLES:
+  - Typography: No Inter/Roboto/system fonts. Use Geist, Satoshi, Cabinet Grotesk.
+  - Color: No purple-blue gradients. Use neutral bases with singular accents.
+  - Layout: No centered heroes or 3-column card grids. Use asymmetric compositions.
+  - Motion: No bounce animations. Use exponential easing, transform/opacity only.
+  - States: Every interactive element needs hover, focus, active, loading, empty, error.
+
+WHEN COMPLETE:
+  uidetox finish                      # squash-merge the session branch
 ```
 ---
 

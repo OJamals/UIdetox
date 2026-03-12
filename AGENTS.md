@@ -22,8 +22,8 @@ Run `uidetox loop` to bootstrap the full 5-phase protocol. The loop automaticall
 The loop triggers `uidetox check --fix` to execute tsc → lint → format in sequence. Errors are automatically queued as T1 issues and auto-fixed where possible.
 
 ### Phase 1: Exploration & Audit (The Scan)
-The loop triggers `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and performs:
-- **Static Slop Analysis:** A 50-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
+The loop auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and performs:
+- **Static Slop Analysis:** A 60+ rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
 - **Design Audit:** The agent reads frontend files and evaluates against SKILL.md.
 - **Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs.
 - **Queue Hygiene:** Scan deduplicates issues already pending in the queue, tightening severity/guidance instead of flooding the backlog with duplicates across repeated passes.
@@ -222,7 +222,7 @@ UIdetox/
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **UIdetox** (622 symbols, 1738 relationships, 44 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **UIdetox** (873 symbols, 2501 relationships, 66 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

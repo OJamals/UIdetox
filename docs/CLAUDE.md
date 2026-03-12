@@ -18,13 +18,13 @@ The simplest way to dispatch Claude into the UIdetox loop:
 uidetox loop
 ```
 
-This bootstraps the full 5-phase protocol with auto-detected tooling, continuation context from memory, and component-level batch commits. Claude will autonomously:
-1. Run `uidetox check --fix` (mechanical fixes)
-2. Run `uidetox scan --path .` then systematically read every frontend file (LLM-dynamic analysis)
-3. Fix issues component-by-component using `uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`
-4. Run `uidetox review` + `uidetox review --score N` to record subjective quality
-5. Check `uidetox status` for blended Design Score (30% static + 70% LLM review)
-6. Run `uidetox finish` to squash-merge the session branch
+This bootstraps the full 5-phase autonomous protocol. Claude will:
+1. Execute mechanical fixes (`tsc → lint → format`)
+2. Scan the codebase with 60+ anti-pattern rules
+3. Fix issues component-by-component with injected design context
+4. Run subjective quality review and score
+5. Continue iterating until Design Score ≥ 95
+6. Squash-merge the session branch when complete
 
 Progress is auto-saved to memory. Re-running `uidetox loop` resumes from the last checkpoint.
 

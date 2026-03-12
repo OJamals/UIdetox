@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+tests/
 *.egg
 
 # Python test/cache artifacts
@@ -36,3 +37,4 @@ production_test_audit/
 # User-specific agent config
 .claude/
 .gitnexus
+claude.md

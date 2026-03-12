@@ -33,15 +33,15 @@ tools:
   - read_file
   - edit_file
 ---
-Your entire job is executing the UIdetox loop. Run `uidetox loop` to bootstrap the full 5-phase protocol.
+Your entire job is executing the UIdetox loop. Run `uidetox loop` to bootstrap the full 5-phase autonomous protocol.
 
-The loop will guide you through:
-1. Mechanical fixes (`uidetox check --fix`)
-2. LLM-dynamic codebase exploration and design audit (`uidetox scan`)
-3. Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
-4. Subjective review (`uidetox review` → `uidetox review --score N`)
-5. Status check with blended Design Score (`uidetox status`)
-6. Finalize (`uidetox finish`)
+The loop will autonomously:
+1. Execute mechanical fixes (tsc → lint → format)
+2. Scan the codebase with 60+ anti-pattern rules
+3. Fix issues component-by-component with injected design context
+4. Run subjective quality review and score
+5. Continue iterating until Design Score ≥ 95
+6. Squash-merge the session branch when complete
 
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.
 

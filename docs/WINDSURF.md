@@ -26,11 +26,12 @@ Run `uidetox loop` to dispatch Windsurf's Cascade into the full 5-phase protocol
 uidetox loop
 ```
 
-The loop guides the agent through:
-1. Mechanical fixes (`uidetox check --fix`)
-2. LLM-dynamic codebase exploration + design audit (`uidetox scan`)
-3. Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
-4. Subjective review with blended Design Score (`uidetox review` → `uidetox status`)
-5. Finalize (`uidetox finish`)
+The loop bootstraps the full 5-phase autonomous protocol. Windsurf will:
+1. Execute mechanical fixes (tsc → lint → format)
+2. Scan the codebase with 60+ anti-pattern rules
+3. Fix issues component-by-component with injected design context
+4. Run subjective quality review and score
+5. Continue iterating until Design Score ≥ 95
+6. Squash-merge the session branch when complete
 
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.

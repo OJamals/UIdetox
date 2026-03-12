@@ -287,8 +287,8 @@ Do not default to generic UI. Pull from this library when building visually stri
 
 When upgrading an existing project, run `uidetox loop` to automatically orchestrate this sequence, or follow it manually:
 
-### Step 1: Scan (`uidetox scan`)
-Read the codebase. Identify framework, styling method, and current design patterns. Run the static analyzer.
+### Step 1: Scan (automatic)
+The loop auto-detects framework, styling method, and current design patterns. The static analyzer runs automatically.
 
 ### Step 2: Diagnose
 Run through the full audit checklist:

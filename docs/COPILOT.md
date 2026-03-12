@@ -25,7 +25,7 @@ When defining your Copilot Workspace prompt, explicitly include UIdetox requirem
 This project adheres to the UIdetox anti-slop guidelines.
 1. Read `SKILL.md` before generating any UI components.
 2. Avoid generic, AI-generated aesthetics (e.g., system-ui fonts, flat borders, excessive glassmorphism, purple gradients).
-3. The resulting PR must successfully pass `uidetox check` and `uidetox scan` without generating any T2, T3, or T4 issues.
+3. The resulting PR must pass `uidetox check` with a Design Score ≥ 95.
 4. **CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
 ```
 

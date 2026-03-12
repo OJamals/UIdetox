@@ -22,11 +22,15 @@
 ```bash
 # Enter the autonomous loop (full 5-phase protocol)
 uidetox loop
-
-# Or scan first, then fix manually
-uidetox scan --path .
-uidetox next
 ```
+
+The loop bootstraps the full 5-phase autonomous protocol. Codex will:
+1. Execute mechanical fixes (tsc → lint → format)
+2. Scan the codebase with 60+ anti-pattern rules
+3. Fix issues component-by-component with injected design context
+4. Run subjective quality review and score
+5. Continue iterating until Design Score ≥ 95
+6. Squash-merge the session branch when complete
 
 ## Key Commands
 

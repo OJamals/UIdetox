@@ -254,7 +254,7 @@ def _run_iteration(
             pre_queue = queue_size
             pre_resolved = resolved
 
-            _run_autopilot_plan(plan, max_commands=max_commands)
+            halt_stage = _run_autopilot_plan(plan, max_commands=max_commands)
 
             # ---- POST-EXECUTION CHECKPOINT ----
             _post_execution_checkpoint(
@@ -264,6 +264,7 @@ def _run_iteration(
                 dry_run=dry_run,
                 pre_queue=pre_queue,
                 pre_resolved=pre_resolved,
+                subagent_halt_stage=halt_stage,
             )
 
         # Log the loop invocation
@@ -295,6 +296,7 @@ def _post_execution_checkpoint(
     dry_run: bool,
     pre_queue: int,
     pre_resolved: int,
+    subagent_halt_stage: str | None = None,
 ) -> None:
     """Reload state after autopilot execution and decide continuation strategy.
 
@@ -348,7 +350,106 @@ def _post_execution_checkpoint(
         args._continue = True  # type: ignore[attr-defined]
         return
 
-    # ── OUTCOME 3: Agent must apply manual fixes ──
+    # ── OUTCOME 3: Agent must apply manual fixes or subjective review ──
+
+    # ── OUTCOME 3a: Autopilot halted on a subagent review/fix prompt ──
+    # The subagent command printed prompts above but the agent must now
+    # EXECUTE them — read files, score domains, queue issues, apply fixes.
+    if subagent_halt_stage == "review":
+        from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+        total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+        print()
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  AGENT DIRECTIVE — EXECUTE SUBJECTIVE REVIEW NOW    ║")
+        print("  ║  The review prompts are printed above.              ║")
+        print("  ║  You MUST perform the review, not just read them.   ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print()
+        print(f"  The subjective score is 70% of the blended Design Score.")
+        print(f"  {len(REVIEW_DOMAINS)} domains, {total_max} total points, organized in 2 waves of 5.")
+        print()
+        print("  EXECUTE THESE STEPS IN ORDER:")
+        print()
+        print("    1. READ every reference file listed in the review prompts above.")
+        print("       These are the scoring authority:")
+        for ref in sorted(set(r for d in REVIEW_DOMAINS for r in d.get("references", []))):
+            print(f"         - {ref}")
+        print()
+        print("    2. READ every frontend file in the codebase.")
+        print("       Use `npx gitnexus query \"frontend components\"` to discover them.")
+        print()
+        print("    3. SCORE each domain using the rubric in the prompts above:")
+        for d in REVIEW_DOMAINS:
+            wave = d.get('wave', '?')
+            print(f"         Wave {wave}: {d['label']} (0-{d.get('max_score', '?')})")
+        print()
+        print("       For each domain:")
+        print("         a. Start at the max score")
+        print("         b. Walk the checklist — mark each item PASS or FAIL")
+        print("         c. Measure every hard threshold — cite actual values")
+        print("         d. Apply every matching automatic deduction")
+        print("         e. Final score = max - deductions (clamped to [0, max])")
+        print()
+        print("    4. QUEUE every issue found during review:")
+        print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+        print()
+        print("    5. Run:  uidetox check --fix")
+        print("       → Ensure code is clean before scoring.")
+        print()
+        print(f"    6. COMPUTE your combined score (sum all domains, normalize to 0-100):")
+        print(f"       Raw total: <sum>/{total_max} → Normalized: <0-100>")
+        print()
+        print("    7. RECORD the score:")
+        print("       uidetox review --score <NORMALIZED_SCORE>")
+        print()
+        print("    8. Run:  uidetox loop")
+        print("       → Re-enters the loop. If issues were queued, fixes begin.")
+        print("       → If score >= target and queue empty, session finishes.")
+        print()
+        print("  DO NOT SKIP THE REVIEW. DO NOT just record a score without evaluating.")
+        print("  READ the files. SCORE the domains. QUEUE the issues. THEN re-enter.")
+        print()
+        if not can_recurse:
+            print(f"  ⚠️  Max iterations reached ({_MAX_LOOP_ITERATIONS}).")
+            print("  The loop will resume from here when you run `uidetox loop`.")
+            print()
+        return
+
+    if subagent_halt_stage == "fix":
+        print()
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  AGENT DIRECTIVE — EXECUTE FIX PROMPTS NOW          ║")
+        print("  ║  The fix prompts are printed above.                 ║")
+        print("  ║  You MUST apply the fixes, not just read them.      ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print()
+        print(f"  {queue_size} issue(s) pending across the fix shards above.")
+        print()
+        print("  EXECUTE THESE STEPS IN ORDER:")
+        print()
+        print("    1. For EACH fix shard prompt above:")
+        print("       a. Read the target files listed")
+        print("       b. Apply ALL fixes following SKILL.md rules and design dials")
+        print("       c. Follow the deconfliction rules (only edit your shard's files)")
+        print()
+        print("    2. Run:  uidetox check --fix")
+        print("       → MUST pass (tsc → lint → format) BEFORE committing.")
+        print()
+        print('    3. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
+        print("       → Marks issues resolved. ONLY after check --fix passes.")
+        print()
+        print("    4. Run:  uidetox loop")
+        print("       → Re-enters the loop with fresh state.")
+        print()
+        print("  DO NOT SKIP. Apply fixes now, then re-enter the loop.")
+        print()
+        if not can_recurse:
+            print(f"  ⚠️  Max iterations reached ({_MAX_LOOP_ITERATIONS}).")
+            print("  The loop will resume from here when you run `uidetox loop`.")
+            print()
+        return
+
+    # ── OUTCOME 3b: Standard agent directive (no subagent halt) ──
     print()
     print("  ╔══════════════════════════════════════════════════════╗")
     print("  ║  AGENT DIRECTIVE — Apply fixes, then re-enter loop  ║")
@@ -376,27 +477,30 @@ def _post_execution_checkpoint(
         print("       → Re-enters the autonomous loop with fresh state.")
         print("       → Repeats until target score is reached.")
     else:
-        # Queue empty but score below target — needs review/rescan
+        # Queue empty but score below target — needs subjective review
+        from uidetox.subagent import REVIEW_DOMAINS
+        total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
         print(f"  Queue is empty but score ({blended}) < target ({target}).")
+        print(f"  The subjective review (70% weight) must be performed.")
         print()
-        print("    1. Run:  npx gitnexus query \"frontend components\"")
-        print("       → Map the component graph before reviewing.")
+        print("    1. Run:  uidetox subagent --stage-prompt review --parallel 10")
+        print("       → Generates domain-sharded review prompts (10 domains, 2 waves of 5).")
+        print("       → READ the prompts and EXECUTE the review (see above for full protocol).")
         print()
-        print("    2. Run:  uidetox check --fix")
-        print("       → Ensure code is clean (tsc → lint → format) before scoring.")
+        print("    2. READ every frontend file and SCORE each domain using the rubric.")
+        print("       For each domain: start at max → checklist → thresholds → deductions.")
         print()
-        print("    3. Run:  uidetox review")
-        print("       → Perform a subjective UX review and score the design.")
-        print("       → (or `uidetox review --parallel 5` for domain-sharded review)")
-        print()
-        print("    4. Run:  uidetox review --score <N>")
-        print("       → Record your subjective score (0-100).")
-        print()
-        print("    5. Queue any new issues found during review:")
+        print("    3. QUEUE every issue found:")
         print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "..." --fix-command "..."')
         print()
+        print("    4. Run:  uidetox check --fix")
+        print("       → Ensure code is clean before scoring.")
+        print()
+        print(f"    5. COMPUTE and RECORD the combined score (0-{total_max} → normalized 0-100):")
+        print("       uidetox review --score <NORMALIZED_SCORE>")
+        print()
         print("    6. Run:  uidetox loop")
-        print("       → Re-enters with fresh state. Rescans if queue remains empty.")
+        print("       → Re-enters with fresh state. Fixes queued issues, then re-reviews.")
 
     if not can_recurse:
         print()
@@ -675,7 +779,7 @@ def _print_autopilot_plan(plan: list[tuple[str, str]]) -> None:
     print("  and which commands to run next. Follow it precisely.")
 
 
-def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) -> None:
+def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) -> str | None:
     """Execute autopilot commands in order with failure-aware continuation.
 
     Commands fall into two categories:
@@ -684,13 +788,16 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
     - **Context-injecting**: ``next``, ``review``, ``status``, ``finish``,
       skill commands, ``subagent`` — these print information for the agent.
       Non-zero exits are informational signals, not failures.
+    - **Agent-action**: ``subagent --stage-prompt review``, ``subagent --stage-prompt fix``
+      — these print prompts that the agent MUST execute.  The autopilot halts
+      after printing them so the agent can act on the prompts before the loop
+      continues.
 
-    The plan runs all commands so the agent sees the full context dump
-    in one terminal read.  After the plan completes, the caller's
-    checkpoint logic decides whether to re-enter or hand off to the agent.
+    Returns the subagent stage name (``"review"`` or ``"fix"``) if the plan
+    halted on an agent-action command, or ``None`` if the plan ran to completion.
     """
     if not plan:
-        return
+        return None
 
     effective = plan[: max(1, max_commands)]
     print(f"\n  ▶ Executing {len(effective)} command(s)...")
@@ -722,6 +829,24 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
         parts = shlex.split(cmd)
         if not parts:
             continue
+
+        # ── Detect subagent review/fix commands that need agent action ──
+        # These commands print prompts the agent MUST execute.  After
+        # running them, halt the autopilot so the checkpoint can instruct
+        # the agent to act on the printed prompts.
+        _is_subagent_action = (
+            len(parts) >= 4
+            and parts[0] == "uidetox"
+            and parts[1] == "subagent"
+            and "--stage-prompt" in parts
+        )
+        _subagent_action_stage: str | None = None
+        if _is_subagent_action:
+            try:
+                sp_idx = parts.index("--stage-prompt")
+                _subagent_action_stage = parts[sp_idx + 1] if sp_idx + 1 < len(parts) else None
+            except (ValueError, IndexError):
+                pass
 
         is_external = parts[0] in _external_prefixes
 
@@ -811,6 +936,21 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
             consecutive_failures = 0  # Reset on success
 
         print()
+
+        # ── Halt after subagent review/fix prompts ──
+        # The prompts were just printed; the agent needs to ACT on them
+        # before the loop continues.  Return the stage name so the
+        # checkpoint can print the appropriate agent directive.
+        if _subagent_action_stage in ("review", "fix"):
+            remaining = len(effective) - idx
+            if remaining > 0:
+                print(f"  ⏸  Autopilot paused — {remaining} command(s) deferred.")
+                print(f"      The agent must execute the {_subagent_action_stage.upper()} prompts above")
+                print(f"      before the loop can continue.  Re-enter with `uidetox loop`.")
+                print()
+            return _subagent_action_stage
+
+    return None
 
 
 def _print_manual_protocol(

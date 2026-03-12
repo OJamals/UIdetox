@@ -27,12 +27,12 @@ Run `uidetox loop` to dispatch Gemini into the full 5-phase protocol:
 uidetox loop
 ```
 
-The loop bootstraps with auto-detected tooling, continuation context from memory, and component-level batch commits. Gemini will:
-1. Run `uidetox check --fix` to clear mechanical issues
-2. Run `uidetox scan --path .` then systematically read every frontend file
-3. Fix issues by component using `uidetox next` → fix all → `uidetox batch-resolve ID1 ID2 ... --note "..."`
-4. Run `uidetox review` + `uidetox review --score N` for subjective quality assessment
-5. Check `uidetox status` for blended Design Score (30% static + 70% LLM review)
-6. Run `uidetox finish` to squash-merge the session branch
+The loop bootstraps the full 5-phase autonomous protocol. Gemini will:
+1. Execute mechanical fixes (tsc → lint → format)
+2. Scan the codebase with 60+ anti-pattern rules
+3. Fix issues component-by-component with injected design context
+4. Run subjective quality review and score
+5. Continue iterating until Design Score ≥ 95
+6. Squash-merge the session branch when complete
 
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.
