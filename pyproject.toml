@@ -5,7 +5,7 @@ backend-path = ["."]
 
 [project]
 name = "uidetox"
-version = "1.3.7"
+version = "1.3.8"
 description = "Agent harness and CLI to eliminate AI slop from frontend code"
 readme = "README.md"
 requires-python = ">=3.11"
