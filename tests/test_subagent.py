@@ -111,6 +111,17 @@ def test_fullstack_prompt_fallback_without_contract_artifacts():
     assert "openapi.json" in prompt
 
 
+def test_stage_prompt_injects_gitnexus_repo_flags_when_configured():
+    from uidetox.state import save_config
+
+    save_config({"gitnexus_repo": "UIdetox"})
+    prompt = generate_stage_prompt("diagnose", parallel=1)[0]
+
+    assert "npx gitnexus query -r UIdetox" in prompt
+    assert "npx gitnexus context -r UIdetox <component_name>" in prompt
+    assert "npx gitnexus impact -r UIdetox <component_name>" in prompt
+
+
 def test_record_result_clears_stale_review_request_when_confidence_recovers():
     session_id = create_session("verify", "verify prompt")
     assert record_result(session_id, {"note": "manual check required", "confidence": 0.6}) is True

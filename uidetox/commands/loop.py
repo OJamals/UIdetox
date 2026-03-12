@@ -23,6 +23,7 @@ directive always ends with ``uidetox loop`` re-entry.
 import argparse
 from datetime import datetime
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -201,6 +202,49 @@ def _gitnexus_cmd(subcommand: str, arg: str, repo: str | None) -> str:
     return base
 
 
+def _parse_multi_repo_error(output: str) -> list[str]:
+    """Parse available repo names from GitNexus multi-repo error output."""
+    if not output:
+        return []
+    m = re.search(r'Available:\s*([^\n\r]+)', output)
+    if not m:
+        return []
+    raw = m.group(1)
+    names = [part.strip().strip('"').strip("'") for part in raw.split(",")]
+    return [name for name in names if name]
+
+
+def _select_repo_from_candidates(candidates: list[str], preferred: str | None = None) -> str | None:
+    """Choose the best repo from candidates, preferring explicit/current project names."""
+    if not candidates:
+        return None
+    preferred_clean = str(preferred or "").strip()
+    if preferred_clean:
+        for candidate in candidates:
+            if candidate == preferred_clean:
+                return candidate
+
+    cwd_name = pathlib.Path.cwd().resolve().name
+    for candidate in candidates:
+        if candidate == cwd_name:
+            return candidate
+
+    return candidates[0]
+
+
+def _gitnexus_cmd_with_repo(parts: list[str], repo: str) -> list[str]:
+    """Inject `-r <repo>` into an `npx gitnexus ...` argv when missing."""
+    if len(parts) < 3:
+        return parts
+    if parts[0] not in {"npx", "bunx", "node"} or parts[1] != "gitnexus":
+        return parts
+    if "-r" in parts or "--repo" in parts:
+        return parts
+
+    # npx gitnexus <subcommand> -r <repo> <args...>
+    return [*parts[:3], "-r", repo, *parts[3:]]
+
+
 def run(args: argparse.Namespace):
     target = getattr(args, "target", 95)
     is_manual = getattr(args, "manual", False)
@@ -272,6 +316,9 @@ def _run_iteration(
     auto_parallel = max(1, min(5, spread))
     is_orchestrator = bool(getattr(args, "orchestrator", True))
     gitnexus_repo = _resolve_gitnexus_repo(config)
+    if gitnexus_repo and str(config.get("gitnexus_repo", "")).strip() != gitnexus_repo:
+        config["gitnexus_repo"] = gitnexus_repo
+        save_config(config)
 
     # ---- GitNexus codebase indexing (early — before any analysis) ----
     # Advance the GitNexus cache iteration so stale entries are pruned.
@@ -560,7 +607,11 @@ def _run_iteration(
             pre_queue = queue_size
             pre_resolved = resolved
 
-            halt_stage = _run_autopilot_plan(plan, max_commands=max_commands)
+            halt_stage = _run_autopilot_plan(
+                plan,
+                max_commands=max_commands,
+                gitnexus_repo=gitnexus_repo,
+            )
 
             # ---- POST-EXECUTION CHECKPOINT ----
             _post_execution_checkpoint(
@@ -1255,7 +1306,12 @@ def _print_autopilot_plan(plan: list[tuple[str, str]]) -> None:
     print("  and which commands to run next. Follow it precisely.")
 
 
-def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) -> str | None:
+def _run_autopilot_plan(
+    plan: list[tuple[str, str]],
+    *,
+    max_commands: int = 50,
+    gitnexus_repo: str | None = None,
+) -> str | None:
     """Execute autopilot commands in order with failure-aware continuation.
 
     Commands fall into two categories:
@@ -1407,6 +1463,72 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
             continue
 
         if proc.returncode != 0:
+            # Self-heal for multi-repo GitNexus setups:
+            # retry once with explicit `-r <repo>` if command omitted repo.
+            if is_external and len(parts) >= 3 and parts[0] in _external_prefixes and parts[1] == "gitnexus":
+                output = ""
+                if is_gitnexus_cacheable:
+                    output = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
+                candidates = _parse_multi_repo_error(output)
+                selected_repo = _select_repo_from_candidates(candidates, gitnexus_repo)
+                retriable = bool(selected_repo and "-r" not in parts and "--repo" not in parts)
+                if retriable:
+                    retry_parts = _gitnexus_cmd_with_repo(parts, selected_repo)
+                    print(f"      ↻ Retrying GitNexus with explicit repo: {selected_repo}")
+                    try:
+                        if is_gitnexus_cacheable:
+                            retry_proc = subprocess.run(
+                                retry_parts,
+                                text=True,
+                                timeout=timeout,
+                                capture_output=True,
+                            )
+                            combined = ((retry_proc.stdout or "") + (retry_proc.stderr or "")).strip()
+                            if combined:
+                                preview = "\n".join(combined.splitlines()[:60])
+                                print(preview)
+                                if len(combined.splitlines()) > 60:
+                                    print("      … (output truncated)")
+                        else:
+                            retry_proc = subprocess.run(retry_parts, text=True, timeout=timeout)
+                    except Exception as retry_exc:
+                        print(f"      ⚠️  GitNexus retry failed: {retry_exc}")
+                    else:
+                        if retry_proc.returncode == 0:
+                            proc = retry_proc
+                            if is_gitnexus_cacheable:
+                                _cache_gitnexus(
+                                    gitnexus_payload,
+                                    {
+                                        "stdout": retry_proc.stdout,
+                                        "stderr": retry_proc.stderr,
+                                        "command": " ".join(retry_parts),
+                                    },
+                                    kind=gitnexus_kind,
+                                )
+                        else:
+                            proc = retry_proc
+
+            if proc.returncode == 0:
+                consecutive_failures = 0
+                print()
+                # Continue with halt checks below.
+                if _subagent_action_stage in ("review", "fix"):
+                    remaining = len(effective) - idx
+                    if remaining > 0:
+                        print(f"  ⏸  Autopilot paused — {remaining} command(s) deferred.")
+                        print(f"      The agent must execute the {_subagent_action_stage.upper()} prompts above")
+                        print(f"      before the loop can continue.  Re-enter with `uidetox loop`.")
+                        print()
+                    return _subagent_action_stage
+                if cmd_name == "next":
+                    remaining = len(effective) - idx
+                    if remaining > 0:
+                        print(f"  ⏸  Autopilot paused — fix the batch above, then re-enter with `uidetox loop`.")
+                        print()
+                    return "next"
+                continue
+
             if cmd_name in _signal_commands or is_skill or is_external:
                 print(f"      ℹ  Signal exit ({proc.returncode}) — continuing.")
                 log_error("loop_autopilot_signal_exit", "Autopilot signal exit", {

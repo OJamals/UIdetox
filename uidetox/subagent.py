@@ -1586,6 +1586,48 @@ _DOMAIN_GITNEXUS_QUERIES: dict[str, list[str]] = {
     ],
 }
 
+_GITNEXUS_REPO_SCOPED_SUBCOMMANDS = {
+    "query",
+    "context",
+    "impact",
+    "cypher",
+    "detect_changes",
+    "status",
+    "analyze",
+    "wiki",
+}
+
+
+def _inject_gitnexus_repo_flags(text: str, repo: str | None) -> str:
+    """Inject `-r <repo>` into GitNexus CLI examples when repo is known."""
+    repo_name = str(repo or "").strip()
+    if not repo_name:
+        return text
+
+    lines: list[str] = []
+    for line in text.splitlines():
+        if "npx gitnexus " not in line:
+            lines.append(line)
+            continue
+        if re.search(r"\s(?:-r|--repo)\b", line):
+            lines.append(line)
+            continue
+
+        m = re.search(r"npx gitnexus\s+([a-zA-Z_]+)", line)
+        if not m:
+            lines.append(line)
+            continue
+
+        subcommand = m.group(1)
+        if subcommand not in _GITNEXUS_REPO_SCOPED_SUBCOMMANDS:
+            lines.append(line)
+            continue
+
+        replacement = f"npx gitnexus {subcommand} -r {shlex.quote(repo_name)}"
+        lines.append(line[:m.start()] + replacement + line[m.end():])
+
+    return "\n".join(lines)
+
 
 def _build_domain_pre_review_block(domains: list[dict]) -> str:
     """Build a numbered pre-review analysis block with domain-specific GitNexus queries.
@@ -1944,32 +1986,36 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
 
 Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
     tooling_block = _build_tooling_block(tooling)
+    gitnexus_repo = str(config.get("gitnexus_repo", "")).strip() or None
+
+    def _finalize(prompts: list[str]) -> list[str]:
+        return [_inject_gitnexus_repo_flags(prompt, gitnexus_repo) for prompt in prompts]
 
     if stage == "observe":
         if parallel > 1:
             files = get_frontend_files()
             if not files:
                 memory_block = _build_memory_block()
-                return [_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)]
+                return _finalize([_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)])
             # Workload-aware file sharding (size + issue density + coupling)
             chunks = _shard_items_by_workload(files, parallel, issues=issues)
-            return [
+            return _finalize([
                 _observe_prompt(tooling_block, chunk, dials_block,
                                 _build_memory_block(files=chunk), idx, len(chunks))
                 for idx, chunk in enumerate(chunks)
-            ]
+            ])
         memory_block = _build_memory_block()
-        return [_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)]
+        return _finalize([_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)])
 
     elif stage == "diagnose":
-        return [_diagnose_prompt(issues, tooling_block, dials_block)]
+        return _finalize([_diagnose_prompt(issues, tooling_block, dials_block)])
 
     elif stage == "prioritize":
-        return [_prioritize_prompt(issues)]
+        return _finalize([_prioritize_prompt(issues)])
 
     elif stage == "fix":
         if not issues:
-            return [_fix_prompt([], tooling_block, dials_block, 0, 1)]
+            return _finalize([_fix_prompt([], tooling_block, dials_block, 0, 1)])
 
         # Safely group by file to prevent merge conflicts
         grouped = {}
@@ -1990,10 +2036,10 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
             buckets = [issues[:5]] # type: ignore
 
         total_buckets = len(buckets)
-        return [_fix_prompt(bucket, tooling_block, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)]
+        return _finalize([_fix_prompt(bucket, tooling_block, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)])
 
     elif stage == "verify":
-        return [_verify_prompt(issues, resolved, tooling_block)]
+        return _finalize([_verify_prompt(issues, resolved, tooling_block)])
 
     elif stage == "review":
         files = get_frontend_files()
@@ -2016,10 +2062,10 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
                         total_shards=len(chunks),
                     )
                 )
-            return prompts
-        return [_review_prompt(files, tooling_block, dials_block)]
+            return _finalize(prompts)
+        return _finalize([_review_prompt(files, tooling_block, dials_block)])
 
-    return [f"Unknown stage: {stage}"]
+    return _finalize([f"Unknown stage: {stage}"])
 
 
 def _observe_prompt(tooling_block: str, files: list[str], dials_block: str,

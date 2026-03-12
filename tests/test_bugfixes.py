@@ -613,3 +613,42 @@ class TestSkillsCleanup:
         source = Path(skills_mod.__file__).read_text()
         # 're' should not be imported at the top level
         assert "import re" not in source.split("# ---")[0]
+
+
+class TestLoopGitNexusMultiRepoRetry:
+    """Ensure loop autopilot self-heals GitNexus multi-repo errors."""
+
+    def test_run_autopilot_retries_with_repo_on_multi_repo_error(self, monkeypatch):
+        from uidetox.commands import loop as loop_cmd
+
+        calls: list[list[str]] = []
+
+        def fake_run(parts, **kwargs):  # noqa: ANN001
+            calls.append(parts)
+            if len(calls) == 1:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr='Multiple repositories indexed. Specify which one with the "repo" parameter. '
+                           "Available: foo, UIdetox",
+                )
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        monkeypatch.setattr(loop_cmd.subprocess, "run", fake_run)
+        monkeypatch.setattr(loop_cmd, "_get_cached_gitnexus", lambda *a, **k: None)
+        monkeypatch.setattr(loop_cmd, "_cache_gitnexus", lambda *a, **k: None)
+
+        result = loop_cmd._run_autopilot_plan(
+            [
+                (
+                    'npx gitnexus impact "src/components/ui/data-table.tsx" --direction upstream',
+                    "pre-fix impact: blast radius",
+                )
+            ],
+            max_commands=1,
+            gitnexus_repo="UIdetox",
+        )
+
+        assert result is None
+        assert len(calls) == 2
+        assert calls[1][:5] == ["npx", "gitnexus", "impact", "-r", "UIdetox"]
