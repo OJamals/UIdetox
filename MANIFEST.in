@@ -2,6 +2,8 @@ include README.md
 include SKILL.md
 include AGENTS.md
 include LICENSE
+include _build_backend.py
+include scripts/sync_data.py
 recursive-include commands *.md
 recursive-include reference *.md
 recursive-include docs *.md
