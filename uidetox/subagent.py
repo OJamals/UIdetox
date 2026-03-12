@@ -238,6 +238,92 @@ REVIEW_DOMAINS: list[dict] = [
             "-1 pt: will-change used preemptively",
         ],
     },
+    {
+        "name": "design_elegance",
+        "label": "Design Elegance & Craft",
+        "wave": 1,
+        "references": ["reference/creative-arsenal.md", "reference/anti-patterns.md"],
+        "rubric": "A.DESIGN ELEGANCE & CRAFT (0-10) = 10 pts",
+        "max_score": 10,
+        "focus": "Holistic aesthetic quality, visual harmony, intentional micro-details, "
+                 "professional finishing, cohesive visual language, craft in every pixel. "
+                 "Does this feel designed or assembled? Would a design director approve?",
+        "checklist": [
+            "Visual hierarchy clear without reading — squint test passes across all pages",
+            "Color palette feels intentional, not randomly assembled from framework defaults",
+            "Whitespace is used as a design element, not just gaps between elements",
+            "Custom micro-details: selection colors, scrollbar styling, text decoration",
+            "Visual rhythm: repeating spacing/alignment patterns create intentional cadence",
+            "Typography and color reinforce information hierarchy in concert",
+            "No 'template' feel — design has a distinctive aesthetic point of view",
+            "Transitions and interactions feel cohesive (unified easing, consistent timing)",
+            "Dark mode is a considered redesign (not a CSS filter/color inversion)",
+            "Custom empty/error/loading states — no browser defaults visible anywhere",
+            "Overall: would a professional designer approve without requests for changes?",
+        ],
+        "thresholds": {
+            "visual_cohesion": "All pages share same spacing scale, type system, and color palette",
+            "detail_level": "≥5 micro-details present (selection color, scrollbar, link underlines, hover states, focus rings)",
+            "hierarchy_dimensions": "≥3 hierarchy tools used together (size + weight + color + spacing)",
+            "aesthetic_consistency": "Cross-page visual language is unified (nav, footer, headings, cards)",
+        },
+        "deductions": [
+            "-4 pts: immediate 'AI-generated' or 'template' impression (fails the squint test)",
+            "-3 pts: no cohesive visual language — pages/sections feel assembled from parts",
+            "-2 pts: whitespace used inconsistently or not as a deliberate design tool",
+            "-2 pts: micro-details missing (default selection, native scrollbars, default underlines)",
+            "-1 pt: dark mode is just inverted light mode (same lightness relationships)",
+            "-1 pt: hierarchy relies on size alone (no weight/color/spacing variation)",
+            "-1 pt: inconsistent visual density across pages (one sparse, one cramped)",
+        ],
+    },
+    {
+        "name": "accessibility",
+        "label": "Accessibility & Inclusive Design",
+        "wave": 1,
+        "references": ["reference/interaction-design.md", "reference/ux-writing.md"],
+        "rubric": "C.ACCESSIBILITY & INCLUSIVE DESIGN (0-10) = 10 pts",
+        "max_score": 10,
+        "focus": "WCAG 2.2 Level AA compliance, semantic HTML structure, landmark "
+                 "regions, keyboard navigation completeness, screen reader UX, "
+                 "reduced motion respect, color independence, touch targets, "
+                 "focus management, heading hierarchy, alt text quality.",
+        "checklist": [
+            "All pages have <main>, <nav>, <header>, <footer> landmarks",
+            "Heading hierarchy: single <h1>, sequential nesting (no h1→h3 skip)",
+            "All interactive elements reachable and operable via keyboard alone",
+            "Focus order matches visual order (no tabindex > 0)",
+            "All non-text content has text alternatives (alt, aria-label, aria-describedby)",
+            "<html lang> attribute present and correct",
+            "Skip-to-content link as first focusable element",
+            "ARIA attributes used correctly (no aria-label on non-interactive divs)",
+            "Live regions (aria-live) for dynamic content updates (toasts, notifications)",
+            "color-scheme meta tag and prefers-color-scheme support",
+            "prefers-reduced-motion media query with crossfade alternatives",
+            "prefers-contrast media query support for high-contrast needs",
+            "No autoplaying media without user control",
+            "Form error announcements linked to fields via aria-describedby",
+        ],
+        "thresholds": {
+            "wcag_level": "AA (minimum), AAA preferred for text contrast",
+            "keyboard_trap_free": "100% — zero keyboard traps in any flow",
+            "landmark_coverage": "100% of page content within landmarks",
+            "heading_sequence": "100% sequential (no skipped levels)",
+            "focus_visible_coverage": "100% of interactive elements have :focus-visible",
+        },
+        "deductions": [
+            "-3 pts: keyboard navigation broken (traps, unreachable elements)",
+            "-3 pts: no landmark regions at all (<main>, <nav>, etc.)",
+            "-2 pts: heading hierarchy broken (skipped levels or multiple h1)",
+            "-2 pts: images without alt text (non-decorative)",
+            "-2 pts: no prefers-reduced-motion support",
+            "-1 pt: no <html lang> attribute",
+            "-1 pt: ARIA misuse (wrong roles, redundant/conflicting labels)",
+            "-1 pt: no skip-to-content link",
+            "-1 pt: focus order doesn't match visual order",
+            "-1 pt: no prefers-contrast support",
+        ],
+    },
     # ── Wave 2: System & Architecture ─────────────────────────────
     {
         "name": "spatial_layout",
@@ -431,13 +517,100 @@ REVIEW_DOMAINS: list[dict] = [
             "-1 pt: hover relied upon for core functionality",
         ],
     },
+    {
+        "name": "api_data_coherence",
+        "label": "API & Data Coherence",
+        "wave": 2,
+        "references": ["reference/interaction-design.md", "reference/responsive-design.md"],
+        "rubric": "D.API & DATA COHERENCE (0-10) = 10 pts",
+        "max_score": 10,
+        "focus": "Frontend-backend alignment, DTO field matching, data flow "
+                 "architecture, caching strategy, optimistic updates, "
+                 "error/loading/empty state coherence with actual API behavior, "
+                 "type safety across boundaries, database schema alignment.",
+        "checklist": [
+            "Frontend types match backend DTOs field-for-field (no phantom fields)",
+            "Nullable/optional fields handled explicitly (not assumed non-null)",
+            "All API responses have defined TypeScript types (never 'any')",
+            "Loading states reflect actual backend latency (skeleton screens, not spinners)",
+            "Error states handle ALL backend status codes (400, 401, 403, 404, 422, 500)",
+            "Empty states match zero-result API responses (not just generic 'No data')",
+            "Form validation mirrors backend constraints (length, format, range, required)",
+            "Pagination/sort/filter params align with backend query API",
+            "Optimistic updates have rollback on server rejection",
+            "Data caching strategy is deliberate (SWR/React Query/RTK Query with stale times)",
+            "Enum values synchronized between frontend and backend/database",
+            "Date/time format handling consistent (ISO 8601, timezone-aware)",
+        ],
+        "thresholds": {
+            "type_coverage": "100% of API responses have typed interfaces",
+            "error_handling": "All 4xx and 5xx codes handled with user-facing messages",
+            "state_completeness": "100% of data-fetching surfaces handle loading/error/empty",
+            "validation_alignment": "100% of form fields validate client-side matching server rules",
+        },
+        "deductions": [
+            "-3 pts: 'any' type used for API responses",
+            "-3 pts: no error handling on data-fetching surfaces",
+            "-2 pts: frontend types have fields the backend doesn't send (phantom fields)",
+            "-2 pts: generic 'Something went wrong' for all API errors",
+            "-2 pts: no loading states on data-fetching components",
+            "-1 pt: nullable fields assumed non-null without runtime guards",
+            "-1 pt: no caching strategy (fresh fetch every render)",
+            "-1 pt: date handling inconsistent (mixing formats, no timezone handling)",
+            "-1 pt: pagination not synchronized with backend API",
+        ],
+    },
+    {
+        "name": "performance_vitals",
+        "label": "Performance & Web Vitals",
+        "wave": 2,
+        "references": ["reference/responsive-design.md"],
+        "rubric": "D.PERFORMANCE & WEB VITALS (0-8) = 8 pts",
+        "max_score": 8,
+        "focus": "Core Web Vitals targets (LCP, CLS, INP), bundle optimization, "
+                 "lazy loading, image optimization, render performance, "
+                 "code splitting, proper asset handling, unnecessary re-render "
+                 "prevention, virtualization for large lists.",
+        "checklist": [
+            "Images use next-gen formats (WebP/AVIF) with fallbacks",
+            "Images have explicit width/height or aspect-ratio to prevent CLS",
+            "Above-fold images use priority/eager loading; below-fold use lazy",
+            "Heavy components code-split (React.lazy, dynamic import())",
+            "CSS and JS tree-shaken (no unused imports shipping to production)",
+            "Fonts use font-display: swap with fallback size-adjust",
+            "No render-blocking resources in critical path",
+            "Expensive computations memoized appropriately (useMemo/useCallback)",
+            "Lists >50 items use virtualization (react-window, TanStack Virtual)",
+            "No layout thrashing (reading then writing DOM in loops)",
+            "Bundle size reasonable: main chunk <200KB gzipped",
+            "Prefetching/preloading for predictable navigation paths",
+        ],
+        "thresholds": {
+            "lcp_target": "≤ 2.5s",
+            "cls_target": "≤ 0.1",
+            "inp_target": "≤ 200ms",
+            "main_bundle_gzip": "< 200KB",
+            "image_format": "WebP or AVIF preferred",
+            "lazy_load_threshold": "Images below first viewport",
+        },
+        "deductions": [
+            "-3 pts: no image optimization (no srcset, no lazy loading, no next-gen formats)",
+            "-2 pts: layout shift sources (images without dimensions, dynamic content without placeholders)",
+            "-2 pts: render-blocking resources without mitigation (no async/defer)",
+            "-2 pts: giant bundle (>500KB gzipped main chunk)",
+            "-1 pt: no code splitting on route level",
+            "-1 pt: unnecessary re-renders (missing memo/callback for expensive operations)",
+            "-1 pt: no font optimization (font-display, size-adjust missing)",
+            "-1 pt: lists >50 items without virtualization",
+        ],
+    },
     # ── Cross-Cutting Perfection Gate ─────────────────────────────
     #
     # This domain is NOT scored independently — it acts as a multiplier
     # gate that caps the final normalized score.  If ANY gate condition
-    # fails, the reviewer MUST cap the final score at 90 maximum.
-    # If 2+ conditions fail, cap at 85.  Only when ALL conditions pass
-    # can the final score exceed 90.
+    # fails, the reviewer MUST cap the final score at 85 maximum.
+    # If 2+ conditions fail, cap at 75.  Only when ALL conditions pass
+    # can the final score exceed 85.
     {
         "name": "perfection_gate",
         "label": "Perfection Gate (ceiling enforcer)",
@@ -446,7 +619,7 @@ REVIEW_DOMAINS: list[dict] = [
         "rubric": "GATE — not scored; caps total when conditions fail",
         "max_score": 0,  # no additive points
         "focus": "Cross-cutting quality gates that MUST all pass before the "
-                 "final score can exceed 90.  These are non-negotiable "
+                 "final score can exceed 85.  These are non-negotiable "
                  "perfection requirements — a single failure here means "
                  "the codebase is NOT perfect, regardless of domain scores.",
         "checklist": [
@@ -460,6 +633,11 @@ REVIEW_DOMAINS: list[dict] = [
             "ALL interactive elements have hover + focus + active + disabled states",
             "ALL images have alt text (decorative → alt='')",
             "ALL forms have visible labels (not placeholder-as-label)",
+            "ALL pages have semantic landmarks (<main>, <nav>, <header>, <footer>)",
+            "ALL heading hierarchy is sequential (single h1, no skipped levels)",
+            "ALL images optimized (srcset, lazy loading, next-gen formats or size-adjust)",
+            "ALL API responses have typed interfaces (no 'any' for data)",
+            "ZERO phantom types (frontend interfaces with fields backend doesn't send)",
             "prefers-reduced-motion media query present",
             "prefers-color-scheme media query present (or CSS custom-property toggle)",
             "Skip-to-content link present",
@@ -467,12 +645,13 @@ REVIEW_DOMAINS: list[dict] = [
             "Meta tags present (title, description, og:image)",
             "Custom 404 page exists",
             "No hardcoded px for font sizes (rem/em only)",
+            "No render-blocking resources without async/defer mitigation",
         ],
         "thresholds": {},
         "deductions": [
-            "GATE FAIL: cap at 90 if 1 condition fails",
-            "GATE FAIL: cap at 85 if 2-3 conditions fail",
-            "GATE FAIL: cap at 80 if 4+ conditions fail",
+            "GATE FAIL: cap at 85 if 1 condition fails",
+            "GATE FAIL: cap at 75 if 2-3 conditions fail",
+            "GATE FAIL: cap at 65 if 4+ conditions fail",
         ],
     },
 ]
@@ -1140,14 +1319,249 @@ def _build_tooling_block(tooling: dict) -> str:
     return "\n".join(lines)
 
 
+_DOMAIN_GITNEXUS_QUERIES: dict[str, list[str]] = {
+    "typography": [
+        'npx gitnexus query "font family weight size text heading"',
+        'npx gitnexus query "typography type scale line-height tracking"',
+    ],
+    "color_contrast": [
+        'npx gitnexus query "color palette theme accent neutral"',
+        'npx gitnexus query "dark mode light contrast background"',
+    ],
+    "interaction_states": [
+        'npx gitnexus query "hover focus active disabled loading error state"',
+        'npx gitnexus query "button input form select checkbox toggle"',
+    ],
+    "content_ux_writing": [
+        'npx gitnexus query "placeholder text label copy heading description"',
+        'npx gitnexus query "error message toast alert notification"',
+    ],
+    "motion_animation": [
+        'npx gitnexus query "animation transition motion delay duration easing"',
+        'npx gitnexus query "keyframe transform opacity scale"',
+    ],
+    "spatial_layout": [
+        'npx gitnexus query "grid flex layout container spacing gap padding margin"',
+        'npx gitnexus query "responsive breakpoint media query mobile"',
+    ],
+    "materiality_surfaces": [
+        'npx gitnexus query "shadow border radius opacity blur glassmorphism"',
+        'npx gitnexus query "surface card panel overlay backdrop"',
+    ],
+    "consistency_system": [
+        'npx gitnexus query "design token variable custom property theme"',
+        'npx gitnexus query "component shared reusable import export default"',
+    ],
+    "identity_brand": [
+        'npx gitnexus query "brand logo icon favicon hero landing"',
+        'npx gitnexus query "image illustration asset avatar placeholder unsplash"',
+    ],
+    "architecture_responsive": [
+        'npx gitnexus query "import export module component file structure"',
+        'npx gitnexus query "fetch request API route endpoint handler"',
+    ],
+    "design_elegance": [
+        'npx gitnexus query "design token variable custom property theme"',
+        'npx gitnexus query "styling className tailwind css module styled"',
+        'npx gitnexus query "layout spacing whitespace padding margin gap"',
+    ],
+    "accessibility": [
+        'npx gitnexus query "aria label role landmark main nav header footer"',
+        'npx gitnexus query "focus keyboard tabindex skip-to-content"',
+        'npx gitnexus query "alt text img image picture srcset"',
+    ],
+    "api_data_coherence": [
+        'npx gitnexus query "fetch request mutation query API endpoint"',
+        'npx gitnexus query "DTO type interface response schema"',
+        'npx gitnexus query "loading error empty state skeleton"',
+        'npx gitnexus query "validation constraint required enum"',
+    ],
+    "performance_vitals": [
+        'npx gitnexus query "lazy loading dynamic import code split"',
+        'npx gitnexus query "image srcset picture WebP AVIF optimization"',
+        'npx gitnexus query "memo callback useMemo useCallback performance"',
+    ],
+}
+
+
+def _build_domain_pre_review_block(domains: list[dict]) -> str:
+    """Build a numbered pre-review analysis block with domain-specific GitNexus queries.
+
+    Generates targeted GitNexus query commands based on the specific domains
+    assigned to this review shard, so each shard gets queries relevant to
+    its scoring focus rather than generic placeholders.
+    """
+    lines: list[str] = []
+    step = 1
+    lines.append(f"{step}. `npx gitnexus analyze` — refresh codebase index (skip if already fresh)")
+    step += 1
+
+    # Collect domain-specific queries (deduplicated)
+    seen_queries: set[str] = set()
+    for domain in domains:
+        domain_name = domain.get("name", "")
+        queries = _DOMAIN_GITNEXUS_QUERIES.get(domain_name, [])
+        for query in queries:
+            if query not in seen_queries:
+                seen_queries.add(query)
+                # Extract the concept from the query for the explanation
+                domain_label = domain.get("label", domain_name)
+                lines.append(f"{step}. `{query}` — map {domain_label.lower()} patterns")
+                step += 1
+
+    # Fallback: if no specific queries were found, use generic ones
+    if not seen_queries:
+        lines.append(f'{step}. `npx gitnexus query "design patterns"` — map relevant code patterns')
+        step += 1
+        lines.append(f'{step}. `npx gitnexus query "component structure"` — discover additional patterns')
+        step += 1
+
+    lines.append(f"{step}. `uidetox check --fix` — ensure code is clean before reviewing")
+    step += 1
+    lines.append(f"{step}. **Read every reference file listed below** — these contain the expert criteria")
+    step += 1
+    lines.append(f"{step}. Read every frontend file and evaluate ONLY your assigned domains")
+
+    return "\n".join(lines)
+
+
+# ── Issue-to-domain mapping for batch GitNexus queries ───────────
+
+_ISSUE_DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "typography": ["font", "text", "heading", "type", "line-height", "tracking", "weight", "serif", "sans"],
+    "color_contrast": ["color", "contrast", "palette", "gradient", "dark", "light", "accent", "saturation", "hue"],
+    "interaction_states": ["hover", "focus", "active", "disabled", "loading", "error", "state", "button", "input"],
+    "content_ux_writing": ["copy", "lorem", "placeholder", "label", "message", "text", "content", "generic"],
+    "motion_animation": ["animation", "transition", "motion", "bounce", "easing", "duration", "keyframe"],
+    "spatial_layout": ["grid", "flex", "spacing", "padding", "margin", "layout", "container", "gap", "column"],
+    "materiality_surfaces": ["shadow", "border", "radius", "blur", "glass", "surface", "card", "opacity"],
+    "consistency_system": ["token", "variable", "consistent", "duplicate", "system", "convention"],
+    "identity_brand": ["brand", "icon", "logo", "identity", "favicon", "hero", "unsplash", "image"],
+    "architecture_responsive": ["responsive", "breakpoint", "mobile", "import", "semantic", "html", "div"],
+    "design_elegance": ["cohesion", "aesthetic", "craft", "elegance", "harmony", "visual", "rhythm", "detail", "micro"],
+    "accessibility": ["aria", "a11y", "screen reader", "landmark", "heading", "alt", "keyboard", "tab", "wcag", "lang"],
+    "api_data_coherence": ["api", "fetch", "dto", "schema", "endpoint", "response", "cache", "mutation", "query", "data"],
+    "performance_vitals": ["performance", "lazy", "bundle", "image", "optimize", "render", "vitals", "lcp", "cls", "split"],
+}
+
+
+def _derive_batch_gitnexus_queries(batch: list[dict]) -> str:
+    """Derive GitNexus queries from issue descriptions in a fix batch.
+
+    Analyzes the batch's issue text to determine which design domains
+    are relevant, then emits targeted GitNexus commands for those domains.
+    Also includes per-file context queries for the batch's target files.
+    """
+    # Determine which domains are relevant to this batch
+    all_issue_text = " ".join(
+        (i.get("issue", "") + " " + i.get("command", "")).lower()
+        for i in batch
+    )
+    relevant_domains: set[str] = set()
+    for domain_name, keywords in _ISSUE_DOMAIN_KEYWORDS.items():
+        for kw in keywords:
+            if kw in all_issue_text:
+                relevant_domains.add(domain_name)
+                break
+
+    lines: list[str] = []
+    step = 1
+
+    # Per-file context queries
+    batch_files = list(dict.fromkeys(i.get("file", "") for i in batch if i.get("file")))
+    for bf in batch_files[:5]:
+        fname = Path(bf).stem
+        lines.append(f"{step}. `npx gitnexus context \"{fname}\"` — trace callers/callees for {fname}")
+        step += 1
+        lines.append(f"{step}. `npx gitnexus impact \"{fname}\"` — check blast radius before editing")
+        step += 1
+
+    # Domain-specific queries (deduplicated)
+    seen_queries: set[str] = set()
+    for domain_name in relevant_domains:
+        queries = _DOMAIN_GITNEXUS_QUERIES.get(domain_name, [])
+        for query in queries:
+            if query not in seen_queries:
+                seen_queries.add(query)
+                lines.append(f"{step}. `{query}` — find related patterns")
+                step += 1
+
+    # Always include design token discovery
+    token_query = 'npx gitnexus query "design token variable custom property theme"'
+    if token_query not in seen_queries:
+        lines.append(f"{step}. `{token_query}` — reuse existing design tokens")
+        step += 1
+
+    if not lines:
+        lines.append(f'{step}. `npx gitnexus query "component design pattern"` — map relevant patterns')
+
+    return "\n".join(lines)
+
+
+def _build_frontend_gitnexus_block(phase: str = "general") -> str:
+    """Build GitNexus analysis instructions for frontend-only projects.
+
+    Unlike ``_build_fullstack_block`` which only emits content for full-stack
+    projects, this provides GitNexus guidance for ALL projects — mapping
+    component architecture, design patterns, state management, and coupling
+    even when no backend/database/API layers are detected.
+    """
+    if phase == "observe":
+        return """## GitNexus Codebase Intelligence (MANDATORY — run before observation)
+1. `npx gitnexus analyze` — refresh codebase index
+2. `npx gitnexus query "component page layout view route"` — map component architecture
+3. `npx gitnexus query "shared hook context provider utility"` — map shared infrastructure
+4. `npx gitnexus query "design token variable custom property"` — find design system surface
+5. `npx gitnexus query "import export default dependency"` — map coupling and dependency chains
+"""
+
+    if phase == "diagnose":
+        return """## GitNexus Pattern Discovery (MANDATORY — run before diagnosing)
+1. `npx gitnexus query "design token variable theme color"` — find design system patterns
+2. `npx gitnexus query "styling className tailwind css module"` — discover styling approaches
+3. `npx gitnexus query "animation transition motion easing"` — find motion patterns
+4. `npx gitnexus query "hover focus active disabled state"` — find interaction patterns
+5. `npx gitnexus query "error loading empty skeleton"` — find state handling patterns
+6. For each suspect component, run: `npx gitnexus context <component>` — trace callers/callees
+"""
+
+    if phase == "fix":
+        return """## GitNexus Pre-Fix Analysis (MANDATORY — run BEFORE editing code)
+1. `npx gitnexus context <component>` — trace ALL callers/callees before modifying
+2. `npx gitnexus impact <symbol>` — check blast radius for any exports you'll change
+3. `npx gitnexus query "design token variable theme"` — use existing design tokens, don't invent new ones
+4. After fixing: `npx gitnexus detect_changes` — verify only expected files/symbols changed
+"""
+
+    if phase == "review":
+        return """## GitNexus Pre-Review Analysis (MANDATORY — run BEFORE scoring)
+1. `npx gitnexus analyze` — refresh codebase index
+2. `npx gitnexus query "component page route layout view"` — map component graph
+3. `npx gitnexus query "design token variable custom property"` — assess design system coverage
+4. `npx gitnexus query "import export default dependency"` — check coupling and cohesion
+5. `npx gitnexus query "shared hook context provider store"` — map state management
+"""
+
+    if phase == "verify":
+        return """## GitNexus Post-Fix Verification (MANDATORY — run after fixes)
+1. `npx gitnexus detect_changes` — verify only expected files/symbols changed
+2. `npx gitnexus impact <modified_symbol>` — check blast radius for each modified export
+3. `npx gitnexus context <component>` — verify component relationships are intact
+"""
+
+    return ""
+
+
 def _build_fullstack_block(tooling: dict, phase: str = "general") -> str:
     """Build full-stack alignment instructions using GitNexus when backend/API/DB detected.
 
-    Only emits content for full-stack projects. Pure frontend projects get "".
-    The *phase* parameter tailors instructions (observe, diagnose, fix, review).
+    Emits full-stack alignment instructions when backend/API/DB layers are
+    detected.  For pure frontend projects, delegates to
+    ``_build_frontend_gitnexus_block`` so every project gets GitNexus guidance.
+    The *phase* parameter tailors instructions (observe, diagnose, fix, review, verify).
     """
     if not _has_fullstack(tooling):
-        return ""
+        return _build_frontend_gitnexus_block(phase)
 
     backends = tooling.get("backend", []) or []
     databases = tooling.get("database", []) or []
@@ -1275,6 +1689,29 @@ This is a full-stack project. Frontend changes MUST be mapped against the backen
 - Data flow: is fetching/caching/mutation coherent across the stack?
 - Validation symmetry: do client-side rules mirror server-side constraints?
 - State completeness: does every data-fetching surface handle loading/error/empty?
+"""
+
+    if phase == "verify":
+        return f"""## Full-Stack Post-Fix Verification (MANDATORY — {stack_summary})
+{schema_block}
+
+### GitNexus Cross-Layer Verification (run ALL after fixes)
+1. `npx gitnexus detect_changes` — verify changes only affect expected symbols/files
+2. `npx gitnexus query "API endpoint route handler"` — confirm backend surface unchanged
+3. `npx gitnexus query "DTO type interface schema"` — verify data contracts still match
+4. For each modified component that fetches data:
+   - `npx gitnexus impact <component> --direction upstream` — check blast radius
+   - `npx gitnexus context <component>` — verify relationships intact
+   - Confirm: frontend types still match backend DTOs after refactoring
+   - Confirm: error/loading/empty states still reflect real backend behavior
+5. `npx gitnexus query "validation constraint required"` — verify validation alignment preserved
+
+### Post-Fix Full-Stack Checklist
+- [ ] No new phantom fields introduced (frontend type has fields backend doesn't send)
+- [ ] No broken data contracts (renamed/moved props still match API response shape)
+- [ ] Error handling still covers all backend status codes
+- [ ] Loading/empty states still match backend behavior patterns
+- [ ] Form validation still mirrors server-side constraints
 """
 
     return ""
@@ -1474,8 +1911,13 @@ Identify every AI slop pattern and design violation.
 1. `npx gitnexus query "design patterns"` — find design system usage and token consistency
 2. `npx gitnexus query "styling color theme"` — discover color/theme patterns across components
 3. `npx gitnexus query "animation transition motion"` — find motion patterns
-4. `npx gitnexus context <suspect_component>` — understand callers/callees for integration issues
-5. `uidetox check --fix` — ensure code is clean before diagnosing
+4. `npx gitnexus query "hover focus active disabled state"` — find interaction state patterns
+5. `npx gitnexus query "error loading empty skeleton placeholder"` — find state handling patterns
+6. `npx gitnexus query "component page layout view"` — map component architecture
+7. For EACH component with potential issues, run:
+   `npx gitnexus context <component_name>` — understand callers/callees for integration issues
+   `npx gitnexus impact <component_name>` — check blast radius before queuing fixes
+8. `uidetox check --fix` — ensure code is clean before diagnosing
 
 ## Already Known Issues
 {existing}
@@ -1640,6 +2082,9 @@ def _fix_prompt(batch: list, tooling_block: str, dials_block: str,
     tooling = config.get("tooling", {})
     fullstack_block = _build_fullstack_block(tooling, phase="fix")
 
+    # Derive domain-specific GitNexus queries from the batch issues
+    batch_gitnexus_queries = _derive_batch_gitnexus_queries(batch)
+
     return f"""# UIdetox Sub-Agent: FIX Stage
 
 {memory_block}
@@ -1656,14 +2101,19 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 {context_block}
 
+## Pre-Fix GitNexus Analysis (MANDATORY — run BEFORE editing code)
+{batch_gitnexus_queries}
+
 ## Tools & Rules
 - Run `npx gitnexus analyze` first if index is stale
 - Use `npx gitnexus impact <symbol>` BEFORE refactoring any exports
 - Use `npx gitnexus context <symbol>` to understand component relationships
+- Use `npx gitnexus query "design token variable theme"` to find existing tokens — reuse, don't reinvent
 - Follow SKILL.md design rules for every change
 - Fix ALL issues in one pass per component, then:
   1. Run `uidetox check --fix` to pass lint/format/typecheck BEFORE committing
-  2. Batch-resolve: `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`
+  2. Run `npx gitnexus detect_changes` to verify only expected files/symbols changed
+  3. Batch-resolve: `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`
 - Move to the next component immediately after resolving
 """
 
@@ -1763,12 +2213,15 @@ blended Design Score.
 - reference/ux-writing.md, reference/responsive-design.md
 
 ## Scoring Guide (after applying domain rubrics)
-     0-30  : Heavy AI slop, generic, inconsistent — multiple critical failures
-    31-50  : Some personality but obvious AI tells remain — several deductions
-    51-70  : Competent design with minor slop traces — some checklist failures
-    71-85  : Good design, mostly clean of AI fingerprints — few deductions
-    86-95  : Excellent, intentional, polished — nearly all checklists pass
-    96-100 : Exceptional — all checklists pass, zero deductions
+     0-20  : Critical failures — AI slop everywhere, no design intention
+    21-40  : Heavy AI fingerprints, generic template, multiple anti-patterns
+    41-55  : Some design effort but obvious AI tells remain
+    56-70  : Competent design with residual slop — checklist failures remain
+    71-80  : Good design, mostly clean — some deductions still apply
+    81-88  : Very good, intentional design — minor checklist gaps
+    89-93  : Excellent — nearly all checklists pass, ≤2 minor deductions
+    94-97  : Near-perfect — ALL checklists pass, ZERO pending issues
+    98-100 : Flawless — zero deductions, perfection gate fully satisfied
 
 ## Post-Review Steps (MANDATORY)
 1. Score each domain with full checklist/threshold/deduction justification
@@ -1902,12 +2355,7 @@ blended Design Score.
 6. You MUST show your deduction math in the justification
 
 ## Pre-Review Analysis (MANDATORY — do ALL before scoring)
-1. `npx gitnexus analyze` — refresh codebase index (skip if already fresh)
-2. `npx gitnexus query "<first domain concept>"` — map relevant code patterns
-3. `npx gitnexus query "<second domain concept>"` — discover additional patterns
-4. `uidetox check --fix` — ensure code is clean before reviewing
-5. **Read every reference file listed below** — these contain the expert criteria
-6. Read every frontend file and evaluate ONLY your assigned domains
+{_build_domain_pre_review_block(domains)}
 
 ## Your Assigned Domains (with full scoring criteria)
 {domain_block}
@@ -1972,7 +2420,7 @@ def _verify_prompt(issues: list, resolved: list, tooling_block: str) -> str:
 
     config = load_config()
     tooling = config.get("tooling", {})
-    fullstack_block = _build_fullstack_block(tooling, phase="fix")
+    fullstack_block = _build_fullstack_block(tooling, phase="verify")
 
     return f"""# UIdetox Sub-Agent: VERIFY Stage
 

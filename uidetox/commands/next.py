@@ -457,32 +457,74 @@ def run(args: argparse.Namespace):
     print(f"  Queue : {remaining} remaining after this batch")
     print(f"  Stats : {tiers['T1']}xT1, {tiers['T2']}xT2, {tiers['T3']}xT3, {tiers['T4']}xT4 | {resolved_count} resolved so far")
     print()
+
+    # ── GitNexus impact guidance for this batch ──
+    # Inject concrete instructions so the agent uses codebase
+    # intelligence when applying fixes, not just pattern-matching.
+    tooling = config.get("tooling", {})
+    is_fullstack = bool(
+        tooling.get("backend") or tooling.get("database") or tooling.get("api")
+    )
+    print("  ━━━ GITNEXUS IMPACT ANALYSIS (run BEFORE fixing) ━━━")
+    print("  Run these commands to understand blast radius and dependencies:")
+    print()
+    for bf in batch_files[:5]:  # Cap at 5 to avoid prompt overload
+        fname = Path(bf).stem
+        print(f"    npx gitnexus context \"{fname}\"")
+        print(f"      → callers, callees, execution flows for {fname}")
+    print()
+    print("    npx gitnexus impact \"<symbol>\" --direction upstream")
+    print("      → blast radius: who breaks if you change <symbol>?")
+    print()
+    if is_fullstack:
+        print("  FULL-STACK ALIGNMENT (this is a full-stack project):")
+        print("    npx gitnexus query \"DTO type interface schema\"")
+        print("      → verify frontend types match backend DTOs")
+        print("    npx gitnexus query \"validation constraint required\"")
+        print("      → verify form validation mirrors server rules")
+        print()
+    print("  After fixing, verify scope:")
+    print("    npx gitnexus detect_changes")
+    print("      → confirm only expected files/symbols were modified")
+    print()
+
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
     batch_ids = " ".join(iss["id"] for iss in batch)
 
     print("[AGENT INSTRUCTION]")
-    print(f"1. Read all files in {target_dir}/ that have issues:")
+    step = 1
+    print(f"{step}. Run GitNexus impact analysis on batch targets (see above):")
+    for bf in batch_files[:5]:
+        fname = Path(bf).stem
+        print(f"     npx gitnexus context \"{fname}\"")
+    print(f"     Review callers and cross-layer dependencies before editing.")
+    step += 1
+    print(f"{step}. Read all files in {target_dir}/ that have issues:")
     for f in batch_files:
         print(f"     {f}")
     if skill_path:
-        print(f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
-    step = 3 if skill_path else 2
+        step += 1
+        print(f"{step}. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
 
     # Inject skill invocation instructions if skills were recommended
     if skill_recs:
+        step += 1
         print(f"{step}. INVOKE recommended skills (listed above) before fixing:")
         for rec in skill_recs:
             print(f"     uidetox {rec['skill']} {target_dir}")
         print(f"     Skills inject domain-specific rules and checklists that improve fix quality.")
-        step += 1
 
+    step += 1
     print(f"{step}. Fix ALL {len(batch)} issue(s) listed above in ONE pass, following SKILL.md rules.")
     step += 1
     print(f"{step}. Verify fixes don't break functionality.")
     step += 1
     print(f"{step}. Run pre-commit quality gate:")
     print(f"     uidetox check --fix")
+    step += 1
+    print(f"{step}. Run GitNexus change detection to verify scope:")
+    print(f"     npx gitnexus detect_changes")
     step += 1
     print(f"{step}. Batch-resolve all issues with a single coherent commit:")
     print(f'     uidetox batch-resolve {batch_ids} --note "describe what you changed"')

@@ -430,6 +430,11 @@ def run(args: argparse.Namespace):
     if has_fullstack:
         print()
         print("  Full-stack: check DTO alignment, type safety, error surfacing across layers.")
+        print("  Run the following GitNexus queries for cross-layer analysis:")
+        print("    npx gitnexus query \"API endpoint route handler DTO\"")
+        print("    npx gitnexus query \"fetch request mutation query\"")
+        print("    npx gitnexus query \"validation constraint required schema\"")
+        print("    npx gitnexus query \"error status code exception boundary\"")
 
     # ===========================================================
     # PART 1b: CONTRACT VALIDATION (OpenAPI/GraphQL/Prisma)

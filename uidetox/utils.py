@@ -151,16 +151,16 @@ def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
        the effective subjective is capped at 80, preventing a high
        self-score from masking real problems.
 
-    The curve is: ``effective = 70 + 30 × ((raw − 70) / 30)^1.8``
-    for raw > 70.  Below 70 the mapping is linear (1:1).
+    The curve is: ``effective = 60 + 40 × ((raw − 60) / 40)^2.2``
+    for raw > 60.  Below 60 the mapping is linear (1:1).
     """
     if raw_score <= 0:
         return 0
 
-    # ── Step 1: Exponential compression above 70 ──
-    CURVE_THRESHOLD = 70
-    CURVE_EXPONENT = 1.8
-    CURVE_RANGE = 100 - CURVE_THRESHOLD  # 30
+    # ── Step 1: Exponential compression above 60 ──
+    CURVE_THRESHOLD = 60
+    CURVE_EXPONENT = 2.2
+    CURVE_RANGE = 100 - CURVE_THRESHOLD  # 40
 
     if raw_score <= CURVE_THRESHOLD:
         effective = float(raw_score)
@@ -169,19 +169,19 @@ def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
         effective = CURVE_THRESHOLD + CURVE_RANGE * (overshoot ** CURVE_EXPONENT)
 
     # ── Step 2: Auto-deductions for pending issues ──
-    PENALTY_WEIGHTS = {"T1": 3.0, "T2": 2.0, "T3": 1.0, "T4": 0.5}
-    MAX_PENALTY = 25.0
+    PENALTY_WEIGHTS = {"T1": 5.0, "T2": 3.0, "T3": 1.5, "T4": 0.75}
+    MAX_PENALTY = 30.0
 
     penalty = 0.0
     for issue in pending_issues:
         tier = issue.get("tier", "T4")
-        penalty += PENALTY_WEIGHTS.get(tier, 0.5)
+        penalty += PENALTY_WEIGHTS.get(tier, 0.75)
     penalty = min(penalty, MAX_PENALTY)
     effective -= penalty
 
     # ── Step 3: Hard ceiling when issues are pending ──
     if pending_issues:
-        effective = min(effective, 85.0)
+        effective = min(effective, 80.0)
 
     return max(0, min(100, int(effective)))
 
@@ -208,7 +208,7 @@ def compute_design_score(state: dict) -> dict:
     scans_run = stats.get("scans_run", 0)
 
     # Higher tiers = more critical → heavier penalty on the score
-    tier_weights = {"T1": 10, "T2": 5, "T3": 3, "T4": 1}
+    tier_weights = {"T1": 15, "T2": 8, "T3": 4, "T4": 2}
 
     current_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in issues)
     resolved_slop = sum(tier_weights.get(i.get("tier", "T4"), 10) for i in resolved)
@@ -230,9 +230,9 @@ def compute_design_score(state: dict) -> dict:
     effective_subjective: int | None = None
     if subjective_score is not None:
         effective_subjective = _apply_subjective_curve(subjective_score, issues)
-        # Cross-gate: if objective < 90, cap effective subjective at 80
-        if objective_score is not None and objective_score < 90:
-            effective_subjective = min(effective_subjective, 80)
+        # Cross-gate: if objective < 95, cap effective subjective at 75
+        if objective_score is not None and objective_score < 95:
+            effective_subjective = min(effective_subjective, 75)
 
     if objective_score is None:
         blended = effective_subjective if effective_subjective is not None else 0

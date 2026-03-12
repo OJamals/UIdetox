@@ -25,25 +25,25 @@ class TestSubjectiveCurve:
         assert _apply_subjective_curve(0, []) == 0
 
     def test_below_threshold_is_linear(self):
-        """Scores at or below 70 pass through unchanged."""
+        """Scores at or below 60 pass through unchanged."""
         assert _apply_subjective_curve(50, []) == 50
-        assert _apply_subjective_curve(70, []) == 70
+        assert _apply_subjective_curve(60, []) == 60
 
     def test_raw_100_maps_to_100(self):
         """Only a raw 100 with no pending issues maps to effective 100."""
         assert _apply_subjective_curve(100, []) == 100
 
     def test_raw_90_compressed_below_90(self):
-        """Raw 90 should be compressed below 90 by the curve."""
+        """Raw 90 should be heavily compressed below 90 by the harder curve."""
         effective = _apply_subjective_curve(90, [])
         assert effective < 90, f"Expected < 90, got {effective}"
-        assert effective >= 80, f"Expected >= 80, got {effective}"
+        assert effective >= 70, f"Expected >= 70, got {effective}"
 
     def test_raw_95_compressed_below_95(self):
-        """Raw 95 should be compressed below 95."""
+        """Raw 95 should be compressed significantly below 95."""
         effective = _apply_subjective_curve(95, [])
         assert effective < 95, f"Expected < 95, got {effective}"
-        assert effective >= 88, f"Expected >= 88, got {effective}"
+        assert effective >= 80, f"Expected >= 80, got {effective}"
 
     def test_pending_issues_deduct(self):
         """Pending issues cause automatic deductions."""
@@ -61,10 +61,10 @@ class TestSubjectiveCurve:
         with_t2 = _apply_subjective_curve(90, [{"tier": "T2"}])
         assert with_t2 < no_issues, "T2 issue should reduce score"
 
-    def test_pending_issues_cap_at_85(self):
-        """With any pending issues, effective is capped at 85."""
+    def test_pending_issues_cap_at_80(self):
+        """With any pending issues, effective is capped at 80."""
         effective = _apply_subjective_curve(100, [{"tier": "T4"}])
-        assert effective <= 85, f"Expected <= 85 with pending issues, got {effective}"
+        assert effective <= 80, f"Expected <= 80 with pending issues, got {effective}"
 
     def test_many_issues_capped_penalty(self):
         """Penalty from issues should be capped (not unbounded)."""
@@ -111,9 +111,9 @@ class TestTierWeightsFix:
             "stats": {"scans_run": 1},
         }
         scores = compute_design_score(state)
-        # T1=10 + T4=1 = 11 total slop, all pending
-        assert scores["current_slop"] == 11
-        assert scores["total_slop"] == 11
+        # T1=15 + T4=2 = 17 total slop, all pending
+        assert scores["current_slop"] == 17
+        assert scores["total_slop"] == 17
         assert scores["blended_score"] == 0  # nothing resolved
 
     def test_all_resolved_is_100(self):

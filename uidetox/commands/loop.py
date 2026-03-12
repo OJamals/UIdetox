@@ -423,6 +423,20 @@ def _post_execution_checkpoint(
     re-entered the loop even when nothing had changed, causing the agent
     to spin without making progress.
     """
+    # ── Post-fix GitNexus change detection ──
+    # Verify that the automated commands only affected expected files
+    # and symbols.  Non-fatal — skips if GitNexus isn't available.
+    if not dry_run:
+        print("  Verifying change scope via GitNexus...")
+        rc = _exec_cmd(
+            "npx gitnexus detect_changes",
+            "post-execution scope check",
+            dry_run=dry_run,
+        )
+        if rc != 0:
+            print("  ℹ  GitNexus change detection unavailable — continuing.")
+        print()
+
     # Reload fresh state after commands executed
     state = load_state()
     scores = compute_design_score(state)
@@ -495,11 +509,14 @@ def _post_execution_checkpoint(
             print(f"  {queue_size} issue(s) pending. The batch above is your focus.")
             print()
             print("  STEPS (already shown by `next`, reinforced here):")
-            print("    1. Read the listed files")
-            print("    2. Fix ALL issues in the batch in ONE pass")
-            print("    3. uidetox check --fix")
-            print('    4. uidetox batch-resolve <IDs> --note "what you changed"')
-            print("    5. uidetox loop")
+            print("    1. Run GitNexus impact analysis on batch targets")
+            print("       (context + impact commands shown in the batch output above)")
+            print("    2. Read the listed files")
+            print("    3. Fix ALL issues in the batch in ONE pass")
+            print("    4. uidetox check --fix")
+            print("    5. npx gitnexus detect_changes  (verify only expected files changed)")
+            print('    6. uidetox batch-resolve <IDs> --note "what you changed"')
+            print("    7. uidetox loop")
             print()
             print("  DO NOT run format/lint separately — `check --fix` does tsc→lint→format.")
             print("  DO NOT run `uidetox next` again — the batch is already shown above.")
@@ -653,18 +670,26 @@ def _post_execution_checkpoint(
         print()
         print("    1. Run:  uidetox next")
         print("       → Shows the highest-priority batch with full context + skill rules.")
+        print("       → Includes GitNexus impact analysis commands — RUN THEM.")
         print()
-        print("    2. Read the target files and apply ALL fixes in one pass.")
+        print("    2. Run GitNexus impact analysis on the batch targets:")
+        print("       npx gitnexus context \"<component>\"  — callers, callees, execution flows")
+        print("       npx gitnexus impact \"<symbol>\" --direction upstream  — blast radius")
+        print()
+        print("    3. Read the target files and apply ALL fixes in one pass.")
         print("       Obey SKILL.md rules and design dials shown in the output.")
         print()
-        print("    3. Run:  uidetox check --fix")
+        print("    4. Run:  uidetox check --fix")
         print("       → Runs tsc → lint → format. Do NOT run these separately.")
         print()
-        print('    4. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
+        print("    5. Run:  npx gitnexus detect_changes")
+        print("       → Verify only expected files/symbols were modified.")
+        print()
+        print('    6. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
         print("       → Marks issues resolved, auto-commits if enabled.")
         print("       → ONLY run after check --fix passes.")
         print()
-        print("    5. Run:  uidetox loop")
+        print("    7. Run:  uidetox loop")
         print("       → Re-enters the autonomous loop with fresh state.")
         print("       → Repeats until target score is reached.")
     else:
@@ -674,23 +699,29 @@ def _post_execution_checkpoint(
         print(f"  Queue is empty but score ({blended}) < target ({target}).")
         print(f"  The subjective review (70% weight) must be performed.")
         print()
-        print("    1. Run:  uidetox subagent --stage-prompt review --parallel 10")
+        print("    1. Run GitNexus codebase analysis FIRST (enriches review context):")
+        print('       npx gitnexus query "component page route layout view"')
+        print('       npx gitnexus query "shared utility hook context provider store"')
+        print('       npx gitnexus query "import dependency coupling circular"')
+        print("       → Gives you architectural awareness for the scoring phase.")
+        print()
+        print("    2. Run:  uidetox subagent --stage-prompt review --parallel 10")
         print("       → Generates domain-sharded review prompts (10 domains, 2 waves of 5).")
         print("       → READ the prompts and EXECUTE the review (see above for full protocol).")
         print()
-        print("    2. READ every frontend file and SCORE each domain using the rubric.")
+        print("    3. READ every frontend file and SCORE each domain using the rubric.")
         print("       For each domain: start at max → checklist → thresholds → deductions.")
         print()
-        print("    3. QUEUE every issue found:")
+        print("    4. QUEUE every issue found:")
         print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "..." --fix-command "..."')
         print()
-        print("    4. Run:  uidetox check --fix")
+        print("    5. Run:  uidetox check --fix")
         print("       → Ensure code is clean before scoring.")
         print()
-        print(f"    5. COMPUTE and RECORD the combined score (0-{total_max} → normalized 0-100):")
+        print(f"    6. COMPUTE and RECORD the combined score (0-{total_max} → normalized 0-100):")
         print("       uidetox review --score <NORMALIZED_SCORE>")
         print()
-        print("    6. Run:  uidetox loop")
+        print("    7. Run:  uidetox loop")
         print("       → Re-enters with fresh state. Fixes queued issues, then re-reviews.")
 
     if not can_recurse:
@@ -754,6 +785,27 @@ def _derive_target_path(issues: list[dict]) -> str:
     return str(pathlib.Path(top_file).parent or ".")
 
 
+def _collect_batch_target_files(issues: list[dict]) -> list[str]:
+    """Identify the files for the next fix batch (mirrors next.py batching logic).
+
+    Returns a list of file paths that the next ``uidetox next`` invocation
+    will target — used to run pre-fix GitNexus impact analysis.
+    """
+    tiers_order = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
+    if not issues:
+        return []
+    sorted_issues = sorted(issues, key=lambda x: tiers_order.get(x.get("tier", "T4"), 5))
+    target_file = sorted_issues[0].get("file")
+    if not target_file:
+        return []
+    target_dir = str(pathlib.Path(target_file).parent)
+    batch = [
+        i for i in sorted_issues
+        if str(pathlib.Path(i.get("file", "")).parent) == target_dir
+    ][:15]
+    return list(dict.fromkeys(i.get("file", "") for i in batch if i.get("file")))
+
+
 def _build_autopilot_plan(
     *,
     issues: list[dict],
@@ -790,6 +842,22 @@ def _build_autopilot_plan(
         # ── Pre-analysis mechanical gate ──
         if has_mechanical:
             plan.append(("uidetox check --fix", "clear mechanical issues before deeper analysis"))
+
+        # ── GitNexus codebase intelligence (enriches agent context) ──
+        # Run BEFORE rescan/audit so the agent has architectural
+        # awareness when interpreting static analysis results.
+        plan.append((
+            'npx gitnexus query "component page route layout view"',
+            "codebase analysis: map frontend component architecture via call graph",
+        ))
+        plan.append((
+            'npx gitnexus query "shared utility hook context provider store"',
+            "codebase analysis: map shared infrastructure and state management",
+        ))
+        plan.append((
+            'npx gitnexus query "export default function interface type"',
+            "impact mapping: identify public API surfaces for blast-radius awareness",
+        ))
 
         plan.append(("uidetox rescan --path .", "refresh issue queue from latest code"))
 
@@ -841,6 +909,22 @@ def _build_autopilot_plan(
                 'npx gitnexus query "fetch request mutation query"',
                 "full-stack gate: map frontend data-fetching surfaces",
             ))
+            plan.append((
+                'npx gitnexus query "validation constraint required schema"',
+                "full-stack gate: map validation rules for frontend↔backend alignment",
+            ))
+            plan.append((
+                'npx gitnexus query "error status code exception boundary"',
+                "full-stack gate: map error-handling surfaces across layers",
+            ))
+
+        # ── Codebase coupling & impact snapshot ──
+        # Gives the agent awareness of tightly-coupled modules so the
+        # review and fix phases can prioritize high-impact areas.
+        plan.append((
+            'npx gitnexus query "import dependency coupling circular"',
+            "dependency analysis: detect tightly-coupled modules for targeted fixes",
+        ))
 
         plan.append(("uidetox status", "check blended score and queue after domain reviews"))
 
@@ -866,16 +950,14 @@ def _build_autopilot_plan(
     # STAGE 2 / FIX LOOP (queue has issues)
     # ──────────────────────────────────────────────────────────────
     #
-    # Intentionally minimal: only 2 commands per iteration.
+    # Intentionally focused: mechanical gate + impact analysis + next.
     # ``next`` already outputs the full batch context, skill
     # recommendations, design dials, and [AGENT INSTRUCTION] steps.
     # The autopilot halts after ``next`` so the agent can focus on
     # fixing ONE batch, then re-enters the loop for the next batch.
     #
-    # Previous plan had 10-15 commands (skills, subagent fix, extra
-    # next rounds, rescan, review) which created a non-productive
-    # loop where the agent fixed ~1 file → format → lint → format →
-    # next → repeat without making real progress.
+    # GitNexus queries run BEFORE next to give the agent dependency
+    # and impact awareness for the files it is about to modify.
     #
     # Discovery (rescan) and subjective review run in STAGE 1 once
     # the queue is drained.  This ensures the agent does focused
@@ -884,6 +966,31 @@ def _build_autopilot_plan(
     # Pre-fix mechanical gate — auto-fix lint/format/tsc ONCE
     if has_mechanical:
         plan.append(("uidetox check --fix", "mechanical quality gate — auto-fix lint/format before manual fixes"))
+
+    # ── GitNexus pre-fix impact analysis ──
+    # Query the call graph for the batch's target files so the agent
+    # knows which callers / shared utilities may be affected before
+    # it starts editing.  Results are cached per iteration.
+    batch_files = _collect_batch_target_files(issues)
+    if batch_files:
+        # Query context for the primary target component
+        primary = batch_files[0]
+        plan.append((
+            f'npx gitnexus context "{primary}"',
+            f"pre-fix context: trace callers/callees for {primary}",
+        ))
+        # Impact analysis on the primary symbol
+        plan.append((
+            f'npx gitnexus impact "{primary}" --direction upstream',
+            f"pre-fix impact: blast radius check for {primary}",
+        ))
+
+    # Full-stack alignment check for the batch being fixed
+    if is_fullstack and batch_files:
+        plan.append((
+            'npx gitnexus query "fetch request mutation query"',
+            "pre-fix full-stack: verify data-fetching alignment before modifying components",
+        ))
 
     # Context dump — prints batch issues, skill rules, design dials,
     # and full [AGENT INSTRUCTION] steps.  Autopilot halts here.
@@ -984,13 +1091,13 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
 
         is_external = parts[0] in _external_prefixes
 
-        # Cache expensive GitNexus graph calls to avoid repeated query/context
+        # Cache expensive GitNexus graph calls to avoid repeated query/context/impact
         # invocations within an iteration and improve deterministic behavior.
         is_gitnexus_cacheable = (
-            len(parts) >= 4
+            len(parts) >= 3
             and parts[0] in _external_prefixes
             and parts[1] == "gitnexus"
-            and parts[2] in {"query", "context"}
+            and parts[2] in {"query", "context", "impact"}
         )
         gitnexus_kind = parts[2] if is_gitnexus_cacheable else ""
         gitnexus_payload = " ".join(parts[3:]) if is_gitnexus_cacheable else ""

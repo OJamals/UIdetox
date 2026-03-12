@@ -129,18 +129,18 @@ def test_record_result_clears_stale_review_request_when_confidence_recovers():
 class TestReviewDomains:
     """Verify the 10 scored review domains (2 waves of 5) plus perfection gate."""
 
-    def test_review_domains_has_eleven_entries(self):
-        """10 scored domains + 1 perfection gate = 11 total."""
-        assert len(REVIEW_DOMAINS) == 11
+    def test_review_domains_has_fifteen_entries(self):
+        """14 scored domains + 1 perfection gate = 15 total."""
+        assert len(REVIEW_DOMAINS) == 15
 
-    def test_scored_review_domains_has_ten_entries(self):
-        assert len(SCORED_REVIEW_DOMAINS) == 10
+    def test_scored_review_domains_has_fourteen_entries(self):
+        assert len(SCORED_REVIEW_DOMAINS) == 14
 
-    def test_wave_1_has_five_entries(self):
-        assert len(REVIEW_WAVE_1) == 5
+    def test_wave_1_has_seven_entries(self):
+        assert len(REVIEW_WAVE_1) == 7
 
-    def test_wave_2_has_five_entries(self):
-        assert len(REVIEW_WAVE_2) == 5
+    def test_wave_2_has_seven_entries(self):
+        assert len(REVIEW_WAVE_2) == 7
 
     def test_waves_cover_all_scored_domains(self):
         """Wave 1 + Wave 2 should equal all scored domains."""
@@ -164,9 +164,9 @@ class TestReviewDomains:
             assert domain.get("max_score", 0) > 0, f"{domain['name']} has no max_score"
 
     def test_scored_domain_max_scores_sum_to_expected(self):
-        """All scored domain max scores should sum to 100 for proper normalization."""
+        """All scored domain max scores should sum to 138 for proper normalization."""
         total = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
-        assert total == 100, f"Total max scores = {total}, expected 100"
+        assert total == 138, f"Total max scores = {total}, expected 138"
 
     def test_each_scored_domain_has_non_empty_checklist(self):
         for domain in SCORED_REVIEW_DOMAINS:
@@ -182,49 +182,49 @@ class TestReviewDomains:
                 f"{domain['name']} has only {len(deductions)} deduction rules"
             )
 
-    def test_parallel_review_generates_ten_prompts(self):
-        """Parallel=10 should produce one prompt per review domain."""
-        prompts = generate_stage_prompt("review", parallel=10)
-        assert len(prompts) == 10
+    def test_parallel_review_generates_fourteen_prompts(self):
+        """Parallel=14 should produce one prompt per review domain."""
+        prompts = generate_stage_prompt("review", parallel=14)
+        assert len(prompts) == 14
 
-    def test_parallel_five_generates_five_prompts(self):
-        """Parallel=5 should shard 10 domains into 5 prompts (2 domains each)."""
-        prompts = generate_stage_prompt("review", parallel=5)
-        assert len(prompts) == 5
+    def test_parallel_seven_generates_seven_prompts(self):
+        """Parallel=7 should shard 14 domains into 7 prompts (2 domains each)."""
+        prompts = generate_stage_prompt("review", parallel=7)
+        assert len(prompts) == 7
 
     def test_parallel_review_prompts_reference_gitnexus(self):
         """Each domain review prompt should include gitnexus instructions."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "gitnexus" in prompt.lower(), "Review prompt missing gitnexus instruction"
 
     def test_parallel_review_prompts_reference_check_fix(self):
         """Each domain review prompt should instruct pre-commit checks."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "check --fix" in prompt, "Review prompt missing check --fix instruction"
 
     def test_parallel_review_prompts_include_checklist(self):
         """Each domain review prompt should include verification checklist items."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "Verification Checklist" in prompt, "Review prompt missing checklist"
 
     def test_parallel_review_prompts_include_deductions(self):
         """Each domain review prompt should include automatic deduction rules."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "Automatic Deductions" in prompt, "Review prompt missing deductions"
 
     def test_parallel_review_prompts_include_scoring_protocol(self):
         """Each domain review prompt should include the scoring protocol."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "Scoring Protocol" in prompt, "Review prompt missing scoring protocol"
 
     def test_parallel_review_prompts_show_max_score(self):
         """Each domain review prompt should display the max score for its domains."""
-        prompts = generate_stage_prompt("review", parallel=10)
+        prompts = generate_stage_prompt("review", parallel=14)
         for prompt in prompts:
             assert "Max Score" in prompt or "max" in prompt.lower(), "Review prompt missing max score"
 
@@ -243,7 +243,7 @@ class TestReviewDomains:
         assert "gitnexus analyze" in prompts[0]
 
     def test_domain_names_cover_expected_areas(self):
-        """The 10 domains should cover all expected design areas."""
+        """The 14 domains should cover all expected design areas."""
         names = {d["name"] for d in REVIEW_DOMAINS}
         # Wave 1
         assert "typography" in names
@@ -251,12 +251,16 @@ class TestReviewDomains:
         assert "interaction_states" in names
         assert "content_ux_writing" in names
         assert "motion_animation" in names
+        assert "design_elegance" in names
+        assert "accessibility" in names
         # Wave 2
         assert "spatial_layout" in names
         assert "materiality_surfaces" in names
         assert "consistency_system" in names
         assert "identity_brand" in names
         assert "architecture_responsive" in names
+        assert "api_data_coherence" in names
+        assert "performance_vitals" in names
 
     def test_wave_assignments_correct(self):
         """Wave 1 domains should have wave=1, wave 2 should have wave=2."""

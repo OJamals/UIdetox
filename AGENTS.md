@@ -40,23 +40,29 @@ The loop repeatedly triggers `uidetox next`. The CLI batches all pending issues 
 (The loop auto-saves progress to memory, so `uidetox loop` can resume anywhere if interrupted).
 
 ### Phase 3: Subjective Review
-The loop spawns 10 parallel domain-specific subagents (2 waves of 5) for comprehensive subjective analysis:
+The loop spawns 14 parallel domain-specific subagents (2 waves of 7) for comprehensive subjective analysis across 138 total points:
 
-**Wave 1 — Audit & Analysis:**
-1. **Typography & Type Hierarchy** — font families, weight spectrum, type scale, line-height
-2. **Color & Contrast** — palette cohesion, contrast ratios, dark mode, AI slop gradients
-3. **Interaction & Component States** — hover/focus/active/disabled/loading/empty/error states
-4. **Content & UX Writing** — microcopy quality, placeholder data, tone consistency
-5. **Motion & Animation Design** — transition timing, easing curves, entrance/exit choreography
+**Wave 1 — Visual Design & Interaction (7 domains):**
+1. **Typography & Type Hierarchy** (10 pts) — font families, weight spectrum, type scale, line-height
+2. **Color & Contrast** (8 pts) — palette cohesion, contrast ratios, dark mode, AI slop gradients
+3. **Interaction & Component States** (10 pts) — hover/focus/active/disabled/loading/empty/error states
+4. **Content & UX Writing** (5 pts) — microcopy quality, placeholder data, tone consistency
+5. **Motion & Animation Design** (7 pts) — transition timing, easing curves, entrance/exit choreography
+6. **Design Elegance & Craft** (10 pts) — holistic aesthetic quality, visual harmony, micro-details, professional finishing
+7. **Accessibility & Inclusive Design** (10 pts) — WCAG 2.2 AA, landmarks, keyboard nav, screen reader UX
 
-**Wave 2 — System & Architecture:**
-6. **Spatial Design & Layout** — grid systems, whitespace rhythm, spacing scale, responsive
-7. **Materiality & Surfaces** — shadow craft, border usage, glassmorphism detection
-8. **Design System & Consistency** — unified tokens, variant drift, duplication detection
-9. **Identity & Brand Coherence** — intentional aesthetic, AI slop fingerprints, visual voice
-10. **Responsive Design & Code Architecture** — component structure, file organization, z-index
+**Wave 2 — System & Architecture (7 domains):**
+8. **Spatial Design & Layout** (15 pts) — grid systems, whitespace rhythm, spacing scale, responsive
+9. **Materiality & Surfaces** (7 pts) — shadow craft, border usage, glassmorphism detection
+10. **Design System & Consistency** (15 pts) — unified tokens, variant drift, duplication detection
+11. **Identity & Brand Coherence** (15 pts) — intentional aesthetic, AI slop fingerprints, visual voice
+12. **Responsive Design & Code Architecture** (8 pts) — component structure, file organization, z-index
+13. **API & Data Coherence** (10 pts) — DTO alignment, data flow, error/loading/empty states vs. real API behavior
+14. **Performance & Web Vitals** (8 pts) — LCP/CLS/INP targets, bundle optimization, lazy loading, image optimization
 
-Each subagent runs `npx gitnexus analyze` and `npx gitnexus query` for codebase intelligence, then scores its assigned domain(s) against the reference files. After all 10 subagents complete, `uidetox check --fix` runs to verify code cleanliness, partial scores are summed, and `uidetox review --score <N>` records the combined score.
+Each subagent runs `npx gitnexus analyze` and `npx gitnexus query` for codebase intelligence, then scores its assigned domain(s) against the reference files. After all 14 subagents complete, `uidetox check --fix` runs to verify code cleanliness, partial scores are summed, normalized to 0-100, and `uidetox review --score <N>` records the combined score.
+
+**Scoring is deliberately harsh:** a diminishing-returns curve compresses raw scores above 60 (raw 80 → effective ~68, raw 90 → effective ~81). Pending issues auto-deduct and cap effective subjective at 80. Objective score < 95 caps subjective at 75. A Perfection Gate with 23 non-negotiable conditions caps the score at 85 if any condition fails.
 
 ### Phase 4: Verification & Status
 The loop triggers `uidetox status` to view your blended Design Score (30% objective static analysis + 70% subjective LLM review). If the score is below 95, the loop continues.
