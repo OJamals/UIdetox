@@ -16,14 +16,12 @@ coverage.xml
 
 # UIdetox runtime state (per-project, not repo)
 .uidetox/
-simpledoctorfrontend/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
@@ -38,4 +36,6 @@ production_test_audit/
 # User-specific agent config
 .claude/
 .gitnexus
-claude.md
+.agents
+CLAUDE.md
+tests/
