@@ -38,13 +38,21 @@ def _get_chroma_client_cached(db_path: str):
         return client
     except ImportError:
         return None
+    except Exception as exc:
+        logger.debug("ChromaDB client init failed for %s: %s", db_path, exc)
+        return None
 
 
 def close_chroma_clients() -> None:
     """Close all cached ChromaDB clients, releasing file handles and memory."""
     for db_path in list(_chroma_clients):
         try:
-            del _chroma_clients[db_path]
+            client = _chroma_clients.pop(db_path, None)
+            if client is not None and hasattr(client, "_client"):
+                try:
+                    client._client.close()
+                except Exception:
+                    pass
             logger.debug("Closed ChromaDB client for %s", db_path)
         except (KeyError, AttributeError) as exc:
             logger.debug("Error closing ChromaDB client for %s: %s", db_path, exc)

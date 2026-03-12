@@ -9,6 +9,22 @@ from uidetox.commands import tsc as tsc_cmd  # type: ignore
 from uidetox.commands import lint as lint_cmd  # type: ignore
 from uidetox.commands import format_cmd  # type: ignore
 
+# Patterns that indicate a formatter/linter actually changed files.
+# Avoids false positives from output like "0 files formatted".
+import re
+_CHANGE_PATTERNS = re.compile(
+    r'\b(?:[1-9]\d*)\s+(?:file|error|warning)s?\s+(?:fixed|formatted|changed)'
+    r'|\bsuccessfully\s+(?:fixed|formatted)'
+    r'|\bformatting\s+\d+\s+file'
+    r'|\bfixed\s+\d+\s+(?:error|warning|issue)',
+    re.IGNORECASE,
+)
+
+
+def _tool_made_changes(output: str) -> bool:
+    """Return True if tool output indicates files were actually modified."""
+    return bool(_CHANGE_PATTERNS.search(output))
+
 
 def _git_changed_paths(project_root: str) -> set[str]:
     """Return staged, unstaged, and untracked repo paths."""
@@ -90,7 +106,7 @@ def run(args: argparse.Namespace):
                 try:
                     res = run_tool(cmd, cwd=project_root)
                     combined = (res.stdout + res.stderr).lower()
-                    if res.returncode != 0 or "fixed" in combined or "formatted" in combined:
+                    if res.returncode != 0 or _tool_made_changes(combined):
                         changed = True
                 except FileNotFoundError:
                     print(f"Warning: Command not found ({cmd})")

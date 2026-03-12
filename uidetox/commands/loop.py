@@ -105,13 +105,16 @@ def _run_iteration(
     tooling = config.get("tooling", {})
     has_mechanical = tooling.get("typescript") or tooling.get("linter") or tooling.get("formatter")
 
-    # ---- Codebase sizing ----
-    frontend_exts = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html", ".css", ".scss", ".sass"}
-    exclude_dirs = {"node_modules", ".git", "dist", "build", ".next", "out", ".uidetox"}
-    frontend_count = 0
-    for p in pathlib.Path('.').rglob('*'):
-        if p.is_file() and p.suffix in frontend_exts and not (set(p.parts) & exclude_dirs):
-            frontend_count += 1
+    # ---- Codebase sizing (cached across loop iterations) ----
+    frontend_count = getattr(args, "_frontend_count", None)
+    if frontend_count is None:
+        frontend_exts = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html", ".css", ".scss", ".sass"}
+        exclude_dirs = {"node_modules", ".git", "dist", "build", ".next", "out", ".uidetox"}
+        frontend_count = 0
+        for p in pathlib.Path('.').rglob('*'):
+            if p.is_file() and p.suffix in frontend_exts and not (set(p.parts) & exclude_dirs):
+                frontend_count += 1
+        args._frontend_count = frontend_count  # type: ignore[attr-defined]
     unique_files = len(set(i.get("file", "") for i in issues))
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))
@@ -738,22 +741,23 @@ def _build_autopilot_plan(
     plan.append(("uidetox status", "post-rescan status — check score trajectory"))
 
     # ── Seamless objective→subjective transition ──
-    # If the fix loop emptied the queue, immediately trigger subjective
-    # review rather than requiring a full loop re-entry to reach Stage 1.
-    # Use 10 parallel domain-sharded review subagents (2 waves of 5).
+    # After the fix loop, immediately trigger subjective review to assess
+    # improvements. Use 10 parallel domain-sharded review subagents (2 waves of 5).
+    # NOTE: Review MUST run even if queue still has issues — the review assesses
+    # design quality of fixed components and discovers new issues to queue.
     from uidetox.subagent import REVIEW_DOMAINS
     review_parallel = len(REVIEW_DOMAINS)  # 10 domains
     if is_orchestrator:
         plan.append((
             f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
-            f"{_QUEUE_EMPTY_ONLY_TAG} seamless transition: parallel domain-sharded subjective review ({review_parallel} domains, 2 waves of 5, 70% weight)",
+            f"parallel domain-sharded subjective review ({review_parallel} domains, 2 waves of 5, 70% weight) — runs after fixes to assess improvements",
         ))
     else:
-        plan.append(("uidetox review", f"{_QUEUE_EMPTY_ONLY_TAG} seamless transition: subjective review (70% weight)"))
+        plan.append(("uidetox review", "subjective review (70% weight) — runs after fixes to assess improvements"))
 
     if has_mechanical:
-        plan.append(("uidetox check --fix", f"{_QUEUE_EMPTY_ONLY_TAG} final quality gate before scoring"))
-    plan.append(("uidetox status", f"{_QUEUE_EMPTY_ONLY_TAG} final score check — blended objective + subjective"))
+        plan.append(("uidetox check --fix", "final quality gate before scoring"))
+    plan.append(("uidetox status", "final score check — blended objective + subjective"))
 
     return plan
 

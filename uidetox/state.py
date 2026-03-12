@@ -276,21 +276,22 @@ def batch_add_issues(new_issues: list[dict], *, phase: str = "") -> dict[str, in
     if phase:
         for issue in new_issues:
             issue["phase"] = phase
-    # Determine whether any issue carries a phase tag
-    phase_scoped = any(issue.get("phase") for issue in new_issues)
     with _locked_file("state"):
         state = load_state()
         issues = state.setdefault("issues", [])
-        existing_by_signature = {
-            _issue_signature(issue, phase_scoped=phase_scoped): issue
-            for issue in issues
-        }
+        # Build signature index from existing issues.  Use per-issue
+        # phase scoping so unphased and phased issues coexist correctly.
+        existing_by_signature: dict[str, dict] = {}
+        for issue in issues:
+            has_phase = bool(issue.get("phase"))
+            existing_by_signature[_issue_signature(issue, phase_scoped=has_phase)] = issue
         ts = now_iso()
         added = 0
         updated = 0
         skipped = 0
         for issue in new_issues:
-            signature = _issue_signature(issue, phase_scoped=phase_scoped)
+            issue_phase_scoped = bool(issue.get("phase"))
+            signature = _issue_signature(issue, phase_scoped=issue_phase_scoped)
             existing = existing_by_signature.get(signature)
             if existing is not None:
                 if _merge_issue(existing, issue):

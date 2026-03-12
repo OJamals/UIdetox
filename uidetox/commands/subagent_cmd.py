@@ -135,7 +135,7 @@ def _handle_record(session_id: str, args: argparse.Namespace):
     note = getattr(args, "note", "") or "completed"
     try:
         result = _load_result_payload(getattr(args, "result_file", None))
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, ValueError, UnicodeDecodeError) as exc:
         print(f"❌ Could not load result payload: {exc}")
         return
 

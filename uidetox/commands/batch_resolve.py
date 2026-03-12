@@ -162,8 +162,11 @@ def _preflight_validate(issue_ids: list[str], config: dict) -> list[str]:
         issue = get_issue(iid)
         if issue:
             fpath = issue.get("file", "")
-            if fpath and not Path(fpath).exists():
-                warnings.append(f"File not found: {fpath} (issue {iid})")
+            if fpath:
+                from uidetox.state import get_project_root
+                resolved_path = get_project_root() / fpath if not Path(fpath).is_absolute() else Path(fpath)
+                if not resolved_path.exists():
+                    warnings.append(f"File not found: {fpath} (issue {iid})")
 
     # Check for uncommitted changes that could conflict with auto-commit
     if config.get("auto_commit", False):

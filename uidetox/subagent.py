@@ -479,13 +479,14 @@ def _file_complexity_score(filepath: str, issues: list[dict] | None = None) -> f
 
     # 3. Import coupling component
     try:
-        content = _Path(filepath).read_text(encoding="utf-8", errors="ignore")
-        # Count local imports (not node_modules)
         import_count = 0
-        for line in content.splitlines()[:100]:
-            stripped = line.strip()
-            if stripped.startswith("import ") and ("'./" in stripped or '"./' in stripped or "'../" in stripped or '"../' in stripped):
-                import_count += 1
+        with open(filepath, encoding="utf-8", errors="ignore") as fh:
+            for line_no, line in enumerate(fh):
+                if line_no >= 100:
+                    break
+                stripped = line.strip()
+                if stripped.startswith("import ") and ("'./" in stripped or '"./' in stripped or "'../" in stripped or '"../' in stripped):
+                    import_count += 1
         score += min(10.0, import_count * 1.5)
     except OSError:
         pass
@@ -871,11 +872,17 @@ def get_session(session_id: str) -> dict | None:
     return result
 
 
-def get_frontend_files(root: str = ".") -> list[str]:
+def get_frontend_files(root: str = "") -> list[str]:
     """Return frontend source files under *root*, respecting IGNORE_DIRS."""
     frontend_exts = {".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte", ".ts", ".js"}
     files = []
 
+    if not root:
+        try:
+            from uidetox.state import get_project_root
+            root = str(get_project_root())
+        except Exception:
+            root = "."
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
         for filename in filenames:

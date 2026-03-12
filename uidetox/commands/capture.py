@@ -1,6 +1,7 @@
 """Capture command: use Playwright to take before/after screenshots for visual regression."""
 
 import argparse
+import shutil
 from pathlib import Path
 from uidetox.state import ensure_uidetox_dir, load_config
 from uidetox.utils import now_iso

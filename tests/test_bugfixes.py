@@ -65,7 +65,9 @@ class TestTierWeightsFix:
         state = {"issues": [], "resolved": [], "stats": {"scans_run": 0}}
         scores = compute_design_score(state)
         assert scores["objective_score"] is None
-        assert scores["blended_score"] is None
+        # blended_score defaults to 0 (not None) so callers can safely
+        # compare it against numeric targets without TypeError.
+        assert scores["blended_score"] == 0
 
 
 class TestHistoryNoneScore:

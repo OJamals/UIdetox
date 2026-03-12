@@ -632,11 +632,12 @@ def validate_frontend_contracts(
 def save_contract_artifacts(root: Path, artifacts: list[SchemaArtifact]) -> Path:
     """Persist parsed contract artifacts to .uidetox/contracts.json."""
     from uidetox.state import ensure_uidetox_dir, _atomic_write_json
+    from uidetox.utils import now_iso
     uidetox_dir = ensure_uidetox_dir()
     out_path = uidetox_dir / "contracts.json"
     data = {
         "artifacts": [a.to_dict() for a in artifacts],
-        "timestamp": __import__("uidetox.utils", fromlist=["now_iso"]).now_iso(),
+        "timestamp": now_iso(),
     }
     _atomic_write_json(out_path, data, dir=uidetox_dir)
     return out_path
