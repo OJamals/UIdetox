@@ -248,3 +248,15 @@ class TestAutofixPhaseResolution:
         source = (ROOT / "uidetox/commands/autofix.py").read_text()
         assert "_executed_cmds" not in source
         assert "phase_dedupe" in source
+
+
+# ── Issue 11: loop autopilot failure telemetry ───────────────────
+
+class TestLoopAutopilotTelemetry:
+    """Autopilot should record command failures for circuit-breaker visibility."""
+
+    def test_autopilot_logs_timeout_exception_and_failures(self):
+        source = (ROOT / "uidetox/commands/loop.py").read_text()
+        assert "loop_autopilot_cmd_timeout" in source
+        assert "loop_autopilot_cmd_exception" in source
+        assert "loop_autopilot_cmd_failed" in source

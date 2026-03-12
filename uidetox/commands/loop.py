@@ -1176,18 +1176,43 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
                 proc = subprocess.run(parts, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"      ⏰ Command timed out after {timeout}s — skipping.")
+            log_error("loop_autopilot_cmd_timeout", "Autopilot command timed out", {
+                "command": cmd,
+                "reason": reason,
+                "timeout": timeout,
+                "cmd_name": cmd_name,
+            })
             continue
         except Exception as e:
             print(f"      ⚠️  Command exception: {e}")
+            log_error("loop_autopilot_cmd_exception", "Autopilot command raised exception", {
+                "command": cmd,
+                "reason": reason,
+                "cmd_name": cmd_name,
+                "error": str(e),
+            })
             continue
 
         if proc.returncode != 0:
             if cmd_name in _signal_commands or is_skill or is_external:
                 print(f"      ℹ  Signal exit ({proc.returncode}) — continuing.")
+                log_error("loop_autopilot_signal_exit", "Autopilot signal exit", {
+                    "command": cmd,
+                    "reason": reason,
+                    "cmd_name": cmd_name,
+                    "returncode": proc.returncode,
+                })
                 consecutive_failures = 0  # Reset: signal exits aren't real failures
             else:
                 consecutive_failures += 1
                 print(f"\n  ⚠️  Command failed (exit {proc.returncode}).")
+                log_error("loop_autopilot_cmd_failed", "Autopilot fatal command failed", {
+                    "command": cmd,
+                    "reason": reason,
+                    "cmd_name": cmd_name,
+                    "returncode": proc.returncode,
+                    "consecutive_failures": consecutive_failures,
+                })
                 if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
                     print(f"  ❌ {_MAX_CONSECUTIVE_FAILURES} consecutive failures — halting pipeline.")
                     print(f"  [SELF-HEAL] Fix the errors above, then run `uidetox loop`.")

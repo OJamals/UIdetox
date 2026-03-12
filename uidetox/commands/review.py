@@ -261,46 +261,59 @@ def _store_subjective_score(score: int):
     Accepts raw 0-100 score (already normalized from domain rubric).
     Records score, tracks history, and provides domain-aware feedback.
     """
+    from uidetox.utils import now_iso, compute_design_score
+
     ensure_uidetox_dir()
     state = load_state()
 
     # Clamp to 0-100
     score = max(0, min(100, score))
+    reviewed_at = now_iso()
 
     state.setdefault("subjective", {})
     state["subjective"]["score"] = score
+    state["subjective"]["reviewed_at"] = reviewed_at
 
     # Keep history of subjective scores for progression tracking (capped at 50)
     history = state["subjective"].setdefault("history", [])
-    from uidetox.utils import now_iso
-    history.append({"score": score, "timestamp": now_iso()})
+    history.append({"score": score, "timestamp": reviewed_at})
+
+    # Compute score snapshot with centralized scoring logic
+    scores_snapshot = compute_design_score(state)
+    pending = state.get("issues", [])
+    effective = scores_snapshot.get("effective_subjective")
+    if effective is None:
+        effective = 0
+    blended = scores_snapshot["blended_score"]
+    obj = scores_snapshot.get("objective_score")
+    details = scores_snapshot.get("effective_subjective_details") or {}
+
+    history[-1]["effective_score"] = effective
+    history[-1]["blended_score"] = blended
+    if obj is not None:
+        history[-1]["objective_score"] = obj
+
     # Prevent unbounded growth — keep only the most recent 50 entries
     state["subjective"]["history"] = history[-50:]
+    state["subjective"]["effective_score"] = effective
+    state["subjective"]["effective_details"] = details
 
     save_state(state)
-
-    # ── Compute effective score (post-curve + penalties) ──
-    from uidetox.utils import compute_design_score, _apply_subjective_curve
-    fresh_state = load_state()
-    pending = fresh_state.get("issues", [])
-    effective = _apply_subjective_curve(score, pending)
-
-    # Cross-gate: if objective < 90, cap at 80
-    scores_snapshot = compute_design_score(fresh_state)
-    obj = scores_snapshot.get("objective_score")
-    if obj is not None and obj < 90:
-        effective = min(effective, 80)
-
-    blended = scores_snapshot["blended_score"]
 
     print(f"✅ Subjective design score recorded: {score}/100 (raw)")
     print(f"   Effective (after curve + penalties): {effective}/100")
     if effective < score:
         print(f"   Δ compression: -{score - effective} pts (diminishing-returns curve")
-        if pending:
-            print(f"     + {len(pending)} pending-issue penalty")
-        if obj is not None and obj < 90:
-            print(f"     + objective cross-gate cap [obj={obj} < 90]")
+        pending_penalty = details.get("pending_penalty")
+        if pending and pending_penalty:
+            print(f"     + pending-issue penalty ({pending_penalty} pts)")
+        for cap in details.get("caps_applied", []):
+            if cap == "pending_issue_cap":
+                print("     + pending-issue cap [effective <= 80]")
+            elif cap == "critical_issue_cap":
+                print("     + critical-issue cap [T1 present -> effective <= 70]")
+            elif cap == "objective_cross_gate" and obj is not None:
+                print(f"     + objective cross-gate cap [obj={obj} < 95 -> effective <= 75]")
         print("   )")
     print(f"   Blended Design Score: {blended}/100")
     print()

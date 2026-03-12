@@ -4,6 +4,17 @@ import shlex
 import subprocess
 from datetime import datetime, timezone
 
+SUBJECTIVE_RULES = {
+    "curve_threshold": 60,
+    "curve_exponent": 2.2,
+    "tier_penalty_weights": {"T1": 5.0, "T2": 3.0, "T3": 1.5, "T4": 0.75},
+    "max_pending_penalty": 30.0,
+    "pending_issue_cap": 80,
+    "critical_issue_cap": 70,
+    "objective_cap_threshold": 95,
+    "objective_cap": 75,
+}
+
 
 def now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
@@ -43,6 +54,18 @@ def _latest_issue_activity(state: dict) -> datetime | None:
     return latest
 
 
+def _latest_subjective_review_at(state: dict) -> datetime | None:
+    """Return the most recent subjective-review timestamp available."""
+    subjective = state.get("subjective", {})
+    latest_review_at: datetime | None = _parse_iso(subjective.get("reviewed_at"))
+    review_history = subjective.get("history", [])
+    for entry in review_history:
+        reviewed_at = _parse_iso(entry.get("timestamp"))
+        if reviewed_at is not None and (latest_review_at is None or reviewed_at > latest_review_at):
+            latest_review_at = reviewed_at
+    return latest_review_at
+
+
 def get_score_freshness(state: dict) -> dict:
     """Return whether score data is fresh enough to permit finishing.
 
@@ -53,13 +76,7 @@ def get_score_freshness(state: dict) -> dict:
     last_scan_at = _parse_iso(state.get("last_scan"))
     latest_issue_activity = _latest_issue_activity(state)
 
-    subjective = state.get("subjective", {})
-    review_history = subjective.get("history", [])
-    latest_review_at: datetime | None = None
-    for entry in review_history:
-        reviewed_at = _parse_iso(entry.get("timestamp"))
-        if reviewed_at is not None and (latest_review_at is None or reviewed_at > latest_review_at):
-            latest_review_at = reviewed_at
+    latest_review_at = _latest_subjective_review_at(state)
 
     objective_fresh = bool(
         last_scan_at is not None
@@ -135,55 +152,96 @@ def run_tool(
     )
 
 
-def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
-    """Apply diminishing-returns curve and objective-anchored penalties.
+def _coerce_score(value: object) -> int | None:
+    """Normalize unknown score inputs into an int score in [0, 100]."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0, min(100, int(round(value))))
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return max(0, min(100, int(round(float(raw)))))
+        except ValueError:
+            return None
+    return None
 
-    Makes 95-100 achievable only when the codebase is genuinely perfect:
 
-    1. **Exponential compression above 70** — raw 95 → effective ~92.
-       Only a raw 100 maps to an effective 100.
-    2. **Auto-deductions for pending issues** — each unresolved issue
-       mechanically lowers the effective subjective score so the agent
-       cannot self-assess perfection while known issues remain.
-    3. **Hard ceiling when issues remain** — effective subjective is
-       capped at 85 as long as the queue is non-empty.
-    4. **Objective cross-gate** — if the objective score is below 90
-       the effective subjective is capped at 80, preventing a high
-       self-score from masking real problems.
+def compute_effective_subjective(
+    raw_score: int,
+    pending_issues: list[dict],
+    *,
+    objective_score: int | None = None,
+) -> dict[str, object]:
+    """Compute effective subjective score with deterministic penalties/caps."""
+    rules = SUBJECTIVE_RULES
+    normalized_raw = max(0, min(100, int(raw_score)))
+    threshold = int(rules["curve_threshold"])
+    exponent = float(rules["curve_exponent"])
+    curve_range = 100 - threshold
 
-    The curve is: ``effective = 60 + 40 × ((raw − 60) / 40)^2.2``
-    for raw > 60.  Below 60 the mapping is linear (1:1).
-    """
-    if raw_score <= 0:
-        return 0
-
-    # ── Step 1: Exponential compression above 60 ──
-    CURVE_THRESHOLD = 60
-    CURVE_EXPONENT = 2.2
-    CURVE_RANGE = 100 - CURVE_THRESHOLD  # 40
-
-    if raw_score <= CURVE_THRESHOLD:
-        effective = float(raw_score)
+    if normalized_raw <= threshold:
+        curve_score = float(normalized_raw)
     else:
-        overshoot = min((raw_score - CURVE_THRESHOLD) / CURVE_RANGE, 1.0)
-        effective = CURVE_THRESHOLD + CURVE_RANGE * (overshoot ** CURVE_EXPONENT)
+        overshoot = min((normalized_raw - threshold) / curve_range, 1.0)
+        curve_score = threshold + curve_range * (overshoot ** exponent)
 
-    # ── Step 2: Auto-deductions for pending issues ──
-    PENALTY_WEIGHTS = {"T1": 5.0, "T2": 3.0, "T3": 1.5, "T4": 0.75}
-    MAX_PENALTY = 30.0
-
-    penalty = 0.0
+    penalty_weights = rules["tier_penalty_weights"]  # type: ignore[assignment]
+    max_penalty = float(rules["max_pending_penalty"])
+    pending_penalty = 0.0
+    t1_pending = 0
     for issue in pending_issues:
         tier = issue.get("tier", "T4")
-        penalty += PENALTY_WEIGHTS.get(tier, 0.75)
-    penalty = min(penalty, MAX_PENALTY)
-    effective -= penalty
+        if tier == "T1":
+            t1_pending += 1
+        pending_penalty += penalty_weights.get(tier, penalty_weights["T4"])  # type: ignore[index]
+    pending_penalty = min(pending_penalty, max_penalty)
 
-    # ── Step 3: Hard ceiling when issues are pending ──
+    effective = curve_score - pending_penalty
+    caps_applied: list[str] = []
+
     if pending_issues:
-        effective = min(effective, 80.0)
+        pending_cap = int(rules["pending_issue_cap"])
+        if effective > pending_cap:
+            caps_applied.append("pending_issue_cap")
+        effective = min(effective, pending_cap)
 
-    return max(0, min(100, int(effective)))
+    if t1_pending > 0:
+        critical_cap = int(rules["critical_issue_cap"])
+        if effective > critical_cap:
+            caps_applied.append("critical_issue_cap")
+        effective = min(effective, critical_cap)
+
+    if objective_score is not None and objective_score < int(rules["objective_cap_threshold"]):
+        objective_cap = int(rules["objective_cap"])
+        if effective > objective_cap:
+            caps_applied.append("objective_cross_gate")
+        effective = min(effective, objective_cap)
+
+    effective_score = max(0, min(100, int(round(effective))))
+
+    return {
+        "raw_score": normalized_raw,
+        "curve_score": int(round(curve_score)),
+        "pending_penalty": round(pending_penalty, 2),
+        "pending_issue_count": len(pending_issues),
+        "critical_issue_count": t1_pending,
+        "objective_score": objective_score,
+        "caps_applied": caps_applied,
+        "effective_score": effective_score,
+    }
+
+
+def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
+    """Backward-compatible wrapper around ``compute_effective_subjective``.
+
+    Keeps legacy call sites/tests working while centralizing scoring logic
+    in one function that also powers ``compute_design_score``.
+    """
+    details = compute_effective_subjective(raw_score, pending_issues)
+    return int(details["effective_score"])
 
 
 def compute_design_score(state: dict) -> dict:
@@ -224,20 +282,23 @@ def compute_design_score(state: dict) -> dict:
         objective_score = int(100 - ((current_slop / total_slop) * 100))
         objective_score = max(0, min(100, objective_score))
 
-    subjective_score = state.get("subjective", {}).get("score")
+    subjective_score = _coerce_score(state.get("subjective", {}).get("score"))
 
     # Apply the diminishing-returns curve + objective-anchored penalties
     effective_subjective: int | None = None
+    effective_subjective_details: dict[str, object] | None = None
     if subjective_score is not None:
-        effective_subjective = _apply_subjective_curve(subjective_score, issues)
-        # Cross-gate: if objective < 95, cap effective subjective at 75
-        if objective_score is not None and objective_score < 95:
-            effective_subjective = min(effective_subjective, 75)
+        effective_subjective_details = compute_effective_subjective(
+            subjective_score,
+            issues,
+            objective_score=objective_score,
+        )
+        effective_subjective = int(effective_subjective_details["effective_score"])
 
     if objective_score is None:
         blended = effective_subjective if effective_subjective is not None else 0
     elif effective_subjective is not None:
-        blended = int(objective_score * 0.3 + effective_subjective * 0.7)
+        blended = int(round(objective_score * 0.3 + effective_subjective * 0.7))
     else:
         blended = objective_score
 
@@ -245,6 +306,7 @@ def compute_design_score(state: dict) -> dict:
         "objective_score": objective_score,
         "subjective_score": subjective_score,
         "effective_subjective": effective_subjective,
+        "effective_subjective_details": effective_subjective_details,
         "blended_score": blended,
         "current_slop": current_slop,
         "resolved_slop": resolved_slop,

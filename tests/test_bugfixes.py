@@ -16,7 +16,7 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
-from uidetox.utils import compute_design_score, _apply_subjective_curve
+from uidetox.utils import compute_design_score, _apply_subjective_curve, get_score_freshness
 
 
 class TestSubjectiveCurve:
@@ -81,6 +81,53 @@ class TestSubjectiveCurve:
             assert higher >= lower, (
                 f"Curve not monotonic: raw {raw}→{lower}, raw {raw+1}→{higher}"
             )
+
+
+class TestSubjectiveScoringRobustness:
+    """Harden subjective scoring against noisy/legacy state data."""
+
+    def test_t1_pending_caps_effective_at_70(self):
+        effective = _apply_subjective_curve(100, [{"tier": "T1"}])
+        assert effective <= 70
+
+    def test_string_subjective_score_is_sanitized(self):
+        state = {
+            "issues": [],
+            "resolved": [{"tier": "T1"}],
+            "stats": {"scans_run": 1},
+            "subjective": {"score": "91"},
+        }
+        scores = compute_design_score(state)
+        assert scores["subjective_score"] == 91
+        assert scores["effective_subjective"] is not None
+        assert isinstance(scores["effective_subjective"], int)
+
+    def test_freshness_accepts_subjective_reviewed_at_fallback(self):
+        state = {
+            "last_scan": "2026-03-10T12:00:00+00:00",
+            "issues": [],
+            "resolved": [],
+            "subjective": {
+                "score": 90,
+                "reviewed_at": "2026-03-10T12:01:00+00:00",
+                "history": [],
+            },
+        }
+        freshness = get_score_freshness(state)
+        assert freshness["subjective_fresh"] is True
+        assert freshness["target_ready"] is True
+
+    def test_effective_details_report_objective_cross_gate(self):
+        state = {
+            "issues": [{"tier": "T4"}],
+            "resolved": [{"tier": "T1"}],
+            "stats": {"scans_run": 1},
+            "subjective": {"score": 100},
+        }
+        scores = compute_design_score(state)
+        details = scores.get("effective_subjective_details") or {}
+        assert "objective_cross_gate" in details.get("caps_applied", [])
+        assert scores["effective_subjective"] <= 75
 
 
 class TestTierWeightsFix:
