@@ -1,8 +1,12 @@
 """Static Slop Analyzer: Detects AI anti-patterns via regex/AST rules."""
 
+import logging
 import os
 import re
+from collections import Counter
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Directories to always skip during traversal
 IGNORE_DIRS = {
@@ -128,11 +132,12 @@ RULES = [
     },
     {
         "id": "SPACING_REPETITION_SLOP",
-        "pattern": re.compile(r'(p-4|gap-4|space-y-4)(?:.*\1){4,}', re.DOTALL),
+        "pattern": None,
         "tier": "T2",
         "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
         "description": "Excessive identical spacing repetition detected (5+ p-4/gap-4).",
-        "command": "Introduce spacing scale variation (mix p-3, p-5, p-6) to create visual rhythm."
+        "command": "Introduce spacing scale variation (mix p-3, p-5, p-6) to create visual rhythm.",
+        "_custom_check": "spacing_repetition"
     },
     {
         "id": "CSS_GRADIENT_SLOP",
@@ -161,19 +166,21 @@ RULES = [
     },
     {
         "id": "EMOJI_HEAVY_SLOP",
-        "pattern": re.compile(r'[\U0001f300-\U0001f9ff](?:.*[\U0001f300-\U0001f9ff]){5,}', re.DOTALL),
+        "pattern": None,
         "tier": "T2",
         "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
         "description": "Emoji-heavy UI detected (6+ emoji in one file) — common AI pattern.",
-        "command": "Replace decorative emoji with proper iconography or remove entirely. Keep emoji only in user content."
+        "command": "Replace decorative emoji with proper iconography or remove entirely. Keep emoji only in user content.",
+        "_custom_check": "emoji_heavy"
     },
     {
         "id": "OPACITY_ABUSE_SLOP",
-        "pattern": re.compile(r'(?:opacity-\d{1,2}|bg-.*?/\d{1,2})(?:.*(?:opacity-\d{1,2}|bg-.*?/\d{1,2})){4,}', re.DOTALL),
+        "pattern": None,
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Excessive opacity/transparency usage detected (glassmorphism cousin).",
-        "command": "Use solid colors. Reserve transparency for overlays and modals only."
+        "command": "Use solid colors. Reserve transparency for overlays and modals only.",
+        "_custom_check": "opacity_abuse"
     },
     # ──────────────────────────────────────────────
     # NEW RULES (14 additional detections)
@@ -188,7 +195,7 @@ RULES = [
     },
     {
         "id": "GRADIENT_TEXT_SLOP",
-        "pattern": re.compile(r'bg-clip-text.*?text-transparent|text-transparent.*?bg-clip-text', re.IGNORECASE | re.DOTALL),
+        "pattern": re.compile(r'bg-clip-text[^\n]{0,200}text-transparent|text-transparent[^\n]{0,200}bg-clip-text', re.IGNORECASE),
         "tier": "T1",
         "exts": _JSX_EXTS,
         "description": "Gradient text (bg-clip-text + text-transparent) — AI decoration cliche.",
@@ -254,7 +261,7 @@ RULES = [
     },
     {
         "id": "CENTER_BIAS_SLOP",
-        "pattern": re.compile(r'text-center.*mx-auto|mx-auto.*text-center', re.IGNORECASE | re.DOTALL),
+        "pattern": re.compile(r'text-center[^\n]{0,300}mx-auto|mx-auto[^\n]{0,300}text-center', re.IGNORECASE),
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Centered hero layout detected — banned when DESIGN_VARIANCE > 4.",
@@ -263,7 +270,7 @@ RULES = [
     },
     {
         "id": "CARD_NESTING_SLOP",
-        "pattern": re.compile(r'(?:card|Card)["\']?[^<]{0,200}(?:card|Card)', re.IGNORECASE | re.DOTALL),
+        "pattern": re.compile(r'(?:card|Card)["\']?[^<\n]{0,200}(?:card|Card)', re.IGNORECASE),
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Nested card pattern detected (card inside card).",
@@ -287,11 +294,12 @@ RULES = [
     },
     {
         "id": "OVERPADDED_LAYOUT_SLOP",
-        "pattern": re.compile(r'(p-(?:8|10|12|16))(?:.*\1){3,}', re.DOTALL),
+        "pattern": None,
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Excessive large padding repetition detected (overpadded layout).",
-        "command": "Reduce padding and vary spacing scale (p-4, p-5, p-6) for visual rhythm."
+        "command": "Reduce padding and vary spacing scale (p-4, p-5, p-6) for visual rhythm.",
+        "_custom_check": "overpadded_layout"
     },
     {
         "id": "SOLID_DIVIDER_SLOP",
@@ -449,66 +457,48 @@ RULES = [
     # ──────────────────────────────────────────────
     {
         "id": "DUPLICATE_TAILWIND_BLOCK",
-        "pattern": re.compile(
-            r'class(?:Name)?=["\']([^"\']{40,})["\']'
-            r'(?:[\s\S]{0,2000})'
-            r'class(?:Name)?=["\'](\1)["\']',
-            re.IGNORECASE,
-        ),
+        "pattern": None,
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Repeated identical long className string detected — extract to component or utility.",
-        "command": "Extract duplicated class strings to a shared component, cn() utility, or cva() variant."
+        "command": "Extract duplicated class strings to a shared component, cn() utility, or cva() variant.",
+        "_custom_check": "duplicate_tailwind"
     },
     {
         "id": "DUPLICATE_COLOR_LITERAL",
-        "pattern": re.compile(
-            r'(#[0-9a-fA-F]{6})\b(?:[\s\S]{0,3000})\1(?:[\s\S]{0,3000})\1',
-        ),
+        "pattern": None,
         "tier": "T2",
         "exts": _ALL_FE_EXTS,
         "description": "Same hex color literal repeated 3+ times — extract to CSS variable or design token.",
-        "command": "Define a CSS custom property (--color-brand: #XXXXXX) and reference it everywhere."
+        "command": "Define a CSS custom property (--color-brand: #XXXXXX) and reference it everywhere.",
+        "_custom_check": "duplicate_color"
     },
     {
         "id": "COPY_PASTE_COMPONENT",
-        "pattern": re.compile(
-            r'(<(?:div|section|article)\s[^>]{30,}>)'
-            r'([\s\S]{80,300}?)'
-            r'</(?:div|section|article)>'
-            r'[\s\S]{0,200}'
-            r'\1\2',
-            re.IGNORECASE,
-        ),
+        "pattern": None,
         "tier": "T3",
         "exts": _JSX_EXTS,
         "description": "Copy-pasted markup block detected — extract to reusable component.",
-        "command": "Extract repeated markup into a shared component with props for variation."
+        "command": "Extract repeated markup into a shared component with props for variation.",
+        "_custom_check": "copy_paste_component"
     },
     {
         "id": "DUPLICATE_HANDLER",
-        "pattern": re.compile(
-            r'((?:on(?:Click|Change|Submit|Press|Focus|Blur))\s*=\s*\{[^}]{20,}\})'
-            r'[\s\S]{0,2000}\1',
-            re.IGNORECASE,
-        ),
+        "pattern": None,
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Identical inline event handler duplicated — extract to named function.",
-        "command": "Extract duplicated handler logic into a named function or custom hook."
+        "command": "Extract duplicated handler logic into a named function or custom hook.",
+        "_custom_check": "duplicate_handler"
     },
     {
         "id": "REPEATED_MEDIA_QUERY",
-        "pattern": re.compile(
-            r'(@media\s*\([^)]+\)\s*\{)'
-            r'[\s\S]{0,5000}'
-            r'\1',
-            re.IGNORECASE,
-        ),
+        "pattern": None,
         "tier": "T2",
         "exts": {".css", ".scss", ".less"},
         "description": "Same @media query duplicated — consolidate into one block.",
-        "command": "Merge duplicate media queries into a single block or use container queries."
+        "command": "Merge duplicate media queries into a single block or use container queries.",
+        "_custom_check": "repeated_media_query"
     },
     # ──────────────────────────────────────────────
     # DEAD CODE SMELLS
@@ -661,6 +651,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
     try:
         tree = parser.parse(content.encode("utf-8", errors="ignore"))
     except Exception:
+        logger.debug("AST parse failed for %s", filepath)
         return []
 
     issues = []
@@ -804,7 +795,6 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
         # ── AST: Identical sibling components (generic layout slop) ──
         for parent_id, children in state["sibling_components"].items():
             if len(children) >= 4:
-                from collections import Counter
                 counts = Counter(children)
                 for comp_name, count in counts.items():
                     if count >= 4:
@@ -959,6 +949,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
     try:
         # 1MB size guard to prevent regex engine freezing on massive bundled files
         if filepath.stat().st_size > 1_000_000:
+            logger.warning("Skipping %s: file exceeds 1MB size limit", filepath)
             return issues
 
         content = filepath.read_text(encoding="utf-8")
@@ -1204,6 +1195,137 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                     break  # Flag once per file
             continue
 
+        # Custom check: spacing_repetition — count repeated identical spacing utilities
+        if custom == "spacing_repetition":
+            spacing_pattern = re.compile(r'\b(p-4|gap-4|space-y-4)\b')
+            hits = spacing_pattern.findall(content)
+            if len(hits) >= 5:
+                most_common = Counter(hits).most_common(1)[0]
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} (`{most_common[0]}` appears {most_common[1]} times)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: emoji_heavy — count emoji in file
+        if custom == "emoji_heavy":
+            emoji_count = len(re.findall(r'[\U0001f300-\U0001f9ff]', content))
+            if emoji_count >= 6:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({emoji_count} emoji found)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: opacity_abuse — count opacity/transparency tokens
+        if custom == "opacity_abuse":
+            opacity_hits = re.findall(r'\b(?:opacity-\d{1,2}|bg-\S+/\d{1,2})\b', content)
+            if len(opacity_hits) >= 5:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({len(opacity_hits)} opacity tokens)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: overpadded_layout — count large padding repetitions
+        if custom == "overpadded_layout":
+            large_padding = re.findall(r'\b(p-(?:8|10|12|16))\b', content)
+            if len(large_padding) >= 4:
+                most_common = Counter(large_padding).most_common(1)[0]
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} (`{most_common[0]}` appears {most_common[1]} times)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: duplicate_tailwind — find repeated long className strings
+        if custom == "duplicate_tailwind":
+            classnames = re.findall(r'class(?:Name)?=["\']([^"\']{40,})["\']', content, re.IGNORECASE)
+            class_counts = Counter(classnames)
+            dupes = [(cn, c) for cn, c in class_counts.items() if c >= 2]
+            if dupes:
+                sample = dupes[0][0][:60]
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} (`{sample}...` repeated {dupes[0][1]}x)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: duplicate_color — find hex colors repeated 3+ times
+        if custom == "duplicate_color":
+            hex_colors = re.findall(r'#[0-9a-fA-F]{6}\b', content)
+            color_counts = Counter(hex_colors)
+            dupes = [(c, n) for c, n in color_counts.items() if n >= 3]
+            if dupes:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} ({dupes[0][0]} appears {dupes[0][1]} times)",
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: copy_paste_component — find repeated opening tag + content blocks
+        if custom == "copy_paste_component":
+            # Extract blocks: opening tag with attributes + 80-300 chars of content
+            blocks = re.findall(
+                r'(<(?:div|section|article)\s[^>]{30,}>)([\s\S]{80,300}?)</(?:div|section|article)>',
+                content, re.IGNORECASE,
+            )
+            if len(blocks) >= 2:
+                signatures = [f"{tag}{body.strip()[:80]}" for tag, body in blocks]
+                sig_counts = Counter(signatures)
+                dupes = [(s, c) for s, c in sig_counts.items() if c >= 2]
+                if dupes:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"]
+                    })
+            continue
+
+        # Custom check: duplicate_handler — find repeated inline event handlers
+        if custom == "duplicate_handler":
+            handlers = re.findall(
+                r'(on(?:Click|Change|Submit|Press|Focus|Blur)\s*=\s*\{[^}]{20,}\})',
+                content, re.IGNORECASE,
+            )
+            handler_counts = Counter(handlers)
+            dupes = [(h, c) for h, c in handler_counts.items() if c >= 2]
+            if dupes:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"]
+                })
+            continue
+
+        # Custom check: repeated_media_query — find duplicate @media queries
+        if custom == "repeated_media_query":
+            media_queries = re.findall(r'(@media\s*\([^)]+\))\s*\{', content, re.IGNORECASE)
+            mq_counts = Counter(media_queries)
+            dupes = [(mq, c) for mq, c in mq_counts.items() if c >= 2]
+            if dupes:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": f"{rule['description']} (`{dupes[0][0]}` appears {dupes[0][1]} times)",
+                    "command": rule["command"]
+                })
+            continue
+
         # Standard regex match — flag once per file
         pattern = rule.get("pattern")
         if isinstance(pattern, re.Pattern) and pattern.search(content):
@@ -1243,7 +1365,7 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
             if zone in ("vendor", "generated"):
                 zone_skip.add(str(Path(fpath).resolve()))
 
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, Future
     from uidetox.color_utils import load_dynamic_colors, audit_project_colors, find_color_config_sources
 
     dynamic_colors = load_dynamic_colors(root)
@@ -1254,13 +1376,11 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     def _analyze_wrapper(fp: Path) -> list:
         return analyze_file(fp, design_variance=design_variance, dynamic_colors=dynamic_colors) # type: ignore
 
-    futures = []
+    future_to_path: dict[Future, Path] = {}
     with ThreadPoolExecutor() as executor:
         for dirpath, dirnames, filenames in os.walk(root):
             # Mutate dirnames in-place to skip IGNORE_DIRS + user excludes
-            new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
-            dirnames.clear()
-            dirnames.extend(new_dir)
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
 
             for filename in filenames:
                 file_path = Path(dirpath) / filename
@@ -1269,10 +1389,24 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
                 if zone_skip and str(file_path.resolve()) in zone_skip:
                     continue
 
-                futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
+                f = executor.submit(_analyze_wrapper, file_path) # type: ignore
+                future_to_path[f] = file_path
 
-        for future in futures:
-            all_issues.extend(future.result())
+        for future, fpath in future_to_path.items():
+            try:
+                all_issues.extend(future.result())
+            except Exception as exc:
+                logger.error("Error analyzing %s: %s", fpath, exc)
+
+    # Deduplicate: same file + same issue description = single entry
+    seen: set[tuple[str, str]] = set()
+    deduped: list[dict] = []
+    for issue in all_issues:
+        key = (issue.get("file", ""), issue.get("issue", ""))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(issue)
+    all_issues = deduped
 
     # Project-level dynamic color audit based on actual Tailwind/theme tokens.
     # Cap output to keep the queue actionable rather than overwhelming.

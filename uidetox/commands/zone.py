@@ -19,17 +19,26 @@ def run(args: argparse.Namespace):
         print("Usage: uidetox zone {show|set|clear}")
 
 def _determine_zone(filepath: str) -> str:
-    """Basic fallback heuristics if not explicitly set."""
+    """Basic fallback heuristics if not explicitly set.
+
+    Uses path segment matching to avoid false positives like
+    'testimonials.tsx' being classified as 'test'.
+    """
+    parts = set(Path(filepath).parts)
+    lower_parts = {p.lower() for p in parts}
     p = filepath.lower()
-    if "node_modules" in p or "vendor" in p:
+
+    if "node_modules" in lower_parts or "vendor" in lower_parts:
         return "vendor"
-    if "test" in p or "spec" in p:
+    if lower_parts & {"test", "tests", "spec", "specs", "__tests__", "__test__"}:
         return "test"
-    if p.endswith(".config.js") or p.endswith(".config.ts") or "config" in p:
+    if p.endswith(".config.js") or p.endswith(".config.ts") or p.endswith(".config.mjs"):
         return "config"
-    if "dist" in p or "build" in p or "out" in p or ".next" in p:
+    if lower_parts & {"config", "configs", ".config"}:
+        return "config"
+    if lower_parts & {"dist", "build", "out", ".next", ".output"}:
         return "generated"
-    if p.endswith(".sh") or p.endswith(".py") or "scripts" in p:
+    if p.endswith(".sh") or p.endswith(".py") or "scripts" in lower_parts:
         return "script"
     return "production"
 

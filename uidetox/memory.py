@@ -1,39 +1,86 @@
 """Persistent agent memory: tracks reviewed files, learned patterns, session progress, and continuation state."""
 
+import atexit
 import json
-import os
-import tempfile
+import logging
 from pathlib import Path
 
 import hashlib
 from typing import Any
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir
+from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, _atomic_write_json, _locked_file
 from uidetox.utils import now_iso
 
+logger = logging.getLogger(__name__)
 
-def _get_collection(name: str) -> Any:
-    """Get a ChromaDB collection for semantic memory search."""
+# ── ChromaDB client management ──────────────────────────────────
+# We keep at most one live client per db_path.  An atexit hook
+# guarantees connections are closed when the process exits.
+
+_chroma_clients: dict[str, Any] = {}
+
+
+def _get_chroma_client_cached(db_path: str):
+    """Get or create a ChromaDB PersistentClient for *db_path*.
+
+    Clients are cached per path and automatically closed at process exit.
+    """
+    if db_path in _chroma_clients:
+        return _chroma_clients[db_path]
     try:
         import chromadb
         from chromadb.config import Settings
 
-        db_path = get_uidetox_dir() / "chroma"
-        # Suppress telemetry and keep it quiet
-        client = chromadb.PersistentClient(path=str(db_path), settings=Settings(anonymized_telemetry=False))
-        return client.get_or_create_collection(name=name)
+        client = chromadb.PersistentClient(
+            path=db_path,
+            settings=Settings(anonymized_telemetry=False),
+        )
+        _chroma_clients[db_path] = client
+        return client
     except ImportError:
         return None
 
 
+def close_chroma_clients() -> None:
+    """Close all cached ChromaDB clients, releasing file handles and memory."""
+    for db_path in list(_chroma_clients):
+        try:
+            del _chroma_clients[db_path]
+            logger.debug("Closed ChromaDB client for %s", db_path)
+        except (KeyError, AttributeError) as exc:
+            logger.debug("Error closing ChromaDB client for %s: %s", db_path, exc)
+
+
+# Ensure all ChromaDB clients are closed when the process exits.
+atexit.register(close_chroma_clients)
+
+
+def _get_chroma_client():
+    """Return a ChromaDB client for the current project's .uidetox/chroma dir."""
+    db_path = str((get_uidetox_dir() / "chroma").resolve())
+    return _get_chroma_client_cached(db_path)
+
+
+def _get_collection(name: str) -> Any:
+    """Get a ChromaDB collection for semantic memory search."""
+    client = _get_chroma_client()
+    if client is None:
+        return None
+    try:
+        return client.get_or_create_collection(name=name)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("Failed to get/create ChromaDB collection %r: %s", name, exc)
+        return None
+
+
 MEMORY_FILE = "memory.json"
+_EMBEDDED_COLLECTIONS = ("patterns", "notes", "file_contexts", "fix_history")
 
 
 def _memory_path() -> Path:
     return get_uidetox_dir() / MEMORY_FILE
 
 
-def _now_iso() -> str:
-    return now_iso()
+# Timestamp helper: use now_iso() directly from utils
 
 
 def load_memory() -> dict:
@@ -66,27 +113,89 @@ def _default_memory() -> dict:
 
 def save_memory(memory: dict):
     """Save agent memory to disk atomically to prevent corruption."""
-    d = ensure_uidetox_dir()
-    target = _memory_path()
-    fd, tmp_path = tempfile.mkstemp(dir=d, prefix="memory_", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(memory, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, target)
+    ensure_uidetox_dir()
+    _atomic_write_json(_memory_path(), memory)
+
+
+def _clear_embedding_memory() -> None:
+    """Delete semantic memory collections so reset operations are truly clean."""
+    client = _get_chroma_client()
+    if client is None:
+        return
+    for collection_name in _EMBEDDED_COLLECTIONS:
+        try:
+            client.delete_collection(collection_name)  # type: ignore[attr-defined]
+        except Exception:
+            # Collection doesn't exist or DB error — skip
+            continue
+
+
+# ── Embedding compaction ────────────────────────────────────────
+
+# Hard caps per collection.  Once a collection exceeds _MAX_EMBEDDINGS,
+# compact_embeddings() trims the oldest entries (by insertion order) down
+# to _TARGET_EMBEDDINGS so the trim isn't needed on every write.
+_MAX_EMBEDDINGS = 500
+_TARGET_EMBEDDINGS = 400
+
+
+def compact_embeddings() -> dict[str, int]:
+    """Trim oversized ChromaDB collections to bounded sizes.
+
+    Returns a dict of {collection_name: items_removed}.
+    Call periodically (e.g. after a scan or on ``uidetox finish``).
+    """
+    client = _get_chroma_client()
+    if client is None:
+        return {}
+
+    removed: dict[str, int] = {}
+    for name in _EMBEDDED_COLLECTIONS:
+        try:
+            col = client.get_collection(name)
+        except Exception:
+            # Collection doesn't exist yet — nothing to compact
+            continue
+        count = col.count()
+        if count <= _MAX_EMBEDDINGS:
+            continue
+
+        # Fetch all IDs (ChromaDB returns insertion-ordered by default)
+        all_data = col.get(limit=count)
+        ids = all_data.get("ids", [])
+        to_delete = ids[: count - _TARGET_EMBEDDINGS]
+        if to_delete:
+            col.delete(ids=to_delete)
+            removed[name] = len(to_delete)
+            logger.info("Compacted %s: removed %d / %d embeddings", name, len(to_delete), count)
+
+    return removed
 
 
 # ── Reviewed Files ──────────────────────────────────────────────
 
 
-def mark_file_reviewed(file_path: str, *, verdict: str = "clean"):
+_MAX_REVIEWED_FILES = 500
+
+
+def mark_file_reviewed(file_path: str, *, verdict: str = "clean") -> None:
     """Mark a file as reviewed with a verdict (clean, has_issues, skipped)."""
-    mem = load_memory()
-    mem["reviewed_files"][file_path] = {
-        "reviewed_at": _now_iso(),
-        "verdict": verdict,
-    }
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        reviewed = mem["reviewed_files"]
+        reviewed[file_path] = {
+            "reviewed_at": now_iso(),
+            "verdict": verdict,
+        }
+        # Cap reviewed_files to prevent unbounded growth
+        if len(reviewed) > _MAX_REVIEWED_FILES:
+            # Evict oldest entries (by reviewed_at timestamp)
+            sorted_keys = sorted(
+                reviewed, key=lambda k: reviewed[k].get("reviewed_at", "")
+            )
+            for k in sorted_keys[: len(reviewed) - _MAX_REVIEWED_FILES]:
+                del reviewed[k]
+        save_memory(mem)
 
 
 def is_file_reviewed(file_path: str) -> bool:
@@ -109,19 +218,21 @@ def add_pattern(pattern: str, *, category: str = "general"):
 
     Patterns are capped at 50 entries in JSON state, but all are embedded.
     """
-    mem = load_memory()
-    mem["patterns"].append({
-        "pattern": pattern,
-        "category": category,
-        "learned_at": _now_iso(),
-    })
-    # Cap at 50 patterns — evict oldest
-    mem["patterns"] = mem["patterns"][-50:]
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        mem["patterns"].append({
+            "pattern": pattern,
+            "category": category,
+            "learned_at": now_iso(),
+        })
+        # Cap at 50 patterns — evict oldest
+        mem["patterns"] = mem["patterns"][-50:]
+        save_memory(mem)
 
     collection = _get_collection("patterns")
     if collection:
-        doc_id = hashlib.md5(pattern.encode("utf-8")).hexdigest()
+        # Include category in hash to avoid collision when same text has different categories
+        doc_id = hashlib.md5(f"{category}:{pattern}".encode("utf-8")).hexdigest()
         collection.upsert(
             documents=[pattern],
             metadatas=[{"category": category}],
@@ -160,14 +271,15 @@ def add_note(note: str):
 
     Notes are capped at 30 entries in JSON.
     """
-    mem = load_memory()
-    mem["notes"].append({
-        "note": note,
-        "created_at": _now_iso(),
-    })
-    # Cap at 30 notes — evict oldest
-    mem["notes"] = mem["notes"][-30:]
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        mem["notes"].append({
+            "note": note,
+            "created_at": now_iso(),
+        })
+        # Cap at 30 notes — evict oldest
+        mem["notes"] = mem["notes"][-30:]
+        save_memory(mem)
 
     collection = _get_collection("notes")
     if collection:
@@ -211,16 +323,19 @@ def save_session(*, phase: str, last_command: str, last_component: str = "",
     Called automatically by scan, resolve, batch-resolve, rescan.
     Allows the agent to resume from the exact point it left off.
     """
-    mem = load_memory()
-    mem["session"] = {
-        "phase": phase,
-        "last_command": last_command,
-        "last_component": last_component,
-        "issues_fixed_this_session": mem.get("session", {}).get("issues_fixed_this_session", 0) + issues_fixed,
-        "saved_at": _now_iso(),
-        "context": context,
-    }
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        prev_fixed = mem.get("session", {}).get("issues_fixed_this_session", 0)
+        mem["session"] = {
+            "phase": phase,
+            "last_command": last_command,
+            "last_component": last_component,
+            # Only accumulate when caller reports a positive delta.
+            "issues_fixed_this_session": prev_fixed + max(0, issues_fixed),
+            "saved_at": now_iso(),
+            "context": context,
+        }
+        save_memory(mem)
 
 
 def get_session() -> dict:
@@ -232,16 +347,17 @@ def get_session() -> dict:
 def save_scan_summary(*, total_found: int, by_tier: dict, by_category: dict,
                       files_scanned: int, top_files: list[str]):
     """Auto-save the last scan summary for quick review without re-scanning."""
-    mem = load_memory()
-    mem["last_scan"] = {
-        "timestamp": _now_iso(),
-        "total_found": total_found,
-        "by_tier": by_tier,
-        "by_category": by_category,
-        "files_scanned": files_scanned,
-        "top_files": top_files[:10],  # type: ignore
-    }
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        mem["last_scan"] = {
+            "timestamp": now_iso(),
+            "total_found": total_found,
+            "by_tier": by_tier,
+            "by_category": by_category,
+            "files_scanned": files_scanned,
+            "top_files": top_files[:10],  # type: ignore
+        }
+        save_memory(mem)
 
 
 def get_last_scan() -> dict | None:
@@ -252,16 +368,17 @@ def get_last_scan() -> dict | None:
 
 def log_progress(action: str, details: str = ""):
     """Append to the auto-progress log. Called after every significant action."""
-    mem = load_memory()
-    log = mem.get("progress_log", [])
-    log.append({
-        "action": action,
-        "details": details,
-        "timestamp": _now_iso(),
-    })
-    # Keep last 50 entries to avoid unbounded growth
-    mem["progress_log"] = log[-50:]
-    save_memory(mem)
+    with _locked_file("memory"):
+        mem = load_memory()
+        log = mem.get("progress_log", [])
+        log.append({
+            "action": action,
+            "details": details,
+            "timestamp": now_iso(),
+        })
+        # Keep last 50 entries to avoid unbounded growth
+        mem["progress_log"] = log[-50:]
+        save_memory(mem)
 
 
 def get_progress_log() -> list[dict]:
@@ -272,7 +389,9 @@ def get_progress_log() -> list[dict]:
 
 def clear_memory():
     """Reset agent memory (used when starting fresh)."""
-    save_memory(_default_memory())
+    with _locked_file("memory"):
+        save_memory(_default_memory())
+    _clear_embedding_memory()
 
 
 # ── Embedding-Based Context Injection ───────────────────────────
@@ -289,13 +408,13 @@ def embed_file_context(file_path: str, context: str, *, category: str = "file_co
     if not collection:
         return
 
-    doc_id = hashlib.md5(f"{file_path}:{context[:100]}".encode("utf-8")).hexdigest()
+    doc_id = hashlib.md5(f"{file_path}:{context}".encode("utf-8")).hexdigest()
     collection.upsert(
         documents=[context],
         metadatas=[{
             "file": file_path,
             "category": category,
-            "embedded_at": _now_iso(),
+            "embedded_at": now_iso(),
         }],
         ids=[doc_id],
     )
@@ -313,13 +432,13 @@ def embed_fix_outcome(file_path: str, issue: str, fix: str, *, outcome: str = "r
     if not collection:
         return
 
-    doc_id = hashlib.md5(doc[:200].encode("utf-8")).hexdigest()
+    doc_id = hashlib.md5(doc.encode("utf-8")).hexdigest()
     collection.upsert(
         documents=[doc],
         metadatas=[{
             "file": file_path,
             "outcome": outcome,
-            "embedded_at": _now_iso(),
+            "embedded_at": now_iso(),
         }],
         ids=[doc_id],
     )
@@ -347,7 +466,8 @@ def query_relevant_context(query: str, *, collections: list[str] | None = None,
         n = min(limit, cnt)
         try:
             search_results = collection.query(query_texts=[query], n_results=n)
-        except Exception:
+        except Exception as exc:
+            logger.debug("ChromaDB query failed for %s: %s", coll_name, exc)
             continue
 
         if not search_results or not search_results.get("documents"):
@@ -359,13 +479,20 @@ def query_relevant_context(query: str, *, collections: list[str] | None = None,
 
         for i, doc in enumerate(docs):
             meta = metas[i] if i < len(metas) else {}
-            distance = distances[i] if i < len(distances) else 1.0
-            results.append({
-                "text": doc,
-                "collection": coll_name,
-                "metadata": meta if meta else {},
-                "relevance": max(0, 1.0 - distance),  # Convert distance to relevance
-            })
+            # Chroma default is squared L2 distance, typical range [0, 4] for normalized vectors
+            # A distance of 0 means identical, 2 means orthogonal, 4 means opposite.
+            # We convert this to a relevance score in [0, 1] using cosine similarity equivalent.
+            distance = distances[i] if i < len(distances) else 2.0
+            relevance = max(0.0, 1.0 - (distance / 2.0))
+            
+            # Only include results with some actual semantic relevance
+            if relevance > 0.1:
+                results.append({
+                    "text": doc,
+                    "collection": coll_name,
+                    "metadata": meta if meta else {},
+                    "relevance": relevance,
+                })
 
     # Sort by relevance (highest first) and cap
     results.sort(key=lambda r: r["relevance"], reverse=True)

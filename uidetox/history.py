@@ -1,12 +1,9 @@
 """Run history: timestamped snapshots of each scan/rescan cycle."""
 
 import json
-import os
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
-from .state import get_uidetox_dir, ensure_uidetox_dir, load_state
-from .utils import compute_design_score
+from .state import get_uidetox_dir, ensure_uidetox_dir, load_state, _atomic_write_json
+from .utils import compute_design_score, now_iso, now_iso_filename
 
 
 def _history_dir() -> Path:
@@ -15,8 +12,14 @@ def _history_dir() -> Path:
     return d
 
 
-def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+def _tier_breakdown(items: list[dict]) -> dict[str, int]:
+    """Return a compact tier count summary for a list of issues."""
+    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
+    for item in items:
+        tier = item.get("tier", "T4")
+        if tier in tiers:
+            tiers[tier] += 1
+    return tiers
 
 
 def save_run_snapshot(*, trigger: str = "scan") -> Path:
@@ -29,29 +32,45 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
         Path to the saved snapshot file.
     """
     state = load_state()
-    stamp = _stamp()
+    stamp = now_iso_filename()
     scores = compute_design_score(state)
+    pending = state.get("issues", [])
+    resolved = state.get("resolved", [])
     snapshot = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso(),
         "trigger": trigger,
         "design_score": scores["blended_score"],
         "objective_score": scores["objective_score"],
         "subjective_score": scores["subjective_score"],
-        "pending_issues": len(state.get("issues", [])),
-        "resolved_issues": len(state.get("resolved", [])),
+        "pending_issues": len(pending),
+        "resolved_issues": len(resolved),
         "total_found": state.get("stats", {}).get("total_found", 0),
         "scans_run": state.get("stats", {}).get("scans_run", 0),
-        "issues": state.get("issues", []),
-        "resolved": state.get("resolved", []),
+        # Compact summaries instead of full issue/resolution lists to keep
+        # snapshots lightweight while preserving useful trend information.
+        "pending_tiers": _tier_breakdown(pending),
+        "resolved_tiers": _tier_breakdown(resolved),
     }
     target = _history_dir() / f"run_{stamp}.json"
-    fd, tmp_path = tempfile.mkstemp(dir=_history_dir(), prefix="run_", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, target)
+    _atomic_write_json(target, snapshot, dir=_history_dir())
+
+    # Rotate history to prevent unbounded growth — keep at most 100 snapshots
+    _rotate_history(max_snapshots=100)
+
     return target
+
+
+def _rotate_history(max_snapshots: int = 100) -> None:
+    """Delete oldest snapshots when the count exceeds *max_snapshots*."""
+    history_dir = _history_dir()
+    snapshots = sorted(history_dir.glob("run_*.json"))
+    if len(snapshots) <= max_snapshots:
+        return
+    for old in snapshots[: len(snapshots) - max_snapshots]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def load_run_history() -> list[dict]:
@@ -75,8 +94,8 @@ def compare_runs() -> list[dict]:
     return [
         {
             "timestamp": r.get("timestamp", ""),
-            "trigger": r.get("trigger", "?"),
-            "score": r.get("design_score", 0),
+            "trigger": r.get("trigger", "unknown"),
+            "score": r.get("design_score") or 0,
             "pending": r.get("pending_issues", 0),
             "resolved": r.get("resolved_issues", 0),
         }

@@ -24,7 +24,7 @@ def run(args: argparse.Namespace):
         print(f"Suppressed: [{args.tier}] {args.issue} in {args.file} (matches active ignore pattern)")
         return
     
-    issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
+    issue_id = f"SCAN-{uuid.uuid4().hex[:8].upper()}"
     new_issue = {
         "id": issue_id,
         "file": args.file,
@@ -32,6 +32,11 @@ def run(args: argparse.Namespace):
         "issue": args.issue,
         "command": args.fix_command
     }
-    add_issue(new_issue)
-    print(f"Added issue {issue_id}: [{args.tier}] {args.issue} in {args.file}")
+    outcome = add_issue(new_issue)
+    if outcome == "added":
+        print(f"Added issue {issue_id}: [{args.tier}] {args.issue} in {args.file}")
+    elif outcome == "updated":
+        print(f"Updated existing pending issue: [{args.tier}] {args.issue} in {args.file}")
+    else:
+        print(f"Skipped duplicate pending issue: [{args.tier}] {args.issue} in {args.file}")
 

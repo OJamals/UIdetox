@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import traceback
 from importlib import import_module
 from pathlib import Path
 
@@ -15,26 +16,34 @@ def _get_version() -> str:
         return "0.1.0"
 
 
-def _get_commands_dir() -> Path | None:
-    """Find the commands/ directory — bundled data first, then project root."""
-    # 1. Bundled inside the installed package (uidetox/data/commands/)
+def _get_commands_dirs() -> list[Path]:
+    """Return all existing commands/ directories (bundled + project root).
+
+    Bundled uidetox/data/commands/ comes first (always available in pip
+    installs), followed by the project root commands/ (user-customized
+    skills, editable installs).  Callers iterate all dirs so user-added
+    skills in the project root are never missed.
+    """
+    dirs: list[Path] = []
+    # 1. Bundled inside the installed package
     pkg_data = Path(__file__).resolve().parent / "data" / "commands"
-    if pkg_data.exists():
-        return pkg_data
-    # 2. Project root commands/ (development / editable install)
+    if pkg_data.is_dir():
+        dirs.append(pkg_data)
+    # 2. Project root commands/
     try:
         from uidetox.state import get_project_root
         cmd_dir = get_project_root() / "commands"
-        if cmd_dir.exists():
-            return cmd_dir
+        if cmd_dir.is_dir() and cmd_dir not in dirs:
+            dirs.append(cmd_dir)
     except Exception:
         pass
     # 3. Fallback: sibling to the package root
-    pkg_root = Path(__file__).resolve().parent.parent
-    cmd_dir = pkg_root / "commands"
-    if cmd_dir.exists():
-        return cmd_dir
-    return None
+    if not dirs:
+        pkg_root = Path(__file__).resolve().parent.parent
+        cmd_dir = pkg_root / "commands"
+        if cmd_dir.is_dir():
+            dirs.append(cmd_dir)
+    return dirs
 
 
 def parse_args(args_list=None):
@@ -67,6 +76,7 @@ def parse_args(args_list=None):
     resolve_parser = subparsers.add_parser("resolve", help="Mark a specific issue as resolved")
     resolve_parser.add_argument("issue_id", help="The ID of the issue to resolve (e.g. SCAN-001)")
     resolve_parser.add_argument("--note", required=True, help="Mandatory explanation of the fix applied")
+    resolve_parser.add_argument("--skip-verify", action="store_true", help="Skip pre-commit verification gate")
 
     # Command: batch-resolve
     batch_resolve_parser = subparsers.add_parser("batch-resolve", help="Resolve multiple issues with a single coherent commit")
@@ -114,7 +124,22 @@ def parse_args(args_list=None):
     # Command: loop
     loop_parser = subparsers.add_parser("loop", help="Instruct the AI agent to enter an autonomous fix loop")
     loop_parser.add_argument("--target", type=int, default=95, help="Target design score to reach (default 95)")
-    loop_parser.add_argument("--orchestrator", action="store_true", help="Use sub-agent orchestrator mode (one agent per stage)")
+    loop_parser.add_argument(
+        "--orchestrator",
+        dest="orchestrator",
+        action="store_true",
+        default=True,
+        help="Enable sub-agent orchestrator mode (default)",
+    )
+    loop_parser.add_argument(
+        "--no-orchestrator",
+        dest="orchestrator",
+        action="store_false",
+        help="Disable orchestrator mode for single-agent loop guidance",
+    )
+    loop_parser.add_argument("--manual", action="store_true", help="Disable default autopilot execution and only print loop guidance")
+    loop_parser.add_argument("--max-commands", type=int, default=50, help="Maximum commands per autopilot cycle (default 50)")
+    loop_parser.add_argument("--dry-run", action="store_true", help="Show generated autopilot command plan without executing it")
 
     # Command: finish
     finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
@@ -127,6 +152,9 @@ def parse_args(args_list=None):
     sub_parser.add_argument("--show", type=str, help="Show details of a session by ID")
     sub_parser.add_argument("--record", type=str, help="Mark a session as completed")
     sub_parser.add_argument("--note", type=str, default="", help="Note for --record")
+    sub_parser.add_argument("--confidence", type=float, help="Confidence score for --record (0.0-1.0)")
+    sub_parser.add_argument("--verification", type=str, default="", help="Verification summary for --record")
+    sub_parser.add_argument("--result-file", type=str, help="JSON file containing a full structured result for --record")
 
     # Command: history
     history_parser = subparsers.add_parser("history", help="View run history and score progression")
@@ -181,13 +209,15 @@ def parse_args(args_list=None):
     format_parser.add_argument("--fix", action="store_true", help="Auto-fix formatting")
 
     # Dynamic Slash Commands (e.g., /audit, /polish) from the commands/ directory
-    cmd_dir = _get_commands_dir()
-    if cmd_dir:
+    # Maintain a set of already-registered subparser names to prevent collisions
+    _registered_commands = set(subparsers.choices.keys()) if hasattr(subparsers, 'choices') else set()
+    for cmd_dir in _get_commands_dirs():
         for md_file in cmd_dir.glob("*.md"):
             skill_name = md_file.stem
-            if skill_name not in ["scan", "setup", "fix"]:
+            if skill_name not in _registered_commands:
                 skill_parser = subparsers.add_parser(skill_name, help=f"Execute the '{skill_name}' UX design skill")
                 skill_parser.add_argument("target", nargs="?", default=".", help="Target file, directory, or component pattern")
+                _registered_commands.add(skill_name)
 
     # Catch common mistake: uidetox --check → redirect to uidetox check
     if args_list is None and len(sys.argv) > 1 and sys.argv[1] == "--check":
@@ -199,31 +229,51 @@ def parse_args(args_list=None):
 def main():
     args = parse_args()
     if not args.command:
-        # Just show help
-        parse_args(["--help"])
-        return
+        # Default to autonomous loop mode when no subcommand is provided.
+        # This makes `uidetox` itself the entrypoint into the full
+        # self-propagating remediation workflow.
+        print("No command provided. Starting autonomous loop: `uidetox loop`")
+        args = parse_args(["loop"])
+
+    # Ensure the .uidetox directory exists once (replaces scattered
+    # ensure_uidetox_dir() calls in individual command modules).
+    from uidetox.state import ensure_uidetox_dir
+    ensure_uidetox_dir()
 
     # Dispatch to the specific command module
     try:
-        # Check dynamic skills
-        cmd_dir = _get_commands_dir()
-        dynamic_skills = []
-        if cmd_dir:
-            dynamic_skills = [f.stem for f in cmd_dir.glob("*.md") if f.stem not in ["scan", "setup", "fix"]]
-
-        if args.command in dynamic_skills:
-            command_name = "skill_cmd"
-        else:
-            command_name = args.command.replace("-", "_")
-
         # Avoid collision with builtins and top-level modules
         name_map = {
             "format": "format_cmd",
             "subagent": "subagent_cmd",
             "history": "history_cmd",
             "memory": "memory_cmd",
-            "tree": "viz" # route 'tree' to 'viz.py'
+            "tree": "viz",  # route 'tree' to 'viz.py'
         }
+
+        # Built-in CLI commands that have dedicated Python modules
+        builtin_commands = {
+            "setup", "scan", "add_issue", "add-issue", "next", "resolve",
+            "batch_resolve", "batch-resolve", "plan", "review", "capture",
+            "update_skill", "update-skill", "status", "show", "exclude",
+            "autofix", "rescan", "loop", "finish", "subagent", "history",
+            "viz", "tree", "zone", "suppress", "memory", "detect",
+            "check", "tsc", "lint", "format",
+        } | set(name_map.keys()) | set(name_map.values())
+
+        # Check dynamic skills — any markdown-based skill not already a built-in command
+        dynamic_skills: set[str] = set()
+        for cmd_dir in _get_commands_dirs():
+            dynamic_skills |= {
+                f.stem for f in cmd_dir.glob("*.md")
+                if f.stem not in builtin_commands
+            }
+
+        if args.command in dynamic_skills:
+            command_name = "skill_cmd"
+        else:
+            command_name = args.command.replace("-", "_")
+
         command_name = name_map.get(command_name, command_name)
         module = import_module(f"uidetox.commands.{command_name}")
 
@@ -242,6 +292,7 @@ def main():
         sys.exit(1)
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

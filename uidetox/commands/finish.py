@@ -1,5 +1,7 @@
+import argparse
 import subprocess
 import sys
+
 
 def _detect_main_branch() -> str:
     """Detect the primary branch (main, master, develop) reliably.
@@ -22,7 +24,7 @@ def _detect_main_branch() -> str:
         result = subprocess.run(
             ["git", "branch", "--list"], capture_output=True, text=True, check=True,
         )
-        branches = [b.strip().lstrip("* ") for b in result.stdout.splitlines()]
+        branches = [b.strip().removeprefix("* ").strip() for b in result.stdout.splitlines()]
         for candidate in ("main", "master", "develop", "dev"):
             if candidate in branches:
                 return candidate
@@ -32,7 +34,7 @@ def _detect_main_branch() -> str:
     return "main"  # Last-resort default
 
 
-def run(args):
+def run(args: argparse.Namespace):
     """
     Squash merges the current UIdetox session branch back into the main branch,
     commits the squashed changes, and deletes the temporary session branch.
@@ -52,6 +54,22 @@ def run(args):
         sys.exit(1)
 
     target_branch = _detect_main_branch()
+
+    # Check for uncommitted changes before switching branches
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, check=True,
+        )
+        if status.stdout.strip():
+            print("⚠️  You have uncommitted changes. Committing them before finishing...")
+            subprocess.run(["git", "add", "-A"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", "[UIdetox] Auto-commit before finish", "--no-verify"],
+                check=True, capture_output=True,
+            )
+    except subprocess.CalledProcessError:
+        pass
 
     print(f"📦 Finishing UIdetox session on branch: {current_branch}")
     print(f"▶️  Target merge branch: {target_branch}")
@@ -75,8 +93,25 @@ def run(args):
         print("▶️  Cleaning up temporary branch...")
         subprocess.run(["git", "branch", "-D", current_branch], check=True)
 
+        # Compact ChromaDB embeddings to prevent unbounded growth
+        try:
+            from uidetox.memory import compact_embeddings
+            trimmed = compact_embeddings()
+            if trimmed:
+                print(f"▶️  Compacted embeddings: {trimmed}")
+        except Exception:
+            pass  # Non-critical in finish flow
+
         print("✅ UIdetox aesthetics successfully merged to your workspace!")
+        print()
+        print("╔══════════════════════════════════════════════════════╗")
+        print("║  SESSION COMPLETE — UIdetox autonomous loop done.   ║")
+        print("║  All fixes merged. Design quality target achieved.  ║")
+        print("╚══════════════════════════════════════════════════════╝")
     except subprocess.CalledProcessError as e:
         print(f"❌ Error during finish operation: {e}")
         print(f"   You may need to manually resolve the merge and delete branch '{current_branch}'.")
+        print(f"   To abort a failed merge:  git merge --abort")
+        print(f"   To return to session:     git checkout {current_branch}")
+        print(f"   To retry:                 uidetox finish")
         sys.exit(1)

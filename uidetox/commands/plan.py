@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score
+from uidetox.utils import compute_design_score, categorize_issue
 
 # Effort estimate per tier (minutes)
 _TIER_EFFORT = {"T1": 2, "T2": 8, "T3": 20, "T4": 45}
@@ -42,27 +42,6 @@ def _component_key(filepath: str) -> str:
     return parent
 
 
-def _categorize_issue(desc: str) -> str:
-    """Quick category inference from description."""
-    desc_lower = desc.lower()
-    category_keywords = {
-        "typography": ["font", "typography", "inter", "roboto", "type scale", "line-height", "px font"],
-        "color": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "black"],
-        "layout": ["layout", "grid", "spacing", "padding", "center", "viewport", "card", "dashboard"],
-        "motion": ["animation", "bounce", "pulse", "spin", "transition"],
-        "materiality": ["shadow", "glassmorphism", "radius", "glow", "opacity", "blur"],
-        "states": ["hover", "focus", "disabled", "loading", "error", "empty"],
-        "content": ["copy", "lorem", "generic", "placeholder", "emoji", "oops", "exclamation"],
-        "code quality": ["div soup", "z-index", "inline style", "!important", "ternary", "any type", "ts-ignore"],
-        "duplication": ["duplicate", "repeated", "copy-paste", "identical"],
-        "dead code": ["commented", "unused", "unreachable", "empty handler", "dead", "deprecated", "console"],
-    }
-    for cat, kws in category_keywords.items():
-        if any(kw in desc_lower for kw in kws):
-            return cat
-    return "other"
-
-
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
@@ -93,7 +72,7 @@ def run(args: argparse.Namespace):
     # ---- Category breakdown ----
     cat_counts: dict[str, int] = defaultdict(int)
     for i in issues:
-        cat = _categorize_issue(i.get("issue", ""))
+        cat = categorize_issue(i.get("issue", ""))
         cat_counts[cat] += 1
 
     if cat_counts:
@@ -127,7 +106,7 @@ def run(args: argparse.Namespace):
         files_in_group = set()
         for i in comp_issues:
             tier_breakdown[i.get("tier", "T4")] += 1
-            cat_breakdown[_categorize_issue(i.get("issue", ""))] += 1
+            cat_breakdown[categorize_issue(i.get("issue", ""))] += 1
             files_in_group.add(i.get("file", ""))
 
         tier_str = " ".join(f"{t}:{c}" for t, c in sorted(tier_breakdown.items()))
@@ -152,12 +131,15 @@ def run(args: argparse.Namespace):
     # ---- Score context ----
     scores = compute_design_score(state)
     target = config.get("target_score", 95)
+    blended = scores["blended_score"]
+    if blended is None:
+        blended = 0
     print(f"  ─── Score Context ───")
-    filled = scores["blended_score"] // 5
+    filled = max(0, blended // 5)
     bar = "█" * filled + "░" * (20 - filled)
-    print(f"  Current: [{bar}] {scores['blended_score']}/100  (target: {target})")
-    if scores["blended_score"] < target:
-        gap = target - scores["blended_score"]
+    print(f"  Current: [{bar}] {blended}/100  (target: {target})")
+    if blended < target:
+        gap = target - blended
         print(f"  Gap: {gap} points to target")
     print()
 

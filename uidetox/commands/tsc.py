@@ -5,6 +5,7 @@ import subprocess
 import re
 from uidetox.tooling import detect_all
 from uidetox.state import add_issue, load_config
+from uidetox.utils import run_tool
 import uuid
 
 
@@ -30,10 +31,7 @@ def run(args: argparse.Namespace):
     print()
 
     try:
-        result = subprocess.run(
-            tsc_cmd.split(),
-            capture_output=True, text=True, cwd=".", timeout=120
-        )
+        result = run_tool(tsc_cmd, cwd=".", timeout=120)
     except FileNotFoundError:
         print(f"Command not found. Install TypeScript: npm install -D typescript")
         return

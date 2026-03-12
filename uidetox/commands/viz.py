@@ -1,10 +1,11 @@
 """Visualization command: generates HTML treemaps and terminal trees of codebase health."""
 
 import argparse
+import html
 import json
 from pathlib import Path
 from collections import defaultdict
-from uidetox.state import load_state, ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import load_state, ensure_uidetox_dir, get_uidetox_dir, get_project_root
 
 
 def run(args: argparse.Namespace):
@@ -29,13 +30,21 @@ def run(args: argparse.Namespace):
 
 def _build_tree(root_path: Path, issue_map: dict) -> dict:
     """Builds a nested dictionary representing the directory structure with issue counts."""
+    project_root = get_project_root().resolve()
     tree = {"name": root_path.name or str(root_path), "path": str(root_path), "type": "dir", "issues": 0, "children": {}}
     
     for file_path_str, file_issues in issue_map.items():
         if not file_path_str:
             continue
-            
-        parts = Path(file_path_str).parts
+        
+        # Make paths relative to project root so the tree doesn't include
+        # absolute OS paths like /Users/omar/Documents/...
+        try:
+            rel_path = Path(file_path_str).resolve().relative_to(project_root)
+        except ValueError:
+            rel_path = Path(file_path_str)
+
+        parts = rel_path.parts
         current = tree
         current["issues"] += len(file_issues)
         
@@ -203,16 +212,16 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
         # Calculate flexible width based on issue weight (more issues = larger block)
         flex_basis = f["issues"] * 50
         
-        tooltip_li = "".join(f"<li>[{i.get('tier', '?')}] {i.get('issue', '')}</li>" for i in f["issue_details"])
+        tooltip_li = "".join(f"<li>[{html.escape(i.get('tier', '?'))}] {html.escape(i.get('issue', ''))}</li>" for i in f["issue_details"])
         
         html_content += f"""
         <div class="file-block {heat_class}" style="flex-basis: {flex_basis}px;">
             <div class="file-info">
-                <div class="file-name">{f["name"]}</div>
+                <div class="file-name">{html.escape(f["name"])}</div>
                 <div class="issue-count">{f["issues"]}</div>
             </div>
             <div class="tooltip">
-                <strong>{f["path"]}</strong>
+                <strong>{html.escape(f["path"])}</strong>
                 <ul>{tooltip_li}</ul>
             </div>
         </div>

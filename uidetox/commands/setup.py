@@ -1,29 +1,35 @@
 """Setup command."""
 
 import argparse
-from uidetox.state import save_config, ensure_uidetox_dir, load_config
+from uidetox.state import save_config, load_config
 
 def run(args: argparse.Namespace):
     print("==============================")
     print(" UIdetox Setup")
     print("==============================")
     
-    ensure_uidetox_dir()
     config = load_config()
     
+    import sys
     # Check if --auto-commit was passed via CLI
     if hasattr(args, 'auto_commit') and args.auto_commit:
         config['auto_commit'] = True
         print("\n⚙️  Auto-commit enabled via flag.")
-    else:
-        # Interactive prompt if not set
+    elif sys.stdin.isatty():
+        # Interactive prompt only when running in a terminal
         current_ac = config.get('auto_commit', False)
         print(f"\nCurrent auto_commit status: {current_ac}")
-        ans = input("Enable automated git commits for each resolved issue? (y/n): ").strip().lower()
-        if ans == 'y':
-            config['auto_commit'] = True
-        elif ans == 'n':
-            config['auto_commit'] = False
+        try:
+            ans = input("Enable automated git commits for each resolved issue? (y/n): ").strip().lower()
+            if ans == 'y':
+                config['auto_commit'] = True
+            elif ans == 'n':
+                config['auto_commit'] = False
+        except EOFError:
+            pass  # Non-interactive fallback — keep existing value
+    else:
+        # Non-interactive (CI, agent, pipe) — keep existing config
+        print(f"\n  Auto-commit: {config.get('auto_commit', False)} (non-interactive mode, use --auto-commit to change)")
 
     print("\nCurrent configuration:")
     print(f"  DESIGN_VARIANCE:  {config.get('DESIGN_VARIANCE', 8)}")

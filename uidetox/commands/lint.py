@@ -6,6 +6,7 @@ import re
 import uuid
 from uidetox.tooling import detect_all
 from uidetox.state import add_issue, load_config
+from uidetox.utils import run_tool
 
 
 def run(args: argparse.Namespace):
@@ -32,10 +33,7 @@ def run(args: argparse.Namespace):
     print()
 
     try:
-        result = subprocess.run(
-            cmd.split(),
-            capture_output=True, text=True, cwd=".", timeout=120
-        )
+        result = run_tool(cmd, cwd=".", timeout=120)
     except FileNotFoundError:
         print(f"Command not found. Install {linter['name']}.")
         return
@@ -62,18 +60,22 @@ def run(args: argparse.Namespace):
 
     queued = 0
     for file_path, line, col, msg in errors:
-        if file_path.startswith("/") or file_path.startswith(".") or ":" not in file_path:
-            issue_id = f"LINT-{str(uuid.uuid4())[:6].upper()}"
-            add_issue({
-                "id": issue_id,
-                "file": file_path,
-                "tier": "T1",
-                "issue": f"Lint: {msg.strip()} (line {line})",
-                "command": "lint-fix",
-            })
-            queued += 1
-            if queued <= 10:
-                print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")
+        # Filter for valid file paths: must look like a relative/absolute filepath
+        # (contains a dot for extension, or starts with / or .) and not an error prefix
+        fp = file_path.strip()
+        if not fp or fp.startswith("(") or fp.startswith("["):
+            continue
+        issue_id = f"LINT-{str(uuid.uuid4())[:6].upper()}"
+        add_issue({
+            "id": issue_id,
+            "file": file_path,
+            "tier": "T1",
+            "issue": f"Lint: {msg.strip()} (line {line})",
+            "command": "lint-fix",
+        })
+        queued += 1
+        if queued <= 10:
+            print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")
 
     if queued > 10:
         print(f"  ... and {queued - 10} more")

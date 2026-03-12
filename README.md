@@ -1,4 +1,6 @@
-![UIdetox Banner](assets/banner.png)
+<div style="text-align: center;">
+   ![UIdetox Banner](assets/banner.png)
+</div>
 
 **The anti-slop harness for AI-generated frontends.**
 

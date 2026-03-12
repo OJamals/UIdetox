@@ -13,7 +13,7 @@ import argparse
 import uuid
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.state import load_state, load_config, clear_issues, add_issue, increment_scans
+from uidetox.state import load_state, load_config, clear_issues, batch_add_issues, increment_scans
 from uidetox.history import save_run_snapshot
 from uidetox.utils import compute_design_score
 from uidetox.memory import log_progress
@@ -76,6 +76,7 @@ def run(args: argparse.Namespace):
     queued_count = 0
     dedup_skipped = 0
     escalated_count = 0
+    pending_issues: list[dict] = []
 
     for issue in slop_issues:
         if _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
@@ -83,11 +84,17 @@ def run(args: argparse.Namespace):
 
         key = _dedup_key(issue)
 
-        # Smart dedup: skip if already resolved AND file hasn't changed
-        # (we re-queue if the pattern recurs — meaning the fix didn't stick)
-        if key in resolved_keys and key not in old_issue_keys:
-            dedup_skipped += 1
-            continue
+        # Smart dedup: If this pattern was resolved before, check recurrence.
+        # If the fix didn't stick (the analyzer found it again), re-queue it.
+        # Only skip on first re-appearance when the issue was NOT already in the
+        # pre-rescan pending queue (benefit-of-the-doubt window).
+        if key in resolved_keys:
+            occurrences = recurrence.get(key, 0)
+            if occurrences < 2 and key not in old_issue_keys:
+                # First re-appearance after resolution — give benefit of doubt
+                dedup_skipped += 1
+                continue
+            # Otherwise: pattern keeps recurring — re-queue it
 
         # Auto-escalate recurring issues
         tier = issue["tier"]
@@ -97,7 +104,7 @@ def run(args: argparse.Namespace):
                 tier = new_tier
                 escalated_count += 1
 
-        issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
+        issue_id = f"SCAN-{uuid.uuid4().hex[:8].upper()}"
         new_issue = {
             "id": issue_id,
             "file": issue['file'],
@@ -105,13 +112,23 @@ def run(args: argparse.Namespace):
             "issue": issue["issue"],
             "command": issue["command"]
         }
-        add_issue(new_issue)
+        pending_issues.append(new_issue)
         queued_count += 1
+
+    # Batch-add all issues in a single state write
+    batch_result = {"added": 0, "updated": 0, "skipped": 0}
+    if pending_issues:
+        batch_result = batch_add_issues(pending_issues)
+        queued_count = batch_result["added"]
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print(f"  -> No mechanical anti-patterns detected.")
+    if batch_result["updated"] > 0:
+        print(f"  -> Refreshed {batch_result['updated']} duplicate issue(s) with stronger severity/guidance.")
+    if batch_result["skipped"] > 0:
+        print(f"  -> Skipped {batch_result['skipped']} duplicate issue(s) generated during the rescan.")
 
     if dedup_skipped > 0:
         print(f"  -> Skipped {dedup_skipped} already-resolved issue(s) (smart dedup).")
@@ -141,19 +158,25 @@ def run(args: argparse.Namespace):
     state = load_state()
     scores = compute_design_score(state)
     score = scores["blended_score"]
+    if score is None:
+        score = 0
     queue_size = len(state.get("issues", []))
 
     print()
     print("-" * 58)
-    filled = score // 5
+    filled = max(0, score // 5)
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score: [{bar}] {score}/100  (target: {target})")
     print(f"  Queue: {queue_size} issue(s)")
-
+    print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
     if score >= target and queue_size == 0:
-        print(f"  TARGET REACHED -> Run `uidetox finish`")
+        print(f"TARGET REACHED (score {score} >= {target}, queue empty).")
+        print("Run `uidetox finish` NOW.")
     elif queue_size > 0:
-        print(f"  -> Run `uidetox next` to enter fix loop.")
+        print(f"Queue refilled with {queue_size} issue(s). Run `uidetox next` NOW.")
+        print("DO NOT STOP. Continue the autonomous fix loop immediately.")
     else:
-        print(f"  -> Complete subjective review above, then `uidetox status`.")
+        print("Queue empty. Complete subjective review, then `uidetox review --score <N>`.")
+        print("Then run `uidetox status` to check if target is met.")
     print()

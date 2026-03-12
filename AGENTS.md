@@ -26,6 +26,7 @@ The loop triggers `uidetox scan` on the project. The scan auto-detects tooling (
 - **Static Slop Analysis:** A 50-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
 - **Design Audit:** The agent reads frontend files and evaluates against SKILL.md.
 - **Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs.
+- **Queue Hygiene:** Scan deduplicates issues already pending in the queue, tightening severity/guidance instead of flooding the backlog with duplicates across repeated passes.
 
 The issues cover TypeScript errors, anti-pattern detection, typography, color/contrast, motion, and backend integration. Issues are tiered T1 (quick fix) to T4 (major redesign).
 
@@ -44,6 +45,7 @@ Run `uidetox review` to perform an LLM-driven subjective quality assessment acro
 ### Phase 4: Verification & Status
 The loop triggers `uidetox status` to view your blended Design Score (60% objective static analysis + 40% subjective LLM review). If the score is below 95, the loop continues.
 For large codebases (>15 frontend files), the loop automatically engages Orchestrator Mode, splitting work into sub-agents (`uidetox subagent --stage-prompt observe`). You can also force it via `uidetox loop --orchestrator`.
+Sub-agent runs can be recorded with structured JSON payloads and explicit confidence (`uidetox subagent --record <id> --result-file result.json --confidence 0.91`) so the harness can route low-confidence work to human review automatically.
 
 ### Phase 5: Finalize
 Once the target score is reached, the loop triggers `uidetox finish` to squash-merge the autonomous session branch cleanly.
@@ -73,7 +75,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 |---------|---------|
 | `uidetox setup` | Initialize project config and design dials (use `--auto-commit` to enable Git tracking) |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → design review |
-| `uidetox detect` | Auto-discover linters, formatters, tsc, backend, database, API |
+| `uidetox detect` | Auto-discover linters, formatters, tsc, backend, database, API, and package-manager-aware execution commands |
 | `uidetox check` | Run tsc → lint → format in sequence, queue errors as T1 (use `--fix` to auto-solve) |
 | `uidetox tsc` | Run TypeScript compiler, parse and queue errors |
 | `uidetox lint` | Run detected linter (biome/eslint), parse and queue errors |
@@ -85,7 +87,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox batch-resolve ID1 ID2 ... --note "..."` | Resolve multiple issues with a single coherent commit |
 | `uidetox loop` | Enter autonomous self-propagation fix loop with LLM-dynamic analysis |
 | `uidetox loop --orchestrator` | Sub-agent mode with auto-parallel (1-5) and memory injection |
-| `uidetox subagent` | Manage sub-agent sessions and generate stage prompts |
+| `uidetox subagent` | Manage sub-agent sessions, generate stage prompts, and record structured/confidence-scored results |
 | `uidetox memory` | Read/write persistent agent memory (patterns, notes, reviewed files) |
 | `uidetox history` | View run history and score progression (use `--full` for deep inspection) |
 | `uidetox status` | Health dashboard with blended Design Score (use `--json` for automation) |
@@ -204,48 +206,48 @@ UIdetox/
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **UIdetox** (319 symbols, 846 relationships, 19 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **UIdetox** (319 symbols, 846 relationships, 19 execution flows). Use the GitNexus CLI tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `npx gitnexus impact <symbolName> --direction upstream` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `npx gitnexus detect_changes` before committing** to verify your changes only affect expected symbols and execution flows.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- When exploring unfamiliar code, use `npx gitnexus query "<concept>"` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `npx gitnexus context <symbolName>`.
 
 ## When Debugging
 
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/UIdetox/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+1. `npx gitnexus query "<error or symptom>"` — find execution flows related to the issue
+2. `npx gitnexus context "<suspect function>"` — see all callers, callees, and process participation
+3. `npx gitnexus process <processName>` — trace the full execution flow step by step
+4. For regressions: `npx gitnexus detect_changes --scope compare --base-ref main` — see what your branch changed
 
 ## When Refactoring
 
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+- **Renaming**: MUST use `npx gitnexus rename <old> <new> --dry-run` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run without `--dry-run`.
+- **Extracting/Splitting**: MUST run `npx gitnexus context <target>` to see all incoming/outgoing refs, then `npx gitnexus impact <target> --direction upstream` to find all external callers before moving code.
+- After any refactor: run `npx gitnexus detect_changes --scope all` to verify only expected files changed.
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER edit a function, class, or method without first running `npx gitnexus impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER rename symbols with find-and-replace — use `npx gitnexus rename` which understands the call graph.
+- NEVER commit changes without running `npx gitnexus detect_changes` to check affected scope.
 
 ## Tools Quick Reference
 
 | Tool | When to use | Command |
 |------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+| `query` | Find code by concept | `npx gitnexus query "auth validation"` |
+| `context` | 360-degree view of one symbol | `npx gitnexus context "validateUser"` |
+| `impact` | Blast radius before editing | `npx gitnexus impact "X" --direction upstream` |
+| `detect_changes` | Pre-commit scope check | `npx gitnexus detect_changes --scope staged` |
+| `rename` | Safe multi-file rename | `npx gitnexus rename "old" "new" --dry-run` |
+| `cypher` | Custom graph queries | `npx gitnexus cypher "MATCH ..."` |
 
 ## Impact Risk Levels
 
@@ -259,17 +261,17 @@ This project is indexed by GitNexus as **UIdetox** (319 symbols, 846 relationshi
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/UIdetox/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/UIdetox/clusters` | All functional areas |
-| `gitnexus://repo/UIdetox/processes` | All execution flows |
-| `gitnexus://repo/UIdetox/process/{name}` | Step-by-step execution trace |
+| `npx gitnexus context` | Codebase overview, check index freshness |
+| `npx gitnexus clusters` | All functional areas |
+| `npx gitnexus processes` | All execution flows |
+| `npx gitnexus process <name>` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 
 Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
+1. `npx gitnexus impact` was run for all modified symbols
 2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
+3. `npx gitnexus detect_changes` confirms changes match expected scope
 4. All d=1 (WILL BREAK) dependents were updated
 
 ## Keeping the Index Fresh

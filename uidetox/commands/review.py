@@ -187,6 +187,10 @@ def run(args: argparse.Namespace):
     print(f"{'6' if not (has_visual_diff or has_responsive) else '7'}. For any issues found, queue them:")
     print('   uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
     print(f"{'7' if not (has_visual_diff or has_responsive) else '8'}. Then run: uidetox status")
+    print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    print("After scoring, run `uidetox review --score <N>` then `uidetox status`.")
+    print("DO NOT STOP. Continue the autonomous loop.")
 
 
 def _store_subjective_score(score: int):
@@ -200,10 +204,12 @@ def _store_subjective_score(score: int):
     state.setdefault("subjective", {})
     state["subjective"]["score"] = score
 
-    # Keep history of subjective scores for progression tracking
+    # Keep history of subjective scores for progression tracking (capped at 50)
     history = state["subjective"].setdefault("history", [])
     from uidetox.utils import now_iso
     history.append({"score": score, "timestamp": now_iso()})
+    # Prevent unbounded growth — keep only the most recent 50 entries
+    state["subjective"]["history"] = history[-50:]
 
     save_state(state)
 
@@ -223,5 +229,6 @@ def _store_subjective_score(score: int):
         print("   Heavy slop — major redesign likely needed.")
 
     print()
-    print("[AGENT LOOP SIGNAL]")
-    print("Run `uidetox status` to see the blended Design Score.")
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    print("Run `uidetox status` NOW to see the blended Design Score.")
+    print("DO NOT STOP. The loop continues automatically.")

@@ -6,17 +6,19 @@ happen together, with mechanical informing subjective.
 """
 
 import argparse
+import sys
 import uuid
+from pathlib import Path
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import (
-    add_issue, ensure_uidetox_dir, load_config, load_state,
+    batch_add_issues, load_config, load_state,
     save_config, increment_scans,
 )
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
 from uidetox.memory import save_scan_summary, save_session, log_progress
-from uidetox.utils import compute_design_score
+from uidetox.utils import compute_design_score, categorize_issue
 
 
 # Categories auto-covered by static analyzer, mapped to rule IDs
@@ -46,7 +48,13 @@ _MANUAL_CATEGORIES = {
 
 
 def run(args: argparse.Namespace):
-    ensure_uidetox_dir()
+
+    # Validate scan path exists
+    scan_path = Path(args.path)
+    if not scan_path.exists():
+        print(f"Error: Scan path '{args.path}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+
     config = load_config()
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
@@ -123,28 +131,38 @@ def run(args: argparse.Namespace):
         zone_overrides=zone_overrides,
         design_variance=variance,
     )
-    queued_count = 0
+    detected_count = 0
     triggered_rules: set[str] = set()
+    new_issues: list[dict] = []
     for issue in slop_issues:
         if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
-            issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
-            new_issue = {
+            issue_id = f"SCAN-{uuid.uuid4().hex[:8].upper()}"
+            new_issues.append({
                 "id": issue_id,
                 "file": issue['file'],
                 "tier": issue["tier"],
                 "issue": issue["issue"],
                 "command": issue["command"]
-            }
-            add_issue(new_issue)
-            queued_count += 1
+            })
+            detected_count += 1
             for rule in RULES:
                 if rule["description"] in issue["issue"]:
                     triggered_rules.add(rule["id"])
 
+    # Batch-add all issues in a single state write
+    batch_result = {"added": 0, "updated": 0, "skipped": 0}
+    if new_issues:
+        batch_result = batch_add_issues(new_issues)
+
+    queued_count = batch_result["added"]
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print(f"  -> No mechanical anti-patterns detected.")
+    if batch_result["updated"] > 0:
+        print(f"  -> Refreshed {batch_result['updated']} matching pending issue(s) with sharper guidance/severity.")
+    if batch_result["skipped"] > 0:
+        print(f"  -> Skipped {batch_result['skipped']} duplicate pending issue(s) already in the queue.")
 
     # Category coverage (compact)
     print()
@@ -275,21 +293,23 @@ def run(args: argparse.Namespace):
     # ===========================================================
     increment_scans()
     save_run_snapshot(trigger="scan")
-    _save_scan_to_memory(slop_issues, queued_count, triggered_rules, args.path)
+    _save_scan_to_memory(new_issues, queued_count, triggered_rules, args.path)
     save_session(phase="scan_complete", last_command="scan",
-                 context=f"Found {queued_count} issues in {args.path}")
-    log_progress("scan", f"Scanned {args.path}: {queued_count} issues queued")
+                 context=f"Detected {detected_count} issues in {args.path}; queued {queued_count}")
+    log_progress("scan", f"Scanned {args.path}: detected={detected_count}, queued={queued_count}, updated={batch_result['updated']}, skipped={batch_result['skipped']}")
 
     # Compute current score and show target check
     state = load_state()
     scores = compute_design_score(state)
     score = scores["blended_score"]
+    if score is None:
+        score = 0  # No scan history yet
     queue_size = len(state.get("issues", []))
 
     print("=" * 58)
     print(" TARGET SCORE CHECK")
     print("=" * 58)
-    filled = score // 5
+    filled = max(0, score // 5)
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score : [{bar}] {score}/100  (target: {target})")
     print(f"  Queue        : {queue_size} issue(s)")
@@ -308,6 +328,16 @@ def run(args: argparse.Namespace):
             print("  -> Complete Part 2 above, then `uidetox review --score <N>`")
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    if score >= target and queue_size == 0:
+        print("TARGET REACHED. Run `uidetox finish` NOW.")
+    elif queue_size > 0:
+        print(f"Scan complete: {queue_size} issues queued. Run `uidetox next` NOW.")
+        print("DO NOT STOP. Begin the autonomous fix loop immediately.")
+    else:
+        print("Scan complete with empty queue. Complete subjective review above,")
+        print("then `uidetox review --score <N>` followed by `uidetox status`.")
+    print()
 
 
 def _save_scan_to_memory(slop_issues: list, queued_count: int,
@@ -321,7 +351,7 @@ def _save_scan_to_memory(slop_issues: list, queued_count: int,
         tier = issue.get("tier", "T4")
         by_tier[tier] = by_tier.get(tier, 0) + 1
         desc = issue.get("issue", "").lower()
-        cat = _infer_category(desc)
+        cat = categorize_issue(desc)
         by_category[cat] = by_category.get(cat, 0) + 1
         f = issue.get("file", "")
         file_counts[f] = file_counts.get(f, 0) + 1
@@ -335,23 +365,3 @@ def _save_scan_to_memory(slop_issues: list, queued_count: int,
         files_scanned=len(file_counts),
         top_files=top_files,
     )
-
-
-def _infer_category(desc: str) -> str:
-    """Infer issue category from description text."""
-    category_keywords = {
-        "typography": ["font", "typography", "inter", "type scale", "line-height", "kerning", "letter-spacing", "px font"],
-        "color": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "black", "hex color"],
-        "layout": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "flex center", "viewport"],
-        "motion": ["animation", "bounce", "pulse", "spin", "transition", "motion"],
-        "materiality": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow", "opacity"],
-        "states": ["loading", "error", "empty", "skeleton", "disabled", "hover", "focus"],
-        "content": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme", "emoji", "oops", "exclamation"],
-        "code quality": ["div soup", "semantic", "z-index", "inline style", "!important", "ternary", "magic number", "any type", "ts-ignore", "eslint-disable"],
-        "duplication": ["duplicate", "repeated", "copy-paste", "identical", "same hex"],
-        "dead code": ["commented-out", "unused import", "unreachable", "empty handler", "empty css", "unused state", "deprecated", "console", "todo", "fixme"],
-    }
-    for cat, keywords in category_keywords.items():
-        if any(kw in desc for kw in keywords):
-            return cat
-    return "other"

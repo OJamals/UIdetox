@@ -5,12 +5,43 @@ import subprocess
 import sys
 from pathlib import Path
 
-from uidetox.state import batch_remove_issues, get_issue, load_state, load_config
+from uidetox.state import batch_remove_issues, get_issue, load_state, load_config, get_project_root
 from uidetox.memory import save_session, log_progress
-from uidetox.utils import safe_split_cmd
+from uidetox.utils import run_tool, compute_design_score
 
 
-def _run_verification(config: dict) -> bool:
+def _run_tool_step(*, cmd: str, label: str, action_label: str,
+                   project_root: str, error_context: list[str]) -> bool:
+    """Run a single verification step (tsc / lint / format).
+
+    Returns True if the step passed, False otherwise.
+    Appends to *error_context* on failure.
+    """
+    print(f"  Running {label}...")
+    try:
+        res = run_tool(cmd, cwd=project_root, timeout=120)
+        if action_label:
+            print(f"  ✓ {action_label}")
+        if res.returncode != 0:
+            errors = res.stdout.strip() or res.stderr.strip()
+            if errors:
+                truncated = "\n".join(errors.splitlines()[:30])
+                if not action_label:
+                    print(f"  ⚠️  {label} errors remain. Fix before committing.")
+                else:
+                    print(f"  ⚠️  {label} warned of remaining issues:")
+                print(f"\n{truncated}\n")
+                error_context.append(f"## {label} Errors\n```\n{truncated}\n```")
+            return False
+        if not action_label:
+            print(f"  ✓ {label} passed")
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print(f"  ⚠️  {label} skipped (tool not found or timed out)")
+        return True  # Non-blocking — tool missing is not a failure
+
+
+def run_verification(config: dict) -> bool:
     """Run tsc → lint --fix → format --fix as a pre-commit quality gate.
 
     Returns True if all checks pass (or no tooling detected).
@@ -23,65 +54,34 @@ def _run_verification(config: dict) -> bool:
 
     passed = True
     error_context: list[str] = []
+    project_root = str(get_project_root())
 
     # TypeScript
     if tooling.get("typescript"):
         cmd = tooling["typescript"].get("run_cmd")
-        if cmd:
-            print("  Running TypeScript check...")
-            try:
-                res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".", timeout=120)
-                if res.returncode != 0:
-                    print(f"  ⚠️  TypeScript errors remain. Fix before committing.")
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        # Truncate to avoid context overflow but keep actionable info
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"\n{truncated}\n")
-                        error_context.append(f"## TypeScript Errors\n```\n{truncated}\n```")
-                    passed = False
-                else:
-                    print("  ✓ TypeScript passed")
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                print("  ⚠️  TypeScript check skipped (tool not found or timed out)")
+        if cmd and not _run_tool_step(
+            cmd=cmd, label="TypeScript", action_label="",
+            project_root=project_root, error_context=error_context,
+        ):
+            passed = False
 
     # Lint (auto-fix)
     if tooling.get("linter"):
         fix_cmd = tooling["linter"].get("fix_cmd")
-        if fix_cmd:
-            print("  Running linter auto-fix...")
-            try:
-                res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
-                print("  ✓ Linter auto-fix applied")
-                if res.returncode != 0:
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"  ⚠️  Linter warned of remaining issues:")
-                        print(f"\n{truncated}\n")
-                        error_context.append(f"## Linter Errors\n```\n{truncated}\n```")
-                    passed = False
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                print("  ⚠️  Linter auto-fix skipped (tool not found or timed out)")
+        if fix_cmd and not _run_tool_step(
+            cmd=fix_cmd, label="Linter", action_label="Linter auto-fix applied",
+            project_root=project_root, error_context=error_context,
+        ):
+            passed = False
 
     # Format (auto-fix)
     if tooling.get("formatter"):
         fix_cmd = tooling["formatter"].get("fix_cmd")
-        if fix_cmd:
-            print("  Running formatter auto-fix...")
-            try:
-                res = subprocess.run(safe_split_cmd(fix_cmd), capture_output=True, text=True, cwd=".", timeout=120)
-                print("  ✓ Formatter auto-fix applied")
-                if res.returncode != 0:
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"  ⚠️  Formatter warned of remaining issues:")
-                        print(f"\n{truncated}\n")
-                        error_context.append(f"## Formatter Errors\n```\n{truncated}\n```")
-                    passed = False
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                print("  ⚠️  Formatter auto-fix skipped (tool not found or timed out)")
+        if fix_cmd and not _run_tool_step(
+            cmd=fix_cmd, label="Formatter", action_label="Formatter auto-fix applied",
+            project_root=project_root, error_context=error_context,
+        ):
+            passed = False
 
     # ── Self-Healing: inject error context for agent recovery ──
     if not passed and error_context:
@@ -131,13 +131,15 @@ def _derive_component_name(files: list[str]) -> str:
                 return part
         return "root"
 
-    # Multiple directories — find deepest common ancestor
-    common: Path = Path(dirs[0])
-    for i in range(1, len(dirs)):
-        d = dirs[i]
-        while not str(d).startswith(str(common)):
-            common = common.parent # type: ignore
-    name = common.name or "project" # type: ignore
+    # Multiple directories — find deepest common ancestor using path parts.
+    # Use os.path.commonpath which is O(n) and cannot loop.
+    import os
+    try:
+        common_str = os.path.commonpath(dirs)
+    except ValueError:
+        # dirs on different drives / no common prefix
+        return "project"
+    name = Path(common_str).name or "project"
     return name
 
 
@@ -160,7 +162,7 @@ def run(args: argparse.Namespace):
     # Pre-commit verification gate
     if not skip_verify:
         print("━━━ Pre-commit verification ━━━")
-        if not _run_verification(config):
+        if not run_verification(config):
             print("❌ Verification failed. Build is broken.", file=sys.stderr)
             sys.exit(1)
         print()
@@ -187,12 +189,14 @@ def run(args: argparse.Namespace):
     print()
 
     # ---- Progress snapshot ----
-    from uidetox.utils import compute_design_score
     scores = compute_design_score(state)
     target = config.get("target_score", 95)
-    filled = scores["blended_score"] // 5
+    blended = scores["blended_score"]
+    if blended is None:
+        blended = 0
+    filled = max(0, blended // 5)
     bar = "█" * filled + "░" * (20 - filled)
-    print(f"   Score : [{bar}] {scores['blended_score']}/100  (target: {target})")
+    print(f"   Score : [{bar}] {blended}/100  (target: {target})")
     print(f"   Queue : {remaining} remaining | {resolved_total} resolved total")
 
     # ---- Remaining issues in same component ----
@@ -229,15 +233,17 @@ def run(args: argparse.Namespace):
 
     # ---- Agent loop signal ----
     print()
-    print("[AGENT LOOP SIGNAL]")
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    print("DO NOT STOP. Proceed immediately:")
     if remaining_in_component:
-        print(f"Same component has {len(remaining_in_component)} more issues. Run `uidetox next` to continue.")
+        print(f"  → {len(remaining_in_component)} more issues in {component}. Run `uidetox next` NOW.")
     elif remaining > 0:
-        print(f"{remaining} issues remain in other components. Run `uidetox next` to continue.")
-    elif scores["blended_score"] >= target:
-        print("Queue empty and target reached! Run `uidetox finish`.")
+        print(f"  → {remaining} issues in other components. Run `uidetox next` NOW.")
+    elif blended >= target:
+        print("  → Queue empty, target reached! Run `uidetox finish` NOW.")
     else:
-        print(f"Queue empty but score {scores['blended_score']} < {target}. Run `uidetox rescan` for deeper analysis.")
+        print(f"  → Queue empty but score {blended} < {target}. Run `uidetox rescan` NOW.")
+    print("The loop is fully autonomous. Keep executing without pausing.")
 
     # Auto-save progress
     log_progress("batch-resolve", f"Detoxed {component}: {note} ({len(removed)} issues)")

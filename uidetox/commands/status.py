@@ -3,7 +3,7 @@
 import argparse
 import json
 from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score
+from uidetox.utils import compute_design_score, categorize_issue, ISSUE_CATEGORY_KEYWORDS
 from uidetox.memory import get_session
 
 
@@ -39,38 +39,34 @@ def run(args: argparse.Namespace):
         if tier in tiers:
             tiers[tier] += 1
 
-    # Category breakdown (infer from issue descriptions)
-    categories: dict[str, dict] = {
-        "typography": {"keywords": ["font", "typography", "inter", "roboto", "type scale", "line-height", "px font"], "pending": 0, "resolved": 0},
-        "color": {"keywords": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "blue", "black", "hex color"], "pending": 0, "resolved": 0},
-        "layout": {"keywords": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "viewport", "h-screen", "flex center"], "pending": 0, "resolved": 0},
-        "motion": {"keywords": ["animation", "bounce", "pulse", "spin", "transition", "motion", "hover"], "pending": 0, "resolved": 0},
-        "states": {"keywords": ["loading", "error", "empty", "skeleton", "disabled", "hover state", "focus"], "pending": 0, "resolved": 0},
-        "a11y": {"keywords": ["accessibility", "a11y", "aria", "alt text", "focus", "contrast ratio", "skip-to-content", "htmlFor"], "pending": 0, "resolved": 0},
-        "materiality": {"keywords": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow", "opacity"], "pending": 0, "resolved": 0},
-        "content": {"keywords": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme", "emoji", "oops", "exclamation"], "pending": 0, "resolved": 0},
-        "code quality": {"keywords": ["div soup", "semantic", "z-index", "inline style", "import", "console", "todo", "fixme", "!important", "ternary", "any type", "ts-ignore", "eslint-disable"], "pending": 0, "resolved": 0},
-        "duplication": {"keywords": ["duplicate", "repeated", "copy-paste", "identical", "same hex", "same className"], "pending": 0, "resolved": 0},
-        "dead code": {"keywords": ["commented-out", "unused import", "unreachable", "empty handler", "empty css", "unused state", "deprecated", "dead code", "no-op"], "pending": 0, "resolved": 0},
-    }
+    # Category breakdown (using centralized category inference)
+    cat_pending: dict[str, int] = {}
+    cat_resolved: dict[str, int] = {}
     for issue in issues:
-        desc = issue.get("issue", "").lower()
-        for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["pending"] += 1
-                break
+        desc = issue.get("issue", "")
+        cat = categorize_issue(desc)
+        cat_pending[cat] = cat_pending.get(cat, 0) + 1
     for issue in resolved:
-        desc = issue.get("issue", "").lower()
-        for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["resolved"] += 1
-                break
+        desc = issue.get("issue", "")
+        cat = categorize_issue(desc)
+        cat_resolved[cat] = cat_resolved.get(cat, 0) + 1
+
+    # Build a unified categories view for display
+    all_cats = sorted(set(cat_pending.keys()) | set(cat_resolved.keys()) | set(ISSUE_CATEGORY_KEYWORDS.keys()))
+    categories: dict[str, dict] = {}
+    for cat in all_cats:
+        categories[cat] = {
+            "pending": cat_pending.get(cat, 0),
+            "resolved": cat_resolved.get(cat, 0),
+        }
 
     # Centralized scoring
     scores = compute_design_score(state)
     score = scores["blended_score"]
     objective_score = scores["objective_score"]
     subjective_score = scores["subjective_score"]
+    # Handle None (no scans run yet)
+    display_score = score if score is not None else 0
 
     use_json = getattr(args, "json", False)
     total_resolved = len(resolved)
@@ -97,9 +93,12 @@ def run(args: argparse.Namespace):
     print("╚══════════════════════════════╝")
 
     # Score bar
-    filled = score // 5
+    filled = max(0, display_score // 5)
     bar = "█" * filled + "░" * (20 - filled)
-    print(f"\n  Design Score : [{bar}] {score}/100")
+    if score is None:
+        print(f"\n  Design Score : [{bar}] —/100  (not scanned yet)")
+    else:
+        print(f"\n  Design Score : [{bar}] {score}/100")
     if subjective_score is not None:
         print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
         print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
@@ -184,23 +183,32 @@ def run(args: argparse.Namespace):
                 if cat_score == 0 and cat_name in _CATEGORY_HINTS:
                     print(f"                 ^ {_CATEGORY_HINTS[cat_name]}")
 
-    # Verdict
-    if score >= 95 and len(issues) == 0:
+    # Verdict — use display_score for safe comparisons (never None)
+    if display_score >= 95 and len(issues) == 0:
         print("\n  EXCELLENT — Interface is clean of AI slop. Queue is empty.")
-    elif score >= 95:
+    elif display_score >= 95:
         print("\n  Score is high, but some issues remain in the queue.")
-    elif score >= 80:
+    elif display_score >= 80:
         print("\n  Good progress. A few issues remain — keep pushing.")
-    elif score >= 50:
+    elif display_score >= 50:
         print("\n  Moderate slop detected. Focus on T1 and T2 first.")
+    elif score is None:
+        print("\n  No score yet. Run 'uidetox scan' to begin analysis.")
     else:
         print("\n  Heavy slop detected. Run 'uidetox loop' and go.")
 
     # Agent loop control signal
-    print("\n[AGENT LOOP SIGNAL]")
-    if score >= 95 and len(issues) == 0:
-        print("TARGET REACHED. You may exit the loop.")
+    target = config.get("target_score", 95)
+    print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    if display_score >= target and len(issues) == 0:
+        print(f"TARGET REACHED (score {display_score} >= {target}, queue empty).")
+        print("Run `uidetox finish` to complete the session.")
     elif len(issues) == 0:
-        print(f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design.")
+        print(f"Queue empty but score {display_score} < {target}.")
+        print("DO NOT STOP. Run `uidetox rescan` to discover deeper issues.")
+        print("Then run review skills: `uidetox critique .` and `uidetox polish .`")
     else:
-        print(f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue.")
+        print(f"Score: {display_score}, Queue: {len(issues)} issue(s).")
+        print("DO NOT STOP. Run `uidetox next` to continue fixing.")
+        print("The loop is fully autonomous — keep executing.")

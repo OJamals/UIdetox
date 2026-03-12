@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 from uidetox.state import load_state, load_config
+from uidetox.skills import recommend_skills_for_issues, format_skill_recommendations
 
 
 def _get_skill_path() -> Path | None:
@@ -319,10 +320,16 @@ def run(args: argparse.Namespace):
 
     if not issues:
         print("Queue is empty. No pending issues.")
-        print("\n[AGENT LOOP SIGNAL]")
-        print("Run 'uidetox status' to check if target score is reached.")
-        print("If score < target, run 'uidetox rescan' to find more issues.")
-        sys.exit(1)
+        print()
+        print("[AUTONOMOUS LOOP SIGNAL]")
+        print("Queue drained. The autonomous loop will now:")
+        print("  1. Run `uidetox rescan` to discover deeper issues")
+        print("  2. Run review skills (critique, polish) for quality pass")
+        print("  3. Check `uidetox status` for score")
+        print("  4. Re-enter `uidetox loop` to continue until target")
+        print()
+        print("DO NOT STOP. Proceed to rescan immediately.")
+        sys.exit(0)  # exit 0 so autopilot chain continues
 
     # Design dials
     variance = config.get("DESIGN_VARIANCE", 8)
@@ -392,7 +399,11 @@ def run(args: argparse.Namespace):
         print()
 
         # Collect unique reference file pointers
-        ref_files = [ref for _, ref in contexts if ref and ref not in seen_refs and not seen_refs.add(ref)]  # type: ignore[func-returns-value]
+        ref_files: list[str] = []
+        for _, ref in contexts:
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                ref_files.append(ref)
         if ref_files:
             print("  Deep-dive references:")
             for ref in ref_files:
@@ -419,6 +430,22 @@ def run(args: argparse.Namespace):
         print(f"  Full design rules: {skill_path}")
         print()
 
+    # ---- Skill recommendations for this batch ----
+    skill_recs = recommend_skills_for_issues(batch, config=config, phase="fix", limit=5)
+    if skill_recs:
+        print("  ━━━ RECOMMENDED SKILLS (invoke before fixing) ━━━")
+        print("  These skills match the issues in this batch. Run them on")
+        print(f"  the target directory to inject domain-specific rules:")
+        print()
+        formatted = format_skill_recommendations(
+            skill_recs,
+            indent="    ",
+            show_commands=True,
+            target=target_dir,
+        )
+        if formatted:
+            print(formatted)
+
     remaining = len(issues) - len(batch)
     tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
     for i in issues:
@@ -440,6 +467,15 @@ def run(args: argparse.Namespace):
     if skill_path:
         print(f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
     step = 3 if skill_path else 2
+
+    # Inject skill invocation instructions if skills were recommended
+    if skill_recs:
+        print(f"{step}. INVOKE recommended skills (listed above) before fixing:")
+        for rec in skill_recs:
+            print(f"     uidetox {rec['skill']} {target_dir}")
+        print(f"     Skills inject domain-specific rules and checklists that improve fix quality.")
+        step += 1
+
     print(f"{step}. Fix ALL {len(batch)} issue(s) listed above in ONE pass, following SKILL.md rules.")
     step += 1
     print(f"{step}. Verify fixes don't break functionality.")
@@ -453,3 +489,8 @@ def run(args: argparse.Namespace):
         print("     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit.")
     step += 1
     print(f"{step}. Then immediately run: uidetox next")
+    print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    print("DO NOT STOP after fixing. DO NOT ask for permission.")
+    print("Execute steps 1-{} above, then immediately continue to the next batch.".format(step))
+    print("The loop is fully autonomous — keep going until the queue is empty.")

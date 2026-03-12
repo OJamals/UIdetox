@@ -7,6 +7,12 @@ dist/
 build/
 *.egg
 
+# Python test/cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
 # UIdetox runtime state (per-project, not repo)
 .uidetox/
 

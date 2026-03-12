@@ -8,6 +8,8 @@ database ORMs, and API layers are present.
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -58,36 +60,119 @@ def _find_any(root: Path, names: list[str]) -> str | None:
     for name in names:
         if name.endswith("*"):
             prefix = name[:-1] # type: ignore
-            for f in root.iterdir():
-                if f.name.startswith(prefix) and f.is_file():
-                    return f.name
+            try:
+                for f in root.iterdir():
+                    if f.name.startswith(prefix) and f.is_file():
+                        return f.name
+            except PermissionError:
+                continue
         elif (root / name).exists():
             return name
     return None
 
 
-def _has_dep(root: Path, dep: str) -> bool:
-    """Check if a dependency exists in package.json."""
+# Directories to skip during recursive file discovery.
+_SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "vendor",
+              "__pycache__", ".tox", "coverage", ".turbo", "out"}
+
+
+def _safe_glob(root: Path, suffix: str, *, limit: int = 50) -> list[Path]:
+    """Recursively find files with *suffix* while skipping heavy directories.
+
+    Unlike ``root.glob("**/*<suffix>")``, this skips ``node_modules``,
+    ``.git``, ``dist``, etc. and caps results at *limit* to avoid
+    traversing enormous trees.
+    """
+    results: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith('.')]
+        for f in filenames:
+            if f.endswith(suffix):
+                results.append(Path(dirpath) / f)
+                if len(results) >= limit:
+                    return results
+    return results
+
+
+_pkg_json_cache: dict[str, dict[str, object]] = {}
+
+
+def _get_all_deps(root: Path) -> dict[str, object]:
+    """Return merged deps/devDeps from package.json (cached per root)."""
+    key = str(root)
+    if key in _pkg_json_cache:
+        return _pkg_json_cache[key]
     pkg = root / "package.json"
     if not pkg.exists():
-        return False
+        _pkg_json_cache[key] = {}
+        return {}
     try:
         data = json.loads(pkg.read_text(encoding="utf-8"))
-        all_deps = {
+        merged = {
             **data.get("dependencies", {}),
             **data.get("devDependencies", {}),
         }
-        return dep in all_deps
+        _pkg_json_cache[key] = merged
+        return merged
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return False
+        _pkg_json_cache[key] = {}
+        return {}
+
+
+def _has_dep(root: Path, dep: str) -> bool:
+    """Check if a dependency exists in package.json (cached)."""
+    return dep in _get_all_deps(root)
+
+
+def _local_bin_cmd(root: Path, binary: str, args: list[str]) -> str | None:
+    """Return a local node_modules/.bin command if the binary exists."""
+    local = root / "node_modules" / ".bin" / binary
+    if not local.exists():
+        return None
+    suffix = f" {' '.join(args)}" if args else ""
+    return f"./node_modules/.bin/{binary}{suffix}"
+
+
+def _package_manager_exec(root: Path, cmd: str) -> str:
+    """Wrap a project-local Node command with the detected package manager."""
+    package_manager = detect_package_manager(root)
+    if package_manager == "pnpm":
+        return f"pnpm exec {cmd}"
+    if package_manager == "bun":
+        return f"bunx {cmd}"
+    if package_manager == "yarn":
+        return f"yarn {cmd}"
+    return f"npx {cmd}"
 
 
 def _npx_or_local(root: Path, cmd: str) -> str:
-    """Return npx prefix or local node_modules/.bin/ path."""
-    local = root / "node_modules" / ".bin" / cmd.split()[0]
-    if local.exists():
-        return f"./node_modules/.bin/{cmd}"
-    return f"npx {cmd}"
+    """Return a package-manager-aware command for a project-local Node binary."""
+    parts = shlex.split(cmd)
+    if not parts:
+        return cmd
+    binary, args = parts[0], parts[1:]
+    local = _local_bin_cmd(root, binary, args)
+    if local:
+        return local
+    return _package_manager_exec(root, cmd)
+
+
+def _dlx_or_local(root: Path, package: str, binary: str, args: str = "") -> str:
+    """Run an on-demand package manager command, preferring a local binary if present."""
+    arg_parts = shlex.split(args) if args else []
+    local = _local_bin_cmd(root, binary, arg_parts)
+    if local:
+        return local
+
+    suffix = f" {args}" if args else ""
+    package_manager = detect_package_manager(root)
+    if package_manager == "pnpm":
+        return f"pnpm dlx {package}{suffix}"
+    if package_manager == "yarn":
+        return f"yarn dlx {package}{suffix}"
+    if package_manager == "bun":
+        return f"bunx {package}{suffix}"
+    return f"npx {package}{suffix}"
 
 
 def detect_package_manager(root: Path) -> str | None:
@@ -173,25 +258,26 @@ def detect_formatter(root: Path) -> ToolInfo | None:
 def detect_frontend(root: Path) -> list[ToolInfo]:
     """Detect frontend frameworks and tools."""
     found = []
+    # Use 'if' (not 'elif') so projects with multiple frameworks are fully detected
     if _has_dep(root, "next"):
         cfg = _find_any(root, ["next.config.js", "next.config.mjs", "next.config.ts"])
-        found.append(ToolInfo(name="next.js", config_file=cfg or "package.json", run_cmd="npx next build"))
-    elif _has_dep(root, "nuxt"):
-        found.append(ToolInfo(name="nuxt", config_file="nuxt.config.ts", run_cmd="npx nuxt build"))
-    elif _has_dep(root, "@sveltejs/kit"):
-        found.append(ToolInfo(name="sveltekit", config_file="svelte.config.js", run_cmd="npx vite build"))
-    elif _has_dep(root, "@remix-run/react"):
-        found.append(ToolInfo(name="remix", config_file="remix.config.js", run_cmd="npx remix build"))
-    elif _has_dep(root, "astro"):
+        found.append(ToolInfo(name="next.js", config_file=cfg or "package.json", run_cmd=_npx_or_local(root, "next build")))
+    if _has_dep(root, "nuxt"):
+        found.append(ToolInfo(name="nuxt", config_file="nuxt.config.ts", run_cmd=_npx_or_local(root, "nuxt build")))
+    if _has_dep(root, "@sveltejs/kit"):
+        found.append(ToolInfo(name="sveltekit", config_file="svelte.config.js", run_cmd=_npx_or_local(root, "vite build")))
+    if _has_dep(root, "@remix-run/react"):
+        found.append(ToolInfo(name="remix", config_file="remix.config.js", run_cmd=_npx_or_local(root, "remix build")))
+    if _has_dep(root, "astro"):
         cfg = _find_any(root, ["astro.config.mjs", "astro.config.js", "astro.config.ts"])
-        found.append(ToolInfo(name="astro", config_file=cfg or "package.json", run_cmd="npx astro check"))
+        found.append(ToolInfo(name="astro", config_file=cfg or "package.json", run_cmd=_npx_or_local(root, "astro check")))
         
     if _has_dep(root, "tailwindcss"):
         cfg = _find_any(root, ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"])
-        found.append(ToolInfo(name="tailwindcss", config_file=cfg or "package.json", run_cmd="npx tailwindcss build"))
+        found.append(ToolInfo(name="tailwindcss", config_file=cfg or "package.json", run_cmd=_npx_or_local(root, "tailwindcss build")))
     if _has_dep(root, "vite"):
         cfg = _find_any(root, ["vite.config.js", "vite.config.ts"])
-        found.append(ToolInfo(name="vite", config_file=cfg or "package.json", run_cmd="npx vite build"))
+        found.append(ToolInfo(name="vite", config_file=cfg or "package.json", run_cmd=_npx_or_local(root, "vite build")))
         
     return found
 
@@ -199,13 +285,19 @@ def detect_frontend(root: Path) -> list[ToolInfo]:
 def detect_backend(root: Path) -> list[ToolInfo]:
     """Detect backend frameworks."""
     found = []
+    # Use 'if' (not 'elif') so NestJS + Express co-existing projects detect both
     if _has_dep(root, "@nestjs/core"):
         found.append(ToolInfo(name="nestjs", config_file="nest-cli.json", run_cmd=_npx_or_local(root, "nest build")))
-    elif _has_dep(root, "express") or _has_dep(root, "fastify") or _has_dep(root, "koa"):
-        found.append(ToolInfo(name="node.js", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
+    if _has_dep(root, "express") and not _has_dep(root, "@nestjs/core"):
+        found.append(ToolInfo(name="express", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
+    if _has_dep(root, "fastify"):
+        found.append(ToolInfo(name="fastify", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
+    if _has_dep(root, "koa"):
+        found.append(ToolInfo(name="koa", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
         
     if (root / "requirements.txt").exists() or (root / "pyproject.toml").exists():
-        found.append(ToolInfo(name="python", config_file="pyproject.toml", run_cmd="python -m pytest"))
+        cfg = "pyproject.toml" if (root / "pyproject.toml").exists() else "requirements.txt"
+        found.append(ToolInfo(name="python", config_file=cfg, run_cmd="python -m pytest"))
     if (root / "go.mod").exists():
         found.append(ToolInfo(name="go", config_file="go.mod", run_cmd="go vet ./..."))
     if (root / "Cargo.toml").exists():
@@ -229,11 +321,11 @@ def detect_database(root: Path) -> list[ToolInfo]:
         found.append(ToolInfo(name="drizzle", config_file=drizzle,
                               run_cmd=_npx_or_local(root, "drizzle-kit check")))
     if _has_dep(root, "knex"):
-        found.append(ToolInfo(name="knex", config_file="knexfile.js", run_cmd="npx knex migrate:status"))
+        found.append(ToolInfo(name="knex", config_file="knexfile.js", run_cmd=_npx_or_local(root, "knex migrate:status")))
     if _has_dep(root, "typeorm"):
-        found.append(ToolInfo(name="typeorm", config_file="ormconfig.json", run_cmd="npx typeorm query"))
+        found.append(ToolInfo(name="typeorm", config_file="ormconfig.json", run_cmd=_npx_or_local(root, "typeorm query")))
     if _has_dep(root, "sequelize"):
-        found.append(ToolInfo(name="sequelize", config_file=".sequelizerc", run_cmd="npx sequelize db:migrate:status"))
+        found.append(ToolInfo(name="sequelize", config_file=".sequelizerc", run_cmd=_npx_or_local(root, "sequelize db:migrate:status")))
     return found
 
 
@@ -243,12 +335,16 @@ def detect_api(root: Path) -> list[ToolInfo]:
     openapi = _find_any(root, ["openapi.yaml", "openapi.yml", "openapi.json",
                                  "swagger.yaml", "swagger.yml", "swagger.json"])
     if openapi:
-        found.append(ToolInfo(name="openapi", config_file=openapi, run_cmd=f"npx @redocly/cli lint {openapi}"))
-    graphql_files = list(root.glob("**/*.graphql"))
-    if graphql_files and len(graphql_files) < 50:
-        found.append(ToolInfo(name="graphql", config_file=str(graphql_files[0]), run_cmd="npx graphql-inspector validate"))
+        found.append(ToolInfo(
+            name="openapi",
+            config_file=openapi,
+            run_cmd=_dlx_or_local(root, "@redocly/cli", "redocly", f"lint {openapi}"),
+        ))
+    graphql_files = _safe_glob(root, ".graphql", limit=50)
+    if graphql_files:
+        found.append(ToolInfo(name="graphql", config_file=str(graphql_files[0]), run_cmd=_npx_or_local(root, "graphql-inspector validate")))
     if _has_dep(root, "@trpc/server") or _has_dep(root, "@trpc/client"):
-        found.append(ToolInfo(name="trpc", config_file="package.json", run_cmd="npx tsc --noEmit"))
+        found.append(ToolInfo(name="trpc", config_file="package.json", run_cmd=_npx_or_local(root, "tsc --noEmit")))
     return found
 
 

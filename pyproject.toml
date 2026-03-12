@@ -1,6 +1,7 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+build-backend = "_build_backend"
+backend-path = ["."]
 
 [project]
 name = "uidetox"
@@ -54,4 +55,5 @@ uidetox = [
     "data/commands/*.md",
     "data/reference/*.md",
     "data/docs/*.md",
+    "data/transforms/*.js",
 ]

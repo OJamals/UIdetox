@@ -4,6 +4,7 @@ import argparse
 import subprocess
 from uidetox.tooling import detect_all
 from uidetox.state import load_config
+from uidetox.utils import run_tool
 
 
 def run(args: argparse.Namespace):
@@ -30,10 +31,7 @@ def run(args: argparse.Namespace):
     print()
 
     try:
-        result = subprocess.run(
-            cmd.split(),
-            capture_output=True, text=True, cwd=".", timeout=120
-        )
+        result = run_tool(cmd, cwd=".", timeout=120)
     except FileNotFoundError:
         print(f"Command not found. Install {formatter['name']}.")
         return

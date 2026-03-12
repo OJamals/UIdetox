@@ -51,8 +51,11 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                 for name, var_name in css_var_matches:
                     colors[f"var-{name}"] = f"var(--{var_name})"
 
-            except (UnicodeDecodeError, OSError):
-                pass
+            except (UnicodeDecodeError, OSError) as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Failed to read Tailwind config %s: %s", config_name, exc
+                )
             break  # Only read the first found config
 
     # 2. Try to read CSS variables from common CSS entry points
@@ -92,8 +95,11 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                     # Store as-is for now; full oklch→hex conversion is complex
                     colors[f"oklch-{name}"] = f"oklch({oklch_val})"
 
-            except (UnicodeDecodeError, OSError):
-                pass
+            except (UnicodeDecodeError, OSError) as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Failed to read CSS file %s: %s", css_file, exc
+                )
 
     # 3. Try to read design token JSON files
     for token_file in ["tokens.json", "design-tokens.json", "src/tokens.json", "theme.json"]:
@@ -102,8 +108,11 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
             try:
                 data = json.loads(token_path.read_text(encoding="utf-8"))
                 _extract_tokens_recursive(data, colors, prefix="")
-            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Failed to read token file %s: %s", token_file, exc
+                )
 
     return colors
 
@@ -183,10 +192,17 @@ def audit_project_colors(project_root: Path) -> list[dict]:
     fg_names = {k: v for k, v in colors.items() if any(x in k.lower() for x in ["foreground", "fg", "text", "content", "body"])}
 
     # Check declared foreground/background pairs
+    # Short-circuit once we have enough violations — the downstream cap is 8
+    # so there's no value in computing thousands of pairs.
+    _MAX_VIOLATIONS = 20
     for fg_name, fg_hex in fg_names.items():
+        if len(violations) >= _MAX_VIOLATIONS:
+            break
         if not fg_hex.startswith("#"):
             continue
         for bg_name, bg_hex in bg_names.items():
+            if len(violations) >= _MAX_VIOLATIONS:
+                break
             if not bg_hex.startswith("#"):
                 continue
             ratio = contrast_ratio(fg_hex, bg_hex)
@@ -228,19 +244,38 @@ def _check_common_pairings(colors: dict[str, str], violations: list[dict]):
                 })
 
 def luminance(hex_code: str) -> float:
+    """Compute relative luminance per WCAG 2.x (sRGB).
+
+    Returns a value in [0.0, 1.0].  On invalid input, returns -1.0 so
+    callers can detect the error instead of silently treating a bad
+    colour as "white" (previous behaviour returned 1.0).
+    """
     try:
         hex_code = hex_code.lstrip('#')
         if len(hex_code) == 3:
             hex_code = ''.join(c + c for c in hex_code)
-        r, g, b = tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
-        a = [v / 255.0 for v in (r, g, b)]
-        a = [(v / 12.92) if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in a]
-        return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722
-    except ValueError:
-        return 1.0
+        if len(hex_code) not in (6, 8):
+            return -1.0
+        r, g, b = (int(hex_code[i:i+2], 16) for i in (0, 2, 4))
+        channels = [v / 255.0 for v in (r, g, b)]
+        linear = [
+            (v / 12.92) if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+            for v in channels
+        ]
+        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+    except (ValueError, IndexError):
+        return -1.0
+
 
 def contrast_ratio(hex1: str, hex2: str) -> float:
+    """Compute WCAG contrast ratio between two hex colours.
+
+    Returns 1.0 (no contrast) when either colour is invalid, rather
+    than silently producing a misleading high ratio.
+    """
     l1 = luminance(hex1)
     l2 = luminance(hex2)
+    if l1 < 0 or l2 < 0:
+        return 1.0  # indeterminate — treat as no contrast
     return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
 

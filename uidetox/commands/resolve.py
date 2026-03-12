@@ -5,7 +5,7 @@ import sys
 import subprocess
 from uidetox.state import remove_issue, get_issue, load_state, load_config
 from uidetox.memory import save_session, log_progress, embed_fix_outcome
-from uidetox.commands.batch_resolve import _run_verification
+from uidetox.commands.batch_resolve import run_verification
 
 
 def run(args: argparse.Namespace):
@@ -20,7 +20,7 @@ def run(args: argparse.Namespace):
 
     if not skip_verify:
         print("━━━ Pre-commit verification ━━━")
-        if not _run_verification(config):
+        if not run_verification(config):
             print("❌ Verification failed. Build is broken. Fix it before resolving.", file=sys.stderr)
             sys.exit(1)
         print()
@@ -36,8 +36,7 @@ def run(args: argparse.Namespace):
         print(f"   Note: {args.note}")
         print(f"   Queue: {remaining} remaining | {resolved_total} resolved total")
 
-        # Git Auto-Commit Integration
-        config = load_config()
+        # Git Auto-Commit Integration (reuse config from above)
         if config.get("auto_commit", False):
             try:
                 # Stage the fixed file AND the state tracking file
@@ -53,8 +52,13 @@ def run(args: argparse.Namespace):
                 print(f"   ⚠️  Warning: git command not found. Skipping auto-commit.")
 
         print()
-        print("[AGENT LOOP SIGNAL]")
-        print("Run `uidetox status` now to check score and continue the loop.")
+        print("[AUTONOMOUS LOOP SIGNAL]")
+        if remaining > 0:
+            print(f"{remaining} issues remain. Run `uidetox next` NOW to continue.")
+        else:
+            print("Queue empty. Run `uidetox status` to check if target is met.")
+            print("If score < target, run `uidetox rescan` for deeper analysis.")
+        print("DO NOT STOP. The loop is fully autonomous.")
 
         # Auto-save progress
         log_progress("resolve", f"Fixed {issue_id}: {args.note}")

@@ -98,6 +98,7 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
   * **Loading:** Skeletal loaders matching layout sizes (never generic circular spinners).
   * **Empty States:** Composed states indicating how to populate data.
   * **Error States:** Clear, inline error reporting.
+* **COHESION RULE:** Loading, empty, error, success, and disabled states must feel like one product family — shared spacing logic, iconography, motion language, and tone.
 * Progressive disclosure — start simple, reveal sophistication through interaction.
 * Make every interactive surface feel intentional and responsive.
 
@@ -106,6 +107,7 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 * Label MUST sit above input. Helper text optional. Error text below input.
 * Use standard gap between input blocks.
 * Make every button primary hierarchy explicit — use ghost buttons, text links, secondary styles.
+* **CONTRACT FIDELITY:** Frontend validation, helper text, loading states, and error states must mirror real backend DTOs, API contracts, and database constraints. Never invent UI states the system cannot actually support.
 
 ---
 

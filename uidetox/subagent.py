@@ -3,15 +3,31 @@
 import json
 import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 
 from uidetox.analyzer import IGNORE_DIRS # type: ignore
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
+from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config, _atomic_write_json # type: ignore
 from uidetox.utils import now_iso # type: ignore
 
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
+
+
+def _coerce_parallel(parallel: int) -> int:
+    return max(1, int(parallel or 1))
+
+
+def _shard_items(items: list, parallel: int) -> list[list]:
+    """Distribute items round-robin into balanced non-empty shards."""
+    shard_count = min(len(items), _coerce_parallel(parallel))
+    if shard_count <= 0:
+        return []
+    shards = [[] for _ in range(shard_count)]
+    for idx, item in enumerate(items):
+        shards[idx % shard_count].append(item)
+    return [shard for shard in shards if shard]
 
 
 def _sessions_dir() -> Path:
@@ -20,12 +36,25 @@ def _sessions_dir() -> Path:
     return d
 
 
-def _now_iso() -> str:
-    return now_iso()
+def _rotate_sessions(max_sessions: int = 200) -> None:
+    """Evict oldest session directories when count exceeds *max_sessions*."""
+    sessions_dir = _sessions_dir()
+    try:
+        session_dirs = sorted(
+            [d for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_")],
+            key=lambda d: d.stat().st_mtime,
+        )
+    except OSError:
+        return
+    if len(session_dirs) <= max_sessions:
+        return
+    for old in session_dirs[: len(session_dirs) - max_sessions]:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def _session_id() -> str:
-    return str(uuid.uuid4()).split("-")[0]
+    """Return a 12-hex-char session ID (collision-safe)."""
+    return uuid.uuid4().hex[:12]
 
 
 def create_session(stage: str, prompt: str) -> str:
@@ -46,16 +75,18 @@ def create_session(stage: str, prompt: str) -> str:
     with open(session_dir / "prompt.md", "w", encoding="utf-8") as f:
         f.write(prompt)
 
-    # Write metadata
+    # Write metadata atomically
     meta = {
         "session_id": session_id,
         "stage": stage,
         "status": "pending",
-        "created_at": _now_iso(),
+        "created_at": now_iso(),
         "completed_at": None,
     }
-    with open(session_dir / "meta.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    _atomic_write_json(session_dir / "meta.json", meta, dir=session_dir)
+
+    # Housekeep old sessions
+    _rotate_sessions()
 
     return session_id
 
@@ -74,13 +105,24 @@ def record_result(session_id: str, result: dict) -> bool:
     if not session_dir.exists():
         return False
 
-    # Write result
-    with open(session_dir / "result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    # Write result atomically
+    _atomic_write_json(session_dir / "result.json", result, dir=session_dir)
 
     # Update meta
     meta_path = session_dir / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        # Corrupt or missing meta.json — rebuild minimal metadata
+        meta = {
+            "session_id": session_id,
+            "stage": "unknown",
+            "status": "pending",
+            "created_at": now_iso(),
+            "completed_at": None,
+            "_recovered": True,
+            "_recovery_reason": str(exc),
+        }
 
     # Parse confidence score if provided (multiple formats supported)
     confidence = _extract_confidence(result)
@@ -97,21 +139,29 @@ def record_result(session_id: str, result: dict) -> bool:
         meta["review_reason"] = None
 
     meta["confidence"] = confidence
-    meta["completed_at"] = _now_iso()
+    meta["completed_at"] = now_iso()
 
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    _atomic_write_json(meta_path, meta, dir=session_dir)
+
+    review_request_path = session_dir / "review_request.json"
 
     # Flag low-confidence results for human review
     if confidence < 0.85:
         _flag_for_review(session_id, meta, confidence)
+    elif review_request_path.exists():
+        review_request_path.unlink(missing_ok=True)
 
     return True
 
 
 def _extract_confidence(result: dict) -> float:
-    """Extract confidence score from result using multiple parsing strategies."""
-    confidence = 1.0
+    """Extract confidence score from result using multiple parsing strategies.
+
+    Default is 0.5 (uncertain) — never assumes high confidence.
+    This ensures unverified fixes are flagged for review rather
+    than auto-resolved.
+    """
+    confidence = 0.5
 
     # Strategy 1: Explicit CONFIDENCE: field in the note
     text = result.get("note", "")
@@ -161,15 +211,14 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
         "confidence": confidence,
         "status": meta.get("status"),
         "reason": meta.get("review_reason", "Below confidence threshold"),
-        "flagged_at": _now_iso(),
+        "flagged_at": now_iso(),
         "action_required": (
             "HUMAN_REVIEW_REQUIRED" if confidence < 0.6
             else "REVIEW_RECOMMENDED"
         ),
     }
 
-    with open(session_dir / "review_request.json", "w", encoding="utf-8") as f:
-        json.dump(review_request, f, indent=2)
+    _atomic_write_json(session_dir / "review_request.json", review_request, dir=session_dir)
 
     # Also log to memory for persistence
     try:
@@ -193,7 +242,7 @@ def get_pending_reviews() -> list[dict]:
         review_path = session_dir / "review_request.json"
         if review_path.exists():
             try:
-                review = json.loads(review_path.read_text())
+                review = json.loads(review_path.read_text(encoding="utf-8"))
                 reviews.append(review)
             except (json.JSONDecodeError, OSError):
                 continue
@@ -210,7 +259,7 @@ def list_sessions() -> list[dict]:
         meta_path = session_dir / "meta.json"
         if meta_path.exists():
             try:
-                meta = json.loads(meta_path.read_text())
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 results.append(meta)
             except (json.JSONDecodeError, OSError):
                 continue
@@ -229,22 +278,21 @@ def get_session(session_id: str) -> dict | None:
 
     result = {}
     if meta_path.exists():
-        result["meta"] = json.loads(meta_path.read_text())
+        result["meta"] = json.loads(meta_path.read_text(encoding="utf-8"))
     if prompt_path.exists():
-        result["prompt"] = prompt_path.read_text()
+        result["prompt"] = prompt_path.read_text(encoding="utf-8")
     if result_path.exists():
-        result["result"] = json.loads(result_path.read_text())
+        result["result"] = json.loads(result_path.read_text(encoding="utf-8"))
     return result
 
 
-def get_frontend_files() -> list[str]:
+def get_frontend_files(root: str = ".") -> list[str]:
+    """Return frontend source files under *root*, respecting IGNORE_DIRS."""
     frontend_exts = {".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte", ".ts", ".js"}
     files = []
 
-    for dirpath, dirnames, filenames in os.walk("."):
-        new_dir = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
-        dirnames.clear()
-        dirnames.extend(new_dir)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
         for filename in filenames:
             if Path(filename).suffix.lower() in frontend_exts:
                 files.append(os.path.join(dirpath, filename))
@@ -339,6 +387,45 @@ def _build_deconfliction_block(shard_index: int, total_shards: int, shard_files:
 """
 
 
+def _build_tooling_block(tooling: dict) -> str:
+    """Summarize detected stack details so sub-agents honor local conventions."""
+    if not tooling:
+        return ""
+
+    lines = ["## Project Integration Profile"]
+    package_manager = tooling.get("package_manager")
+    if package_manager:
+        lines.append(f"- Package manager: {package_manager}")
+
+    typescript = tooling.get("typescript")
+    if typescript:
+        lines.append(f"- TypeScript: {typescript.get('config_file', 'detected')}")
+
+    linter = tooling.get("linter")
+    formatter = tooling.get("formatter")
+    if linter or formatter:
+        lines.append(
+            "- Mechanical toolchain: "
+            + ", ".join(
+                part for part in [
+                    f"lint={linter.get('name')}" if linter else "",
+                    f"format={formatter.get('name')}" if formatter else "",
+                ]
+                if part
+            )
+        )
+
+    for label in ("frontend", "backend", "database", "api"):
+        items = tooling.get(label, []) or []
+        if items:
+            names = ", ".join(item.get("name", "unknown") for item in items)
+            lines.append(f"- {label.capitalize()}: {names}")
+
+    lines.append("- Preserve existing framework conventions, API contracts, DB schemas, and design tokens.")
+    lines.append("- Prefer cohesive fixes that improve loading/error/empty states alongside the happy path.")
+    return "\n".join(lines)
+
+
 def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     """Generate focused prompts for a specific sub-agent stage.
 
@@ -347,6 +434,7 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     """
     state = load_state()
     config = load_config()
+    parallel = _coerce_parallel(parallel)
     issues = state.get("issues", [])
     resolved = state.get("resolved", [])
     tooling = config.get("tooling", {})
@@ -361,28 +449,25 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
 - VISUAL_DENSITY   = {density}  {'(cockpit mode, dense data)' if density > 7 else '(standard web app spacing)' if density > 3 else '(art gallery, spacious, luxury)'}
 
 Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
+    tooling_block = _build_tooling_block(tooling)
 
     if stage == "observe":
         if parallel > 1:
             files = get_frontend_files()
             if not files:
                 memory_block = _build_memory_block()
-                return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
-            chunk_size = max(1, len(files) // parallel)
-            chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)] # type: ignore
-            # Merge trailing chunk if rounding caused an extra bucket
-            if len(chunks) > parallel:
-                chunks[parallel-1].extend(chunks.pop()) # type: ignore
+                return [_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)]
+            chunks = _shard_items(files, parallel)
             return [
-                _observe_prompt(tooling, chunk, dials_block,
+                _observe_prompt(tooling_block, chunk, dials_block,
                                 _build_memory_block(files=chunk), idx, len(chunks))
                 for idx, chunk in enumerate(chunks)
             ]
         memory_block = _build_memory_block()
-        return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
+        return [_observe_prompt(tooling_block, [], dials_block, memory_block, 0, 1)]
 
     elif stage == "diagnose":
-        return [_diagnose_prompt(issues, dials_block)]
+        return [_diagnose_prompt(issues, tooling_block, dials_block)]
 
     elif stage == "prioritize":
         return [_prioritize_prompt(issues)]
@@ -406,29 +491,25 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         )
 
         # Take the most pressing file-groups to batch, up to parallel * 3
-        top_groups = sorted_groups[:parallel * 3] # type: ignore
-
-        # Distribute file-groups into parallel buckets
-        buckets = [[] for _ in range(parallel)]
-        for i, group in enumerate(top_groups):
-            buckets[i % parallel].extend(group)
-
-        # Strip empty buckets if there were fewer files than agents
-        buckets = [b for b in buckets if b]
+        top_groups = sorted_groups[: max(parallel * 3, parallel)] # type: ignore
+        buckets = [
+            [issue for group in shard for issue in group]
+            for shard in _shard_items(top_groups, parallel)
+        ]
 
         if not buckets:  # Fallback sanity check
             buckets = [issues[:5]] # type: ignore
 
         total_buckets = len(buckets)
-        return [_fix_prompt(bucket, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)]
+        return [_fix_prompt(bucket, tooling_block, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)]
 
     elif stage == "verify":
-        return [_verify_prompt(issues, resolved)]
+        return [_verify_prompt(issues, resolved, tooling_block)]
 
     return [f"Unknown stage: {stage}"]
 
 
-def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
+def _observe_prompt(tooling_block: str, files: list[str], dials_block: str,
                     memory_block: str = "", shard_index: int = 0, total_shards: int = 1) -> str:
     # Build file target list if specific shard provided
     target_directive = "Systematically scan the codebase and catalog everything you see."
@@ -441,6 +522,7 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
     return f"""# UIdetox Sub-Agent: OBSERVE Stage
 
 {memory_block}
+{tooling_block}
 {dials_block}
 {deconfliction}
 
@@ -454,6 +536,7 @@ Use GitNexus to map codebase flows before deep diving!
 
 ## What to Catalog
 For every frontend file, note:
+- **Design System Cohesion**: repeated tokens, inconsistent spacing/color/type decisions, variant drift
 - **Typography**: Font families, sizes, weights, line heights, tracking
 - **Colors**: All color values (hex, rgb, hsl, oklch, named, CSS variables, Tailwind classes)
 - **Layout**: Grid systems, flex patterns, max-widths, padding/margin patterns, symmetry vs asymmetry
@@ -461,12 +544,14 @@ For every frontend file, note:
 - **Motion**: Animations, transitions, hover/focus/active effects, easing curves
 - **States**: Loading, error, empty, disabled state handling
 - **Accessibility**: ARIA labels, focus indicators, skip-to-content, lang attributes
+- **Integration Boundaries**: data fetching surfaces, backend/API state mapping, schema/DTO assumptions
 - **Content**: Placeholder data quality (names, numbers, dates, copy tone)
 
 ## Output Format
 For each file, output a structured observation:
 ```
 FILE: <path>
+COHESION: <shared system patterns or inconsistencies>
 TYPOGRAPHY: <what fonts/sizes you see>
 COLORS: <what color values you see>
 LAYOUT: <what layout patterns you see>
@@ -474,6 +559,7 @@ COMPONENTS: <what UI components you see>
 MOTION: <what animations/transitions you see>
 STATES: <what state handling you see>
 ACCESSIBILITY: <what a11y features are present or missing>
+INTEGRATION: <data/API/backend contract observations>
 CONTENT: <quality of placeholder data and copy>
 ```
 
@@ -484,13 +570,14 @@ CONTENT: <quality of placeholder data and copy>
 """
 
 
-def _diagnose_prompt(issues: list, dials_block: str) -> str:
+def _diagnose_prompt(issues: list, tooling_block: str, dials_block: str) -> str:
     existing = "\n".join(
         f"- [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues[:20] # type: ignore
     ) if issues else "None yet."
 
     return f"""# UIdetox Sub-Agent: DIAGNOSE Stage
 
+{tooling_block}
 {dials_block}
 
 ## Your Mission
@@ -581,6 +668,12 @@ Identify every AI slop pattern and design violation.
 - Missing favicon
 - Missing meta tags
 
+### 11. Integration & Cohesion
+- Components with inconsistent token usage across related flows
+- API/loading/error/empty states that don't reflect actual backend behavior
+- Frontend types that drift from DTOs, schemas, or ORM-backed constraints
+- Screens that solve local issues but fragment the overall design language
+
 ## Output Format
 For each issue found, output:
 ```
@@ -624,7 +717,7 @@ Provide the recommended fix order as a numbered list with rationale for each gro
 """
 
 
-def _fix_prompt(batch: list, dials_block: str,
+def _fix_prompt(batch: list, tooling_block: str, dials_block: str,
                 shard_index: int = 0, total_shards: int = 1) -> str:
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
@@ -653,6 +746,7 @@ def _fix_prompt(batch: list, dials_block: str,
     return f"""# UIdetox Sub-Agent: FIX Stage
 
 {memory_block}
+{tooling_block}
 {dials_block}
 {deconfliction}
 
@@ -667,6 +761,7 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 ## Tools & Rules
 - Use `npx gitnexus impact <symbol>` before refactoring any exports
 - Follow SKILL.md design rules for every change
+- Preserve API/DTO contracts and align loading/error/empty states with real backend behavior
 - Fix ALL issues in one pass per component, then batch-resolve:
   `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`
 - Run `uidetox check --fix` BEFORE batch-resolve to catch regressions
@@ -674,7 +769,7 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 """
 
 
-def _verify_prompt(issues: list, resolved: list) -> str:
+def _verify_prompt(issues: list, resolved: list, tooling_block: str) -> str:
     # Check for pending reviews
     pending_reviews = get_pending_reviews()
     review_block = ""
@@ -687,6 +782,7 @@ def _verify_prompt(issues: list, resolved: list) -> str:
     return f"""# UIdetox Sub-Agent: VERIFY Stage
 
 {review_block}
+{tooling_block}
 
 ## Your Mission
 Re-scan the codebase to confirm improvements. Check that fixes actually improved the interface.
@@ -703,6 +799,7 @@ Re-scan the codebase to confirm improvements. Check that fixes actually improved
 5. Run `uidetox check --fix` to verify no build errors were introduced
 6. If new issues are found, queue them: `uidetox add-issue --file <path> --tier <tier> --issue "<desc>" --fix-command "<cmd>"`
 7. Run `uidetox status` again to see the updated score
+8. Verify related flows still feel cohesive across loading, empty, error, and responsive states
 
 ## Confidence Scoring (MANDATORY)
 You MUST yield a confidence score at the end of your output.

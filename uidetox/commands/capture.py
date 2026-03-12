@@ -1,7 +1,6 @@
 """Capture command: use Playwright to take before/after screenshots for visual regression."""
 
 import argparse
-import shutil
 from pathlib import Path
 from uidetox.state import ensure_uidetox_dir, load_config
 from uidetox.utils import now_iso
@@ -32,12 +31,14 @@ def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport=vp)
-            page.goto(url, wait_until="networkidle", timeout=15000)
-            # Wait for animations to settle
-            page.wait_for_timeout(1000)
-            page.screenshot(path=str(out_path), full_page=full_page)
-            browser.close()
+            try:
+                page = browser.new_page(viewport=vp)
+                page.goto(url, wait_until="networkidle", timeout=15000)
+                # Wait for animations to settle
+                page.wait_for_timeout(1000)
+                page.screenshot(path=str(out_path), full_page=full_page)
+            finally:
+                browser.close()
         return True
     except Exception as e:
         print(f"❌ Failed to capture screenshot: {e}", file=sys.stderr)
@@ -93,9 +94,21 @@ def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
 
         diff_img = ImageChops.difference(before_img.convert("RGB"), after_img.convert("RGB"))
 
-        # Calculate change percentage
-        diff_pixels = sum(1 for px in diff_img.getdata() if sum(px) > 30)
-        total_pixels = diff_img.width * diff_img.height
+        # Calculate change percentage — use NumPy for speed if available,
+        # otherwise fall back to Pillow's ImageStat (fast C code).
+        try:
+            import numpy as np
+            diff_array = np.array(diff_img)
+            diff_pixels = int(np.sum(np.sum(diff_array, axis=-1) > 30))
+            total_pixels = diff_array.shape[0] * diff_array.shape[1]
+        except ImportError:
+            from PIL import ImageStat
+            stat = ImageStat.Stat(diff_img)
+            total_pixels = diff_img.width * diff_img.height
+            # Approximate: use mean channel diff to estimate changed fraction
+            mean_diff = sum(stat.mean) / 3
+            diff_pixels = int((mean_diff / 255) * total_pixels) if total_pixels > 0 else 0
+
         change_pct = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0
 
         # Save the diff image
@@ -157,6 +170,7 @@ def run(args: argparse.Namespace):
 
                 # Generate diffs for each viewport
                 print("\n🔍 Generating visual diffs...")
+                responsive_diffs = []
                 for after_path in captured:
                     vp_name = after_path.stem.replace("after_", "")
                     before_path = snapshots / f"before_{vp_name}.png"
@@ -165,6 +179,14 @@ def run(args: argparse.Namespace):
                         change_pct = diff.get("change_percentage", "?")
                         severity = diff.get("severity", "unknown")
                         print(f"  {vp_name}: {change_pct}% change ({severity})")
+                        responsive_diffs.append({"viewport": vp_name, **diff})
+
+                # Save responsive diff metadata (mirrors the non-responsive path)
+                if responsive_diffs:
+                    import json
+                    diff_meta = snapshots / "diff_meta.json"
+                    with open(diff_meta, "w", encoding="utf-8") as f:
+                        json.dump({"responsive": True, "viewports": responsive_diffs}, f, indent=2)
         else:
             out_file = snapshots / "after.png"
             if _capture_screenshot(url, out_file):
