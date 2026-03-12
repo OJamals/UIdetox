@@ -58,6 +58,7 @@ _QUEUE_EMPTY_ONLY_TAG = "[queue-empty-only]"
 _MAX_CONSECUTIVE_SAME_SCORE = 5  # Stop if score doesn't change for N iterations
 _MAX_ERROR_RATE = 10  # Stop if more than N errors in last 5 iterations
 _RECOVERY_COOLDOWN = 3  # Wait N iterations before retrying after failure
+_GITNEXUS_COMMAND_SUPPORT: dict[str, bool] = {}
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -243,6 +244,44 @@ def _gitnexus_cmd_with_repo(parts: list[str], repo: str) -> list[str]:
 
     # npx gitnexus <subcommand> -r <repo> <args...>
     return [*parts[:3], "-r", repo, *parts[3:]]
+
+
+def _gitnexus_supports_command(command: str) -> bool:
+    """Return True if the installed GitNexus CLI supports a subcommand."""
+    cached = _GITNEXUS_COMMAND_SUPPORT.get(command)
+    if cached is not None:
+        return cached
+
+    try:
+        result = subprocess.run(
+            ["npx", "gitnexus", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode == 0:
+            supported = bool(re.search(rf"^\s*{re.escape(command)}\b", result.stdout, re.MULTILINE))
+            _GITNEXUS_COMMAND_SUPPORT[command] = supported
+            return supported
+    except Exception:
+        pass
+
+    # Be conservative: assume supported if discovery fails.
+    _GITNEXUS_COMMAND_SUPPORT[command] = True
+    return True
+
+
+def _gitnexus_scope_check_command() -> tuple[str, str]:
+    """Choose the best available post-fix scope verification command."""
+    if _gitnexus_supports_command("detect_changes"):
+        return (
+            "npx gitnexus detect_changes",
+            "post-execution scope check (GitNexus)",
+        )
+    return (
+        "git diff --name-status",
+        "post-execution scope check (fallback: GitNexus detect_changes unavailable)",
+    )
 
 
 def run(args: argparse.Namespace):
@@ -674,11 +713,8 @@ def _post_execution_checkpoint(
     # and symbols.  Non-fatal — skips if GitNexus isn't available.
     if not dry_run:
         print("  Verifying change scope via GitNexus...")
-        rc = _exec_cmd(
-            "npx gitnexus detect_changes",
-            "post-execution scope check",
-            dry_run=dry_run,
-        )
+        scope_cmd, scope_reason = _gitnexus_scope_check_command()
+        rc = _exec_cmd(scope_cmd, scope_reason, dry_run=dry_run)
         if rc != 0:
             print("  ℹ  GitNexus change detection unavailable — continuing.")
         print()

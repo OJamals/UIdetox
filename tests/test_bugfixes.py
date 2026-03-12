@@ -652,3 +652,16 @@ class TestLoopGitNexusMultiRepoRetry:
         assert result is None
         assert len(calls) == 2
         assert calls[1][:5] == ["npx", "gitnexus", "impact", "-r", "UIdetox"]
+
+
+class TestLoopGitNexusScopeFallback:
+    """Loop should use fallback scope check when detect_changes is unavailable."""
+
+    def test_scope_check_command_falls_back_to_git_diff(self, monkeypatch):
+        from uidetox.commands import loop as loop_cmd
+
+        monkeypatch.setattr(loop_cmd, "_gitnexus_supports_command", lambda command: False)
+        cmd, reason = loop_cmd._gitnexus_scope_check_command()
+
+        assert cmd == "git diff --name-status"
+        assert "fallback" in reason.lower()
