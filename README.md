@@ -1,8 +1,8 @@
-<div style="text-align: center;">
-   ![UIdetox Banner](assets/banner.png)
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="UIdetox Banner" />
+</p>
 
-**The anti-slop harness for AI-generated frontends.**
+<p align="center"><strong>The anti-slop harness for AI-generated frontends.</strong></p>
 
 [UIdetox](https://github.com/OJamals/UIdetox) helps your coding agent turn generic, LLM-style UI output into production-quality interface work through a repeatable **scan → fix → verify** loop.
 
