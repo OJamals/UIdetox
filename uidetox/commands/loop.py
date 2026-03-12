@@ -750,6 +750,25 @@ def _exec_cmd(cmd: str, reason: str, *, dry_run: bool = False) -> int:
         return 1
 
 
+def _persist_git_session(*, active_branch: str, base_branch: str | None = None) -> None:
+    """Persist session-branch metadata for deterministic finish targets."""
+    try:
+        config = load_config()
+        existing = config.get("git_session", {})
+        if not isinstance(existing, dict):
+            existing = {}
+
+        resolved_base = str(base_branch or existing.get("base_branch", "")).strip()
+        config["git_session"] = {
+            "active_branch": active_branch,
+            "base_branch": resolved_base,
+        }
+        save_config(config)
+    except Exception:
+        # Branch metadata is helpful but non-critical to loop execution.
+        pass
+
+
 def _ensure_session_branch():
     """Create or resume a UIdetox session branch for workspace isolation."""
     try:
@@ -759,13 +778,16 @@ def _ensure_session_branch():
         ).stdout.strip()
 
         if not current.startswith("uidetox-session-"):
+            base_branch = current
             session_id = uuid.uuid4().hex[:12]
             branch = f"uidetox-session-{session_id}"
             print(f"  Git: switching to session branch {branch}")
             subprocess.run(["git", "checkout", "-b", branch], check=True,
                            capture_output=True)
+            _persist_git_session(active_branch=branch, base_branch=base_branch)
         else:
             print(f"  Git: resuming session branch {current}")
+            _persist_git_session(active_branch=current)
     except subprocess.CalledProcessError:
         print("  Git: not initialized or branching failed. Proceeding without isolation.")
 

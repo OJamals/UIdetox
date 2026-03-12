@@ -2,7 +2,7 @@ import argparse
 import subprocess
 import sys
 
-from uidetox.state import load_state, load_config
+from uidetox.state import load_state, load_config, save_config
 from uidetox.utils import compute_design_score, get_score_freshness
 
 
@@ -37,10 +37,63 @@ def _detect_main_branch() -> str:
     return "main"  # Last-resort default
 
 
+def _branch_exists(branch: str) -> bool:
+    """Return True when branch exists locally or on origin."""
+    refs = (
+        f"refs/heads/{branch}",
+        f"refs/remotes/origin/{branch}",
+    )
+    for ref in refs:
+        result = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", ref],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return True
+    return False
+
+
+def _resolve_target_branch(current_branch: str, config: dict) -> tuple[str, str]:
+    """Resolve merge target branch.
+
+    Prefer the branch that the current session was created from. Fall back to
+    default-branch detection for older sessions that lack metadata.
+    """
+    session_meta = config.get("git_session", {})
+    if isinstance(session_meta, dict):
+        active_branch = str(session_meta.get("active_branch", "")).strip()
+        base_branch = str(session_meta.get("base_branch", "")).strip()
+        if base_branch and (not active_branch or active_branch == current_branch):
+            if _branch_exists(base_branch):
+                return base_branch, "recorded session base branch"
+
+    return _detect_main_branch(), "detected default branch"
+
+
+def _clear_session_metadata(session_branch: str) -> None:
+    """Clear stale git-session metadata after a successful finish."""
+    try:
+        config = load_config()
+        session_meta = config.get("git_session")
+        if not isinstance(session_meta, dict):
+            return
+
+        active_branch = str(session_meta.get("active_branch", "")).strip()
+        if active_branch and active_branch != session_branch:
+            return
+
+        config.pop("git_session", None)
+        save_config(config)
+    except Exception:
+        # Never block finish cleanup on metadata writes.
+        pass
+
+
 def run(args: argparse.Namespace):
     """
-    Squash merges the current UIdetox session branch back into the main branch,
-    commits the squashed changes, and deletes the temporary session branch.
+    Squash merge the current UIdetox session branch back into its base branch,
+    commit the squashed changes, and delete the temporary session branch.
     """
     try:
         current_branch = subprocess.run(
@@ -56,12 +109,11 @@ def run(args: argparse.Namespace):
         print("Run 'uidetox finish' only when you are on a branch created by 'uidetox loop'.")
         sys.exit(1)
 
-    target_branch = _detect_main_branch()
-
     # ── Score validation gate ──
     force = getattr(args, "force", False)
     state = load_state()
     config = load_config()
+    target_branch, target_reason = _resolve_target_branch(current_branch, config)
     scores = compute_design_score(state)
     freshness = get_score_freshness(state)
     blended = scores["blended_score"]
@@ -103,7 +155,7 @@ def run(args: argparse.Namespace):
         pass
 
     print(f"📦 Finishing UIdetox session on branch: {current_branch}")
-    print(f"▶️  Target merge branch: {target_branch}")
+    print(f"▶️  Target merge branch: {target_branch} ({target_reason})")
 
     try:
         # Switch to the detected main branch
@@ -123,6 +175,7 @@ def run(args: argparse.Namespace):
         # Delete the session branch
         print("▶️  Cleaning up temporary branch...")
         subprocess.run(["git", "branch", "-D", current_branch], check=True)
+        _clear_session_metadata(current_branch)
 
         # Compact ChromaDB embeddings to prevent unbounded growth
         try:

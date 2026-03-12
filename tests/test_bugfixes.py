@@ -14,6 +14,7 @@ Covers:
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 from uidetox.utils import compute_design_score, _apply_subjective_curve
 
@@ -245,6 +246,115 @@ class TestFinishBranchParsing:
         assert "feature-branch" in branches
         assert "master" in branches
         assert "star" in branches  # Would have been 'tar' with old lstrip("* ")
+
+
+class TestFinishSessionTargeting:
+    """Ensure finish resolves the correct merge target for session branches."""
+
+    def test_resolve_target_prefers_recorded_base_branch(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        config = {
+            "git_session": {
+                "active_branch": "uidetox-session-123",
+                "base_branch": "master",
+            }
+        }
+        monkeypatch.setattr(finish_cmd, "_branch_exists", lambda branch: branch == "master")
+        monkeypatch.setattr(finish_cmd, "_detect_main_branch", lambda: "main")
+
+        target, reason = finish_cmd._resolve_target_branch("uidetox-session-123", config)
+        assert target == "master"
+        assert "recorded session base branch" in reason
+
+    def test_resolve_target_falls_back_when_metadata_mismatches(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        config = {
+            "git_session": {
+                "active_branch": "uidetox-session-other",
+                "base_branch": "master",
+            }
+        }
+        monkeypatch.setattr(finish_cmd, "_branch_exists", lambda branch: True)
+        monkeypatch.setattr(finish_cmd, "_detect_main_branch", lambda: "main")
+
+        target, reason = finish_cmd._resolve_target_branch("uidetox-session-123", config)
+        assert target == "main"
+        assert "detected default branch" in reason
+
+    def test_clear_session_metadata_removes_matching_active_branch(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        saved: dict = {}
+        monkeypatch.setattr(
+            finish_cmd,
+            "load_config",
+            lambda: {
+                "auto_commit": True,
+                "git_session": {
+                    "active_branch": "uidetox-session-123",
+                    "base_branch": "master",
+                },
+            },
+        )
+        monkeypatch.setattr(finish_cmd, "save_config", lambda cfg: saved.update(cfg))
+
+        finish_cmd._clear_session_metadata("uidetox-session-123")
+
+        assert saved.get("auto_commit") is True
+        assert "git_session" not in saved
+
+
+class TestLoopSessionMetadata:
+    """Session branch creation should persist base-branch context."""
+
+    def test_persist_session_preserves_existing_base(self, monkeypatch):
+        from uidetox.commands import loop as loop_cmd
+
+        saved: dict = {}
+        monkeypatch.setattr(
+            loop_cmd,
+            "load_config",
+            lambda: {
+                "auto_commit": True,
+                "git_session": {
+                    "active_branch": "uidetox-session-old",
+                    "base_branch": "master",
+                },
+            },
+        )
+        monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: saved.update(cfg))
+
+        loop_cmd._persist_git_session(active_branch="uidetox-session-new")
+
+        assert saved["git_session"]["active_branch"] == "uidetox-session-new"
+        assert saved["git_session"]["base_branch"] == "master"
+
+    def test_ensure_session_branch_records_base_branch(self, monkeypatch):
+        from uidetox.commands import loop as loop_cmd
+
+        recorded: list[dict] = []
+
+        def fake_run(cmd, capture_output=False, text=False, check=False):  # noqa: ANN001
+            if cmd == ["git", "branch", "--show-current"]:
+                return SimpleNamespace(stdout="master\n")
+            if cmd[:3] == ["git", "checkout", "-b"]:
+                return SimpleNamespace(stdout="")
+            raise AssertionError(f"Unexpected git command: {cmd}")
+
+        monkeypatch.setattr(loop_cmd.subprocess, "run", fake_run)
+        monkeypatch.setattr(loop_cmd.uuid, "uuid4", lambda: SimpleNamespace(hex="abc123def4567890"))
+        monkeypatch.setattr(loop_cmd, "_persist_git_session", lambda **kw: recorded.append(kw))
+
+        loop_cmd._ensure_session_branch()
+
+        assert recorded == [
+            {
+                "active_branch": "uidetox-session-abc123def456",
+                "base_branch": "master",
+            }
+        ]
 
 
 class TestToolingBackendDetection:
