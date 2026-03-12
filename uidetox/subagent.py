@@ -2046,16 +2046,14 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         if parallel > 1 and len(REVIEW_DOMAINS) > 1:
             domains = REVIEW_DOMAINS
             chunks = _shard_items(domains, min(parallel, len(domains)))
-            # Keep domain shards (for rubric scoring) but pair each shard with
-            # workload-balanced file slices so review load is not flat-count only.
-            file_shards = _shard_items_by_workload(files, len(chunks), issues=issues) if files else [[] for _ in chunks]
+            # Review is domain-sharded, not file-sharded: each domain reviewer
+            # should score against the full frontend surface area.
             prompts = []
             for idx, domain_chunk in enumerate(chunks):
-                shard_files = file_shards[idx] if idx < len(file_shards) else files
                 prompts.append(
                     _review_domain_prompt(
                         domains=domain_chunk,
-                        files=shard_files,
+                        files=files,
                         tooling_block=tooling_block,
                         dials_block=dials_block,
                         shard_index=idx,

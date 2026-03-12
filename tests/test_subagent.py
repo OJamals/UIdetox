@@ -212,6 +212,21 @@ def test_record_result_dedupes_repeated_ingested_issues():
     assert len(matches) == 1
 
 
+def test_parallel_review_prompts_keep_global_file_scope_per_domain():
+    src = Path("src")
+    src.mkdir(parents=True, exist_ok=True)
+    file_a = (src / "Alpha.tsx").resolve()
+    file_b = (src / "Beta.tsx").resolve()
+    file_a.write_text("export const Alpha = () => null;\n", encoding="utf-8")
+    file_b.write_text("export const Beta = () => null;\n", encoding="utf-8")
+
+    prompts = generate_stage_prompt("review", parallel=2)
+    assert len(prompts) == 2
+    for prompt in prompts:
+        assert str(file_a) in prompt
+        assert str(file_b) in prompt
+
+
 class TestReviewDomains:
     """Verify the 10 scored review domains (2 waves of 5) plus perfection gate."""
 
