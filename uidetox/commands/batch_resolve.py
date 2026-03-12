@@ -1,4 +1,8 @@
-"""Batch-resolve command: resolve multiple issues with a single coherent commit."""
+"""Batch-resolve command: resolve multiple issues with a single coherent commit.
+
+Includes failsafe pre-flight validation, rollback-safe verification, and
+self-healing error injection so the agent can recover from broken builds.
+"""
 
 import argparse
 import subprocess
@@ -143,6 +147,47 @@ def _derive_component_name(files: list[str]) -> str:
     return name
 
 
+def _preflight_validate(issue_ids: list[str], config: dict) -> list[str]:
+    """Pre-flight validation before resolve.  Returns list of warning strings.
+
+    Checks:
+    1. All referenced files exist on disk
+    2. No uncommitted changes in non-UIdetox files that could be lost
+    3. State file is not corrupted
+    """
+    warnings: list[str] = []
+
+    # Check that referenced files exist
+    for iid in issue_ids:
+        issue = get_issue(iid)
+        if issue:
+            fpath = issue.get("file", "")
+            if fpath and not Path(fpath).exists():
+                warnings.append(f"File not found: {fpath} (issue {iid})")
+
+    # Check for uncommitted changes that could conflict with auto-commit
+    if config.get("auto_commit", False):
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=M"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                changed = [
+                    f.strip() for f in result.stdout.strip().splitlines()
+                    if f.strip() and not f.strip().startswith(".uidetox")
+                ]
+                if len(changed) > 20:
+                    warnings.append(
+                        f"Large number of uncommitted changes ({len(changed)} files). "
+                        f"Consider committing manually first to avoid merge conflicts."
+                    )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # Git not available — skip check
+
+    return warnings
+
+
 def run(args: argparse.Namespace):
     issue_ids = args.issue_ids
     note = args.note
@@ -159,11 +204,25 @@ def run(args: argparse.Namespace):
 
     config = load_config()
 
+    # ── Pre-flight validation ──
+    preflight_warnings = _preflight_validate(issue_ids, config)
+    if preflight_warnings:
+        print("━━━ Pre-flight warnings ━━━")
+        for w in preflight_warnings:
+            print(f"  ⚠️  {w}")
+        print()
+        # Warnings are non-blocking but informational
+
     # Pre-commit verification gate
     if not skip_verify:
         print("━━━ Pre-commit verification ━━━")
         if not run_verification(config):
             print("❌ Verification failed. Build is broken.", file=sys.stderr)
+            print()
+            print("[AGENT INSTRUCTION] Fix the build errors above, then retry:")
+            print("  1. Fix the compiler/lint errors in the affected files")
+            print("  2. Run `uidetox check --fix` to auto-fix what you can")
+            print(f"  3. Retry: uidetox batch-resolve {' '.join(issue_ids)} --note \"{note}\"")
             sys.exit(1)
         print()
 
@@ -212,24 +271,27 @@ def run(args: argparse.Namespace):
         if len(remaining_in_component) > 5:
             print(f"      ... +{len(remaining_in_component) - 5} more")
 
-    # Git auto-commit (single commit for the entire batch)
+    # Git auto-commit via risk-aware policy (single commit for the entire batch)
     if config.get("auto_commit", False):
+        project_root = str(get_project_root())
         try:
-            # Stage all affected files + state
-            for f in affected_files:
-                subprocess.run(["git", "add", f], check=True, capture_output=True)
-            subprocess.run(["git", "add", ".uidetox/state.json"], check=True, capture_output=True)
-
+            from uidetox.git_policy import CommitPolicy, safe_commit
+            policy = CommitPolicy.from_config(config)
             commit_msg = f"[UIdetox] Detoxed {component}: {note} ({len(removed)} issues resolved)"
-            subprocess.run(
-                ["git", "commit", "-m", commit_msg, "--no-verify"],
-                check=True, capture_output=True,
+            result = safe_commit(
+                touched_files=affected_files,
+                message=commit_msg,
+                policy=policy,
+                cwd=project_root,
             )
-            print(f"\n   📦 Auto-committed: {commit_msg}")
-        except subprocess.CalledProcessError:
-            print("\n   ⚠️  Warning: Git auto-commit failed.")
-        except FileNotFoundError:
-            print("\n   ⚠️  Warning: git not found. Skipping auto-commit.")
+            if result.success:
+                print(f"\n   📦 Auto-committed: {commit_msg}")
+                if result.unrelated_files:
+                    print(f"   ℹ  {len(result.unrelated_files)} unrelated file(s) left unstaged.")
+            else:
+                print(f"\n   ⚠️  Auto-commit aborted: {result.aborted_reason}")
+        except Exception as e:
+            print(f"\n   ⚠️  Warning: Git auto-commit failed: {e}")
 
     # ---- Agent loop signal ----
     print()

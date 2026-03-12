@@ -13,6 +13,7 @@ import shlex
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+from uidetox.contracts import discover_schemas  # type: ignore
 
 @dataclass
 class ToolInfo:
@@ -31,10 +32,19 @@ class ProjectProfile:
     typescript: ToolInfo | None = None
     linter: ToolInfo | None = None
     formatter: ToolInfo | None = None
+    all_linters: list[ToolInfo] = field(default_factory=list)
+    all_formatters: list[ToolInfo] = field(default_factory=list)
     frontend: list[ToolInfo] = field(default_factory=list)
     backend: list[ToolInfo] = field(default_factory=list)
     database: list[ToolInfo] = field(default_factory=list)
     api: list[ToolInfo] = field(default_factory=list)
+    contract_artifacts: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "schema_files": [],
+            "dto_files": [],
+            "contract_files": [],
+        }
+    )
 
     def to_dict(self) -> dict:
         d: dict = {}
@@ -48,10 +58,17 @@ class ProjectProfile:
         d["typescript"] = asdict(ts) if ts is not None else None # type: ignore
         d["linter"] = asdict(ln) if ln is not None else None # type: ignore
         d["formatter"] = asdict(fm) if fm is not None else None # type: ignore
+        d["all_linters"] = [asdict(t) for t in self.all_linters] # type: ignore
+        d["all_formatters"] = [asdict(t) for t in self.all_formatters] # type: ignore
         d["frontend"] = [asdict(t) for t in self.frontend] # type: ignore
         d["backend"] = [asdict(t) for t in self.backend] # type: ignore
         d["database"] = [asdict(t) for t in self.database] # type: ignore
         d["api"] = [asdict(t) for t in self.api] # type: ignore
+        d["contract_artifacts"] = {
+            "schema_files": list(self.contract_artifacts.get("schema_files", [])),
+            "dto_files": list(self.contract_artifacts.get("dto_files", [])),
+            "contract_files": list(self.contract_artifacts.get("contract_files", [])),
+        }
         return d
 
 
@@ -85,7 +102,10 @@ def _safe_glob(root: Path, suffix: str, *, limit: int = 50) -> list[Path]:
     """
     results: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith('.')]
+        # Filter dirnames in-place to control recursion
+        keep = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith('.')]
+        dirnames.clear()
+        dirnames.extend(keep)
         for f in filenames:
             if f.endswith(suffix):
                 results.append(Path(dirpath) / f)
@@ -150,7 +170,8 @@ def _npx_or_local(root: Path, cmd: str) -> str:
     parts = shlex.split(cmd)
     if not parts:
         return cmd
-    binary, args = parts[0], parts[1:]
+    binary = parts[0]
+    args = [p for i, p in enumerate(parts) if i > 0]
     local = _local_bin_cmd(root, binary, args)
     if local:
         return local
@@ -203,42 +224,80 @@ def detect_typescript(root: Path) -> ToolInfo | None:
     return None
 
 
-def detect_linter(root: Path) -> ToolInfo | None:
-    """Detect linter: biome > eslint."""
+def detect_linters(root: Path) -> list[ToolInfo]:
+    """Detect linters: biome, eslint, stylelint, markuplint."""
+    found: list[ToolInfo] = []
+    
     biome_cfg = _find_any(root, ["biome.json", "biome.jsonc"])
     if biome_cfg:
-        return ToolInfo(
+        found.append(ToolInfo(
             name="biome",
             config_file=biome_cfg,
             run_cmd=_npx_or_local(root, "biome check ."),
             fix_cmd=_npx_or_local(root, "biome check --write ."),
-        )
+        ))
 
     eslint_cfg = _find_any(root, [
         "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts",
         ".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml",
     ])
     if eslint_cfg or _has_dep(root, "eslint"):
-        return ToolInfo(
+        found.append(ToolInfo(
             name="eslint",
             config_file=eslint_cfg or "package.json",
             run_cmd=_npx_or_local(root, "eslint --format unix ."),
             fix_cmd=_npx_or_local(root, "eslint --fix ."),
-        )
-    return None
+        ))
+        
+    stylelint_cfg = _find_any(root, [
+        ".stylelintrc", ".stylelintrc.js", ".stylelintrc.json", ".stylelintrc.yml",
+        ".stylelintrc.yaml", "stylelint.config.js", "stylelint.config.mjs",
+        "stylelint.config.cjs",
+    ])
+    if stylelint_cfg or _has_dep(root, "stylelint"):
+        found.append(ToolInfo(
+            name="stylelint",
+            config_file=stylelint_cfg or "package.json",
+            run_cmd=_npx_or_local(root, 'stylelint "**/*.{css,scss,sass,less}"'),
+            fix_cmd=_npx_or_local(root, 'stylelint "**/*.{css,scss,sass,less}" --fix'),
+        ))
+        
+    markuplint_cfg = _find_any(root, [
+        ".markuplintrc", "markuplint.config.js", "markuplint.config.ts",
+        "markuplint.config.mjs", "markuplint.config.cjs",
+    ])
+    if markuplint_cfg or _has_dep(root, "markuplint"):
+        found.append(ToolInfo(
+            name="markuplint",
+            config_file=markuplint_cfg or "package.json",
+            run_cmd=_npx_or_local(root, "markuplint **/*.html"),
+            fix_cmd=_npx_or_local(root, "markuplint **/*.html --fix"),
+        ))
+    return found
 
 
-def detect_formatter(root: Path) -> ToolInfo | None:
-    """Detect formatter: biome (if already linter) > prettier."""
-    # If biome is detected, it handles formatting too
+def detect_linter(root: Path) -> ToolInfo | None:
+    """Detect primary linter: biome > eslint."""
+    linters = detect_linters(root)
+    # Prefer biome if present, otherwise first one found
+    for l in linters:
+        if l.name == "biome":
+            return l
+    return linters[0] if linters else None
+
+
+def detect_formatters(root: Path) -> list[ToolInfo]:
+    """Detect formatters: biome, prettier."""
+    found: list[ToolInfo] = []
+    
     biome_cfg = _find_any(root, ["biome.json", "biome.jsonc"])
     if biome_cfg:
-        return ToolInfo(
+        found.append(ToolInfo(
             name="biome",
             config_file=biome_cfg,
-            run_cmd=_npx_or_local(root, "biome format --check ."),
-            fix_cmd=_npx_or_local(root, "biome format --write ."),
-        )
+            run_cmd=_npx_or_local(root, "biome check ."),
+            fix_cmd=_npx_or_local(root, "biome check --write ."),
+        ))
 
     prettier_cfg = _find_any(root, [
         ".prettierrc", ".prettierrc.js", ".prettierrc.json", ".prettierrc.yml",
@@ -246,13 +305,22 @@ def detect_formatter(root: Path) -> ToolInfo | None:
         "prettier.config.mjs", "prettier.config.cjs",
     ])
     if prettier_cfg or _has_dep(root, "prettier"):
-        return ToolInfo(
+        found.append(ToolInfo(
             name="prettier",
             config_file=prettier_cfg or "package.json",
             run_cmd=_npx_or_local(root, "prettier --check ."),
             fix_cmd=_npx_or_local(root, "prettier --write ."),
-        )
-    return None
+        ))
+    return found
+
+
+def detect_formatter(root: Path) -> ToolInfo | None:
+    """Detect primary formatter: biome (if already linter) > prettier."""
+    formatters = detect_formatters(root)
+    for f in formatters:
+        if f.name == "biome":
+            return f
+    return formatters[0] if formatters else None
 
 
 def detect_frontend(root: Path) -> list[ToolInfo]:
@@ -348,6 +416,67 @@ def detect_api(root: Path) -> list[ToolInfo]:
     return found
 
 
+def detect_contract_artifacts(root: Path, *, limit_per_bucket: int = 75) -> dict[str, list[str]]:
+    """Detect schema/DTO/contract artifact files used for full-stack validation."""
+    schema_files: list[str] = []
+    dto_files: list[str] = []
+    contract_files: list[str] = []
+
+    # Canonical schema discovery (OpenAPI/GraphQL/Prisma)
+    try:
+        for schema_path in discover_schemas(root):
+            try:
+                rel = schema_path.relative_to(root).as_posix()
+            except ValueError:
+                rel = str(schema_path.as_posix())
+            schema_files.append(rel)
+            if len(schema_files) >= limit_per_bucket:
+                break
+    except Exception:
+        # Contract discovery is additive-only; never fail tooling detection.
+        pass
+
+    # Heuristic DTO/contract discovery from source files
+    exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".yaml", ".yml", ".graphql", ".gql"}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fname in filenames:
+            path = Path(dirpath) / fname
+            if path.suffix.lower() not in exts:
+                continue
+
+            lower_name = fname.lower()
+            try:
+                rel = path.relative_to(root).as_posix()
+            except ValueError:
+                rel = str(path.as_posix())
+
+            if (
+                ("dto" in lower_name or lower_name.endswith(".dto.ts") or ".dto." in lower_name)
+                and len(dto_files) < limit_per_bucket
+            ):
+                dto_files.append(rel)
+                continue
+
+            if (
+                any(token in lower_name for token in ("contract", "schema", "validator", "zod", "valibot", "io-ts"))
+                and len(contract_files) < limit_per_bucket
+            ):
+                contract_files.append(rel)
+
+        if (
+            len(dto_files) >= limit_per_bucket
+            and len(contract_files) >= limit_per_bucket
+        ):
+            break
+
+    return {
+        "schema_files": sorted(set(schema_files)),
+        "dto_files": sorted(set(dto_files)),
+        "contract_files": sorted(set(contract_files)),
+    }
+
+
 def detect_all(root: Path | None = None) -> ProjectProfile:
     """Run all detections and return a ProjectProfile."""
     if root is None:
@@ -360,8 +489,11 @@ def detect_all(root: Path | None = None) -> ProjectProfile:
         typescript=detect_typescript(root),
         linter=detect_linter(root),
         formatter=detect_formatter(root),
+        all_linters=detect_linters(root),
+        all_formatters=detect_formatters(root),
         frontend=detect_frontend(root),
         backend=detect_backend(root),
         database=detect_database(root),
         api=detect_api(root),
+        contract_artifacts=detect_contract_artifacts(root),
     )

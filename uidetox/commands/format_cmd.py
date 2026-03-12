@@ -2,57 +2,64 @@
 
 import argparse
 import subprocess
-from uidetox.tooling import detect_all
-from uidetox.state import load_config
-from uidetox.utils import run_tool
+from dataclasses import asdict
+from uidetox.tooling import detect_all  # type: ignore
+from uidetox.state import load_config, get_project_root  # type: ignore
+from uidetox.utils import run_tool  # type: ignore
 
 
 def run(args: argparse.Namespace):
     config = load_config()
     tooling = config.get("tooling")
 
-    if tooling and tooling.get("formatter"):
-        formatter = tooling["formatter"]
+    formatters = []
+    if tooling and tooling.get("all_formatters"):
+        formatters = tooling["all_formatters"]
+    elif tooling and tooling.get("formatter"):
+        formatters = [tooling["formatter"]]
     else:
         profile = detect_all()
-        if not profile.formatter:
+        if not profile.all_formatters:
             print("No formatter detected. Install biome or prettier.")
             return
-        formatter = {"name": profile.formatter.name, "run_cmd": profile.formatter.run_cmd,
-                     "fix_cmd": profile.formatter.fix_cmd}
+        formatters = [asdict(f) for f in profile.all_formatters]
 
     fix = getattr(args, "fix", False)
-    cmd = formatter["fix_cmd"] if fix and formatter.get("fix_cmd") else formatter["run_cmd"]
+    project_root = str(get_project_root())
 
-    print("==============================")
-    print(f" UIdetox Format ({formatter['name']})")
-    print("==============================")
-    print(f"  Running: {cmd}")
-    print()
+    for formatter in formatters:
+        cmd = formatter["fix_cmd"] if fix and formatter.get("fix_cmd") else formatter["run_cmd"]
 
-    try:
-        result = run_tool(cmd, cwd=".", timeout=120)
-    except FileNotFoundError:
-        print(f"Command not found. Install {formatter['name']}.")
-        return
-    except subprocess.TimeoutExpired:
-        print("Format check timed out after 120s.")
-        return
+        print("==============================")
+        print(f" UIdetox Format ({formatter['name']})")
+        print("==============================")
+        print(f"  Running: {cmd}")
+        print()
 
-    output = result.stdout + result.stderr
+        try:
+            result = run_tool(cmd, cwd=project_root, timeout=120)
+        except FileNotFoundError:
+            print(f"Command not found. Install {formatter['name']}.")
+            continue
+        except subprocess.TimeoutExpired:
+            print(f"Format check ({formatter['name']}) timed out after 120s.")
+            continue
 
-    if result.returncode == 0:
-        if fix:
-            print("✅ Formatting applied successfully.")
+        output = result.stdout + result.stderr
+
+        if result.returncode == 0:
+            if fix:
+                print(f"✅ {formatter['name']}: Formatting applied successfully.")
+            else:
+                print(f"✅ {formatter['name']}: All files properly formatted.")
         else:
-            print("✅ All files properly formatted.")
-    else:
-        if fix:
-            print("🔧 Formatting applied.")
-        else:
-            print("⚠️  Formatting issues found:")
-        if output.strip():
-            print(output[:2000])
+            if fix:
+                print(f"🔧 {formatter['name']}: Formatting applied.")
+            else:
+                print(f"⚠️  {formatter['name']}: Formatting issues found:")
+            if output.strip():
+                print(output[:1000])
 
-    if not fix and result.returncode != 0:
+    # Final footer
+    if not fix:
         print(f"\nRun 'uidetox format --fix' to auto-fix formatting issues.")

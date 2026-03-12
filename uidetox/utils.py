@@ -92,7 +92,7 @@ def compute_design_score(state: dict) -> dict:
     if objective_score is None:
         blended = subjective_score  # may also be None → no score available
     elif subjective_score is not None:
-        blended = int(objective_score * 0.6 + subjective_score * 0.4)
+        blended = int(objective_score * 0.3 + subjective_score * 0.7)
     else:
         blended = objective_score
 

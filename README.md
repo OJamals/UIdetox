@@ -96,7 +96,7 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 > **Visual Regression Workflow**: Use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive`) to generate screenshot diffs that are surfaced inside `uidetox review`.
 
 
-**Design Score** = Objective × 0.6 + Subjective × 0.4 — the agent keeps looping until this hits the target.
+**Design Score** = Objective × 0.3 + Subjective × 0.7 — the agent keeps looping until this hits the target.
 
 ---
 

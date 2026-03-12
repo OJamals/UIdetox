@@ -39,7 +39,7 @@ uidetox next
 | `uidetox check --fix` | Pre-commit quality gate (tsc → lint → format) |
 | `uidetox review` | LLM subjective quality review |
 | `uidetox review --score N` | Record subjective score (0-100) |
-| `uidetox status` | Blended Design Score (60% static + 40% LLM review) |
+| `uidetox status` | Blended Design Score (30% static + 70% LLM review) |
 | `uidetox memory show` | View session progress and last scan summary |
 | `uidetox finish` | Squash-merge session branch |
 

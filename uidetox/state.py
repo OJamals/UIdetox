@@ -162,14 +162,26 @@ def _normalize_issue_text(value: str) -> str:
     return " ".join(str(value).split()).strip().lower()
 
 
-def _issue_signature(issue: dict) -> str:
-    """Create a stable signature for deduplicating pending issues."""
-    return "::".join(
-        [
-            _normalize_issue_text(issue.get("file", "")),
-            _normalize_issue_text(issue.get("issue", "")),
-        ]
-    )
+def _issue_signature(issue: dict, *, phase_scoped: bool = False) -> str:
+    """Create a stable signature for deduplicating pending issues.
+
+    When *phase_scoped* is True the phase tag (e.g. ``"check"``,
+    ``"scan"``, ``"review"``) is included in the key so that
+    lint/format can run once per phase while still avoiding duplicate
+    issues within a single phase.
+
+    Backward compatible: omitting ``phase`` or setting *phase_scoped*
+    to False produces the same global signature as before.
+    """
+    parts = [
+        _normalize_issue_text(issue.get("file", "")),
+        _normalize_issue_text(issue.get("issue", "")),
+    ]
+    if phase_scoped:
+        phase = _normalize_issue_text(issue.get("phase", ""))
+        if phase:
+            parts.append(phase)
+    return "::".join(parts)
 
 
 def _merge_issue(existing: dict, incoming: dict) -> bool:
@@ -220,13 +232,23 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
             return True
         return False
 
-def add_issue(issue: dict) -> str:
+def add_issue(issue: dict, *, phase: str = "") -> str:
+    """Add a single issue to the queue with optional phase-scoped dedup.
+
+    When *phase* is provided it is stored on the issue and used as part
+    of the dedup signature so identical lint/format findings from
+    different phases are kept separate while true duplicates within one
+    phase are still suppressed.
+    """
+    if phase:
+        issue["phase"] = phase
+    phase_scoped = bool(issue.get("phase"))
     with _locked_file("state"):
         state = load_state()
         issues = state.setdefault("issues", [])
-        signature = _issue_signature(issue)
+        signature = _issue_signature(issue, phase_scoped=phase_scoped)
         for existing in issues:
-            if _issue_signature(existing) != signature:
+            if _issue_signature(existing, phase_scoped=phase_scoped) != signature:
                 continue
             if _merge_issue(existing, issue):
                 save_state(state)
@@ -240,24 +262,35 @@ def add_issue(issue: dict) -> str:
         return "added"
 
 
-def batch_add_issues(new_issues: list[dict]) -> dict[str, int]:
+def batch_add_issues(new_issues: list[dict], *, phase: str = "") -> dict[str, int]:
     """Add multiple issues in a single load/save cycle.
 
     Significantly more efficient than calling add_issue() in a loop
     during scans that may produce hundreds of issues.
+
+    When *phase* is provided it is stored on every issue and used for
+    phase-scoped deduplication.
     """
     if not new_issues:
         return {"added": 0, "updated": 0, "skipped": 0}
+    if phase:
+        for issue in new_issues:
+            issue["phase"] = phase
+    # Determine whether any issue carries a phase tag
+    phase_scoped = any(issue.get("phase") for issue in new_issues)
     with _locked_file("state"):
         state = load_state()
         issues = state.setdefault("issues", [])
-        existing_by_signature = {_issue_signature(issue): issue for issue in issues}
+        existing_by_signature = {
+            _issue_signature(issue, phase_scoped=phase_scoped): issue
+            for issue in issues
+        }
         ts = now_iso()
         added = 0
         updated = 0
         skipped = 0
         for issue in new_issues:
-            signature = _issue_signature(issue)
+            signature = _issue_signature(issue, phase_scoped=phase_scoped)
             existing = existing_by_signature.get(signature)
             if existing is not None:
                 if _merge_issue(existing, issue):

@@ -2,12 +2,31 @@
 
 import argparse
 import subprocess
-from uidetox.tooling import detect_all
-from uidetox.state import load_config, save_config, get_project_root
-from uidetox.utils import run_tool
-from uidetox.commands import tsc as tsc_cmd
-from uidetox.commands import lint as lint_cmd
-from uidetox.commands import format_cmd
+from uidetox.tooling import detect_all  # type: ignore
+from uidetox.state import load_config, save_config, get_project_root  # type: ignore
+from uidetox.utils import run_tool  # type: ignore
+from uidetox.commands import tsc as tsc_cmd  # type: ignore
+from uidetox.commands import lint as lint_cmd  # type: ignore
+from uidetox.commands import format_cmd  # type: ignore
+
+
+def _git_changed_paths(project_root: str) -> set[str]:
+    """Return staged, unstaged, and untracked repo paths."""
+    changed: set[str] = set()
+    commands = (
+        ["git", "diff", "--name-only"],
+        ["git", "diff", "--name-only", "--cached"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    )
+    for cmd in commands:
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=project_root)
+        if res.returncode != 0:
+            raise subprocess.CalledProcessError(res.returncode, cmd, output=res.stdout, stderr=res.stderr)
+        for line in res.stdout.splitlines():
+            path = line.strip()
+            if path:
+                changed.add(path)
+    return changed
 
 
 def run(args: argparse.Namespace):
@@ -29,36 +48,53 @@ def run(args: argparse.Namespace):
     fix = getattr(args, "fix", False)
     steps_run = 0
     project_root = str(get_project_root())
+    pre_fix_changed: set[str] | None = None
 
-    if fix and (tooling.get("linter") or tooling.get("formatter")):
+    # Build tool lists with fallback: prefer all_linters/all_formatters,
+    # fall back to single linter/formatter if the lists are empty.
+    fix_formatters = tooling.get("all_formatters") or []
+    if not fix_formatters and tooling.get("formatter"):
+        fix_formatters = [tooling["formatter"]]
+    fix_linters = tooling.get("all_linters") or []
+    if not fix_linters and tooling.get("linter"):
+        fix_linters = [tooling["linter"]]
+
+    if fix and (fix_linters or fix_formatters):
+        if config.get("auto_commit", False):
+            try:
+                pre_fix_changed = _git_changed_paths(project_root)
+            except Exception as e:
+                print(f"  ⚠️  Warning: Could not establish git baseline for scoped auto-commit: {e}")
+                pre_fix_changed = None
+
         print("━━━ Phase 1: Iterative Auto-Fix ━━━")
+
+        # Deduplicate: when biome is both linter and formatter, the same
+        # fix command would run twice per iteration. Track by command string.
+        seen_cmds: set[str] = set()
+        deduped_tools: list[dict] = []
+        for tool in fix_formatters + fix_linters:
+            cmd = tool.get("fix_cmd")
+            if cmd and cmd not in seen_cmds:
+                seen_cmds.add(cmd)
+                deduped_tools.append(tool)
+
         for iteration in range(1, 4):
             print(f"Iteration {iteration}...")
             changed = False
-            
-            if tooling.get("formatter"):
-                cmd = tooling["formatter"].get("fix_cmd")
-                if cmd:
-                    try:
-                        res = run_tool(cmd, cwd=project_root)
-                        # If formatter changed files, it usually outputs file names or has exit code
-                        if res.returncode != 0 or "fixed" in res.stdout.lower() or "formatted" in res.stdout.lower():
-                            changed = True
-                    except FileNotFoundError:
-                        print(f"Warning: Formatter command not found ({cmd})")
 
-            if tooling.get("linter"):
-                cmd = tooling["linter"].get("fix_cmd")
-                if cmd:
-                    try:
-                        res = run_tool(cmd, cwd=project_root)
-                        # If linter fixed files, it might still have exit code 1 if some remain
-                        # We assume it changed things if the output mentions fixes, or just run max 3 times anyway
-                        if "fixed" in res.stdout.lower() or "fixed" in res.stderr.lower():
-                            changed = True
-                    except FileNotFoundError:
-                        print(f"Warning: Linter command not found ({cmd})")
-            
+            for tool in deduped_tools:
+                cmd = tool.get("fix_cmd")
+                if not cmd:
+                    continue
+                try:
+                    res = run_tool(cmd, cwd=project_root)
+                    combined = (res.stdout + res.stderr).lower()
+                    if res.returncode != 0 or "fixed" in combined or "formatted" in combined:
+                        changed = True
+                except FileNotFoundError:
+                    print(f"Warning: Command not found ({cmd})")
+
             if not changed:
                 print("Code is clean or no more auto-fixes available.\n")
                 break
@@ -66,25 +102,23 @@ def run(args: argparse.Namespace):
 
         if config.get("auto_commit", False):
             try:
-                status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=project_root)
-                changed_files = [
-                    line[3:].strip() for line in status.stdout.strip().splitlines()
-                    if line and len(line) >= 3 and line[1] == 'M'
-                    # Only work-tree modifications (column 2 = 'M') — these are
-                    # files the formatter/linter just changed.  Avoids staging
-                    # the user's unrelated manually-modified files.
-                ]
+                if pre_fix_changed is None:
+                    raise RuntimeError("missing pre-fix git baseline")
+                post_fix_changed = _git_changed_paths(project_root)
+                changed_files = sorted(post_fix_changed - pre_fix_changed)
                 if changed_files:
-                    # Stage only files modified by linter/formatter, not all tracked files
-                    for f in changed_files:
-                        subprocess.run(["git", "add", f], cwd=project_root, capture_output=True)
-                    subprocess.run(
-                        ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"],
-                        check=True,
-                        stdout=subprocess.DEVNULL,
+                    from uidetox.git_policy import CommitPolicy, safe_commit
+                    policy = CommitPolicy.from_config(config)
+                    result = safe_commit(
+                        touched_files=list(changed_files),
+                        message="[UIdetox] Mechanical auto-fix (formatting/linting)",
+                        policy=policy,
                         cwd=project_root,
                     )
-                    print("  📦 Auto-committed mechanical fixes to git.\n")
+                    if result.success:
+                        print("  📦 Auto-committed mechanical fixes to git.\n")
+                    else:
+                        print(f"  ⚠️  Auto-commit aborted: {result.aborted_reason}\n")
             except Exception as e:
                 print(f"  ⚠️  Warning: Git auto-commit failed during mechanical check: {e}\n")
 
@@ -101,7 +135,7 @@ def run(args: argparse.Namespace):
         print("  TypeScript: skipped (not detected)\n")
 
     # Step 2: Lint
-    if tooling.get("linter"):
+    if fix_linters:
         print("  Running Linter check...")
         lint_args = argparse.Namespace(fix=False)
         lint_cmd.run(lint_args)
@@ -111,7 +145,7 @@ def run(args: argparse.Namespace):
         print("  Linter: skipped (not detected)\n")
 
     # Step 3: Format
-    if tooling.get("formatter"):
+    if fix_formatters:
         print("  Running Formatter check...")
         fmt_args = argparse.Namespace(fix=False)
         format_cmd.run(fmt_args)

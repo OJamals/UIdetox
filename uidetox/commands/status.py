@@ -100,8 +100,8 @@ def run(args: argparse.Namespace):
     else:
         print(f"\n  Design Score : [{bar}] {score}/100")
     if subjective_score is not None:
-        print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
-        print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
+        print(f"    Objective  : {objective_score}/100  (static analysis — 30% weight)")
+        print(f"    Subjective : {subjective_score}/100  (LLM review — 70% weight)")
     elif scans_run == 0 and scores["total_slop"] == 0:
         print(f"  (Baseline — run 'uidetox scan' for an accurate score)")
     else:

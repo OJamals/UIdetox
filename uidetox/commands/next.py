@@ -8,16 +8,21 @@ from uidetox.skills import recommend_skills_for_issues, format_skill_recommendat
 
 
 def _get_skill_path() -> Path | None:
-    """Locate SKILL.md — check project root first, then bundled data."""
+    """Locate SKILL.md — check platform-specific directories, then bundled data."""
     cwd = Path.cwd()
-    # 1. Project root (installed via update-skill)
+    # 1. Project root (installed via update-skill for copilot)
     if (cwd / "SKILL.md").exists():
         return cwd / "SKILL.md"
-    # 2. Claude skills directory
-    claude_skill = cwd / ".claude" / "skills" / "uidetox" / "SKILL.md"
-    if claude_skill.exists():
-        return claude_skill
-    # 3. Bundled inside pip package
+    # 2. Platform-specific skill directories (update-skill installs here)
+    for platform in (".claude", ".cursor", ".gemini", ".windsurf", ".github"):
+        skill = cwd / platform / "skills" / "uidetox" / "SKILL.md"
+        if skill.exists():
+            return skill
+    # 3. Legacy .agents directory
+    agents_skill = cwd / ".agents" / "skills" / "uidetox" / "SKILL.md"
+    if agents_skill.exists():
+        return agents_skill
+    # 4. Bundled inside pip package
     pkg_data = Path(__file__).resolve().parent.parent / "data" / "SKILL.md"
     if pkg_data.exists():
         return pkg_data

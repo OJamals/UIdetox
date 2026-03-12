@@ -1,22 +1,35 @@
-## GitHub Copilot Workspace Integration
+## GitHub Copilot Integration
 
-GitHub Copilot Workspace operates on spec-driven pull request generation. UIdetox can be used as a pre-flight checklist or a continuous spec constraint.
+UIdetox integrates with GitHub Copilot through its native `.github/copilot-instructions.md` project-level instruction file.
 
-### 1. Spec Constraint
+### 1. Installation
+
+```bash
+uidetox update-skill copilot
+```
+
+This command:
+- Creates `.github/copilot-instructions.md` with UIdetox anti-slop directives (section-injected, safe for existing files)
+- Copies `SKILL.md` and `AGENTS.md` to the project root
+- Copies `reference/` and `commands/` directories
+
+Copilot automatically reads `.github/copilot-instructions.md` as project context. The installer uses `<!-- uidetox-skill-begin -->` / `<!-- uidetox-skill-end -->` markers, so running `update-skill copilot` again will update the UIdetox section without affecting other content in the file.
+
+### 2. Spec Constraint
 
 When defining your Copilot Workspace prompt, explicitly include UIdetox requirements:
 
 ```markdown
 # Implementation Requirements
 
-This project adheres to the UIdetox anti-slop guidelines. 
+This project adheres to the UIdetox anti-slop guidelines.
 1. Read `SKILL.md` before generating any UI components.
 2. Avoid generic, AI-generated aesthetics (e.g., system-ui fonts, flat borders, excessive glassmorphism, purple gradients).
 3. The resulting PR must successfully pass `uidetox check` and `uidetox scan` without generating any T2, T3, or T4 issues.
 4. **CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
 ```
 
-### 2. Terminal Integration
+### 3. Terminal Integration
 
 If you use Copilot within your CLI or IDE terminal, dispatch into the full autonomous loop:
 

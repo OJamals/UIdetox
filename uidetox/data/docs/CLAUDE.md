@@ -23,7 +23,7 @@ This bootstraps the full 5-phase protocol with auto-detected tooling, continuati
 2. Run `uidetox scan --path .` then systematically read every frontend file (LLM-dynamic analysis)
 3. Fix issues component-by-component using `uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`
 4. Run `uidetox review` + `uidetox review --score N` to record subjective quality
-5. Check `uidetox status` for blended Design Score (60% static + 40% LLM review)
+5. Check `uidetox status` for blended Design Score (30% static + 70% LLM review)
 6. Run `uidetox finish` to squash-merge the session branch
 
 Progress is auto-saved to memory. Re-running `uidetox loop` resumes from the last checkpoint.

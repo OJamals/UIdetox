@@ -195,3 +195,56 @@ class TestColorUtilsExceptionLogging:
         """color_utils.py should use logging in its exception handlers."""
         source = (ROOT / "uidetox" / "color_utils.py").read_text()
         assert "logging.getLogger" in source or "logger." in source
+
+
+# ── Issue 8: git auto-commit safety in harness commands ─────────
+
+class TestGitCommitSafety:
+    """Automation commit paths should not bypass git hooks by default."""
+
+    def test_no_no_verify_in_autonomous_commit_paths(self):
+        for rel in [
+            "uidetox/commands/autofix.py",
+            "uidetox/commands/check.py",
+            "uidetox/commands/resolve.py",
+            "uidetox/commands/batch_resolve.py",
+        ]:
+            source = (ROOT / rel).read_text()
+            assert "--no-verify" not in source, f"{rel} should not bypass git hooks by default"
+
+    def test_check_uses_changed_file_delta_for_autocommit(self):
+        source = (ROOT / "uidetox/commands/check.py").read_text()
+        assert "_git_changed_paths" in source
+        assert "post_fix_changed - pre_fix_changed" in source
+
+
+# ── Issue 9: loop Stage-2 queue-empty transition gate ───────────
+
+class TestLoopQueueEmptyTransition:
+    """Stage-2 subjective review transition should be queue-empty gated at runtime."""
+
+    def test_queue_empty_tag_is_defined(self):
+        source = (ROOT / "uidetox/commands/loop.py").read_text()
+        assert "_QUEUE_EMPTY_ONLY_TAG" in source
+
+    def test_runtime_skip_guard_exists(self):
+        source = (ROOT / "uidetox/commands/loop.py").read_text()
+        assert "reason.startswith(_QUEUE_EMPTY_ONLY_TAG)" in source
+        assert "Skipping queue-empty-only step" in source
+
+
+# ── Issue 10: autofix phase resolution correctness ───────────────
+
+class TestAutofixPhaseResolution:
+    """Autofix should not resolve lint/format issues when fix commands fail."""
+
+    def test_autofix_uses_phase_stats_for_resolution(self):
+        source = (ROOT / "uidetox/commands/autofix.py").read_text()
+        assert "if stats.clean" in source
+        assert "Lint fix phase had failures" in source
+        assert "Format fix phase had failures" in source
+
+    def test_autofix_no_global_dedupe_set(self):
+        source = (ROOT / "uidetox/commands/autofix.py").read_text()
+        assert "_executed_cmds" not in source
+        assert "phase_dedupe" in source

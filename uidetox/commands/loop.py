@@ -37,9 +37,14 @@ from ..skills import (
     format_skill_recommendations,
     list_all_skills,
 )
+from ..gitnexus_cache import (
+    set_iteration as _set_cache_iteration,
+    cache_stats as _cache_stats,
+)
 
 # Maximum iterations to prevent infinite loops in edge cases
 _MAX_LOOP_ITERATIONS = 20
+_QUEUE_EMPTY_ONLY_TAG = "[queue-empty-only]"
 
 
 def run(args: argparse.Namespace):
@@ -109,6 +114,22 @@ def _run_iteration(
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))
     is_orchestrator = bool(getattr(args, "orchestrator", True))
+
+    # ---- GitNexus codebase indexing (early — before any analysis) ----
+    # Advance the GitNexus cache iteration so stale entries are pruned.
+    _set_cache_iteration(iteration)
+    stats = _cache_stats()
+    if stats["total_entries"] > 0:
+        print(f"  GitNexus cache: {stats['total_entries']} entries (iter {stats['iteration']})")
+
+    # Run as pre-phase so the call graph is fresh for all downstream
+    # commands (observe, diagnose, review, impact analysis, etc.).
+    # Non-fatal: if npx/gitnexus aren't installed, we silently continue.
+    print("  Refreshing GitNexus codebase index...")
+    rc = _exec_cmd("npx gitnexus analyze", "pre-phase codebase indexing", dry_run=dry_run)
+    if rc != 0:
+        print("  ℹ  GitNexus not available or index refresh failed — continuing without it.")
+    print()
 
     # ---- Git workspace isolation ----
     if config.get("auto_commit"):
@@ -216,6 +237,7 @@ def _run_iteration(
             is_orchestrator=is_orchestrator,
             auto_parallel=auto_parallel,
             queue_size=queue_size,
+            tooling=tooling,
         )
 
         print("=" * 60)
@@ -342,10 +364,11 @@ def _post_execution_checkpoint(
         print("       Obey SKILL.md rules and design dials shown in the output.")
         print()
         print("    3. Run:  uidetox check --fix")
-        print("       → Ensures the build is clean (tsc → lint → format).")
+        print("       → MUST pass (tsc → lint → format) BEFORE committing.")
         print()
         print('    4. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
         print("       → Marks issues resolved, auto-commits if enabled.")
+        print("       → ONLY run after check --fix passes.")
         print()
         print("    5. Run:  uidetox loop")
         print("       → Re-enters the autonomous loop with fresh state.")
@@ -354,16 +377,23 @@ def _post_execution_checkpoint(
         # Queue empty but score below target — needs review/rescan
         print(f"  Queue is empty but score ({blended}) < target ({target}).")
         print()
-        print("    1. Run:  uidetox review")
-        print("       → Perform a subjective UX review and score the design.")
+        print("    1. Run:  npx gitnexus query \"frontend components\"")
+        print("       → Map the component graph before reviewing.")
         print()
-        print("    2. Run:  uidetox review --score <N>")
+        print("    2. Run:  uidetox check --fix")
+        print("       → Ensure code is clean (tsc → lint → format) before scoring.")
+        print()
+        print("    3. Run:  uidetox review")
+        print("       → Perform a subjective UX review and score the design.")
+        print("       → (or `uidetox review --parallel 5` for domain-sharded review)")
+        print()
+        print("    4. Run:  uidetox review --score <N>")
         print("       → Record your subjective score (0-100).")
         print()
-        print("    3. Queue any new issues found during review:")
+        print("    5. Queue any new issues found during review:")
         print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "..." --fix-command "..."')
         print()
-        print("    4. Run:  uidetox loop")
+        print("    6. Run:  uidetox loop")
         print("       → Re-enters with fresh state. Rescans if queue remains empty.")
 
     if not can_recurse:
@@ -437,6 +467,7 @@ def _build_autopilot_plan(
     is_orchestrator: bool,
     auto_parallel: int,
     queue_size: int | None = None,
+    tooling: dict | None = None,
 ) -> list[tuple[str, str]]:
     """Build an ordered command plan for autonomous loop execution.
 
@@ -446,6 +477,11 @@ def _build_autopilot_plan(
     """
     if queue_size is None:
         queue_size = len(issues)
+    if tooling is None:
+        tooling = config.get("tooling", {})
+    is_fullstack = bool(
+        tooling.get("backend") or tooling.get("database") or tooling.get("api")
+    )
     target_path = _derive_target_path(issues)
     plan: list[tuple[str, str]] = []
 
@@ -453,9 +489,14 @@ def _build_autopilot_plan(
     # STAGE 1 / REDISCOVERY (queue empty, score below target)
     # ──────────────────────────────────────────────────────────────
     if queue_size == 0:
+        # ── Pre-analysis mechanical gate ──
         if has_mechanical:
             plan.append(("uidetox check --fix", "clear mechanical issues before deeper analysis"))
+
         plan.append(("uidetox rescan --path .", "refresh issue queue from latest code"))
+
+        # Contract + UX-state validation (deterministic gates)
+        plan.append(("uidetox scan --path .", "contract validation + UX-state coverage check"))
 
         # Run audit for comprehensive analysis
         plan.append(("uidetox audit .", "comprehensive quality audit (a11y, perf, theming, responsive)"))
@@ -480,7 +521,49 @@ def _build_autopilot_plan(
         for rec in review_recs[:3]:
             plan.append((f"uidetox {rec['skill']} .", f"review skill: {rec.get('reason', 'recommended')}"))
 
-        plan.append(("uidetox review", "subjective UX review pass"))
+        # ── Parallel domain-sharded subjective review (10 domains, 2 waves of 5) ──
+        # The subjective score carries 70% weight in the blended Design Score.
+        # Spawn 10 parallel domain review subagents for maximum granularity:
+        #   Wave 1 (5): typography, color, interaction, content, motion
+        #   Wave 2 (5): spatial, materiality, consistency, identity, architecture
+        from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+        review_parallel = len(REVIEW_DOMAINS)  # 10 domains = 10 shards
+        plan.append((
+            f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
+            f"parallel domain-sharded subjective review ({review_parallel} domains in 2 waves of 5, 70% of blended score)",
+        ))
+
+        # ── Full-stack cross-layer validation (only for full-stack projects) ──
+        if is_fullstack:
+            plan.append((
+                'npx gitnexus query "API endpoint route handler DTO"',
+                "full-stack gate: map backend surface for cross-layer validation",
+            ))
+            plan.append((
+                'npx gitnexus query "fetch request mutation query"',
+                "full-stack gate: map frontend data-fetching surfaces",
+            ))
+
+        # ── Pre-score verification gate ──
+        if has_mechanical:
+            plan.append(("uidetox check --fix", "lint/format/typecheck before scoring"))
+        plan.append(("uidetox status", "check blended score and queue after domain reviews"))
+
+        # ── Post-review: parallel implementation subagents for new issues ──
+        # Spawn 2 waves of 5 fix subagents (10 total) matching the review
+        # domain count.  Each wave handles issues from its corresponding
+        # review domains.
+        fix_parallel = max(1, min(10, max(auto_parallel, len(REVIEW_DOMAINS))))
+        if is_orchestrator:
+            plan.append((
+                f"uidetox subagent --stage-prompt fix --parallel {fix_parallel}",
+                f"parallel implementation subagents ({fix_parallel} shards, 2 waves of 5) for review-discovered issues",
+            ))
+
+        # ── Post-fix verification ──
+        if has_mechanical:
+            plan.append(("uidetox check --fix", "verify code is clean after implementation"))
+        plan.append(("uidetox subagent --stage-prompt verify", "verification subagent: confirm improvements"))
         plan.append(("uidetox status", "check blended score and queue"))
 
         if blended >= target:
@@ -529,9 +612,42 @@ def _build_autopilot_plan(
     for cycle in range(extra_cycles):
         plan.append(("uidetox next", f"context dump: batch {cycle + 2} of {len(dirs_with_issues)}"))
 
+    # ── Full-stack cross-layer validation after fixes ──
+    if is_fullstack:
+        plan.append((
+            "npx gitnexus detect_changes",
+            "full-stack gate: verify changes only affect expected symbols",
+        ))
+        plan.append((
+            'npx gitnexus query "DTO type interface schema"',
+            "full-stack gate: verify frontend types still match backend DTOs after fixes",
+        ))
+
+    # ── Post-fix quality gate — MUST pass before committing ──
+    if has_mechanical:
+        plan.append(("uidetox check --fix", "quality gate: tsc → lint → format BEFORE any commit"))
+
     # Final rescan to discover deeper issues after fixes
     plan.append(("uidetox rescan --path .", "rescan after fix phase — discover deeper issues"))
     plan.append(("uidetox status", "post-rescan status — check score trajectory"))
+
+    # ── Seamless objective→subjective transition ──
+    # If the fix loop emptied the queue, immediately trigger subjective
+    # review rather than requiring a full loop re-entry to reach Stage 1.
+    # Use 10 parallel domain-sharded review subagents (2 waves of 5).
+    from uidetox.subagent import REVIEW_DOMAINS
+    review_parallel = len(REVIEW_DOMAINS)  # 10 domains
+    if is_orchestrator:
+        plan.append((
+            f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
+            f"{_QUEUE_EMPTY_ONLY_TAG} seamless transition: parallel domain-sharded subjective review ({review_parallel} domains, 2 waves of 5, 70% weight)",
+        ))
+    else:
+        plan.append(("uidetox review", f"{_QUEUE_EMPTY_ONLY_TAG} seamless transition: subjective review (70% weight)"))
+
+    if has_mechanical:
+        plan.append(("uidetox check --fix", f"{_QUEUE_EMPTY_ONLY_TAG} final quality gate before scoring"))
+    plan.append(("uidetox status", f"{_QUEUE_EMPTY_ONLY_TAG} final score check — blended objective + subjective"))
 
     return plan
 
@@ -544,8 +660,13 @@ def _print_autopilot_plan(plan: list[tuple[str, str]]) -> None:
     print(f"  {len(plan)} command(s) queued for autonomous execution:")
     print()
     for idx, (cmd, reason) in enumerate(plan, 1):
+        queue_empty_only = reason.startswith(_QUEUE_EMPTY_ONLY_TAG)
+        display_reason = reason
+        if queue_empty_only:
+            display_reason = reason.replace(_QUEUE_EMPTY_ONLY_TAG, "", 1).strip()
+            display_reason += " [runs only when queue is empty at runtime]"
         print(f"    {idx:2d}. {cmd}")
-        print(f"        └─ {reason}")
+        print(f"        └─ {display_reason}")
     print()
     print("  NOTE: After these commands dump context, you will receive a")
     print("  step-by-step AGENT DIRECTIVE telling you exactly what to fix")
@@ -574,18 +695,39 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
     print()
 
     # Commands whose non-zero exit is a signal, not a fatal error
-    _signal_commands = {"next", "review", "status", "finish", "subagent"}
+    _signal_commands = {"next", "review", "status", "finish", "subagent", "gitnexus"}
+    # External tool prefixes (npx, node, etc.) — non-zero exit is never fatal
+    _external_prefixes = {"npx", "node", "bunx"}
+    # Per-command timeout (seconds) — prevents infinite hangs
+    _CMD_TIMEOUT = 300  # 5 minutes per command (generous for large projects)
+    _LONG_CMD_TIMEOUT = 600  # 10 minutes for known-slow commands
+    _slow_commands = {"subagent", "check", "scan", "rescan", "audit"}
+
+    consecutive_failures = 0
+    _MAX_CONSECUTIVE_FAILURES = 3  # Bail after 3 consecutive fatal failures
 
     for idx, (cmd, reason) in enumerate(effective, 1):
         print(f"  [{idx}/{len(effective)}] {cmd}")
         print(f"      └─ {reason}")
 
+        if reason.startswith(_QUEUE_EMPTY_ONLY_TAG):
+            live_queue = len(load_state().get("issues", []))
+            if live_queue > 0:
+                print(f"      ↷ Skipping queue-empty-only step ({live_queue} issue(s) pending).")
+                print()
+                continue
+
         parts = shlex.split(cmd)
         if not parts:
             continue
 
-        # Detect which command this is
+        is_external = parts[0] in _external_prefixes
+
+        # Detect which uidetox subcommand this is (or external tool name)
         cmd_name = parts[1] if len(parts) > 1 and parts[0] == "uidetox" else parts[0]
+
+        # Choose timeout based on command type
+        timeout = _LONG_CMD_TIMEOUT if cmd_name in _slow_commands else _CMD_TIMEOUT
 
         # Skill commands (dynamic skills) are also context-injecting
         is_skill = cmd_name not in {
@@ -598,20 +740,30 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
             parts = [sys.executable, "-m", "uidetox.cli", *parts[1:]]
 
         try:
-            proc = subprocess.run(parts, text=True)
+            proc = subprocess.run(parts, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"      ⏰ Command timed out after {timeout}s — skipping.")
+            continue
         except Exception as e:
             print(f"      ⚠️  Command exception: {e}")
             continue
 
         if proc.returncode != 0:
-            if cmd_name in _signal_commands or is_skill:
-                # Non-zero from signal/skill commands = expected
+            if cmd_name in _signal_commands or is_skill or is_external:
                 print(f"      ℹ  Signal exit ({proc.returncode}) — continuing.")
+                consecutive_failures = 0  # Reset: signal exits aren't real failures
             else:
+                consecutive_failures += 1
                 print(f"\n  ⚠️  Command failed (exit {proc.returncode}).")
+                if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    print(f"  ❌ {_MAX_CONSECUTIVE_FAILURES} consecutive failures — halting pipeline.")
+                    print(f"  [SELF-HEAL] Fix the errors above, then run `uidetox loop`.")
+                    break
                 print(f"  [SELF-HEAL] Fix the error above, then run `uidetox loop`.")
                 print(f"  The loop will self-propagate from where it left off.")
                 break
+        else:
+            consecutive_failures = 0  # Reset on success
 
         print()
 
@@ -639,12 +791,14 @@ def _print_manual_protocol(
     # ---- STAGE 1 ----
     print("  STAGE 1: SCAN CODEBASE")
     print("  " + "-" * 40)
+    print("    1a. Run `npx gitnexus analyze`  (index codebase — run FIRST, takes ~10-30s)")
+    print("    1b. Run `npx gitnexus query \"frontend components\"` (map codebase)")
     if has_mechanical:
-        print("    1a. Run `uidetox check --fix`  (tsc -> lint -> format)")
-    print("    1b. Run `uidetox scan --path .`")
-    print("    1c. Run `uidetox audit .`  (comprehensive quality audit)")
+        print("    1c. Run `uidetox check --fix`  (tsc -> lint -> format)")
+    print("    1d. Run `uidetox scan --path .`")
+    print("    1e. Run `uidetox audit .`  (comprehensive quality audit)")
     if is_orchestrator:
-        print(f"    1d. `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`")
+        print(f"    1f. `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`")
         print(f"        `uidetox subagent --stage-prompt diagnose`")
     print()
 
@@ -653,21 +807,29 @@ def _print_manual_protocol(
     print("  " + "-" * 40)
     print("    2a. `uidetox next`              — get batch + skills")
     print("    2b. Apply fixes following SKILL.md rules")
-    print("    2c. `uidetox batch-resolve IDs --note '...'`")
-    print("    2d. `uidetox check --fix`       — quality gate")
+    print("    2c. `uidetox check --fix`       — tsc/lint/format BEFORE commit")
+    print("    2d. `uidetox batch-resolve IDs --note '...'`")
     print("    2e. `uidetox status`            — check score")
     print("    Loop back to 2a until queue is empty.")
     print()
 
     # ---- STAGE 3 ----
+    from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+    review_parallel = len(REVIEW_DOMAINS)  # 10 domain shards
     print("  STAGE 3: RE-SCAN & POLISH")
     print("  " + "-" * 40)
-    print("    3a. `uidetox rescan`            — fresh analysis")
-    print("    3b. `uidetox critique .`        — design review")
-    print("    3c. `uidetox polish .`          — final pass")
-    print("    3d. `uidetox review --score N`  — record score")
-    print("    3e. `uidetox status`            — check blended score")
-    print(f"    3f. Score >= {target}? → `uidetox finish`")
+    print("    3a. `npx gitnexus analyze`      — refresh codebase index")
+    print("    3b. `uidetox rescan`            — fresh analysis")
+    print("    3c. `uidetox critique .`        — design review")
+    print("    3d. `uidetox polish .`          — final pass")
+    print(f"    3e. `uidetox subagent --stage-prompt review --parallel {review_parallel}`")
+    print(f"        → Spawns {review_parallel} parallel domain review subagents (2 waves of 5):")
+    print("          Wave 1: " + ", ".join(d["name"] for d in REVIEW_WAVE_1))
+    print("          Wave 2: " + ", ".join(d["name"] for d in REVIEW_WAVE_2))
+    print("    3f. `uidetox check --fix`       — tsc/lint/format before scoring")
+    print("    3g. `uidetox review --score N`  — record combined score")
+    print("    3h. `uidetox status`            — check blended score (30% obj + 70% subj)")
+    print(f"    3i. Score >= {target}? → `uidetox finish`")
     print()
 
     # ---- Skill recommendations ----

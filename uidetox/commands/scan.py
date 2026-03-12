@@ -6,6 +6,7 @@ happen together, with mechanical informing subjective.
 """
 
 import argparse
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -19,6 +20,12 @@ from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
 from uidetox.memory import save_scan_summary, save_session, log_progress
 from uidetox.utils import compute_design_score, categorize_issue
+from uidetox.contracts import (
+    parse_all_schemas, parse_schema, validate_frontend_contracts, save_contract_artifacts,
+)
+from uidetox.ux_states import (
+    StateCoverage, find_data_surfaces, validate_state_coverage, generate_coverage_report,
+)
 
 
 # Categories auto-covered by static analyzer, mapped to rule IDs
@@ -28,7 +35,7 @@ _AUTO_CATEGORIES = {
     "layout": {"LAYOUT_MATH_SLOP", "CENTER_BIAS_SLOP", "CARD_NESTING_SLOP", "OVERPADDED_LAYOUT_SLOP", "VIEWPORT_HEIGHT_SLOP", "LAZY_FLEX_CENTER_SLOP"},
     "motion": {"BOUNCE_ANIMATION_SLOP", "MISSING_TRANSITION_SLOP"},
     "materiality": {"GLASSMORPHISM_SLOP", "SHADOW_SLOP", "MATERIALITY_RADIUS_SLOP", "NEON_GLOW_SLOP", "OPACITY_ABUSE_SLOP", "GRADIENT_TEXT_SLOP"},
-    "states": {"MISSING_HOVER_STATES", "MISSING_FOCUS_SLOP", "MISSING_DARK_MODE", "DISABLED_NO_CURSOR_SLOP"},
+    "states": {"MISSING_HOVER_STATES", "MISSING_FOCUS_SLOP", "MISSING_DARK_MODE", "DISABLED_NO_CURSOR_SLOP", "ROUTE_UI_STATE_COVERAGE"},
     "content": {"GENERIC_COPY_SLOP", "AI_COPY_CLICHE_SLOP", "LOREM_IPSUM_SLOP", "GENERIC_NAME_SLOP", "EMOJI_HEAVY_SLOP", "EXCLAMATION_UX_SLOP", "OOPS_ERROR_SLOP"},
     "code quality": {"DIV_SOUP_SLOP", "HARDCODED_ZINDEX_SLOP", "INLINE_STYLE_SLOP", "IMPORTANT_ABUSE_SLOP", "NESTED_TERNARY_SLOP", "MAGIC_NUMBER_SLOP", "ANY_TYPE_SLOP", "TS_IGNORE_SLOP", "DISABLED_LINT_RULE"},
     "components": {"HERO_DASHBOARD_SLOP", "ICONOGRAPHY_SLOP", "PILL_BADGE_SLOP"},
@@ -47,6 +54,198 @@ _MANUAL_CATEGORIES = {
 }
 
 
+_ROUTE_UI_STATE_RULE_ID = "ROUTE_UI_STATE_COVERAGE"
+_REQUIRED_ROUTE_STATES = ("loading", "error", "empty")
+_FRONTEND_EXTS = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte"}
+_ROUTE_SEGMENTS = {"app", "pages", "routes", "views"}
+_ROUTE_FILENAMES = {
+    "page.tsx", "page.jsx", "page.ts", "page.js",
+    "route.tsx", "route.jsx", "route.ts", "route.js",
+    "+page.svelte", "+page.ts", "index.tsx", "index.jsx",
+}
+_TEST_FILE_MARKERS = (".test.", ".spec.", ".stories.")
+_MAX_ROUTE_SCAN_FILES = 250
+_MAX_ROUTE_FILE_BYTES = 250_000
+
+
+def _normalize_contract_artifacts(tooling: dict) -> dict[str, list[str]]:
+    raw = tooling.get("contract_artifacts", {})
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "schema_files": [v for v in raw.get("schema_files", []) if isinstance(v, str) and v],
+        "dto_files": [v for v in raw.get("dto_files", []) if isinstance(v, str) and v],
+        "contract_files": [v for v in raw.get("contract_files", []) if isinstance(v, str) and v],
+    }
+
+
+def _collect_contract_validation_issues(
+    scan_root: Path,
+    tooling: dict,
+    ignore_patterns: list[str],
+) -> tuple[list[dict], dict]:
+    artifacts_config = _normalize_contract_artifacts(tooling)
+    schema_paths = artifacts_config.get("schema_files", [])
+    parsed_artifacts = []
+    parsed_schema_files: list[str] = []
+
+    for rel_path in schema_paths:
+        schema_path = Path(rel_path)
+        if not schema_path.is_absolute():
+            schema_path = scan_root / schema_path
+        art = parse_schema(schema_path)
+        if not art or not (art.endpoints or art.models):
+            continue
+        parsed_artifacts.append(art)
+        try:
+            parsed_schema_files.append(schema_path.resolve().relative_to(scan_root.resolve()).as_posix())
+        except ValueError:
+            parsed_schema_files.append(schema_path.as_posix())
+
+    if not parsed_artifacts:
+        parsed_artifacts = parse_all_schemas(scan_root)
+        parsed_schema_files = []
+        for art in parsed_artifacts:
+            source = art.source_file
+            if not source:
+                continue
+            source_path = Path(source)
+            try:
+                rel = source_path.resolve().relative_to(scan_root.resolve()).as_posix()
+            except ValueError:
+                rel = source_path.as_posix()
+            parsed_schema_files.append(rel)
+
+    meta = {
+        "schema_files": sorted(set(parsed_schema_files)),
+        "artifact_count": len(parsed_artifacts),
+        "source_types": sorted({a.source for a in parsed_artifacts}),
+        "models": sum(len(a.models) for a in parsed_artifacts),
+        "endpoints": sum(len(a.endpoints) for a in parsed_artifacts),
+        "cache_path": "",
+    }
+    if not parsed_artifacts:
+        return [], meta
+
+    violations = validate_frontend_contracts(scan_root, parsed_artifacts)
+    issues: list[dict] = []
+    for violation in violations:
+        issue = violation.to_issue()
+        if _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
+            continue
+        issue["id"] = f"CONTRACT-{uuid.uuid4().hex[:8].upper()}"
+        issues.append(issue)
+
+    cache_path = save_contract_artifacts(scan_root, parsed_artifacts)
+    meta["cache_path"] = str(cache_path)
+    return issues, meta
+
+
+def _is_route_like_file(path: Path) -> bool:
+    lower = path.as_posix().lower()
+    if any(marker in lower for marker in _TEST_FILE_MARKERS):
+        return False
+    if path.name.lower() in _ROUTE_FILENAMES:
+        return True
+    return bool({part.lower() for part in path.parts} & _ROUTE_SEGMENTS)
+
+
+def _iter_route_frontend_files(
+    root: Path,
+    *,
+    exclude_paths: list[str],
+    zone_overrides: dict[str, str],
+) -> list[Path]:
+    skip_dirs = {"node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__", ".tox", "coverage", ".turbo", "out"}
+    for entry in exclude_paths:
+        cleaned = (entry or "").strip().strip("/")
+        if not cleaned:
+            continue
+        skip_dirs.add(Path(cleaned).name or cleaned)
+
+    zone_skip: set[str] = set()
+    for file_path, zone in zone_overrides.items():
+        if zone not in {"vendor", "generated", "test", "script"}:
+            continue
+        raw = str(file_path)
+        zone_skip.add(raw)
+        zone_skip.add(raw.lstrip("./"))
+
+    route_files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in skip_dirs and not d.startswith("."))
+        for filename in sorted(filenames):
+            candidate = Path(dirpath) / filename
+            if candidate.suffix.lower() not in _FRONTEND_EXTS:
+                continue
+            try:
+                if candidate.stat().st_size > _MAX_ROUTE_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+
+            try:
+                rel = candidate.resolve().relative_to(root.resolve()).as_posix()
+            except ValueError:
+                rel = candidate.as_posix()
+            if rel in zone_skip or rel.lstrip("./") in zone_skip:
+                continue
+            if not _is_route_like_file(Path(rel)):
+                continue
+            route_files.append(candidate)
+            if len(route_files) >= _MAX_ROUTE_SCAN_FILES:
+                return route_files
+    return route_files
+
+
+def _missing_required_route_states(coverage: StateCoverage) -> list[str]:
+    return [state for state in _REQUIRED_ROUTE_STATES if state in coverage.missing_states]
+
+
+def _build_route_state_issue(file_path: str, missing: list[str]) -> dict:
+    return {
+        "file": file_path,
+        "tier": "T2",
+        "issue": f"Route data-fetch UI state coverage missing: {', '.join(missing)}.",
+        "command": (
+            "Add route-level state branches before success render: "
+            "loading -> skeleton/spinner, error -> retryable error state, empty -> actionable empty state."
+        ),
+    }
+
+
+def _collect_route_ui_state_issues(
+    path: str,
+    *,
+    exclude_paths: list[str],
+    zone_overrides: dict[str, str],
+    ignore_patterns: list[str],
+) -> list[dict]:
+    scan_root = Path(path).resolve()
+    route_files = _iter_route_frontend_files(
+        scan_root,
+        exclude_paths=exclude_paths,
+        zone_overrides=zone_overrides,
+    )
+    if not route_files:
+        return []
+    surfaces = find_data_surfaces(scan_root, files=route_files)
+    if not surfaces:
+        return []
+    coverages = validate_state_coverage(scan_root, surfaces)
+    issues: list[dict] = []
+    for coverage in sorted(coverages, key=lambda c: c.surface.file):
+        missing = _missing_required_route_states(coverage)
+        if not missing:
+            continue
+        issue = _build_route_state_issue(coverage.surface.file, missing)
+        if _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
+            continue
+        issue["id"] = f"ROUTESTATE-{uuid.uuid4().hex[:8].upper()}"
+        issues.append(issue)
+    return issues
+
+
 def run(args: argparse.Namespace):
 
     # Validate scan path exists
@@ -61,8 +260,10 @@ def run(args: argparse.Namespace):
     density = config.get("VISUAL_DENSITY", 4)
     target = config.get("target_score", 95)
 
-    # Auto-detect tooling if not already configured
-    if not config.get("tooling"):
+    # Auto-detect tooling if not already configured (or needs contract artifact upgrade)
+    tooling_missing = not config.get("tooling")
+    tooling_needs_upgrade = bool(config.get("tooling")) and "contract_artifacts" not in config.get("tooling", {})
+    if tooling_missing or tooling_needs_upgrade:
         profile = detect_all(args.path)
         config["tooling"] = profile.to_dict()
         save_config(config)
@@ -85,6 +286,7 @@ def run(args: argparse.Namespace):
     backends = tooling.get("backend", [])
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
+    contract_artifacts = _normalize_contract_artifacts(tooling)
 
     print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
     if frontends:
@@ -98,6 +300,26 @@ def run(args: argparse.Namespace):
         if apis:
             layers.append(f"api={', '.join(a['name'] for a in apis)}")
         print(f"           {', '.join(layers)}")
+    schema_count = len(contract_artifacts["schema_files"])
+    dto_count = len(contract_artifacts["dto_files"])
+    contract_count = len(contract_artifacts["contract_files"])
+    if schema_count or dto_count or contract_count:
+        print(
+            "           contract-artifacts="
+            f"schemas:{schema_count}, dto:{dto_count}, contracts:{contract_count}"
+        )
+        for label, files in (
+            ("schemas", contract_artifacts["schema_files"]),
+            ("dtos", contract_artifacts["dto_files"]),
+            ("contracts", contract_artifacts["contract_files"]),
+        ):
+            if not files:
+                continue
+            preview = ", ".join(files[:3])
+            extra = ""
+            if len(files) > 3:
+                extra = f", ... (+{len(files) - 3})"
+            print(f"             - {label}: {preview}{extra}")
     print()
 
     # --- Suppressions & Zones ---
@@ -149,20 +371,39 @@ def run(args: argparse.Namespace):
                 if rule["description"] in issue["issue"]:
                     triggered_rules.add(rule["id"])
 
-    # Batch-add all issues in a single state write
+    route_state_issues = _collect_route_ui_state_issues(
+        args.path,
+        exclude_paths=exclude_paths,
+        zone_overrides=zone_overrides,
+        ignore_patterns=ignore_patterns,
+    )
+    if route_state_issues:
+        triggered_rules.add(_ROUTE_UI_STATE_RULE_ID)
+
+    # Batch-add in two phases to keep reporting clear.
     batch_result = {"added": 0, "updated": 0, "skipped": 0}
     if new_issues:
         batch_result = batch_add_issues(new_issues)
 
-    queued_count = batch_result["added"]
+    route_result = {"added": 0, "updated": 0, "skipped": 0}
+    if route_state_issues:
+        route_result = batch_add_issues(route_state_issues, phase="route_state_validation")
+
+    queued_count = batch_result["added"] + route_result["added"]
     if queued_count > 0:
-        print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
+        print(f"  -> Queued {queued_count} mechanical issue(s).")
     else:
-        print(f"  -> No mechanical anti-patterns detected.")
+        print("  -> No mechanical anti-patterns detected.")
     if batch_result["updated"] > 0:
         print(f"  -> Refreshed {batch_result['updated']} matching pending issue(s) with sharper guidance/severity.")
     if batch_result["skipped"] > 0:
         print(f"  -> Skipped {batch_result['skipped']} duplicate pending issue(s) already in the queue.")
+    if route_state_issues:
+        print(f"  -> Route-level state findings: {len(route_state_issues)}")
+        if route_result["updated"] > 0:
+            print(f"  -> Updated {route_result['updated']} matching route-state issue(s).")
+        if route_result["skipped"] > 0:
+            print(f"  -> Skipped {route_result['skipped']} duplicate route-state issue(s).")
 
     # Category coverage (compact)
     print()
@@ -189,6 +430,92 @@ def run(args: argparse.Namespace):
     if has_fullstack:
         print()
         print("  Full-stack: check DTO alignment, type safety, error surfacing across layers.")
+
+    # ===========================================================
+    # PART 1b: CONTRACT VALIDATION (OpenAPI/GraphQL/Prisma)
+    # ===========================================================
+    scan_root = Path(args.path)
+    contract_issues, contract_meta = _collect_contract_validation_issues(
+        scan_root,
+        tooling,
+        ignore_patterns,
+    )
+    if contract_meta["artifact_count"] > 0:
+        print()
+        print("=" * 58)
+        print(" PART 1b: CONTRACT VALIDATION (backend schema → frontend DTO)")
+        print("=" * 58)
+        source_types = contract_meta["source_types"] or ["unknown"]
+        print(f"  Parsed {contract_meta['artifact_count']} schema(s): {', '.join(source_types)}")
+        print(f"  Models: {contract_meta['models']}  |  Endpoints: {contract_meta['endpoints']}")
+        if contract_meta["schema_files"]:
+            preview = ", ".join(contract_meta["schema_files"][:4])
+            extra = ""
+            if len(contract_meta["schema_files"]) > 4:
+                extra = f", ... (+{len(contract_meta['schema_files']) - 4})"
+            print(f"  Schema files: {preview}{extra}")
+
+        if contract_issues:
+            contract_result = batch_add_issues(contract_issues, phase="contract_validation")
+            print(f"  -> Queued {contract_result['added']} contract violation(s).")
+            if contract_result["skipped"] > 0:
+                print(f"  -> Skipped {contract_result['skipped']} duplicate(s).")
+        else:
+            print("  -> Frontend DTOs match backend contracts. ✓")
+
+        if contract_meta["cache_path"]:
+            print(f"  Contract cache: {contract_meta['cache_path']}")
+        print()
+    else:
+        print()
+        print("  No OpenAPI/GraphQL/Prisma schemas found — contract validation skipped.")
+
+    # ===========================================================
+    # PART 1c: UX-STATE VALIDATION (loading/error/empty/success)
+    # ===========================================================
+    ux_issues: list[dict] = []
+    surfaces = find_data_surfaces(scan_root)
+    if surfaces:
+        print()
+        print("=" * 58)
+        print(" PART 1c: UX-STATE VALIDATION (data surface coverage)")
+        print("=" * 58)
+        coverages = validate_state_coverage(scan_root, surfaces)
+        report = generate_coverage_report(coverages)
+
+        print(f"  Data surfaces found : {report['total_surfaces']}")
+        print(f"  Complete coverage   : {report['complete']}")
+        print(f"  Incomplete coverage : {report['incomplete']}")
+        print(f"  Overall coverage    : {report['coverage_percentage']}%")
+
+        missing = report.get("missing_breakdown", {})
+        if any(v > 0 for v in missing.values()):
+            print(f"  Missing breakdown   : " + ", ".join(
+                f"{k}={v}" for k, v in missing.items() if v > 0
+            ))
+
+        for cov in coverages:
+            # Route-level surfaces are handled by the dedicated route checker above.
+            surface_path = Path(cov.surface.file)
+            try:
+                rel_surface = surface_path.resolve().relative_to(scan_root.resolve())
+            except ValueError:
+                rel_surface = surface_path
+            if _is_route_like_file(rel_surface):
+                continue
+            issue_dict = cov.to_issue()
+            if issue_dict and not _is_suppressed(issue_dict["file"], issue_dict["issue"], ignore_patterns):
+                issue_dict["id"] = f"UXSTATE-{uuid.uuid4().hex[:8].upper()}"
+                ux_issues.append(issue_dict)
+
+        if ux_issues:
+            ux_result = batch_add_issues(ux_issues, phase="ux_state_validation")
+            print(f"  -> Queued {ux_result['added']} UX-state coverage issue(s).")
+            if ux_result["skipped"] > 0:
+                print(f"  -> Skipped {ux_result['skipped']} duplicate(s).")
+        else:
+            print("  -> All data surfaces have complete state coverage. ✓")
+        print()
 
     # ===========================================================
     # PART 2: SUBJECTIVE ANALYSIS (LLM-driven design review)
@@ -294,9 +621,10 @@ def run(args: argparse.Namespace):
     increment_scans()
     save_run_snapshot(trigger="scan")
     _save_scan_to_memory(new_issues, queued_count, triggered_rules, args.path)
+    total_new = queued_count + len(contract_issues) + len(ux_issues)
     save_session(phase="scan_complete", last_command="scan",
-                 context=f"Detected {detected_count} issues in {args.path}; queued {queued_count}")
-    log_progress("scan", f"Scanned {args.path}: detected={detected_count}, queued={queued_count}, updated={batch_result['updated']}, skipped={batch_result['skipped']}")
+                 context=f"Detected {detected_count} anti-slop + {len(route_state_issues)} route-state + {len(contract_issues)} contract + {len(ux_issues)} UX-state issues in {args.path}; queued {total_new}")
+    log_progress("scan", f"Scanned {args.path}: anti_slop={detected_count}, route_state={len(route_state_issues)}, contract={len(contract_issues)}, ux_state={len(ux_issues)}, queued={total_new}")
 
     # Compute current score and show target check
     state = load_state()

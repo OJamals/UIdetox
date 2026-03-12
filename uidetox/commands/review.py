@@ -2,24 +2,23 @@
 
 import argparse
 import json
-from uidetox.state import load_config, load_state, save_state, ensure_uidetox_dir
+from uidetox.state import load_state, save_state, ensure_uidetox_dir
 
 
 def run(args: argparse.Namespace):
     score = getattr(args, "score", None)
 
     if score is not None:
-        # Store the subjective score
         _store_subjective_score(score)
         return
 
-    config = load_config()
-    tooling = config.get("tooling", {})
-    has_fullstack = bool(
-        tooling.get("backend") or tooling.get("database") or tooling.get("api")
-    )
+    parallel = getattr(args, "parallel", 1) or 1
 
-    # Check for visual snapshot
+    # Parallel domain-sharded review via subagent infrastructure
+    if parallel > 1:
+        _run_parallel_review(parallel)
+        return
+
     from uidetox.state import get_uidetox_dir
     snapshot = get_uidetox_dir() / "snapshots" / "latest.png"
     has_snapshot = snapshot.exists()
@@ -28,85 +27,94 @@ def run(args: argparse.Namespace):
     print("| UIdetox Subjective Review                                |")
     print("+" + "=" * 58 + "+")
     print()
+    print("  ──── PRE-REVIEW ANALYSIS (MANDATORY — do ALL before scoring) ────")
+    print()
+    print("  1. npx gitnexus analyze             — refresh codebase index")
+    print('  2. npx gitnexus query "frontend components"  — map component graph')
+    print('  3. npx gitnexus query "design patterns"      — find design system patterns')
+    print('  4. npx gitnexus query "styling color theme"  — discover color/theme usage')
+    print('  5. npx gitnexus query "animation transition" — find motion patterns')
+    print('  6. npx gitnexus query "error loading state"  — find state handling')
+    print("  7. uidetox check --fix               — ensure code is clean")
+    print("  8. uidetox status                    — see current score and queue")
+    print()
+    print("  ────────────────────────────────────────────────────────────")
+    print()
     print("  Perform a deep, subjective quality review of this project.")
     print("  Evaluate the OVERALL design — not individual issues, but the holistic feel.")
     print()
-
-    # ---- A. VISUAL DESIGN & AESTHETICS (40 pts) ----
-    print("  A. VISUAL DESIGN & AESTHETICS (0-40)")
-    print("  " + "-" * 50)
+    print("  NOTE: Subjective score carries 70% weight in the blended Design Score.")
     print()
-    print("    STYLING & ELEGANCE (0-15)")
-    print("      -> Surface textures, color relationships, shadow/border craft")
-    print("      -> Does it feel polished or rough? Premium or cheap?")
-    print("      -> Visual rhythm — intentional contrast between dense and airy")
-    print()
-    print("    TYPOGRAPHY (0-10)")
-    print("      -> Font choice, weight spectrum, scale, kerning, line-height")
-    print("      -> Is there a clear type hierarchy (display, body, caption)?")
-    print("      -> Are weights intentional (500/600, not just 400/700)?")
-    print()
-    print("    LAYOUT & SPATIAL DESIGN (0-15)")
-    print("      -> Grid structure, whitespace, alignment, responsive behavior")
-    print("      -> Is the layout compositional or just stacked divs?")
-    print("      -> Does spacing create grouping and hierarchy, not just padding?")
+    print("  ──── SCORING PROTOCOL (follow this exact process) ────")
+    print("  1. Start each domain at max score")
+    print("  2. Walk through every checklist item — mark pass or fail")
+    print("  3. Measure every hard threshold — cite actual values found")
+    print("  4. Apply every matching automatic deduction")
+    print("  5. Domain score = max - sum(deductions), clamped to [0, max]")
+    print("  6. Show deduction math in justification")
     print()
 
-    # ---- B. DESIGN SYSTEM & COHERENCE (30 pts) ----
-    print("  B. DESIGN SYSTEM & COHERENCE (0-30)")
-    print("  " + "-" * 50)
-    print()
-    print("    CONSISTENCY (0-15)")
-    print("      -> Unified tokens, spacing scale, color palette, component patterns")
-    print("      -> Does the same element look the same everywhere?")
-    print("      -> Would a new developer know the design system from reading the code?")
-    print()
-    print("    IDENTITY (0-15)")
-    print("      -> Does this feel designed, not generated?")
-    print("      -> Is there an intentional aesthetic point-of-view?")
-    print("      -> Would someone ask 'what tool made this?' (bad) or")
-    print("         'who designed this?' (good)")
-    print()
+    # ── Print the full reference-driven rubric from REVIEW_DOMAINS ──
+    from uidetox.subagent import REVIEW_DOMAINS
 
-    # ---- C. INTERACTION & CRAFT (20 pts) ----
-    print("  C. INTERACTION & CRAFT (0-20)")
-    print("  " + "-" * 50)
-    print()
-    print("    STATES & MICRO-INTERACTIONS (0-10)")
-    print("      -> Hover, focus, active, disabled, loading, empty, error states")
-    print("      -> Transitions, animations, feedback on user actions")
-    print("      -> Does the interface feel alive and responsive to input?")
-    print()
-    print("    EDGE CASES & POLISH (0-10)")
-    print("      -> Error boundaries, empty states, skeleton screens, truncation")
-    print("      -> Graceful degradation, mobile edge cases, keyboard navigation")
-    print("      -> Does the squint test pass — clear hierarchy at a glance?")
-    print()
+    total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
 
-    # ---- D. ARCHITECTURE & CODE QUALITY (10 pts) ----
-    print("  D. ARCHITECTURE & CODE QUALITY (0-10)")
-    print("  " + "-" * 50)
-    print()
-    print("    -> Component structure, file organization, naming conventions")
-    print("    -> Separation of concerns (logic/presentation/data)")
-    print("    -> Reusability, composability, prop/API surface area")
-    if has_fullstack:
-        print("    -> DTO alignment: do frontend types match backend schemas?")
-        print("    -> Error surfacing: do API errors appear as meaningful UI feedback?")
-        print("    -> Data flow: is fetching/caching/mutation coherent across the stack?")
-    print()
+    # Group domains by rubric section letter for display
+    section_a = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("A.")]
+    section_b = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("B.")]
+    section_c = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("C.")]
+    section_d = [d for d in REVIEW_DOMAINS if d["rubric"].startswith("D.")]
 
+    section_groups = [
+        ("A. VISUAL DESIGN & AESTHETICS", section_a),
+        ("B. DESIGN SYSTEM & COHERENCE", section_b),
+        ("C. INTERACTION & CRAFT", section_c),
+        ("D. ARCHITECTURE & CODE QUALITY", section_d),
+    ]
+
+    for section_label, domains_in_section in section_groups:
+        section_total = sum(d.get("max_score", 0) for d in domains_in_section)
+        print(f"  {section_label} (0-{section_total})")
+        print("  " + "-" * 50)
+        print()
+        for domain in domains_in_section:
+            max_s = domain.get("max_score", 0)
+            print(f"    {domain['label']} (0-{max_s})")
+            print(f"      Focus: {domain['focus']}")
+            # Print checklist
+            checklist = domain.get("checklist", [])
+            if checklist:
+                print("      Checklist:")
+                for item in checklist[:6]:  # Show top 6 for space
+                    print(f"        - {item}")
+                if len(checklist) > 6:
+                    print(f"        ... +{len(checklist) - 6} more (see reference files)")
+            # Print key thresholds
+            thresholds = domain.get("thresholds", {})
+            if thresholds:
+                print("      Thresholds:")
+                for k, v in list(thresholds.items())[:4]:
+                    print(f"        - {k}: {v}")
+            # Print deductions
+            deductions = domain.get("deductions", [])
+            if deductions:
+                print("      Deductions:")
+                for ded in deductions[:4]:  # Show top 4
+                    print(f"        - {ded}")
+                if len(deductions) > 4:
+                    print(f"        ... +{len(deductions) - 4} more")
+            print()
     # ---- Scoring Guide ----
     print("  " + "=" * 50)
-    print("  SCORING GUIDE (sum A+B+C+D = 0-100)")
+    print(f"  SCORING GUIDE (sum all domains = 0-{total_max}, normalize to 0-100)")
     print("  " + "=" * 50)
     print()
-    print("     0-30  : Heavy AI slop, generic, inconsistent")
-    print("    31-50  : Some personality but obvious AI tells remain")
-    print("    51-70  : Competent design with minor slop traces")
-    print("    71-85  : Good design, mostly clean of AI fingerprints")
-    print("    86-95  : Excellent, intentional, polished")
-    print("    96-100 : Exceptional — indistinguishable from expert human design")
+    print("     0-30  : Heavy AI slop, generic, inconsistent — multiple critical failures")
+    print("    31-50  : Some personality but obvious AI tells remain — several deductions")
+    print("    51-70  : Competent design with minor slop traces — some checklist failures")
+    print("    71-85  : Good design, mostly clean of AI fingerprints — few deductions")
+    print("    86-95  : Excellent, intentional, polished — nearly all checklists pass")
+    print("    96-100 : Exceptional — all checklists pass, zero deductions")
     print()
 
     if has_snapshot:
@@ -175,18 +183,45 @@ def run(args: argparse.Namespace):
         print()
 
     print("[AGENT INSTRUCTION]")
-    print("1. Read every frontend file in the project.")
+    print()
+    print("  PRE-REVIEW (MANDATORY):")
+    print("  1. Run `npx gitnexus query \"frontend components\"` — map the component graph")
+    print("  2. Run `npx gitnexus query \"design patterns\"` — find design system patterns")
+    print("  3. Run `uidetox check --fix` — ensure code is clean (tsc → lint → format)")
+    print()
+    print("  REVIEW:")
+    step = 4
+    print(f"  {step}. Read every reference file (reference/*.md) for scoring criteria.")
+    step += 1
+    print(f"  {step}. Read every frontend file in the project.")
+    step += 1
     if has_visual_diff or has_responsive:
-        print("2. Review the visual snapshots above (before/after + responsive).")
-        print("3. Factor visual quality into your scoring.")
+        print(f"  {step}. Review the visual snapshots above (before/after + responsive).")
+        step += 1
+        print(f"  {step}. Factor visual quality into your scoring.")
+        step += 1
     else:
-        print("2. Optional: Run `uidetox capture --stage before` (if dev server is up) for visual regression.")
-    print(f"{'3' if not (has_visual_diff or has_responsive) else '4'}. Score each of the 4 sections above (A, B, C, D) mentally.")
-    print(f"{'4' if not (has_visual_diff or has_responsive) else '5'}. Sum them for a total (0-100).")
-    print(f"{'5' if not (has_visual_diff or has_responsive) else '6'}. Store your score:  uidetox review --score <N>")
-    print(f"{'6' if not (has_visual_diff or has_responsive) else '7'}. For any issues found, queue them:")
-    print('   uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
-    print(f"{'7' if not (has_visual_diff or has_responsive) else '8'}. Then run: uidetox status")
+        print(f"  {step}. Optional: Run `uidetox capture --stage before` (if dev server is up).")
+        step += 1
+    print(f"  {step}. For each domain: walk checklist, measure thresholds, apply deductions.")
+    step += 1
+    print(f"  {step}. Domain score = max - deductions (clamped to 0). Show math.")
+    step += 1
+    print(f"  {step}. Sum all domain scores, normalize to 0-100.")
+    step += 1
+    print()
+    print("  POST-REVIEW:")
+    print(f"  {step}. Run `uidetox check --fix` — verify code is still clean after any changes")
+    step += 1
+    print(f"  {step}. Store your score:  uidetox review --score <N>")
+    step += 1
+    print(f"  {step}. For any issues found, queue them:")
+    print('     uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+    step += 1
+    print(f"  {step}. Then run: uidetox status")
+    print()
+    print("  NOTE: Subjective score = 70% of final blended score. Be thorough.")
+    print("        Use checklist/threshold/deduction protocol for consistency.")
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
     print("After scoring, run `uidetox review --score <N>` then `uidetox status`.")
@@ -194,7 +229,11 @@ def run(args: argparse.Namespace):
 
 
 def _store_subjective_score(score: int):
-    """Store the LLM's subjective design score."""
+    """Store the LLM's subjective design score.
+
+    Accepts raw 0-100 score (already normalized from domain rubric).
+    Records score, tracks history, and provides domain-aware feedback.
+    """
     ensure_uidetox_dir()
     state = load_state()
 
@@ -216,19 +255,91 @@ def _store_subjective_score(score: int):
     print(f"✅ Subjective design score recorded: {score}/100")
     print()
 
-    # Show breakdown hint
+    # Domain-aware feedback with checklist/threshold context
     if score >= 86:
-        print("   Excellent — minimal slop detected by LLM review.")
+        print("   Excellent — nearly all domain checklists pass, minimal deductions.")
     elif score >= 71:
-        print("   Good — some areas need polish. Check issues queue.")
+        print("   Good — some checklist failures remain. Review deductions applied.")
+        print("   Focus areas: check which domains scored lowest and target those.")
     elif score >= 51:
-        print("   Moderate — AI fingerprints still visible. Focus on identity and consistency.")
+        print("   Moderate — multiple threshold violations and AI fingerprints detected.")
+        print("   Priority: fix identity/consistency deductions first (highest impact).")
     elif score >= 31:
-        print("   Below average — significant slop remains. Deep work needed.")
+        print("   Below average — significant deductions across multiple domains.")
+        print("   Action: run `uidetox review --parallel 10` for detailed domain breakdown.")
     else:
-        print("   Heavy slop — major redesign likely needed.")
+        print("   Heavy slop — critical failures in most domains.")
+        print("   Action: address typography + color + identity deductions first.")
+
+    # Show progression trend if history exists
+    if len(history) >= 2:
+        prev = history[-2]["score"]
+        delta = score - prev
+        if delta > 0:
+            print(f"\n   📈 Trend: +{delta} pts from previous score ({prev} → {score})")
+        elif delta < 0:
+            print(f"\n   📉 Trend: {delta} pts from previous score ({prev} → {score})")
+        else:
+            print(f"\n   ➡️  No change from previous score ({prev})")
 
     print()
     print("[AUTONOMOUS LOOP SIGNAL]")
     print("Run `uidetox status` NOW to see the blended Design Score.")
     print("DO NOT STOP. The loop continues automatically.")
+
+
+def _run_parallel_review(parallel: int):
+    """Generate parallel domain-sharded review subagent prompts."""
+    from uidetox.subagent import generate_stage_prompt, REVIEW_DOMAINS
+
+    total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+
+    print("+" + "=" * 58 + "+")
+    print("| UIdetox Parallel Subjective Review                       |")
+    print("+" + "=" * 58 + "+")
+    print()
+    print(f"  Spawning {min(parallel, len(REVIEW_DOMAINS))} parallel review subagents")
+    print(f"  across {len(REVIEW_DOMAINS)} design domains ({total_max} total pts).")
+    print("  Subjective score = 70% of final blended Design Score.")
+    print()
+    print("  Scoring Protocol: checklist → thresholds → deductions → score")
+    print()
+
+    prompts = generate_stage_prompt("review", parallel=parallel)
+
+    print(f"  Generated {len(prompts)} domain review prompt(s):")
+    print()
+    for idx, domain in enumerate(REVIEW_DOMAINS[:len(prompts)]):
+        label = domain.get("label", f"Domain {idx + 1}")
+        rubric = domain.get("rubric", "")
+        max_s = domain.get("max_score", 0)
+        n_checks = len(domain.get("checklist", []))
+        n_deds = len(domain.get("deductions", []))
+        print(f"    Shard {idx + 1}: {label} ({max_s} pts)")
+        print(f"             {rubric}")
+        print(f"             {n_checks} checklist items, {n_deds} deduction rules")
+    print()
+
+    for idx, prompt in enumerate(prompts):
+        print("=" * 60)
+        print(f"  REVIEW SUBAGENT PROMPT {idx + 1}/{len(prompts)}")
+        print("=" * 60)
+        print(prompt)
+        print()
+
+    print("─" * 60)
+    print("[AGENT INSTRUCTION]")
+    print()
+    print("  0. Run `npx gitnexus analyze` — refresh codebase index")
+    print("  1. Spawn the subagent prompts above in PARALLEL")
+    print("     (one subagent per domain shard)")
+    print("  2. Each subagent follows the scoring protocol:")
+    print("     checklist items → threshold measurements → automatic deductions")
+    print(f"  3. After ALL subagents complete, SUM partial scores (0-{total_max} raw)")
+    print(f"  4. Normalize: final_score = round(sum / {total_max} × 100)")
+    print("  5. Run `uidetox check --fix` — verify code is clean (tsc → lint → format)")
+    print("  6. Record the normalized score: `uidetox review --score <NORMALIZED>`")
+    print("  7. Run `uidetox status` to see the blended Design Score")
+    print()
+    print("[AUTONOMOUS LOOP SIGNAL]")
+    print("After scoring, continue the autonomous loop. DO NOT STOP.")

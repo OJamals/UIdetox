@@ -4,7 +4,7 @@ import argparse
 import subprocess
 import re
 from uidetox.tooling import detect_all
-from uidetox.state import add_issue, load_config
+from uidetox.state import add_issue, load_config, get_project_root
 from uidetox.utils import run_tool
 import uuid
 
@@ -23,6 +23,7 @@ def run(args: argparse.Namespace):
         tsc_cmd = profile.typescript.run_cmd
 
     fix = getattr(args, "fix", False)
+    project_root = str(get_project_root())
 
     print("==============================")
     print(" UIdetox TypeScript Check")
@@ -31,7 +32,7 @@ def run(args: argparse.Namespace):
     print()
 
     try:
-        result = run_tool(tsc_cmd, cwd=".", timeout=120)
+        result = run_tool(tsc_cmd, cwd=project_root, timeout=120)
     except FileNotFoundError:
         print(f"Command not found. Install TypeScript: npm install -D typescript")
         return
@@ -56,7 +57,7 @@ def run(args: argparse.Namespace):
 
     queued = 0
     for file_path, line, col, code, msg in errors:
-        issue_id = f"TSC-{str(uuid.uuid4())[:6].upper()}"
+        issue_id = f"TSC-{uuid.uuid4().hex[:6].upper()}"
         add_issue({
             "id": issue_id,
             "file": file_path.strip(),

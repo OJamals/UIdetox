@@ -32,7 +32,7 @@ The loop bootstraps with auto-detected tooling, continuation context from memory
 2. Run `uidetox scan --path .` then systematically read every frontend file
 3. Fix issues by component using `uidetox next` → fix all → `uidetox batch-resolve ID1 ID2 ... --note "..."`
 4. Run `uidetox review` + `uidetox review --score N` for subjective quality assessment
-5. Check `uidetox status` for blended Design Score (60% static + 40% LLM review)
+5. Check `uidetox status` for blended Design Score (30% static + 70% LLM review)
 6. Run `uidetox finish` to squash-merge the session branch
 
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.

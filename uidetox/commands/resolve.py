@@ -3,7 +3,7 @@
 import argparse
 import sys
 import subprocess
-from uidetox.state import remove_issue, get_issue, load_state, load_config
+from uidetox.state import remove_issue, get_issue, load_state, load_config, get_project_root
 from uidetox.memory import save_session, log_progress, embed_fix_outcome
 from uidetox.commands.batch_resolve import run_verification
 
@@ -36,20 +36,27 @@ def run(args: argparse.Namespace):
         print(f"   Note: {args.note}")
         print(f"   Queue: {remaining} remaining | {resolved_total} resolved total")
 
-        # Git Auto-Commit Integration (reuse config from above)
+        # Git Auto-Commit via risk-aware policy
         if config.get("auto_commit", False):
+            project_root = str(get_project_root())
             try:
-                # Stage the fixed file AND the state tracking file
-                subprocess.run(["git", "add", issue["file"]], check=True, capture_output=True)
-                subprocess.run(["git", "add", ".uidetox/state.json"], check=True, capture_output=True)
-                # Commit with standard UIdetox prefix
+                from uidetox.git_policy import CommitPolicy, safe_commit
+                policy = CommitPolicy.from_config(config)
                 commit_msg = f"[UIdetox] Fixed {issue_id}: {args.note}"
-                subprocess.run(["git", "commit", "-m", commit_msg, "--no-verify"], check=True, capture_output=True)
-                print(f"   📦 Auto-committed to git: {commit_msg}")
-            except subprocess.CalledProcessError:
-                print(f"   ⚠️  Warning: Git auto-commit failed. Is this a git repo?")
-            except FileNotFoundError:
-                print(f"   ⚠️  Warning: git command not found. Skipping auto-commit.")
+                result = safe_commit(
+                    touched_files=[issue["file"]],
+                    message=commit_msg,
+                    policy=policy,
+                    cwd=project_root,
+                )
+                if result.success:
+                    print(f"   📦 Auto-committed to git: {commit_msg}")
+                    if result.unrelated_files:
+                        print(f"   ℹ  {len(result.unrelated_files)} unrelated file(s) left unstaged.")
+                else:
+                    print(f"   ⚠️  Auto-commit aborted: {result.aborted_reason}")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Git auto-commit failed: {e}")
 
         print()
         print("[AUTONOMOUS LOOP SIGNAL]")

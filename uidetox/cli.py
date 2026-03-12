@@ -90,6 +90,7 @@ def parse_args(args_list=None):
     # Command: review
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
     review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
+    review_parser.add_argument("--parallel", type=int, default=1, help="Parallel domain-sharded review subagents (default: 1)")
 
     # Command: capture
     capture_parser = subparsers.add_parser("capture", help="Capture visual regression screenshots via Playwright")
