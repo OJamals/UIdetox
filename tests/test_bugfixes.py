@@ -130,6 +130,81 @@ class TestSubjectiveScoringRobustness:
         assert scores["effective_subjective"] <= 75
 
 
+class TestReviewFollowupGate:
+    """Ensure subjective review is always followed by implementation work."""
+
+    def test_followup_stays_active_until_score_recorded(self):
+        from uidetox.commands.loop import _review_followup_snapshot
+
+        state = {
+            "issues": [],
+            "resolved": [],
+            "subjective": {
+                "review_followup": {
+                    "active": True,
+                    "opened_at": "2026-03-10T10:00:00+00:00",
+                },
+            },
+        }
+
+        snapshot = _review_followup_snapshot(state)
+        assert snapshot["active"] is True
+        assert snapshot["score_recorded"] is False
+        assert snapshot["pending_count"] == 0
+
+    def test_followup_counts_pending_issues_created_after_review_open(self):
+        from uidetox.commands.loop import _review_followup_snapshot
+
+        state = {
+            "issues": [
+                {"id": "A", "created_at": "2026-03-10T09:59:00+00:00"},
+                {"id": "B", "created_at": "2026-03-10T10:05:00+00:00"},
+            ],
+            "resolved": [],
+            "subjective": {
+                "reviewed_at": "2026-03-10T10:06:00+00:00",
+                "review_followup": {
+                    "active": True,
+                    "opened_at": "2026-03-10T10:00:00+00:00",
+                },
+            },
+        }
+
+        snapshot = _review_followup_snapshot(state)
+        assert snapshot["active"] is True
+        assert snapshot["score_recorded"] is True
+        assert snapshot["pending_count"] == 1
+
+    def test_followup_auto_closes_when_window_issues_are_resolved(self, monkeypatch):
+        from uidetox.commands import loop as loop_cmd
+
+        persisted: list[dict] = []
+        monkeypatch.setattr(loop_cmd, "save_state", lambda s: persisted.append(s.copy()))
+        monkeypatch.setattr(loop_cmd, "now_iso", lambda: "2026-03-10T10:10:00+00:00")
+
+        state = {
+            "issues": [],
+            "resolved": [
+                {"id": "B", "created_at": "2026-03-10T10:05:00+00:00", "resolved_at": "2026-03-10T10:09:00+00:00"},
+            ],
+            "subjective": {
+                "reviewed_at": "2026-03-10T10:06:00+00:00",
+                "review_followup": {
+                    "active": True,
+                    "opened_at": "2026-03-10T10:00:00+00:00",
+                },
+            },
+        }
+
+        snapshot = loop_cmd._review_followup_snapshot(state)
+        assert snapshot["active"] is False
+        assert snapshot["resolved_count"] == 1
+        assert snapshot.get("just_closed") is True
+        assert state["subjective"]["review_followup"]["active"] is False
+        assert state["subjective"]["review_followup"]["closed_reason"] == "followup_issues_resolved"
+        assert persisted, "Gate closure should persist state"
+
+
 class TestTierWeightsFix:
     """Verify T1 (critical) penalises more than T4 (informational)."""
 

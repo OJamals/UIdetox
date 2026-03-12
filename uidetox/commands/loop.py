@@ -21,6 +21,7 @@ directive always ends with ``uidetox loop`` re-entry.
 """
 
 import argparse
+from datetime import datetime
 import pathlib
 import shlex
 import subprocess
@@ -30,11 +31,11 @@ import uuid
 from ..state import (
     load_config, save_config, load_state,
     save_checkpoint, get_recent_checkpoints, get_recent_errors,
-    log_error, get_loop_progress,
+    log_error, get_loop_progress, save_state,
 )
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, log_progress
-from ..utils import compute_design_score, get_score_freshness
+from ..utils import compute_design_score, get_score_freshness, now_iso
 from ..skills import (
     recommend_skills_for_issues,
     recommend_review_skills,
@@ -56,6 +57,99 @@ _QUEUE_EMPTY_ONLY_TAG = "[queue-empty-only]"
 _MAX_CONSECUTIVE_SAME_SCORE = 5  # Stop if score doesn't change for N iterations
 _MAX_ERROR_RATE = 10  # Stop if more than N errors in last 5 iterations
 _RECOVERY_COOLDOWN = 3  # Wait N iterations before retrying after failure
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _issues_since(items: list[dict], opened_at: datetime | None) -> list[dict]:
+    """Return issues created after the review follow-up window opened."""
+    if opened_at is None:
+        return list(items)
+    selected: list[dict] = []
+    for issue in items:
+        created_at = _parse_iso(issue.get("created_at"))
+        if created_at is None:
+            created_at = _parse_iso(issue.get("resolved_at"))
+        if created_at is not None and created_at >= opened_at:
+            selected.append(issue)
+    return selected
+
+
+def _activate_review_followup_window(state: dict) -> dict:
+    """Mark that a review pass started and must be followed by implementation."""
+    subjective = state.setdefault("subjective", {})
+    followup = subjective.get("review_followup")
+    if isinstance(followup, dict) and followup.get("active"):
+        return followup
+
+    marker = {
+        "active": True,
+        "opened_at": now_iso(),
+        "completed_at": None,
+        "closed_reason": None,
+    }
+    subjective["review_followup"] = marker
+    save_state(state)
+    return marker
+
+
+def _review_followup_snapshot(state: dict) -> dict:
+    """Inspect/maintain the post-review implementation gate."""
+    subjective = state.get("subjective", {})
+    followup = subjective.get("review_followup")
+    if not isinstance(followup, dict) or not followup.get("active"):
+        return {
+            "active": False,
+            "score_recorded": False,
+            "pending_count": 0,
+            "resolved_count": 0,
+            "opened_at": None,
+        }
+
+    opened_at_raw = str(followup.get("opened_at", "")).strip() or None
+    opened_at = _parse_iso(opened_at_raw)
+    reviewed_at = _parse_iso(subjective.get("reviewed_at"))
+    score_recorded = bool(reviewed_at is not None and opened_at is not None and reviewed_at >= opened_at)
+
+    pending_followup = _issues_since(state.get("issues", []), opened_at)
+    resolved_followup = _issues_since(state.get("resolved", []), opened_at)
+
+    # Auto-close the gate once review score is recorded and follow-up
+    # issues created during the review window are fully resolved.
+    if score_recorded and not pending_followup:
+        followup["active"] = False
+        followup["completed_at"] = now_iso()
+        followup["closed_reason"] = (
+            "review_completed_no_followup_issues"
+            if not resolved_followup
+            else "followup_issues_resolved"
+        )
+        subjective["review_followup"] = followup
+        state["subjective"] = subjective
+        save_state(state)
+        return {
+            "active": False,
+            "score_recorded": score_recorded,
+            "pending_count": 0,
+            "resolved_count": len(resolved_followup),
+            "opened_at": opened_at_raw,
+            "just_closed": True,
+        }
+
+    return {
+        "active": True,
+        "score_recorded": score_recorded,
+        "pending_count": len(pending_followup),
+        "resolved_count": len(resolved_followup),
+        "opened_at": opened_at_raw,
+    }
 
 
 def _resolve_gitnexus_repo(config: dict) -> str | None:
@@ -198,6 +292,7 @@ def _run_iteration(
     if blended is None:
         blended = 0
     queue_size = len(issues)
+    review_followup = _review_followup_snapshot(state)
 
     # ---- Header ----
     print()
@@ -220,7 +315,31 @@ def _run_iteration(
         print(f"  Score breakdown: {' | '.join(score_parts)}")
     print(f"  Files: {frontend_count}  |  Orchestrator: {'ON' if is_orchestrator else 'off'}")
     print(f"  Mode: {'AUTOPILOT' if not is_manual else 'MANUAL'}  |  Iteration: {iteration + 1}")
+    if review_followup["active"]:
+        print("  Post-review gate: ACTIVE")
+        if review_followup["score_recorded"]:
+            print(
+                f"    Review score recorded; follow-up pending issues: {review_followup['pending_count']} "
+                f"(resolved: {review_followup['resolved_count']})"
+            )
+        else:
+            print("    Waiting for subjective review score + queued follow-up issues.")
     print()
+
+    # If review prompts were already emitted, the loop must not skip
+    # directly to another discovery cycle. Enforce review -> implement.
+    if review_followup["active"] and not review_followup["score_recorded"]:
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  REVIEW GATE — COMPLETE SUBJECTIVE REVIEW FIRST     ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print()
+        print("  A review pass is in progress. Finish it before continuing:")
+        print("    1. Queue all issues discovered by the review.")
+        print("    2. Run `uidetox check --fix`.")
+        print("    3. Record score: `uidetox review --score <N>`.")
+        print("    4. Run `uidetox loop` again (it will force implementation of review findings).")
+        print()
+        return
 
     # ---- IMMEDIATE TERMINATION CHECK ----
     freshness = get_score_freshness(state)
@@ -571,6 +690,7 @@ def _post_execution_checkpoint(
     if subagent_halt_stage == "review":
         from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
         total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+        followup_marker = _activate_review_followup_window(state)
 
         # Check for existing objective issues already in the queue
         # (from rescan/scan/audit that ran BEFORE the review)
@@ -602,6 +722,7 @@ def _post_execution_checkpoint(
         print("  ║  The review prompts are printed above.              ║")
         print("  ║  You MUST perform the review, not just read them.   ║")
         print("  ╚══════════════════════════════════════════════════════╝")
+        print(f"  Review follow-up window opened: {followup_marker.get('opened_at')}")
         if obj_issues_note:
             print(obj_issues_note)
         if stale_warning:
@@ -645,8 +766,9 @@ def _post_execution_checkpoint(
         print("       uidetox review --score <NORMALIZED_SCORE>")
         print()
         print("    8. Run:  uidetox loop")
-        print("       → Re-enters the loop. If issues were queued, fixes begin.")
-        print("       → If score >= target and queue empty, session finishes.")
+        print("       → Re-enters the loop.")
+        print("       → The loop WILL enforce implementation of all issues queued in this review window.")
+        print("       → Only after that can the review gate close.")
         print()
         print("  DO NOT SKIP THE REVIEW. DO NOT just record a score without evaluating.")
         print("  READ the files. SCORE the domains. QUEUE the issues. THEN re-enter.")
