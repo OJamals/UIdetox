@@ -40,6 +40,8 @@ from ..skills import (
 from ..gitnexus_cache import (
     set_iteration as _set_cache_iteration,
     cache_stats as _cache_stats,
+    get_cached_result as _get_cached_gitnexus,
+    cache_query_result as _cache_gitnexus,
 )
 
 # Maximum iterations to prevent infinite loops in edge cases
@@ -723,6 +725,30 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
 
         is_external = parts[0] in _external_prefixes
 
+        # Cache expensive GitNexus graph calls to avoid repeated query/context
+        # invocations within an iteration and improve deterministic behavior.
+        is_gitnexus_cacheable = (
+            len(parts) >= 4
+            and parts[0] in _external_prefixes
+            and parts[1] == "gitnexus"
+            and parts[2] in {"query", "context"}
+        )
+        gitnexus_kind = parts[2] if is_gitnexus_cacheable else ""
+        gitnexus_payload = " ".join(parts[3:]) if is_gitnexus_cacheable else ""
+        if is_gitnexus_cacheable:
+            cached = _get_cached_gitnexus(gitnexus_payload, kind=gitnexus_kind)
+            if cached is not None:
+                print(f"      ♻️  Cache hit: gitnexus {gitnexus_kind} ({gitnexus_payload[:80]})")
+                if isinstance(cached, dict):
+                    out = str(cached.get("stdout", "") or "").strip()
+                    if out:
+                        preview = "\n".join(out.splitlines()[:40])
+                        print(preview)
+                        if len(out.splitlines()) > 40:
+                            print("      … (cached output truncated)")
+                print()
+                continue
+
         # Detect which uidetox subcommand this is (or external tool name)
         cmd_name = parts[1] if len(parts) > 1 and parts[0] == "uidetox" else parts[0]
 
@@ -740,7 +766,26 @@ def _run_autopilot_plan(plan: list[tuple[str, str]], *, max_commands: int = 50) 
             parts = [sys.executable, "-m", "uidetox.cli", *parts[1:]]
 
         try:
-            proc = subprocess.run(parts, text=True, timeout=timeout)
+            if is_gitnexus_cacheable:
+                proc = subprocess.run(parts, text=True, timeout=timeout, capture_output=True)
+                combined = ((proc.stdout or "") + (proc.stderr or "")).strip()
+                if combined:
+                    preview = "\n".join(combined.splitlines()[:60])
+                    print(preview)
+                    if len(combined.splitlines()) > 60:
+                        print("      … (output truncated)")
+                if proc.returncode == 0:
+                    _cache_gitnexus(
+                        gitnexus_payload,
+                        {
+                            "stdout": proc.stdout,
+                            "stderr": proc.stderr,
+                            "command": cmd,
+                        },
+                        kind=gitnexus_kind,
+                    )
+            else:
+                proc = subprocess.run(parts, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"      ⏰ Command timed out after {timeout}s — skipping.")
             continue
