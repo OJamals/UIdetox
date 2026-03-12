@@ -175,6 +175,28 @@ class TestReviewFollowupGate:
         assert snapshot["score_recorded"] is True
         assert snapshot["pending_count"] == 1
 
+    def test_followup_remains_active_when_score_recorded_but_no_issues_queued(self):
+        from uidetox.commands.loop import _review_followup_snapshot
+
+        state = {
+            "issues": [],
+            "resolved": [],
+            "subjective": {
+                "reviewed_at": "2026-03-10T10:06:00+00:00",
+                "review_followup": {
+                    "active": True,
+                    "opened_at": "2026-03-10T10:00:00+00:00",
+                },
+            },
+        }
+
+        snapshot = _review_followup_snapshot(state)
+        assert snapshot["active"] is True
+        assert snapshot["score_recorded"] is True
+        assert snapshot["pending_count"] == 0
+        assert snapshot["resolved_count"] == 0
+        assert snapshot.get("awaiting_implementation") is True
+
     def test_followup_auto_closes_when_window_issues_are_resolved(self, monkeypatch):
         from uidetox.commands import loop as loop_cmd
 
@@ -426,6 +448,59 @@ class TestFinishSessionTargeting:
 
         assert saved.get("auto_commit") is True
         assert "git_session" not in saved
+
+
+class TestFinishTargetCheckout:
+    """Ensure finish can checkout target branches in common git states."""
+
+    def test_checkout_target_branch_uses_local_when_present(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(finish_cmd, "_local_branch_exists", lambda b: b == "main")
+        monkeypatch.setattr(finish_cmd, "_remote_branch_exists", lambda b: False)
+        monkeypatch.setattr(
+            finish_cmd.subprocess,
+            "run",
+            lambda cmd, **kwargs: calls.append(cmd) or SimpleNamespace(returncode=0),
+        )
+
+        finish_cmd._checkout_target_branch("main")
+        assert calls == [["git", "checkout", "main"]]
+
+    def test_checkout_target_branch_creates_tracking_branch_from_origin(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(finish_cmd, "_local_branch_exists", lambda b: False)
+        monkeypatch.setattr(finish_cmd, "_remote_branch_exists", lambda b: b == "master")
+        monkeypatch.setattr(
+            finish_cmd.subprocess,
+            "run",
+            lambda cmd, **kwargs: calls.append(cmd) or SimpleNamespace(returncode=0),
+        )
+
+        finish_cmd._checkout_target_branch("master")
+        assert calls == [["git", "checkout", "-b", "master", "origin/master"]]
+
+
+class TestFinishDirtyWorktreeParsing:
+    """Ensure finish correctly parses porcelain output paths."""
+
+    def test_dirty_worktree_paths_parses_regular_and_renamed_paths(self, monkeypatch):
+        from uidetox.commands import finish as finish_cmd
+
+        stdout = " M uidetox/commands/loop.py\nR  old.py -> new.py\n?? untracked.txt\n"
+        monkeypatch.setattr(
+            finish_cmd.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(stdout=stdout),
+        )
+
+        paths = finish_cmd._dirty_worktree_paths()
+        assert "uidetox/commands/loop.py" in paths
+        assert "new.py" in paths
+        assert "untracked.txt" in paths
 
 
 class TestLoopSessionMetadata:

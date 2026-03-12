@@ -6,6 +6,23 @@ from uidetox.state import load_state, load_config, save_config
 from uidetox.utils import compute_design_score, get_score_freshness
 
 
+def _ref_exists(ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", ref],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _local_branch_exists(branch: str) -> bool:
+    return _ref_exists(f"refs/heads/{branch}")
+
+
+def _remote_branch_exists(branch: str) -> bool:
+    return _ref_exists(f"refs/remotes/origin/{branch}")
+
+
 def _detect_main_branch() -> str:
     """Detect the primary branch (main, master, develop) reliably.
 
@@ -39,19 +56,42 @@ def _detect_main_branch() -> str:
 
 def _branch_exists(branch: str) -> bool:
     """Return True when branch exists locally or on origin."""
-    refs = (
-        f"refs/heads/{branch}",
-        f"refs/remotes/origin/{branch}",
+    return _local_branch_exists(branch) or _remote_branch_exists(branch)
+
+
+def _checkout_target_branch(branch: str) -> None:
+    """Checkout merge target, creating a local tracking branch if needed."""
+    if _local_branch_exists(branch):
+        subprocess.run(["git", "checkout", branch], check=True)
+        return
+
+    if _remote_branch_exists(branch):
+        subprocess.run(["git", "checkout", "-b", branch, f"origin/{branch}"], check=True)
+        return
+
+    raise subprocess.CalledProcessError(1, ["git", "checkout", branch])
+
+
+def _dirty_worktree_paths() -> list[str]:
+    """Return file paths from git porcelain status (tracked + untracked)."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    for ref in refs:
-        result = subprocess.run(
-            ["git", "show-ref", "--verify", "--quiet", ref],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return True
-    return False
+    paths: list[str] = []
+    for raw in result.stdout.splitlines():
+        line = raw.rstrip()
+        if len(line) < 4:
+            continue
+        # Format: XY <path> OR XY <old> -> <new> (rename)
+        path_part = line[3:].strip()
+        if " -> " in path_part:
+            path_part = path_part.split(" -> ", 1)[1].strip()
+        if path_part:
+            paths.append(path_part)
+    return list(dict.fromkeys(paths))
 
 
 def _resolve_target_branch(current_branch: str, config: dict) -> tuple[str, str]:
@@ -140,26 +180,37 @@ def run(args: argparse.Namespace):
 
     # Check for uncommitted changes before switching branches
     try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True, text=True, check=True,
-        )
-        if status.stdout.strip():
-            print("⚠️  You have uncommitted changes. Committing them before finishing...")
-            subprocess.run(["git", "add", "-A"], check=True, capture_output=True)
-            subprocess.run(
-                ["git", "commit", "-m", "[UIdetox] Auto-commit before finish", "--no-verify"],
-                check=True, capture_output=True,
-            )
+        dirty_paths = _dirty_worktree_paths()
     except subprocess.CalledProcessError:
-        pass
+        dirty_paths = []
+
+    if dirty_paths:
+        print("⚠️  You have uncommitted changes. Committing them before finishing...")
+        try:
+            from uidetox.git_policy import CommitPolicy, safe_commit
+
+            policy = CommitPolicy.from_config(config)
+            result = safe_commit(
+                touched_files=dirty_paths,
+                message="[UIdetox] Auto-commit before finish",
+                policy=policy,
+                cwd=".",
+            )
+            if not result.success:
+                print(f"❌ Auto-commit before finish failed: {result.aborted_reason}")
+                print("Resolve the working tree and run `uidetox finish` again.")
+                sys.exit(1)
+        except Exception as exc:
+            print(f"❌ Auto-commit before finish failed: {exc}")
+            print("Resolve the working tree and run `uidetox finish` again.")
+            sys.exit(1)
 
     print(f"📦 Finishing UIdetox session on branch: {current_branch}")
     print(f"▶️  Target merge branch: {target_branch} ({target_reason})")
 
     try:
         # Switch to the detected main branch
-        subprocess.run(["git", "checkout", target_branch], check=True)
+        _checkout_target_branch(target_branch)
         print(f"▶️  Switched to target branch: {target_branch}")
 
         # Squash merge
@@ -169,7 +220,7 @@ def run(args: argparse.Namespace):
         # Commit squashed changes
         print("▶️  Committing aesthetic fixes...")
         subprocess.run([
-            "git", "commit", "-m", "[UIdetox] Detoxing complete: Resolved issues and improved Design Score.", "--no-verify"
+            "git", "commit", "-m", "[UIdetox] Detoxing complete: Resolved issues and improved Design Score."
         ], check=True)
 
         # Delete the session branch

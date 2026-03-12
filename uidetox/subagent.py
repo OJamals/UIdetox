@@ -1,16 +1,26 @@
 """Sub-agent session management: create, track, and record sub-agent work."""
 
 import json
+import logging
 import os
 import re
+import shlex
 import shutil
 import uuid
 from pathlib import Path
 
 from uidetox.analyzer import IGNORE_DIRS # type: ignore
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config, _atomic_write_json # type: ignore
+from uidetox.state import (
+    get_uidetox_dir,
+    ensure_uidetox_dir,
+    load_state,
+    load_config,
+    batch_add_issues,
+    _atomic_write_json,
+) # type: ignore
 from uidetox.utils import now_iso # type: ignore
 
+logger = logging.getLogger(__name__)
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify", "review"]
 
@@ -903,6 +913,187 @@ def create_session(stage: str, prompt: str) -> str:
     return session_id
 
 
+_SEVERITY_TO_TIER = {
+    "critical": "T1",
+    "blocker": "T1",
+    "urgent": "T1",
+    "high": "T2",
+    "major": "T2",
+    "medium": "T3",
+    "moderate": "T3",
+    "low": "T4",
+    "minor": "T4",
+    "info": "T4",
+    "informational": "T4",
+    "p0": "T1",
+    "p1": "T2",
+    "p2": "T3",
+    "p3": "T4",
+}
+
+
+def _normalize_tier(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"t1", "t2", "t3", "t4"}:
+        return raw.upper()
+    return _SEVERITY_TO_TIER.get(raw, "T3")
+
+
+def _first_nonempty(candidate: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = candidate.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
+
+
+def _normalize_issue_candidate(candidate: dict, *, default_command: str) -> dict | None:
+    file_path = _first_nonempty(candidate, ("file", "path", "file_path", "filepath", "target"))
+    issue_text = _first_nonempty(candidate, ("issue", "description", "finding", "title", "message"))
+    if not file_path or not issue_text:
+        return None
+
+    command = _first_nonempty(candidate, ("fix_command", "command", "fix", "remediation", "suggested_fix"))
+    normalized = {
+        "id": f"SUB-{uuid.uuid4().hex[:8].upper()}",
+        "file": file_path,
+        "tier": _normalize_tier(candidate.get("tier") or candidate.get("severity") or candidate.get("priority")),
+        "issue": issue_text,
+        "command": command or default_command,
+    }
+    return normalized
+
+
+def _extract_issue_candidates(result: dict) -> list[dict]:
+    candidates: list[dict] = []
+    top_level_keys = ("issues", "new_issues", "queued_issues", "review_issues", "findings")
+    for key in top_level_keys:
+        value = result.get(key)
+        if isinstance(value, list):
+            candidates.extend(item for item in value if isinstance(item, dict))
+
+    nested_keys = ("domain_results", "domains", "results", "shards")
+    nested_issue_keys = ("issues", "findings", "new_issues")
+    for key in nested_keys:
+        value = result.get(key)
+        if not isinstance(value, list):
+            continue
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            for issues_key in nested_issue_keys:
+                nested = entry.get(issues_key)
+                if isinstance(nested, list):
+                    candidates.extend(item for item in nested if isinstance(item, dict))
+
+    issues_by_file = result.get("issues_by_file")
+    if isinstance(issues_by_file, dict):
+        for file_path, issue_values in issues_by_file.items():
+            if not isinstance(file_path, str):
+                continue
+            if isinstance(issue_values, list):
+                for value in issue_values:
+                    if isinstance(value, str) and value.strip():
+                        candidates.append({"file": file_path, "issue": value.strip()})
+                    elif isinstance(value, dict):
+                        merged = dict(value)
+                        merged.setdefault("file", file_path)
+                        candidates.append(merged)
+    return candidates
+
+
+def _extract_add_issue_commands(result: dict) -> list[dict]:
+    parsed: list[dict] = []
+    text_fields = (
+        result.get("note"),
+        result.get("output"),
+        result.get("verification"),
+        result.get("summary"),
+    )
+    for field in text_fields:
+        if not isinstance(field, str) or "uidetox add-issue" not in field:
+            continue
+        for raw_line in field.splitlines():
+            line = raw_line.strip().strip("`")
+            if "uidetox add-issue" not in line:
+                continue
+            try:
+                tokens = shlex.split(line)
+            except ValueError:
+                continue
+            if len(tokens) < 2:
+                continue
+            file_path = ""
+            tier = "T3"
+            issue_text = ""
+            fix_command = ""
+            idx = 0
+            while idx < len(tokens):
+                token = tokens[idx]
+                nxt = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+                if token == "--file" and nxt:
+                    file_path = nxt
+                    idx += 2
+                    continue
+                if token == "--tier" and nxt:
+                    tier = nxt
+                    idx += 2
+                    continue
+                if token == "--issue" and nxt:
+                    issue_text = nxt
+                    idx += 2
+                    continue
+                if token == "--fix-command" and nxt:
+                    fix_command = nxt
+                    idx += 2
+                    continue
+                idx += 1
+            if file_path and issue_text:
+                parsed.append(
+                    {
+                        "file": file_path,
+                        "tier": tier,
+                        "issue": issue_text,
+                        "fix_command": fix_command,
+                    }
+                )
+    return parsed
+
+
+def _ingest_result_issues(result: dict, *, stage: str) -> dict[str, int]:
+    stage_label = stage.strip().lower() if isinstance(stage, str) else "unknown"
+    phase = f"subagent_{stage_label or 'unknown'}"
+    default_command = "uidetox next"
+
+    raw_candidates = _extract_issue_candidates(result)
+    raw_candidates.extend(_extract_add_issue_commands(result))
+
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for candidate in raw_candidates:
+        issue = _normalize_issue_candidate(candidate, default_command=default_command)
+        if issue is None:
+            continue
+        key = f"{issue['file']}::{issue['issue']}::{issue['tier']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(issue)
+
+    if not normalized:
+        return {"submitted": 0, "added": 0, "updated": 0, "skipped": 0}
+
+    result_stats = batch_add_issues(normalized, phase=phase)
+    return {
+        "submitted": len(normalized),
+        "added": int(result_stats.get("added", 0)),
+        "updated": int(result_stats.get("updated", 0)),
+        "skipped": int(result_stats.get("skipped", 0)),
+    }
+
+
 def record_result(session_id: str, result: dict) -> bool:
     """Record the result of a sub-agent session.
 
@@ -962,6 +1153,18 @@ def record_result(session_id: str, result: dict) -> bool:
             meta["issues_fixed"] = result["issues_fixed"]
         if "files_modified" in result:
             meta["files_modified"] = result["files_modified"]
+
+        stage_name = str(meta.get("stage", "")).strip()
+        try:
+            ingest_stats = _ingest_result_issues(result, stage=stage_name)
+            meta["issues_ingest_submitted"] = ingest_stats["submitted"]
+            meta["issues_ingested"] = ingest_stats["added"]
+            meta["issues_ingest_updated"] = ingest_stats["updated"]
+            meta["issues_ingest_skipped"] = ingest_stats["skipped"]
+            if "issues_found" not in result and ingest_stats["submitted"] > 0:
+                meta["issues_found"] = ingest_stats["submitted"]
+        except Exception as exc:
+            logger.error(f"Issue ingestion failed for session {session_id}: {exc}")
 
         _atomic_write_json(meta_path, meta, dir=session_dir)
 

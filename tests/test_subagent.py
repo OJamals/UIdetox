@@ -3,7 +3,7 @@ from pathlib import Path
 
 from uidetox import memory as memory_module
 from uidetox import state as state_module
-from uidetox.state import ensure_uidetox_dir
+from uidetox.state import ensure_uidetox_dir, load_state
 from uidetox.subagent import (
     REVIEW_DOMAINS,
     SCORED_REVIEW_DOMAINS,
@@ -124,6 +124,81 @@ def test_record_result_clears_stale_review_request_when_confidence_recovers():
     session = get_session(session_id)
     assert session is not None
     assert session["meta"]["status"] == "completed"
+
+
+def test_record_result_ingests_structured_issues_into_queue():
+    session_id = create_session("review", "review prompt")
+    payload = {
+        "confidence": 0.93,
+        "issues": [
+            {
+                "file": "src/components/Table.tsx",
+                "severity": "high",
+                "description": "Missing empty-state UX for zero rows",
+                "fix_command": "uidetox harden src/components/Table.tsx",
+            }
+        ],
+    }
+
+    assert record_result(session_id, payload) is True
+    state = load_state()
+    issues = state.get("issues", [])
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["file"] == "src/components/Table.tsx"
+    assert issue["tier"] == "T2"
+    assert "Missing empty-state UX" in issue["issue"]
+    assert issue["command"] == "uidetox harden src/components/Table.tsx"
+    assert issue.get("phase") == "subagent_review"
+
+
+def test_record_result_extracts_add_issue_commands_from_output_text():
+    session_id = create_session("verify", "verify prompt")
+    payload = {
+        "confidence": 0.9,
+        "output": (
+            'uidetox add-issue --file src/App.tsx --tier T3 '
+            '--issue "Missing loading skeleton" '
+            '--fix-command "uidetox harden src/App.tsx"'
+        ),
+    }
+
+    assert record_result(session_id, payload) is True
+    state = load_state()
+    issues = state.get("issues", [])
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["file"] == "src/App.tsx"
+    assert issue["tier"] == "T3"
+    assert issue["issue"] == "Missing loading skeleton"
+    assert issue["command"] == "uidetox harden src/App.tsx"
+    assert issue.get("phase") == "subagent_verify"
+
+
+def test_record_result_dedupes_repeated_ingested_issues():
+    session_id = create_session("review", "review prompt")
+    payload = {
+        "confidence": 0.92,
+        "issues": [
+            {
+                "file": "src/components/Card.tsx",
+                "tier": "T2",
+                "issue": "Inconsistent focus ring contrast",
+                "fix_command": "uidetox polish src/components/Card.tsx",
+            }
+        ],
+    }
+
+    assert record_result(session_id, payload) is True
+    assert record_result(session_id, payload) is True
+
+    state = load_state()
+    matches = [
+        i for i in state.get("issues", [])
+        if i.get("file") == "src/components/Card.tsx"
+        and "focus ring contrast" in i.get("issue", "")
+    ]
+    assert len(matches) == 1
 
 
 class TestReviewDomains:

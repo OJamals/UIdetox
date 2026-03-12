@@ -208,9 +208,14 @@ class TestGitCommitSafety:
             "uidetox/commands/check.py",
             "uidetox/commands/resolve.py",
             "uidetox/commands/batch_resolve.py",
+            "uidetox/commands/finish.py",
         ]:
             source = (ROOT / rel).read_text()
             assert "--no-verify" not in source, f"{rel} should not bypass git hooks by default"
+
+    def test_finish_avoids_git_add_all_autostage(self):
+        source = (ROOT / "uidetox/commands/finish.py").read_text()
+        assert '"git", "add", "-A"' not in source
 
     def test_check_uses_changed_file_delta_for_autocommit(self):
         source = (ROOT / "uidetox/commands/check.py").read_text()

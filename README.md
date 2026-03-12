@@ -4,7 +4,7 @@
 
 <p align="center"><strong>The anti-slop harness for AI-generated frontends.</strong></p>
 
-[UIdetox](https://github.com/OJamals/UIdetox) helps your coding agent turn generic, LLM-style UI output into production-quality interface work through a repeatable **scan → fix → verify** loop.
+[UIdetox](https://github.com/OJamals/UIdetox) helps your coding agent turn generic, LLM-style UI output into production-quality interface work through a repeatable **scan → fix → review → verify** loop.
 
 It combines:
 - deterministic anti-pattern detection,
@@ -66,8 +66,8 @@ THE PROTOCOL (runs automatically until score ≥ 95):
   Phase 0: Mechanical fixes (tsc → lint → format)
   Phase 1: Scan codebase with 60+ anti-pattern rules
   Phase 2: Fix issues component-by-component with design context
-  Phase 3: Subjective quality review across 10 design dimensions
-  Phase 4: Verify score, iterate if below 95
+  Phase 3: Subjective quality review across 14 scored domains + Perfection Gate
+  Phase 4: Verify blended score freshness + queue state, iterate if below 95
   Phase 5: Squash-merge when complete
 
 YOUR JOB:
@@ -98,7 +98,7 @@ WHEN COMPLETE:
 
 ## The Autonomous Protocol
 
-`uidetox loop` drives a fully autonomous **scan → fix → verify** cycle. The loop continues until the Design Score meets the target (default 95) and the issue queue is empty.
+`uidetox loop` drives a fully autonomous **scan → fix → review → verify** cycle. The loop continues until the Design Score meets the target (default 95), review/scan freshness checks pass, and the issue queue is empty.
 
 ### The Intelligence Layer
 UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
@@ -116,6 +116,9 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 > [!TIP]
 > **Visual Regression Workflow**: Use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive`) to generate screenshot diffs that are surfaced inside `uidetox review`.
 
+> [!TIP]
+> **Review Follow-Up Gate**: After subjective review prompts are emitted, the loop requires implementation of review findings before allowing another review cycle. This prevents review-only loops without fixes.
+
 
 **Design Score** = Objective × 0.3 + Subjective × 0.7 — the agent keeps looping until this hits the target.
 
@@ -125,18 +128,35 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 
 | Command | Purpose |
 | :--- | :--- |
-| `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
+| `uidetox loop` | Start the autonomous workflow (scan → fix → review → verify cycle). |
 | `uidetox scan` | Run 60+ rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox next` | Get the highest-priority issue batch with SKILL.md context. |
 | `uidetox batch-resolve` | Resolve issues atomically with verification + auto-commit. |
 | `uidetox status` | Show blended Design Score, velocity, and queue health. |
-| `uidetox review` | Subjective quality scoring across 4 design dimensions. |
+| `uidetox review` | Subjective quality scoring across 14 scored domains (+ Perfection Gate enforcement). |
+| `uidetox subagent` | Generate/record orchestrated stage prompts; supports structured result ingestion. |
 | `uidetox capture` | Capture before/after screenshots and visual diffs (`--stage before/after`, `--responsive`). |
 | `uidetox rescan` | Fresh re-analysis with dedup and auto-escalation. |
 | `uidetox check --fix` | Mechanical gate: tsc → lint → format. |
 | `uidetox plan` | Attack plan grouped by component with effort estimates. |
 | `uidetox autofix` | T1-first quick-win guidance across 12 categories. |
-| `uidetox finish` | Squash-merge session branch into main. |
+| `uidetox finish` | Squash-merge session branch into its resolved base branch with safe checkout behavior. |
+
+### Subagent result ingestion
+
+When recording subagent output via:
+
+```bash
+uidetox subagent --record <session_id> --result-file result.json --confidence 0.92
+```
+
+UIdetox can now automatically ingest structured findings into the issue queue:
+
+- accepts structured lists such as `issues`, `new_issues`, `review_issues`, `findings`
+- supports nested domain payloads (`domain_results[*].issues`)
+- parses inline `uidetox add-issue ...` command lines from text fields when present
+- normalizes severities (`critical/high/medium/low` → `T1..T4`)
+- deduplicates findings before queueing
 
 ### Design skill commands
 
@@ -202,5 +222,6 @@ Each rule is classified into **tiers** with estimated effort:
 Inspired by and built on ideas from:
 - [desloppify](https://github.com/peteromallet/desloppify)
 - [impeccable](https://github.com/pbakaus/impeccable)
+- [gitnexus](https://github.com/abhigyanpatwari/gitnexus)
 
 MIT © [OJamals](https://github.com/OJamals)

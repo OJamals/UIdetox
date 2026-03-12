@@ -123,14 +123,10 @@ def _review_followup_snapshot(state: dict) -> dict:
 
     # Auto-close the gate once review score is recorded and follow-up
     # issues created during the review window are fully resolved.
-    if score_recorded and not pending_followup:
+    if score_recorded and not pending_followup and resolved_followup:
         followup["active"] = False
         followup["completed_at"] = now_iso()
-        followup["closed_reason"] = (
-            "review_completed_no_followup_issues"
-            if not resolved_followup
-            else "followup_issues_resolved"
-        )
+        followup["closed_reason"] = "followup_issues_resolved"
         subjective["review_followup"] = followup
         state["subjective"] = subjective
         save_state(state)
@@ -141,6 +137,19 @@ def _review_followup_snapshot(state: dict) -> dict:
             "resolved_count": len(resolved_followup),
             "opened_at": opened_at_raw,
             "just_closed": True,
+        }
+
+    # Score was recorded but no review-window issues were ever queued/resolved.
+    # Keep the gate active to prevent the loop from launching another review
+    # without implementing review findings.
+    if score_recorded and not pending_followup and not resolved_followup:
+        return {
+            "active": True,
+            "score_recorded": True,
+            "pending_count": 0,
+            "resolved_count": 0,
+            "opened_at": opened_at_raw,
+            "awaiting_implementation": True,
         }
 
     return {
@@ -338,6 +347,29 @@ def _run_iteration(
         print("    2. Run `uidetox check --fix`.")
         print("    3. Record score: `uidetox review --score <N>`.")
         print("    4. Run `uidetox loop` again (it will force implementation of review findings).")
+        print()
+        return
+
+    if (
+        review_followup["active"]
+        and review_followup["score_recorded"]
+        and review_followup["pending_count"] == 0
+        and review_followup["resolved_count"] == 0
+        and blended < target
+    ):
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  REVIEW GATE — IMPLEMENT FINDINGS BEFORE RE-REVIEW  ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print()
+        print("  Review score was recorded, but no review-window issues were queued.")
+        print("  The loop will NOT launch another subjective review yet.")
+        print()
+        print("  Required next actions:")
+        print("    1. Queue every concrete finding from the completed review:")
+        print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+        print("    2. Run `uidetox loop` to enter the fix phase.")
+        print("    3. Resolve all queued review findings via `uidetox batch-resolve ...`.")
+        print("    4. Re-run `uidetox loop` (only then will a fresh review be allowed).")
         print()
         return
 
@@ -688,8 +720,14 @@ def _post_execution_checkpoint(
             return
 
     if subagent_halt_stage == "review":
-        from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
-        total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+        from uidetox.subagent import (
+            REVIEW_DOMAINS,
+            SCORED_REVIEW_DOMAINS,
+            REVIEW_WAVE_1,
+            REVIEW_WAVE_2,
+            PERFECTION_GATE,
+        )
+        total_max = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
         followup_marker = _activate_review_followup_window(state)
 
         # Check for existing objective issues already in the queue
@@ -729,7 +767,11 @@ def _post_execution_checkpoint(
             print(stale_warning)
         print()
         print(f"  The subjective score is 70% of the blended Design Score.")
-        print(f"  {len(REVIEW_DOMAINS)} domains, {total_max} total points, organized in 2 waves of 5.")
+        print(
+            f"  {len(SCORED_REVIEW_DOMAINS)} scored domains + "
+            f"{'Perfection Gate' if PERFECTION_GATE else 'no gate'}, {total_max} total points."
+        )
+        print(f"  Wave split: {len(REVIEW_WAVE_1)} domain(s) in Wave 1, {len(REVIEW_WAVE_2)} in Wave 2.")
         print()
         print("  EXECUTE THESE STEPS IN ORDER:")
         print()
@@ -741,8 +783,8 @@ def _post_execution_checkpoint(
         print("    2. READ every frontend file in the codebase.")
         print("       Use `npx gitnexus query \"frontend components\"` to discover them.")
         print()
-        print("    3. SCORE each domain using the rubric in the prompts above:")
-        for d in REVIEW_DOMAINS:
+        print("    3. SCORE each scored domain using the rubric in the prompts above:")
+        for d in SCORED_REVIEW_DOMAINS:
             wave = d.get('wave', '?')
             print(f"         Wave {wave}: {d['label']} (0-{d.get('max_score', '?')})")
         print()
@@ -860,8 +902,8 @@ def _post_execution_checkpoint(
         print("       → Repeats until target score is reached.")
     else:
         # Queue empty but score below target — needs subjective review
-        from uidetox.subagent import REVIEW_DOMAINS
-        total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+        from uidetox.subagent import SCORED_REVIEW_DOMAINS
+        total_max = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
         print(f"  Queue is empty but score ({blended}) < target ({target}).")
         print(f"  The subjective review (70% weight) must be performed.")
         print()
@@ -871,8 +913,12 @@ def _post_execution_checkpoint(
         print('       npx gitnexus query "import dependency coupling circular"')
         print("       → Gives you architectural awareness for the scoring phase.")
         print()
-        print("    2. Run:  uidetox subagent --stage-prompt review --parallel 10")
-        print("       → Generates domain-sharded review prompts (10 domains, 2 waves of 5).")
+        review_parallel = len(SCORED_REVIEW_DOMAINS)
+        print(f"    2. Run:  uidetox subagent --stage-prompt review --parallel {review_parallel}")
+        print(
+            f"       → Generates domain-sharded review prompts "
+            f"({review_parallel} scored domains + perfection gate)."
+        )
         print("       → READ the prompts and EXECUTE the review (see above for full protocol).")
         print()
         print("    3. READ every frontend file and SCORE each domain using the rubric.")
@@ -1076,16 +1122,18 @@ def _build_autopilot_plan(
         for rec in review_recs[:3]:
             plan.append((f"uidetox {rec['skill']} .", f"review skill: {rec.get('reason', 'recommended')}"))
 
-        # ── Parallel domain-sharded subjective review (10 domains, 2 waves of 5) ──
+        # ── Parallel domain-sharded subjective review ──
         # The subjective score carries 70% weight in the blended Design Score.
-        # Spawn 10 parallel domain review subagents for maximum granularity:
-        #   Wave 1 (5): typography, color, interaction, content, motion
-        #   Wave 2 (5): spatial, materiality, consistency, identity, architecture
-        from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
-        review_parallel = len(REVIEW_DOMAINS)  # 10 domains = 10 shards
+        # Use scored domains for shard count; perfection gate has max_score=0.
+        from uidetox.subagent import SCORED_REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+        review_parallel = len(SCORED_REVIEW_DOMAINS)
         plan.append((
             f"uidetox subagent --stage-prompt review --parallel {review_parallel}",
-            f"parallel domain-sharded subjective review ({review_parallel} domains in 2 waves of 5, 70% of blended score)",
+            (
+                "parallel domain-sharded subjective review "
+                f"({review_parallel} scored domains; wave1={len(REVIEW_WAVE_1)}, "
+                f"wave2={len(REVIEW_WAVE_2)}, 70% of blended score)"
+            ),
         ))
 
         # ── Full-stack cross-layer validation (only for full-stack projects) ──
@@ -1118,14 +1166,12 @@ def _build_autopilot_plan(
         plan.append(("uidetox status", "check blended score and queue after domain reviews"))
 
         # ── Post-review: parallel implementation subagents for new issues ──
-        # Spawn 2 waves of 5 fix subagents (10 total) matching the review
-        # domain count.  Each wave handles issues from its corresponding
-        # review domains.
-        fix_parallel = max(1, min(10, max(auto_parallel, len(REVIEW_DOMAINS))))
+        # Scale implementation subagents with scored review shard count.
+        fix_parallel = max(1, min(len(SCORED_REVIEW_DOMAINS), max(auto_parallel, len(SCORED_REVIEW_DOMAINS))))
         if is_orchestrator:
             plan.append((
                 f"uidetox subagent --stage-prompt fix --parallel {fix_parallel}",
-                f"parallel implementation subagents ({fix_parallel} shards, 2 waves of 5) for review-discovered issues",
+                f"parallel implementation subagents ({fix_parallel} shards) for review-discovered issues",
             ))
 
         # ── Post-fix verification ──
@@ -1464,8 +1510,8 @@ def _print_manual_protocol(
     print()
 
     # ---- STAGE 3 ----
-    from uidetox.subagent import REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
-    review_parallel = len(REVIEW_DOMAINS)  # 10 domain shards
+    from uidetox.subagent import SCORED_REVIEW_DOMAINS, REVIEW_WAVE_1, REVIEW_WAVE_2
+    review_parallel = len(SCORED_REVIEW_DOMAINS)
     print("  STAGE 3: RE-SCAN & POLISH")
     print("  " + "-" * 40)
     print("    3a. `npx gitnexus analyze`      — refresh codebase index")
@@ -1473,7 +1519,10 @@ def _print_manual_protocol(
     print("    3c. `uidetox critique .`        — design review")
     print("    3d. `uidetox polish .`          — final pass")
     print(f"    3e. `uidetox subagent --stage-prompt review --parallel {review_parallel}`")
-    print(f"        → Spawns {review_parallel} parallel domain review subagents (2 waves of 5):")
+    print(
+        f"        → Spawns {review_parallel} parallel scored-domain review subagents "
+        f"(wave1={len(REVIEW_WAVE_1)}, wave2={len(REVIEW_WAVE_2)}):"
+    )
     print("          Wave 1: " + ", ".join(d["name"] for d in REVIEW_WAVE_1))
     print("          Wave 2: " + ", ".join(d["name"] for d in REVIEW_WAVE_2))
     print("    3f. `uidetox check --fix`       — tsc/lint/format before scoring")
