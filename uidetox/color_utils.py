@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import json
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Tailwind CSS default colors (partial, primarily grays and some standard colors for contrast checks)
 TAILWIND_COLORS = {

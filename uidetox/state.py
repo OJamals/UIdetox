@@ -97,13 +97,16 @@ def _locked_file(lock_name: str) -> Iterator[None]:
     lock_path = get_uidetox_dir() / f".{lock_name}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.touch(exist_ok=True)
-    fd = os.open(str(lock_path), os.O_RDONLY)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
     try:
         if _HAS_FCNTL:
             fcntl.flock(fd, fcntl.LOCK_EX)  # type: ignore[union-attr]
         else:
             try:
                 import msvcrt
+                # Write a sentinel byte so msvcrt.locking has a byte to lock.
+                os.write(fd, b"\x00")
+                os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
             except (ImportError, OSError):
                 pass  # Best-effort: no locking available
@@ -114,6 +117,7 @@ def _locked_file(lock_name: str) -> Iterator[None]:
         else:
             try:
                 import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_UNLOCK, 1)  # type: ignore[attr-defined]
             except (ImportError, OSError):
                 pass

@@ -1239,12 +1239,12 @@ def _extract_confidence(result: dict) -> float:
     text = result.get("note", "")
     m = re.search(r'CONFIDENCE:\s*(0\.\d+|1\.0|1)', text, re.IGNORECASE)
     if m:
-        return float(m.group(1))
+        return max(0.0, min(1.0, float(m.group(1))))
 
     # Strategy 2: Check for confidence in structured result data
     if "confidence" in result:
         try:
-            return float(result["confidence"])
+            return max(0.0, min(1.0, float(result["confidence"])))
         except (ValueError, TypeError):
             pass
 
@@ -1253,7 +1253,7 @@ def _extract_confidence(result: dict) -> float:
     if verify_text:
         m = re.search(r'(?:confidence|certainty|score)[\s:]*(?:is\s+)?(0\.\d+|1\.0)', verify_text, re.IGNORECASE)
         if m:
-            return float(m.group(1))
+            return max(0.0, min(1.0, float(m.group(1))))
 
     # Strategy 4: Infer from error/warning signals in the result
     all_text = json.dumps(result).lower()

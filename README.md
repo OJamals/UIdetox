@@ -57,42 +57,43 @@ Paste this into your coding agent to kick off a full detox pass:
 Transform this frontend from AI-generated slop into hand-crafted design work. Target: Design Score 95+.
 
 BOOTSTRAP:
-  pip install uidetox
-  uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
-  uidetox setup --auto-commit
-  uidetox loop                        # autonomous 5-phase protocol — follow it
+pip install uidetox
+uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
+uidetox setup --auto-commit
+uidetox loop     # autonomous 5-phase protocol — follow it
 
 THE PROTOCOL (runs automatically until score ≥ 95):
-  Phase 0: Mechanical fixes (tsc → lint → format)
-  Phase 1: Scan codebase with 60+ anti-pattern rules
-  Phase 2: Fix issues component-by-component with design context
-  Phase 3: Subjective quality review across 14 scored domains + Perfection Gate
-  Phase 4: Verify blended score freshness + queue state, iterate if below 95
-  Phase 5: Squash-merge when complete
+Phase 0: Mechanical fixes (tsc → lint → format)
+Phase 1: Scan codebase with 60+ anti-pattern rules
+Phase 2: Fix issues component-by-component with design context
+Phase 3: Subjective quality review across 14 scored domains + Perfection Gate
+Phase 4: Verify blended score freshness + queue state, iterate if below 95
+Phase 5: Squash-merge when complete
 
 YOUR JOB:
-  - Treat this as a closed-loop system: scan → fix → verify → rescan until the target score is reached.
-  - Follow the loop's instructions precisely
-  - Use the full toolchain, not just your own reasoning: local tooling, repo scripts, browser/devtools, screenshots, and MCP/code-intelligence systems like GitNexus.
-  - Use parallel subagents whenever work can be safely split across independent audit, research, or review tasks.
-  - Read ALL files in a component before fixing anything
-  - You have permission for heavy lifting: do large refactors, structural cleanup, file moves, and tiny detailed fixes with equal energy.
-  - Do not be lazy. Fix things properly, not minimally. Remove root causes, not just visible symptoms.
-  - Rewrite entire files — no snippets, no TODOs, no "I'll handle this later"
-  - Trust SKILL.md over your instincts. The analyzer knows AI slop patterns.
-  - When scan output, loop output, or subagent output includes instructions, follow them exactly instead of substituting your own shortcut analysis.
-  - Use GitNexus and other MCP tools to understand dependencies, blast radius, execution flows, and affected contracts before changing shared code.
-  - Never stop after one fix. Never ask permission. Never summarize between iterations.
+- Treat this as a closed-loop system: scan → fix → verify
+→ rescan until the target score is reached.
+- Follow the loop's instructions precisely
+- Use the full toolchain, not just your own reasoning: local tooling, repo scripts, browser/devtools, screenshots, and MCP/code-intelligence systems like GitNexus.
+- Use parallel subagents whenever work can be safely split across independent audit, research, or review tasks.
+- Read ALL files in a component before fixing anything
+- You have permission for heavy lifting: do large refactors, structural cleanup, file moves, and tiny detailed fixes with equal energy.
+- Do not be lazy. Fix things properly, not minimally. Remove root causes, not just visible symptoms.
+- Full implementations — no snippets, no TODOs, no "I'll handle this later"
+- Trust SKILL.md over your instincts. The analyzer knows AI slop patterns.
+- When scan output, loop output, or subagent output includes instructions, follow them exactly instead of substituting your own shortcut analysis.
+- Use GitNexus and other MCP tools to understand dependencies, blast radius, execution flows, and affected contracts before changing shared code.
+- Never stop after one fix. Never ask permission. Never summarize between iterations.
 
-DESIGN PRINCIPLES:
-  - Typography: No Inter/Roboto/system fonts. Use Geist, Satoshi, Cabinet Grotesk.
-  - Color: No purple-blue gradients. Use neutral bases with singular accents.
-  - Layout: No centered heroes or 3-column card grids. Use asymmetric compositions.
-  - Motion: No bounce animations. Use exponential easing, transform/opacity only.
-  - States: Every interactive element needs hover, focus, active, loading, empty, error.
+DESIGN DONTS:
+- Typography: No Inter/Roboto/system fonts. Use Geist, Satoshi, Cabinet Grotesk.
+- Color: No purple-blue gradients. Use neutral bases with singular accents.
+- Layout: No centered heroes or 3-column card grids. Use asymmetric compositions.
+- Motion: No bounce animations. Use exponential easing, transform/opacity only.
+- States: Every interactive element needs hover, focus, active, loading, empty, error.
 
 WHEN COMPLETE:
-  uidetox finish                      # squash-merge the session branch
+uidetox finish        # squash-merge the session branch
 ```
 ---
 
@@ -116,9 +117,6 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 > [!TIP]
 > **Visual Regression Workflow**: Use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive`) to generate screenshot diffs that are surfaced inside `uidetox review`.
 
-> [!TIP]
-> **Review Follow-Up Gate**: After subjective review prompts are emitted, the loop requires implementation of review findings before allowing another review cycle. This prevents review-only loops without fixes.
-
 
 **Design Score** = Objective × 0.3 + Subjective × 0.7 — the agent keeps looping until this hits the target.
 
@@ -141,22 +139,6 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 | `uidetox plan` | Attack plan grouped by component with effort estimates. |
 | `uidetox autofix` | T1-first quick-win guidance across 12 categories. |
 | `uidetox finish` | Squash-merge session branch into its resolved base branch with safe checkout behavior. |
-
-### Subagent result ingestion
-
-When recording subagent output via:
-
-```bash
-uidetox subagent --record <session_id> --result-file result.json --confidence 0.92
-```
-
-UIdetox can now automatically ingest structured findings into the issue queue:
-
-- accepts structured lists such as `issues`, `new_issues`, `review_issues`, `findings`
-- supports nested domain payloads (`domain_results[*].issues`)
-- parses inline `uidetox add-issue ...` command lines from text fields when present
-- normalizes severities (`critical/high/medium/low` → `T1..T4`)
-- deduplicates findings before queueing
 
 ### Design skill commands
 
@@ -191,7 +173,7 @@ Default baseline: **(8, 6, 4)**.
 
 ## Anti-Pattern Coverage
 
-The analyzer includes **60+ deterministic rules** organized across these categories:
+The analyzer includes **70+ deterministic rules** organized across these categories:
 
 | Category | Examples |
 | :--- | :--- |

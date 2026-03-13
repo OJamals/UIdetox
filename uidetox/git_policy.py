@@ -171,24 +171,14 @@ def safe_stage(
 
     staged: list[str] = []
     for f in files:
-        fpath = Path(cwd or ".") / f
-        # Stage both existing and deleted files.  `git add` correctly
-        # handles deletions, so we attempt it for any tracked path.
-        if fpath.exists() or f.startswith(".uidetox"):
-            try:
-                result = _git_run(["add", "--", f], cwd=cwd)
-                if result.returncode == 0:
-                    staged.append(f)
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                continue
-        else:
-            # File was deleted — stage the removal so commits are complete.
-            try:
-                result = _git_run(["add", "--", f], cwd=cwd)
-                if result.returncode == 0:
-                    staged.append(f)
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                continue
+        # `git add --` handles both existing and deleted files correctly,
+        # so we always attempt the same command regardless of file state.
+        try:
+            result = _git_run(["add", "--", f], cwd=cwd)
+            if result.returncode == 0:
+                staged.append(f)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
 
     return staged, ""
 
