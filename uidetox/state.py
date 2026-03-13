@@ -101,10 +101,22 @@ def _locked_file(lock_name: str) -> Iterator[None]:
     try:
         if _HAS_FCNTL:
             fcntl.flock(fd, fcntl.LOCK_EX)  # type: ignore[union-attr]
+        else:
+            try:
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+            except (ImportError, OSError):
+                pass  # Best-effort: no locking available
         yield
     finally:
         if _HAS_FCNTL:
             fcntl.flock(fd, fcntl.LOCK_UN)  # type: ignore[union-attr]
+        else:
+            try:
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_UNLOCK, 1)  # type: ignore[attr-defined]
+            except (ImportError, OSError):
+                pass
         os.close(fd)
 
 
@@ -300,14 +312,18 @@ def get_issue(issue_id: str) -> dict | None:
             return item
     return None
 
-def remove_issue(issue_id: str, note: str = "") -> bool:
+def remove_issue(issue_id: str, note: str = "") -> dict | None:
+    """Remove an issue by ID and return its data, or ``None`` if not found.
+
+    The lookup and removal happen within a single file lock so concurrent
+    callers cannot both "see" the same issue.
+    """
     with _locked_file("state"):
         state = load_state()
         original_len = len(state.get("issues", []))
         removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
         state["issues"] = [i for i in state.get("issues", []) if i.get("id") != issue_id]
         if len(state["issues"]) < original_len:
-            # Track resolved issues
             for r in removed:
                 r["resolved_at"] = now_iso()
                 if note:
@@ -316,8 +332,8 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
             state.setdefault("stats", {})
             state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
             save_state(state)
-            return True
-        return False
+            return removed[0] if removed else None
+        return None
 
 def add_issue(issue: dict, *, phase: str = "") -> str:
     """Add a single issue to the queue with optional phase-scoped dedup.
@@ -528,7 +544,8 @@ def get_loop_progress() -> dict:
             score_trend = "declining"
     
     # Error rate
-    recent_errors = [e for e in errors if e.get("timestamp", "") > now_iso()[:10]]  # Today's errors
+    today_prefix = now_iso()[:10]  # e.g. "2026-03-12"
+    recent_errors = [e for e in errors if e.get("timestamp", "").startswith(today_prefix)]
     error_rate = len(recent_errors)
     
     return {

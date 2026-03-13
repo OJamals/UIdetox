@@ -755,3 +755,112 @@ class TestAutofixReviewSafety:
 
         assert "left pending for manual verification + explicit resolve" in output
         assert not removed_calls
+
+    def test_autofix_does_not_resolve_lint_issue_without_file_change(self, monkeypatch, capsys, tmp_path):
+        from uidetox.commands import autofix as autofix_cmd
+
+        src = tmp_path / "src"
+        src.mkdir(parents=True, exist_ok=True)
+        file_path = src / "A.tsx"
+        file_path.write_text("export const A = 1;\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            autofix_cmd,
+            "load_state",
+            lambda: {
+                "issues": [
+                    {
+                        "id": "LINT-1",
+                        "file": "src/A.tsx",
+                        "tier": "T1",
+                        "issue": "ESLint error",
+                        "command": "lint-fix",
+                    }
+                ]
+            },
+        )
+        monkeypatch.setattr(autofix_cmd, "load_config", lambda: {"auto_commit": False})
+        monkeypatch.setattr(autofix_cmd, "_ensure_tooling", lambda config: {"linter": {"fix_cmd": "echo ok"}})
+        monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+        monkeypatch.setattr(autofix_cmd, "_collect_snapshot_files", lambda *a, **k: ["src/A.tsx"])
+
+        def _clean_stats(*args, **kwargs):  # noqa: ANN001
+            stats = autofix_cmd._FixPhaseStats()
+            stats.attempted = 1
+            stats.succeeded = 1
+            return stats
+
+        monkeypatch.setattr(autofix_cmd, "_run_lint_fixes", _clean_stats)
+        monkeypatch.setattr(autofix_cmd, "_run_format_fixes", lambda *a, **k: autofix_cmd._FixPhaseStats())
+        monkeypatch.setattr(autofix_cmd, "_verify_no_regressions", lambda *a, **k: True)
+
+        removed_calls: list[list[str]] = []
+        monkeypatch.setattr(
+            autofix_cmd,
+            "batch_remove_issues",
+            lambda issue_ids, note="": removed_calls.append(list(issue_ids)) or [],
+        )
+
+        autofix_cmd.run(SimpleNamespace(dry_run=False))
+        output = capsys.readouterr().out
+
+        assert "No verified fixes for lint issue files" in output or "No mechanical fixes could be applied" in output
+        assert not removed_calls
+
+
+class TestResolveChangeGuard:
+    def test_resolve_blocks_when_issue_file_has_no_local_changes(self, monkeypatch, capsys):
+        from uidetox.commands import resolve as resolve_cmd
+
+        monkeypatch.setattr(
+            resolve_cmd,
+            "get_issue",
+            lambda issue_id: {
+                "id": issue_id,
+                "file": "src/A.tsx",
+                "tier": "T2",
+                "issue": "Fix contrast",
+                "command": "manual",
+            },
+        )
+        monkeypatch.setattr(resolve_cmd, "load_config", lambda: {})
+        monkeypatch.setattr(resolve_cmd, "run_verification", lambda config: True)
+        monkeypatch.setattr(
+            resolve_cmd,
+            "has_local_changes_for_issue_files",
+            lambda files: (False, []),
+        )
+
+        with pytest.raises(SystemExit):
+            resolve_cmd.run(SimpleNamespace(issue_id="ISS-1", note="fixed", skip_verify=False))
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert "No local file changes detected" in output
+
+    def test_batch_resolve_blocks_when_issue_files_are_unchanged(self, monkeypatch, capsys):
+        from uidetox.commands import batch_resolve as batch_cmd
+
+        monkeypatch.setattr(
+            batch_cmd,
+            "get_issue",
+            lambda issue_id: {
+                "id": issue_id,
+                "file": "src/A.tsx",
+                "tier": "T2",
+                "issue": "Fix contrast",
+                "command": "manual",
+            },
+        )
+        monkeypatch.setattr(batch_cmd, "load_config", lambda: {})
+        monkeypatch.setattr(batch_cmd, "run_verification", lambda config: True)
+        monkeypatch.setattr(
+            batch_cmd,
+            "has_local_changes_for_issue_files",
+            lambda files: (False, []),
+        )
+
+        with pytest.raises(SystemExit):
+            batch_cmd.run(SimpleNamespace(issue_ids=["ISS-1"], note="fixed", skip_verify=False))
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert "No local file changes detected for selected issue files" in output

@@ -57,17 +57,10 @@ _QUEUE_EMPTY_ONLY_TAG = "[queue-empty-only]"
 # Circuit breaker thresholds
 _MAX_CONSECUTIVE_SAME_SCORE = 5  # Stop if score doesn't change for N iterations
 _MAX_ERROR_RATE = 10  # Stop if more than N errors in last 5 iterations
-_RECOVERY_COOLDOWN = 3  # Wait N iterations before retrying after failure
 _GITNEXUS_COMMAND_SUPPORT: dict[str, bool] = {}
 
 
-def _parse_iso(value: str | None) -> datetime | None:
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+from uidetox.utils import _parse_iso  # re-use shared helper
 
 
 def _issues_since(items: list[dict], opened_at: datetime | None) -> list[dict]:
@@ -142,9 +135,28 @@ def _review_followup_snapshot(state: dict) -> dict:
         }
 
     # Score was recorded but no review-window issues were ever queued/resolved.
-    # Keep the gate active to prevent the loop from launching another review
-    # without implementing review findings.
+    # This can happen when the review genuinely found zero issues (score is
+    # high) or the agent failed to queue findings.  Auto-close the gate if
+    # the recorded score is ≥ 90 (a clean review at high quality is
+    # credible), otherwise keep it active to prompt implementation.
     if score_recorded and not pending_followup and not resolved_followup:
+        raw_score = subjective.get("score", 0)
+        if raw_score >= 90:
+            # High score + no findings = legitimately clean review → close gate
+            followup["active"] = False
+            followup["completed_at"] = now_iso()
+            followup["closed_reason"] = "clean_review_high_score"
+            subjective["review_followup"] = followup
+            state["subjective"] = subjective
+            save_state(state)
+            return {
+                "active": False,
+                "score_recorded": True,
+                "pending_count": 0,
+                "resolved_count": 0,
+                "opened_at": opened_at_raw,
+                "just_closed": True,
+            }
         return {
             "active": True,
             "score_recorded": True,
@@ -373,6 +385,7 @@ def _run_iteration(
     rc = _exec_cmd("npx gitnexus analyze", "pre-phase codebase indexing", dry_run=dry_run)
     if rc != 0:
         print("  ℹ  GitNexus not available or index refresh failed — continuing without it.")
+        log_error("gitnexus_index", "GitNexus pre-phase indexing failed", {"returncode": rc})
     elif gitnexus_repo:
         print(f"  GitNexus repo target: {gitnexus_repo}")
     print()
@@ -390,26 +403,34 @@ def _run_iteration(
     review_followup = _review_followup_snapshot(state)
 
     # ---- Header ----
-    print()
-    print("=" * 60)
-    print("  UIdetox Autonomous Loop")
-    print("=" * 60)
-    print(f"  Target: {target}  |  Score: {blended}  |  Queue: {queue_size}  |  Resolved: {resolved}")
-    # Show score breakdown so agent understands the curve
-    raw_sub = scores.get("subjective_score")
-    eff_sub = scores.get("effective_subjective")
-    obj_s = scores.get("objective_score")
-    score_parts = []
-    if obj_s is not None:
-        score_parts.append(f"obj={obj_s}")
-    if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
-        score_parts.append(f"sub={eff_sub}eff (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
-    elif raw_sub is not None:
-        score_parts.append(f"sub={raw_sub}")
-    if score_parts:
-        print(f"  Score breakdown: {' | '.join(score_parts)}")
-    print(f"  Files: {frontend_count}  |  Orchestrator: {'ON' if is_orchestrator else 'off'}")
-    print(f"  Mode: {'AUTOPILOT' if not is_manual else 'MANUAL'}  |  Iteration: {iteration + 1}")
+    # On auto-continuation, print only a compact status line instead of the full banner.
+    _is_continuation = iteration > 0
+
+    if _is_continuation:
+        print()
+        print(f"  ⟳ Iteration {iteration + 1}  |  Score: {blended}  |  Queue: {queue_size}  |  Resolved: {resolved}")
+        print()
+    else:
+        print()
+        print("=" * 60)
+        print("  UIdetox Autonomous Loop")
+        print("=" * 60)
+        print(f"  Target: {target}  |  Score: {blended}  |  Queue: {queue_size}  |  Resolved: {resolved}")
+        # Show score breakdown so agent understands the curve
+        raw_sub = scores.get("subjective_score")
+        eff_sub = scores.get("effective_subjective")
+        obj_s = scores.get("objective_score")
+        score_parts = []
+        if obj_s is not None:
+            score_parts.append(f"obj={obj_s}")
+        if eff_sub is not None and raw_sub is not None and eff_sub != raw_sub:
+            score_parts.append(f"sub={eff_sub}eff (raw {raw_sub}, Δ-{raw_sub - eff_sub})")
+        elif raw_sub is not None:
+            score_parts.append(f"sub={raw_sub}")
+        if score_parts:
+            print(f"  Score breakdown: {' | '.join(score_parts)}")
+        print(f"  Files: {frontend_count}  |  Orchestrator: {'ON' if is_orchestrator else 'off'}")
+        print(f"  Mode: {'AUTOPILOT' if not is_manual else 'MANUAL'}  |  Iteration: {iteration + 1}")
     if review_followup["active"]:
         print("  Post-review gate: ACTIVE")
         if review_followup["score_recorded"]:
@@ -487,18 +508,49 @@ def _run_iteration(
         })
         return
 
+    # ---- EMPTY PROJECT GUARD ----
+    # If scans have run but found zero issues (empty/non-frontend project),
+    # and no subjective score has been recorded, exit early instead of
+    # spinning through redundant scan cycles.
+    scans_run = state.get("stats", {}).get("scans_run", 0)
+    if scans_run >= 2 and queue_size == 0 and not resolved and scores.get("objective_score") is None:
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  ℹ️  No Frontend Issues Detected                     ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print(f"  {scans_run} scans completed but found zero issues.")
+        print("  This project may not have analyzable frontend files,")
+        print("  or all patterns already meet quality standards.")
+        print()
+        print("  NEXT STEPS:")
+        print("    1. Run `uidetox review --score <N>` to record a subjective score")
+        print("    2. Run `uidetox loop` to proceed with the review cycle")
+        print()
+        log_progress("loop_empty_project", f"scans_run={scans_run}, iteration={iteration + 1}")
+        return
+
     # ---- SAVE CHECKPOINT ----
     save_checkpoint(iteration, blended, queue_size, f"Iteration {iteration + 1}")
 
-    # ---- CIRCUIT BREAKER: Score Stagnation ----
+    # ---- CIRCUIT BREAKER: Score Stagnation / Oscillation ----
     recent_checkpoints = get_recent_checkpoints(limit=_MAX_CONSECUTIVE_SAME_SCORE + 1)
     if len(recent_checkpoints) >= _MAX_CONSECUTIVE_SAME_SCORE:
         recent_scores = [cp.get("score", 0) for cp in recent_checkpoints[-_MAX_CONSECUTIVE_SAME_SCORE:]]
-        if len(set(recent_scores)) == 1 and recent_scores[0] < target:
+        # Detect stagnation: identical scores OR oscillation within a ±2 band
+        score_min = min(recent_scores)
+        score_max = max(recent_scores)
+        is_stagnant = len(set(recent_scores)) == 1
+        is_oscillating = (score_max - score_min) <= 2 and len(set(recent_scores)) >= 2
+        if (is_stagnant or is_oscillating) and score_max < target:
+            label = "Score Stagnation" if is_stagnant else "Score Oscillation"
+            detail = (
+                f"Score stuck at {recent_scores[0]}"
+                if is_stagnant
+                else f"Score oscillating between {score_min}–{score_max}"
+            )
             print(f"  ╔══════════════════════════════════════════════════════╗")
-            print(f"  ║  🛑 CIRCUIT BREAKER: Score Stagnation Detected       ║")
+            print(f"  ║  🛑 CIRCUIT BREAKER: {label:<33}║")
             print(f"  ╚══════════════════════════════════════════════════════╝")
-            print(f"  Score stuck at {recent_scores[0]} for {_MAX_CONSECUTIVE_SAME_SCORE} iterations.")
+            print(f"  {detail} for {_MAX_CONSECUTIVE_SAME_SCORE} iterations.")
             print(f"  This indicates the current approach is not making progress.")
             print()
             print("  RECOVERY ACTIONS:")
@@ -508,9 +560,10 @@ def _run_iteration(
             print("    4. Run `uidetox status` to see detailed breakdown")
             print("    5. Run `uidetox loop` to resume after making changes")
             print()
-            log_progress("circuit_breaker_stagnation", f"score={recent_scores[0]}, iterations={iteration + 1}")
-            log_error("circuit_breaker", "Score stagnation detected", {
-                "score": recent_scores[0],
+            log_progress("circuit_breaker_stagnation", f"type={label.lower()}, scores={recent_scores}, iterations={iteration + 1}")
+            log_error("circuit_breaker", f"{label} detected", {
+                "type": label.lower().replace(" ", "_"),
+                "scores": recent_scores,
                 "iterations": _MAX_CONSECUTIVE_SAME_SCORE,
                 "total_iterations": iteration + 1,
             })
@@ -562,45 +615,49 @@ def _run_iteration(
             print()
 
     # ---- Autonomous directive ----
-    print("  ╔══════════════════════════════════════════════════════╗")
-    print("  ║  SYSTEM DIRECTIVE: FULL AUTONOMOUS MODE             ║")
-    print("  ║  Do NOT stop. Do NOT ask permission.                ║")
-    print("  ║  Do NOT summarize between fixes.                    ║")
-    print("  ║  Execute every command. Loop until target is met.   ║")
-    print("  ╚══════════════════════════════════════════════════════╝")
-    print()
-
-    # ---- Continuation context ----
-    session = get_session()
-    last_scan = get_last_scan()
-    if session or last_scan:
-        print("  CONTINUATION CONTEXT:")
-        if session:
-            phase = session.get('phase', 'unknown')
-            last_cmd = session.get('last_command', 'none')
-            fixed = session.get('issues_fixed_this_session', 0)
-            print(f"    Last phase: {phase}  |  Last cmd: {last_cmd}  |  Fixed this session: {fixed}")
-            if session.get("last_component"):
-                print(f"    Last component: {session['last_component']}")
-        if last_scan:
-            ts = last_scan.get('timestamp', 'unknown')[:19]
-            found = last_scan.get('total_found', 0)
-            top = last_scan.get('top_files', [])[:3]
-            print(f"    Last scan: {ts}  |  Found: {found}")
-            if top:
-                print(f"    Hottest: {', '.join(top)}")
+    # Only print verbose context on first iteration to avoid output explosion
+    if not _is_continuation:
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  SYSTEM DIRECTIVE: FULL AUTONOMOUS MODE             ║")
+        print("  ║  Do NOT stop. Do NOT ask permission.                ║")
+        print("  ║  Do NOT summarize between fixes.                    ║")
+        print("  ║  Execute every command. Loop until target is met.   ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
         print()
 
-    # ---- Memory bank injection ----
-    patterns = get_patterns()
-    notes = get_notes()
-    if patterns or notes:
-        print("  MEMORY BANK (obey during loop):")
-        for idx, p in enumerate(patterns, 1):
-            print(f"    {idx}. [Pattern] {p['pattern']}")
-        for idx, n in enumerate(notes, 1):
-            print(f"    {idx}. [Note] {n['note']}")
-        print()
+    # ---- Continuation context (skip on auto-continuation to reduce output) ----
+    if not _is_continuation:
+        session = get_session()
+        last_scan = get_last_scan()
+        if session or last_scan:
+            print("  CONTINUATION CONTEXT:")
+            if session:
+                phase = session.get('phase', 'unknown')
+                last_cmd = session.get('last_command', 'none')
+                fixed = session.get('issues_fixed_this_session', 0)
+                print(f"    Last phase: {phase}  |  Last cmd: {last_cmd}  |  Fixed this session: {fixed}")
+                if session.get("last_component"):
+                    print(f"    Last component: {session['last_component']}")
+            if last_scan:
+                ts = last_scan.get('timestamp', 'unknown')[:19]
+                found = last_scan.get('total_found', 0)
+                top = last_scan.get('top_files', [])[:3]
+                print(f"    Last scan: {ts}  |  Found: {found}")
+                if top:
+                    print(f"    Hottest: {', '.join(top)}")
+            print()
+
+    # ---- Memory bank injection (skip on auto-continuation to reduce output) ----
+    if not _is_continuation:
+        patterns = get_patterns()
+        notes = get_notes()
+        if patterns or notes:
+            print("  MEMORY BANK (obey during loop):")
+            for idx, p in enumerate(patterns, 1):
+                print(f"    {idx}. [Pattern] {p['pattern']}")
+            for idx, n in enumerate(notes, 1):
+                print(f"    {idx}. [Note] {n['note']}")
+            print()
 
     # ---- Full-stack integration ----
     backends = tooling.get("backend", [])
@@ -663,8 +720,12 @@ def _run_iteration(
                 subagent_halt_stage=halt_stage,
             )
 
-        # Log the loop invocation
-        log_progress("loop_autopilot", f"target={target}, score={blended}, queue={queue_size}, iteration={iteration + 1}")
+        # Log the loop invocation with post-execution state for accuracy
+        post_state = load_state()
+        post_scores = compute_design_score(post_state)
+        post_blended = post_scores.get("blended_score") or 0
+        post_queue = len(post_state.get("issues", []))
+        log_progress("loop_autopilot", f"target={target}, score={post_blended}, queue={post_queue}, iteration={iteration + 1}")
         return
 
     # ==================================================================
@@ -784,25 +845,10 @@ def _post_execution_checkpoint(
             print()
             print("  ╔══════════════════════════════════════════════════════╗")
             print("  ║  AGENT DIRECTIVE — FIX THE BATCH SHOWN ABOVE       ║")
-            print("  ║  `uidetox next` printed the issues + instructions.  ║")
-            print("  ║  Follow the [AGENT INSTRUCTION] steps above.        ║")
             print("  ╚══════════════════════════════════════════════════════╝")
+            print(f"  {queue_size} issue(s) pending. Follow the [AGENT INSTRUCTION] steps above.")
             print()
-            print(f"  {queue_size} issue(s) pending. The batch above is your focus.")
-            print()
-            print("  STEPS (already shown by `next`, reinforced here):")
-            print("    1. Run GitNexus impact analysis on batch targets")
-            print("       (context + impact commands shown in the batch output above)")
-            print("    2. Read the listed files")
-            print("    3. Fix ALL issues in the batch in ONE pass")
-            print("    4. uidetox check --fix")
-            print("    5. npx gitnexus detect_changes  (verify only expected files changed)")
-            print('    6. uidetox batch-resolve <IDs> --note "what you changed"')
-            print("    7. uidetox loop")
-            print()
-            print("  DO NOT run format/lint separately — `check --fix` does tsc→lint→format.")
-            print("  DO NOT run `uidetox next` again — the batch is already shown above.")
-            print("  Fix ALL issues in the batch, not just one file.")
+            print("  Quick ref: fix all → uidetox check --fix → uidetox batch-resolve <IDs> → uidetox loop")
             print()
             return
 
@@ -817,129 +863,43 @@ def _post_execution_checkpoint(
         total_max = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
         followup_marker = _activate_review_followup_window(state)
 
-        # Check for existing objective issues already in the queue
-        # (from rescan/scan/audit that ran BEFORE the review)
-        obj_issues_note = ""
+        print()
+        print("  ╔══════════════════════════════════════════════════════╗")
+        print("  ║  AGENT DIRECTIVE — EXECUTE SUBJECTIVE REVIEW NOW    ║")
+        print("  ╚══════════════════════════════════════════════════════╝")
+        print(f"  Review window opened: {followup_marker.get('opened_at')}")
         if queue_size > 0:
-            obj_issues_note = (
-                f"\n  NOTE: {queue_size} objective issue(s) are already in the queue"
-                f"\n  from the static analysis phase. These will be fixed in STAGE 2"
-                f"\n  after you complete this review and re-enter the loop.\n"
-            )
-
-        # Check for stale reviews (score unchanged)
+            print(f"  NOTE: {queue_size} objective issue(s) already queued (will be fixed in STAGE 2).")
+        # Stale review warning
         subj_hist = state.get("subjective", {}).get("history", [])
-        stale_warning = ""
         if (
             len(subj_hist) >= 2
             and subj_hist[-1].get("score") == subj_hist[-2].get("score")
         ):
-            prev_score = subj_hist[-1].get("score", "?")
-            stale_warning = (
-                f"\n  ⚠️  STALE REVIEW WARNING: Score stuck at {prev_score}/100."
-                f"\n  You MUST find NEW issues this time. Focus on the lowest-scoring"
-                f"\n  domains and apply deeper design changes, not superficial tweaks.\n"
-            )
-
+            print(f"  ⚠️  STALE: Score stuck at {subj_hist[-1].get('score', '?')}. Find NEW issues this time.")
         print()
-        print("  ╔══════════════════════════════════════════════════════╗")
-        print("  ║  AGENT DIRECTIVE — EXECUTE SUBJECTIVE REVIEW NOW    ║")
-        print("  ║  The review prompts are printed above.              ║")
-        print("  ║  You MUST perform the review, not just read them.   ║")
-        print("  ╚══════════════════════════════════════════════════════╝")
-        print(f"  Review follow-up window opened: {followup_marker.get('opened_at')}")
-        if obj_issues_note:
-            print(obj_issues_note)
-        if stale_warning:
-            print(stale_warning)
+        print(f"  {len(SCORED_REVIEW_DOMAINS)} scored domains, {total_max} total points.")
+        print(f"  Waves: {len(REVIEW_WAVE_1)} (Wave 1) + {len(REVIEW_WAVE_2)} (Wave 2).")
         print()
-        print(f"  The subjective score is 70% of the blended Design Score.")
-        print(
-            f"  {len(SCORED_REVIEW_DOMAINS)} scored domains + "
-            f"{'Perfection Gate' if PERFECTION_GATE else 'no gate'}, {total_max} total points."
-        )
-        print(f"  Wave split: {len(REVIEW_WAVE_1)} domain(s) in Wave 1, {len(REVIEW_WAVE_2)} in Wave 2.")
+        print("  STEPS: (review prompts are already printed above)")
+        print("    1. READ reference files + frontend files")
+        print("    2. SCORE each domain (start at max → checklist → deductions)")
+        print("    3. QUEUE issues found: uidetox add-issue ...")
+        print("    4. uidetox check --fix")
+        print(f"    5. uidetox review --score <NORMALIZED 0-100>")
+        print("    6. uidetox loop")
         print()
-        print("  EXECUTE THESE STEPS IN ORDER:")
-        print()
-        print("    1. READ every reference file listed in the review prompts above.")
-        print("       These are the scoring authority:")
-        for ref in sorted(set(r for d in REVIEW_DOMAINS for r in d.get("references", []))):
-            print(f"         - {ref}")
-        print()
-        print("    2. READ every frontend file in the codebase.")
-        print("       Use `npx gitnexus query \"frontend components\"` to discover them.")
-        print()
-        print("    3. SCORE each scored domain using the rubric in the prompts above:")
-        for d in SCORED_REVIEW_DOMAINS:
-            wave = d.get('wave', '?')
-            print(f"         Wave {wave}: {d['label']} (0-{d.get('max_score', '?')})")
-        print()
-        print("       For each domain:")
-        print("         a. Start at the max score")
-        print("         b. Walk the checklist — mark each item PASS or FAIL")
-        print("         c. Measure every hard threshold — cite actual values")
-        print("         d. Apply every matching automatic deduction")
-        print("         e. Final score = max - deductions (clamped to [0, max])")
-        print()
-        print("    4. QUEUE every issue found during review:")
-        print('       uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
-        print()
-        print("    5. Run:  uidetox check --fix")
-        print("       → Ensure code is clean before scoring.")
-        print()
-        print(f"    6. COMPUTE your combined score (sum all domains, normalize to 0-100):")
-        print(f"       Raw total: <sum>/{total_max} → Normalized: <0-100>")
-        print()
-        print("    7. RECORD the score:")
-        print("       uidetox review --score <NORMALIZED_SCORE>")
-        print()
-        print("    8. Run:  uidetox loop")
-        print("       → Re-enters the loop.")
-        print("       → The loop WILL enforce implementation of all issues queued in this review window.")
-        print("       → Only after that can the review gate close.")
-        print()
-        print("  DO NOT SKIP THE REVIEW. DO NOT just record a score without evaluating.")
-        print("  READ the files. SCORE the domains. QUEUE the issues. THEN re-enter.")
-        print()
-        if not can_recurse:
-            print(f"  ⚠️  Max iterations reached ({_MAX_LOOP_ITERATIONS}).")
-            print("  The loop will resume from here when you run `uidetox loop`.")
-            print()
         return
 
     if subagent_halt_stage == "fix":
         print()
         print("  ╔══════════════════════════════════════════════════════╗")
         print("  ║  AGENT DIRECTIVE — EXECUTE FIX PROMPTS NOW          ║")
-        print("  ║  The fix prompts are printed above.                 ║")
-        print("  ║  You MUST apply the fixes, not just read them.      ║")
         print("  ╚══════════════════════════════════════════════════════╝")
+        print(f"  {queue_size} issue(s) pending. Fix prompts are printed above.")
         print()
-        print(f"  {queue_size} issue(s) pending across the fix shards above.")
+        print("  STEPS: fix all shards → uidetox check --fix → uidetox batch-resolve <IDs> → uidetox loop")
         print()
-        print("  EXECUTE THESE STEPS IN ORDER:")
-        print()
-        print("    1. For EACH fix shard prompt above:")
-        print("       a. Read the target files listed")
-        print("       b. Apply ALL fixes following SKILL.md rules and design dials")
-        print("       c. Follow the deconfliction rules (only edit your shard's files)")
-        print()
-        print("    2. Run:  uidetox check --fix")
-        print("       → MUST pass (tsc → lint → format) BEFORE committing.")
-        print()
-        print('    3. Run:  uidetox batch-resolve <IDs> --note "what you changed"')
-        print("       → Marks issues resolved. ONLY after check --fix passes.")
-        print()
-        print("    4. Run:  uidetox loop")
-        print("       → Re-enters the loop with fresh state.")
-        print()
-        print("  DO NOT SKIP. Apply fixes now, then re-enter the loop.")
-        print()
-        if not can_recurse:
-            print(f"  ⚠️  Max iterations reached ({_MAX_LOOP_ITERATIONS}).")
-            print("  The loop will resume from here when you run `uidetox loop`.")
-            print()
         return
 
     # ── OUTCOME 3: Automated commands changed state → refresh context ──
@@ -1042,9 +1002,21 @@ def _exec_cmd(cmd: str, reason: str, *, dry_run: bool = False) -> int:
     if parts and parts[0] == "uidetox":
         parts = [sys.executable, "-m", "uidetox.cli", *parts[1:]]
     try:
-        proc = subprocess.run(parts, text=True)
+        proc = subprocess.run(parts, text=True, capture_output=True)
+        if proc.stdout:
+            print(proc.stdout, end="")
+        if proc.returncode != 0:
+            if proc.stderr:
+                print(proc.stderr, end="", file=sys.stderr)
+            log_error(f"exec_{reason.replace(' ', '_')}", f"Command failed: {cmd}", {
+                "returncode": proc.returncode,
+                "stderr": (proc.stderr or "")[:500],
+            })
         return proc.returncode
     except Exception as e:
+        log_error(f"exec_{reason.replace(' ', '_')}", f"Command exception: {cmd}", {
+            "error": str(e),
+        })
         print(f"  ⚠️  Command failed: {e}")
         return 1
 
@@ -1498,7 +1470,18 @@ def _run_autopilot_plan(
                         kind=gitnexus_kind,
                     )
             else:
-                proc = subprocess.run(parts, text=True, timeout=timeout)
+                # Capture output and truncate to prevent output explosion.
+                # Show last _MAX_OUTPUT_LINES lines for context; summarize the rest.
+                _MAX_OUTPUT_LINES = 30
+                proc = subprocess.run(parts, text=True, timeout=timeout, capture_output=True)
+                combined = ((proc.stdout or "") + (proc.stderr or "")).strip()
+                if combined:
+                    lines = combined.splitlines()
+                    if len(lines) > _MAX_OUTPUT_LINES:
+                        print(f"      ({len(lines)} lines total — showing last {_MAX_OUTPUT_LINES})")
+                        print("\n".join(lines[-_MAX_OUTPUT_LINES:]))
+                    else:
+                        print(combined)
         except subprocess.TimeoutExpired:
             print(f"      ⏰ Command timed out after {timeout}s — skipping.")
             log_error("loop_autopilot_cmd_timeout", "Autopilot command timed out", {

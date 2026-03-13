@@ -26,10 +26,10 @@ STAGES = ["observe", "diagnose", "prioritize", "fix", "verify", "review"]
 
 # ── Reference-driven scoring rubric ──────────────────────────────
 #
-# Domain sharding for parallel subjective review — 10 fine-grained
-# domains organized as 2 waves of 5.  Each domain maps to reference
+# Domain sharding for parallel subjective review — 14 fine-grained
+# domains organized as 2 waves of 7.  Each domain maps to reference
 # files and the review rubric sections it evaluates.  Splitting into
-# 10 (vs. the original 5) gives each subagent a narrower, deeper
+# 14 (vs. the original 5) gives each subagent a narrower, deeper
 # focus and yields more thorough coverage of the subjective rubric
 # which accounts for 70% of the blended Design Score.
 #
@@ -696,6 +696,25 @@ def _coerce_parallel(parallel: int) -> int:
 _TIER_COMPLEXITY = {"T1": 1, "T2": 3, "T3": 5, "T4": 8}
 _FIX_TIER_PRIORITY = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
 _FIX_TIER_WORKLOAD = {"T1": 8, "T2": 5, "T3": 3, "T4": 1}
+
+
+def _perfection_gate_block() -> str:
+    """Build a markdown block for the Perfection Gate cross-cutting context."""
+    gate = PERFECTION_GATE
+    if not gate:
+        return ""
+    checklist = gate.get("checklist", [])
+    deductions = gate.get("deductions", [])
+    items = "\n".join(f"  - [ ] {item}" for item in checklist)
+    deds = "\n".join(f"  - {d}" for d in deductions)
+    return (
+        f"**{gate['label']}** — {gate['rubric']}\n"
+        f"- **Focus**: {gate['focus']}\n"
+        f"- **Conditions** ({len(checklist)} non-negotiable):\n{items}\n"
+        f"- **Cap Rules**:\n{deds}\n"
+        f"Note any gate failures in your output. Gate failures cap the OVERALL "
+        f"normalized score — they do NOT affect your domain partial scores."
+    )
 
 
 def _file_complexity_score(filepath: str, issues: list[dict] | None = None) -> float:
@@ -2064,8 +2083,11 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
 
     elif stage == "review":
         files = get_frontend_files()
-        if parallel > 1 and len(REVIEW_DOMAINS) > 1:
-            domains = REVIEW_DOMAINS
+        if parallel > 1 and len(SCORED_REVIEW_DOMAINS) > 1:
+            # Shard only scored domains (14); the perfection gate (wave 0,
+            # max_score=0) is injected into every shard as cross-cutting
+            # context rather than bundled via round-robin with typography.
+            domains = SCORED_REVIEW_DOMAINS
             chunks = _shard_items(domains, min(parallel, len(domains)))
             # Review is domain-sharded, not file-sharded: each domain reviewer
             # should score against the full frontend surface area.
@@ -2642,6 +2664,9 @@ blended Design Score.
 - Queue any issues you find:
   `uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"`
 
+## Perfection Gate (cross-cutting — applies to ALL shards)
+{_perfection_gate_block()}
+
 ## Post-Review Steps (MANDATORY)
 1. Run `uidetox check --fix` after queuing issues
 2. Output your partial scores with detailed justification
@@ -2663,6 +2688,8 @@ THRESHOLD MEASUREMENTS:
 DEDUCTIONS APPLIED:
   [domain_name] deduction_rule: -N pts (evidence)
   ...
+
+PERFECTION GATE: <PASS | FAIL (N conditions failed)>
 
 ISSUES FOUND: <count>
 

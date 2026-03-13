@@ -1438,6 +1438,50 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 })
             continue
 
+        # Custom check: missing_error_boundary — flag files with app-level
+        # structure (Router, Provider, etc.) but no ErrorBoundary wrapping.
+        if custom == "missing_error_boundary":
+            has_structure = bool(re.search(
+                r'<(?:Suspense|Provider|Router|Route|Switch|BrowserRouter)',
+                content, re.IGNORECASE,
+            ))
+            has_boundary = bool(re.search(r'<ErrorBoundary', content))
+            if has_structure and not has_boundary:
+                issues.append({
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                })
+            continue
+
+        # Custom check: unoptimized_list — flag .map() list rendering that
+        # is missing a ``key`` prop or uses index as key.
+        if custom == "unoptimized_list":
+            for m in re.finditer(
+                r'\.map\s*\(\s*\(\s*(\w+)\s*(?:,\s*(\w+))?\s*\)\s*=>\s*(<(?:div|li|article|section)\s[^>]*>)',
+                content, re.IGNORECASE,
+            ):
+                opening_tag = m.group(3)
+                index_var = m.group(2)  # may be None
+                if 'key=' not in opening_tag:
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": "List rendering without key prop detected.",
+                        "command": rule["command"],
+                    })
+                    break
+                elif index_var and re.search(r'key=\{' + re.escape(index_var) + r'\}', opening_tag):
+                    issues.append({
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": "List rendering using array index as key detected.",
+                        "command": rule["command"],
+                    })
+                    break
+            continue
+
         # Standard regex match — flag once per file
         pattern = rule.get("pattern")
         if isinstance(pattern, re.Pattern) and pattern.search(content):

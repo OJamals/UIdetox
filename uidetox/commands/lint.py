@@ -9,6 +9,10 @@ from uidetox.tooling import detect_all  # type: ignore
 from uidetox.state import add_issue, load_config, get_project_root  # type: ignore
 from uidetox.utils import run_tool  # type: ignore
 
+_LINT_ERROR_PATTERN = re.compile(
+    r"^([^:\n]+?):(\d+):(\d+)(?::\s*|\s+-\s*|\s+)(.+)$", re.MULTILINE
+)
+
 
 def run(args: argparse.Namespace):
     config = load_config()
@@ -61,8 +65,7 @@ def run(args: argparse.Namespace):
             continue
 
         # Generic parser that catches file.ts:line:col
-        pattern = re.compile(r"^([^:\n]+?):(\d+):(\d+)(?::\s*|\s+-\s*|\s+)(.+)$", re.MULTILINE)
-        errors = pattern.findall(output)
+        errors = _LINT_ERROR_PATTERN.findall(output)
 
         queued = 0
         for file_path, line, col, msg in errors:

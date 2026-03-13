@@ -194,6 +194,7 @@ def _iter_route_frontend_files(
                 continue
             route_files.append(candidate)
             if len(route_files) >= _MAX_ROUTE_SCAN_FILES:
+                print(f"  ⚠️  Route scan capped at {_MAX_ROUTE_SCAN_FILES} files. Some files may not be analyzed.")
                 return route_files
     return route_files
 

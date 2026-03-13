@@ -235,11 +235,7 @@ def compute_effective_subjective(
 
 
 def _apply_subjective_curve(raw_score: int, pending_issues: list[dict]) -> int:
-    """Backward-compatible wrapper around ``compute_effective_subjective``.
-
-    Keeps legacy call sites/tests working while centralizing scoring logic
-    in one function that also powers ``compute_design_score``.
-    """
+    """Backward-compatible wrapper around ``compute_effective_subjective``."""
     details = compute_effective_subjective(raw_score, pending_issues)
     return int(details["effective_score"])
 

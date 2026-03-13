@@ -2,16 +2,17 @@
 
 import argparse
 import sys
-import subprocess
 from uidetox.state import remove_issue, get_issue, load_state, load_config, get_project_root
 from uidetox.memory import save_session, log_progress, embed_fix_outcome
-from uidetox.commands.batch_resolve import run_verification
+from uidetox.commands.batch_resolve import run_verification, has_local_changes_for_issue_files
 
 
 def run(args: argparse.Namespace):
     issue_id = args.issue_id
-    issue = get_issue(issue_id)
-    if not issue:
+    # Preliminary (unlocked) lookup for pre-verification file info.
+    # The authoritative existence check happens in remove_issue() under lock.
+    issue_preview = get_issue(issue_id)
+    if not issue_preview:
         print(f"Error: Issue {issue_id} not found in the queue.", file=sys.stderr)
         sys.exit(1)
 
@@ -23,10 +24,27 @@ def run(args: argparse.Namespace):
         if not run_verification(config):
             print("❌ Verification failed. Build is broken. Fix it before resolving.", file=sys.stderr)
             sys.exit(1)
+        has_changes, changed_subset = has_local_changes_for_issue_files([issue_preview.get("file", "")])
+        if not has_changes:
+            print("❌ No local file changes detected for this issue file.", file=sys.stderr)
+            print()
+            print("[AGENT INSTRUCTION] Refusing to resolve without concrete edits.")
+            print(f"  1. Fix `{issue_preview.get('file', '')}` for issue `{issue_id}`")
+            print("  2. Run `uidetox check --fix`")
+            print(f"  3. Retry: uidetox resolve {issue_id} --note \"{args.note}\"")
+            print("  4. If this was pre-fixed in a prior commit, rerun with --skip-verify")
+            sys.exit(1)
+        if changed_subset:
+            print(f"  Changed issue files detected: {len(changed_subset)}")
+            for p in changed_subset[:5]:
+                print(f"    - {p}")
+        else:
+            print("  ℹ️  Git change metadata unavailable; proceeding with verification-only guard.")
         print()
 
-    success = remove_issue(issue_id, note=args.note)
-    if success:
+    # Atomic removal under file lock — guards against concurrent resolves
+    issue = remove_issue(issue_id, note=args.note)
+    if issue:
         state = load_state()
         remaining = len(state.get("issues", []))
         resolved_total = len(state.get("resolved", []))

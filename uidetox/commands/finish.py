@@ -62,11 +62,11 @@ def _branch_exists(branch: str) -> bool:
 def _checkout_target_branch(branch: str) -> None:
     """Checkout merge target, creating a local tracking branch if needed."""
     if _local_branch_exists(branch):
-        subprocess.run(["git", "checkout", branch], check=True)
+        subprocess.run(["git", "checkout", branch], check=True, timeout=60)
         return
 
     if _remote_branch_exists(branch):
-        subprocess.run(["git", "checkout", "-b", branch, f"origin/{branch}"], check=True)
+        subprocess.run(["git", "checkout", "-b", branch, f"origin/{branch}"], check=True, timeout=60)
         return
 
     raise subprocess.CalledProcessError(1, ["git", "checkout", branch])
@@ -192,7 +192,7 @@ def run(args: argparse.Namespace):
             policy = CommitPolicy.from_config(config)
             result = safe_commit(
                 touched_files=dirty_paths,
-                message="[UIdetox] Auto-commit before finish",
+                message="chore(uidetox): auto-commit uncommitted changes before finish",
                 policy=policy,
                 cwd=".",
             )
@@ -215,17 +215,29 @@ def run(args: argparse.Namespace):
 
         # Squash merge
         print("▶️  Squashing changes...")
-        subprocess.run(["git", "merge", "--squash", current_branch], check=True)
+        subprocess.run(["git", "merge", "--squash", current_branch], check=True, timeout=120)
 
-        # Commit squashed changes
+        # Commit squashed changes via safe_commit for policy + hook compliance
         print("▶️  Committing aesthetic fixes...")
-        subprocess.run([
-            "git", "commit", "-m", "[UIdetox] Detoxing complete: Resolved issues and improved Design Score."
-        ], check=True)
+        from uidetox.git_policy import CommitPolicy, safe_commit as _safe_commit
+        _finish_policy = CommitPolicy.from_config(config)
+        _finish_msg = f"style(uidetox): resolve {queue_size} issues, design score {blended}/100"
+        _finish_result = _safe_commit(
+            touched_files=[],
+            message=_finish_msg,
+            policy=_finish_policy,
+            cwd=".",
+            stage_all=True,
+        )
+        if not _finish_result.success:
+            # Fallback: commit directly if safe_commit failed (e.g. nothing staged)
+            subprocess.run([
+                "git", "commit", "-m", _finish_msg,
+            ], check=True, timeout=60)
 
         # Delete the session branch
         print("▶️  Cleaning up temporary branch...")
-        subprocess.run(["git", "branch", "-D", current_branch], check=True)
+        subprocess.run(["git", "branch", "-D", current_branch], check=True, timeout=30)
         _clear_session_metadata(current_branch)
 
         # Compact ChromaDB embeddings to prevent unbounded growth

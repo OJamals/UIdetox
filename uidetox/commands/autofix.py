@@ -1,6 +1,7 @@
 """Autofix command: automatically apply safe T1 fixes with rollback safety."""
 
 import argparse
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -208,8 +209,11 @@ def _normalize_repo_path(path: str, project_root: str) -> str | None:
     root = Path(project_root).resolve()
     try:
         if p.is_absolute():
-            return str(p.resolve().relative_to(root))
-        return str(Path(path))
+            rel = p.resolve().relative_to(root).as_posix()
+        else:
+            rel = p.as_posix()
+        rel = rel.lstrip("./")
+        return rel or None
     except ValueError:
         return None
 
@@ -261,7 +265,7 @@ def _auto_commit(fixed_files: set[str], project_root: str, label: str) -> None:
             subprocess.run(["git", "add", "--", f], cwd=project_root, capture_output=True, check=True)
 
         subprocess.run(
-            ["git", "commit", "-m", f"[UIdetox] Autofix: {label} ({len(scoped)} files)"],
+            ["git", "commit", "-m", f"fix(uidetox): autofix {label} ({len(scoped)} files)"],
             check=True, stdout=subprocess.DEVNULL, cwd=project_root,
         )
         print(f"   Auto-committed {label} to git.")
@@ -291,6 +295,80 @@ def _is_review_origin_issue(issue: dict) -> bool:
 def _is_mechanical_issue(issue: dict) -> bool:
     command = str(issue.get("command", "") or "").strip().lower()
     return command in _MECHANICAL_FIX_COMMANDS
+
+
+def _reverify_issues(candidates: list[dict], project_root: str) -> list[dict]:
+    """Re-scan candidate issues' files and keep only those whose pattern is gone.
+
+    This prevents marking issues as resolved when the file changed for an
+    unrelated reason (e.g. a different lint rule fixed something else).
+    """
+    try:
+        from uidetox.analyzer import analyze_file  # type: ignore[import]
+    except ImportError:
+        # If analyzer is unavailable, fall back to trusting candidates.
+        return candidates
+
+    verified: list[dict] = []
+    for issue in candidates:
+        file_path = issue.get("file", "")
+        if not file_path:
+            verified.append(issue)
+            continue
+        full_path = Path(project_root) / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        if not full_path.exists():
+            verified.append(issue)
+            continue
+        try:
+            remaining = analyze_file(str(full_path))
+        except Exception:
+            # Analysis failed — conservatively keep the issue pending.
+            continue
+        # Check if this specific issue's description still matches any finding
+        issue_desc = str(issue.get("issue", "")).lower().strip()
+        still_present = any(
+            issue_desc and (
+                issue_desc in str(finding.get("issue", "")).lower()
+                or str(finding.get("rule_id", "")).lower() in issue_desc
+            )
+            for finding in remaining
+        )
+        if not still_present:
+            verified.append(issue)
+        else:
+            print(f"    ℹ️  Issue {issue.get('id', '?')} still detected after fix — keeping pending.")
+    return verified
+
+
+def _file_signature(path: Path) -> str | None:
+    """Content signature for change detection; None when file is missing."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha1(data).hexdigest()
+
+
+def _capture_issue_file_signatures(issue_files: set[str], project_root: str) -> dict[str, str | None]:
+    signatures: dict[str, str | None] = {}
+    root = Path(project_root)
+    for raw in issue_files:
+        rel = _normalize_repo_path(raw, project_root)
+        if not rel:
+            continue
+        path = root / rel
+        signatures[rel] = _file_signature(path)
+    return signatures
+
+
+def _changed_issue_files_from_signatures(before: dict[str, str | None], project_root: str) -> set[str]:
+    changed: set[str] = set()
+    root = Path(project_root)
+    for rel, old_sig in before.items():
+        new_sig = _file_signature(root / rel)
+        if new_sig != old_sig:
+            changed.add(rel)
+    return changed
 
 
 def _collect_snapshot_files(t1_issues: list[dict], tooling: dict, project_root: str) -> list[str]:
@@ -532,12 +610,35 @@ def run(args: argparse.Namespace):
     phase_dedupe: set[str] = set()
     if lint_issues:
         print("━━━ Phase 1: Lint Auto-Fix ━━━")
+        lint_issue_files = {
+            rel for rel in (
+                _normalize_repo_path(str(i.get("file", "")), project_root)
+                for i in lint_issues
+            ) if rel
+        }
+        lint_before = _capture_issue_file_signatures(lint_issue_files, project_root)
         stats = _run_lint_fixes(tooling, project_root, dedupe_set=phase_dedupe)
+        lint_changed_files = _changed_issue_files_from_signatures(lint_before, project_root)
         if stats.clean:
-            resolved_ids.extend(i["id"] for i in lint_issues)
-            total_fixed += len(lint_issues)
-            if auto_commit:
-                _auto_commit({str(i.get("file")) for i in lint_issues if i.get("file")}, project_root, "lint fixes")
+            # Only consider files changed in THIS phase, not cumulative
+            lint_resolved = [
+                i for i in lint_issues
+                if _normalize_repo_path(str(i.get("file", "")), project_root) in lint_changed_files
+            ]
+            # Re-verify: confirm each issue is actually fixed via re-scan
+            if lint_resolved:
+                lint_resolved = _reverify_issues(lint_resolved, project_root)
+            if lint_resolved:
+                resolved_ids.extend(i["id"] for i in lint_resolved)
+                total_fixed += len(lint_resolved)
+                if auto_commit:
+                    _auto_commit(
+                        {str(i.get("file")) for i in lint_resolved if i.get("file")},
+                        project_root,
+                        "lint fixes",
+                    )
+            else:
+                print("  ⚠️  No verified fixes for lint issue files — leaving lint issues pending.")
         elif stats.ran:
             print("  ⚠️  Lint fix phase had failures — keeping lint issues in queue.")
         print()
@@ -545,12 +646,35 @@ def run(args: argparse.Namespace):
     # ── Phase 2: Format fixes ──
     if format_issues:
         print("━━━ Phase 2: Format Auto-Fix ━━━")
+        format_issue_files = {
+            rel for rel in (
+                _normalize_repo_path(str(i.get("file", "")), project_root)
+                for i in format_issues
+            ) if rel
+        }
+        format_before = _capture_issue_file_signatures(format_issue_files, project_root)
         stats = _run_format_fixes(tooling, project_root, dedupe_set=phase_dedupe)
+        format_changed_files = _changed_issue_files_from_signatures(format_before, project_root)
         if stats.clean:
-            resolved_ids.extend(i["id"] for i in format_issues)
-            total_fixed += len(format_issues)
-            if auto_commit:
-                _auto_commit({str(i.get("file")) for i in format_issues if i.get("file")}, project_root, "format fixes")
+            # Only consider files changed in THIS phase, not cumulative
+            format_resolved = [
+                i for i in format_issues
+                if _normalize_repo_path(str(i.get("file", "")), project_root) in format_changed_files
+            ]
+            # Re-verify: confirm each issue is actually fixed via re-scan
+            if format_resolved:
+                format_resolved = _reverify_issues(format_resolved, project_root)
+            if format_resolved:
+                resolved_ids.extend(i["id"] for i in format_resolved)
+                total_fixed += len(format_resolved)
+                if auto_commit:
+                    _auto_commit(
+                        {str(i.get("file")) for i in format_resolved if i.get("file")},
+                        project_root,
+                        "format fixes",
+                    )
+            else:
+                print("  ⚠️  No verified fixes for format issue files — leaving format issues pending.")
         elif stats.ran:
             print("  ⚠️  Format fix phase had failures — keeping format issues in queue.")
         print()

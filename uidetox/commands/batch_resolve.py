@@ -12,6 +12,7 @@ from pathlib import Path
 from uidetox.state import batch_remove_issues, get_issue, load_state, load_config, get_project_root
 from uidetox.memory import save_session, log_progress
 from uidetox.utils import run_tool, compute_design_score, get_score_freshness
+from uidetox.git_policy import git_changed_paths as _git_changed_paths
 
 
 def _run_tool_step(*, cmd: str, label: str, action_label: str,
@@ -147,6 +148,42 @@ def _derive_component_name(files: list[str]) -> str:
     return name
 
 
+def _normalize_issue_file(file_path: str, project_root: str) -> str | None:
+    """Normalize an issue file path to repo-relative POSIX form."""
+    if not file_path:
+        return None
+    p = Path(file_path)
+    root = Path(project_root).resolve()
+    try:
+        if p.is_absolute():
+            rel = p.resolve().relative_to(root).as_posix()
+        else:
+            rel = p.as_posix()
+    except ValueError:
+        return None
+    rel = rel.lstrip("./")
+    return rel or None
+
+
+def has_local_changes_for_issue_files(issue_files: list[str], *, project_root: str | None = None) -> tuple[bool, list[str]]:
+    """Return whether any issue file has local git changes and the changed subset."""
+    root = project_root or str(get_project_root())
+    changed_paths = _git_changed_paths(root)
+    if changed_paths is None:
+        # No git metadata: do not hard-block resolution.
+        return True, []
+    if not changed_paths:
+        return False, []
+
+    normalized = {
+        n for n in (
+            _normalize_issue_file(f, root) for f in issue_files
+        ) if n
+    }
+    matched = sorted(normalized & changed_paths)
+    return bool(matched), matched
+
+
 def _preflight_validate(issue_ids: list[str], config: dict) -> list[str]:
     """Pre-flight validation before resolve.  Returns list of warning strings.
 
@@ -229,6 +266,28 @@ def run(args: argparse.Namespace):
             sys.exit(1)
         print()
 
+    issue_files = [str(iss.get("file", "")) for iid in issue_ids if (iss := get_issue(iid))]
+    if issue_files and not skip_verify:
+        has_changes, changed_subset = has_local_changes_for_issue_files(issue_files)
+        if not has_changes:
+            print("❌ No local file changes detected for selected issue files.", file=sys.stderr)
+            print()
+            print("[AGENT INSTRUCTION] Refusing to mark issues resolved without concrete edits.")
+            print("  1. Implement the fixes in the files tied to these issue IDs")
+            print("  2. Run `uidetox check --fix`")
+            print(f"  3. Retry: uidetox batch-resolve {' '.join(issue_ids)} --note \"{note}\"")
+            print("  4. If you intentionally pre-fixed in a clean commit, re-run with --skip-verify")
+            sys.exit(1)
+        if changed_subset:
+            print(f"  Changed issue files detected: {len(changed_subset)}")
+            for p in changed_subset[:5]:
+                print(f"    - {p}")
+            if len(changed_subset) > 5:
+                print(f"    ... +{len(changed_subset) - 5} more")
+        else:
+            print("  ℹ️  Git change metadata unavailable; proceeding with verification-only guard.")
+        print()
+
     # Batch resolve
     removed = batch_remove_issues(issue_ids, note=note)
     if not removed:
@@ -289,7 +348,7 @@ def run(args: argparse.Namespace):
         try:
             from uidetox.git_policy import CommitPolicy, safe_commit
             policy = CommitPolicy.from_config(config)
-            commit_msg = f"[UIdetox] Detoxed {component}: {note} ({len(removed)} issues resolved)"
+            commit_msg = f"fix(uidetox): {component} — {note} ({len(removed)} issues resolved)"
             result = safe_commit(
                 touched_files=affected_files,
                 message=commit_msg,

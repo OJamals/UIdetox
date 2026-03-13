@@ -98,6 +98,32 @@ def get_untracked_files(cwd: str | None = None) -> list[str]:
         return []
 
 
+def git_changed_paths(project_root: str) -> set[str] | None:
+    """Return modified/staged/untracked paths via ``git status --porcelain``.
+
+    Returns ``None`` when git metadata is unavailable in this environment.
+    This is the canonical implementation — do **not** duplicate elsewhere.
+    """
+    changed: set[str] = set()
+    try:
+        status = _git_run(["status", "--porcelain"], cwd=project_root)
+        if status.returncode != 0:
+            return None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+    for line in status.stdout.splitlines():
+        if not line or len(line) < 4:
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        path = path.lstrip("./")
+        if path:
+            changed.add(path.replace("\\", "/"))
+    return changed
+
+
 def classify_modifications(
     touched_files: list[str],
     cwd: str | None = None,

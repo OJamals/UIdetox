@@ -362,16 +362,19 @@ def _store_subjective_score(score: int):
 
 def _run_parallel_review(parallel: int):
     """Generate parallel domain-sharded review subagent prompts."""
-    from uidetox.subagent import generate_stage_prompt, REVIEW_DOMAINS
+    from uidetox.subagent import generate_stage_prompt, SCORED_REVIEW_DOMAINS, PERFECTION_GATE
 
-    total_max = sum(d.get("max_score", 0) for d in REVIEW_DOMAINS)
+    total_max = sum(d.get("max_score", 0) for d in SCORED_REVIEW_DOMAINS)
 
     print("+" + "=" * 58 + "+")
     print("| UIdetox Parallel Subjective Review                       |")
     print("+" + "=" * 58 + "+")
     print()
-    print(f"  Spawning {min(parallel, len(REVIEW_DOMAINS))} parallel review subagents")
-    print(f"  across {len(REVIEW_DOMAINS)} design domains ({total_max} total pts).")
+    print(f"  Spawning {min(parallel, len(SCORED_REVIEW_DOMAINS))} parallel review subagents")
+    print(f"  across {len(SCORED_REVIEW_DOMAINS)} scored domains ({total_max} total pts).")
+    if PERFECTION_GATE:
+        gate_checks = len(PERFECTION_GATE.get("checklist", []))
+        print(f"  + Perfection Gate ({gate_checks} cross-cutting conditions) injected into every shard.")
     print("  Subjective score = 70% of final blended Design Score.")
     print()
     print("  Scoring Protocol: checklist → thresholds → deductions → score")
@@ -381,7 +384,7 @@ def _run_parallel_review(parallel: int):
 
     print(f"  Generated {len(prompts)} domain review prompt(s):")
     print()
-    for idx, domain in enumerate(REVIEW_DOMAINS[:len(prompts)]):
+    for idx, domain in enumerate(SCORED_REVIEW_DOMAINS[:len(prompts)]):
         label = domain.get("label", f"Domain {idx + 1}")
         rubric = domain.get("rubric", "")
         max_s = domain.get("max_score", 0)

@@ -48,10 +48,6 @@ def run(args: argparse.Namespace):
         key = _dedup_key(r)
         recurrence[key] = recurrence.get(key, 0) + 1
 
-    # Clear existing issues and track the rescan
-    clear_issues()
-    increment_scans()
-
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
@@ -61,17 +57,27 @@ def run(args: argparse.Namespace):
     print("=" * 58)
     print(" UIdetox Rescan (fresh analysis + smart dedup)")
     print("=" * 58)
-    print(f"  Cleared {old_count} previous issue(s).")
+    print(f"  Previous issue(s): {old_count}")
     print(f"  Resolved history: {len(resolved)} issue(s)")
     print(f"  Path: {path}  |  Dials: V={variance} M={intensity} D={density}")
     print()
 
     # ---- STATIC ANALYSIS ----
+    # Run analysis BEFORE clearing issues so a crash preserves the old queue.
     print("  Running static slop analyzer...")
     ignore_patterns = config.get("ignore_patterns", [])
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
-    slop_issues = analyze_directory(path, exclude_paths=exclude_paths, zone_overrides=zone_overrides, design_variance=variance)
+    try:
+        slop_issues = analyze_directory(path, exclude_paths=exclude_paths, zone_overrides=zone_overrides, design_variance=variance)
+    except Exception as exc:
+        print(f"  ❌ Analyzer crashed: {exc}")
+        print("  Previous issue queue preserved (no data lost).")
+        return
+
+    # Analysis succeeded — safe to clear old issues and swap in new ones.
+    clear_issues()
+    increment_scans()
 
     queued_count = 0
     dedup_skipped = 0

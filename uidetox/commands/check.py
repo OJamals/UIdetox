@@ -3,9 +3,11 @@
 import argparse
 import subprocess
 import logging
+import time
 from uidetox.tooling import detect_all  # type: ignore
 from uidetox.state import load_config, save_config, get_project_root, log_error  # type: ignore
 from uidetox.utils import run_tool  # type: ignore
+from uidetox.git_policy import git_changed_paths as _git_changed_paths  # type: ignore
 from uidetox.commands import tsc as tsc_cmd  # type: ignore
 from uidetox.commands import lint as lint_cmd  # type: ignore
 from uidetox.commands import format_cmd  # type: ignore
@@ -57,25 +59,6 @@ def _is_recoverable_error(output: str) -> bool:
     ]
     pattern = '|'.join(recoverable_patterns)
     return bool(re.search(pattern, output, re.IGNORECASE))
-
-
-def _git_changed_paths(project_root: str) -> set[str]:
-    """Return staged, unstaged, and untracked repo paths."""
-    changed: set[str] = set()
-    commands = (
-        ["git", "diff", "--name-only"],
-        ["git", "diff", "--name-only", "--cached"],
-        ["git", "ls-files", "--others", "--exclude-standard"],
-    )
-    for cmd in commands:
-        res = subprocess.run(cmd, capture_output=True, text=True, cwd=project_root)
-        if res.returncode != 0:
-            raise subprocess.CalledProcessError(res.returncode, cmd, output=res.stdout, stderr=res.stderr)
-        for line in res.stdout.splitlines():
-            path = line.strip()
-            if path:
-                changed.add(path)
-    return changed
 
 
 def run(args: argparse.Namespace):
@@ -150,7 +133,6 @@ def run(args: argparse.Namespace):
                             if _is_recoverable_error(combined):
                                 if attempt < _MAX_RETRIES:
                                     logger.warning(f"{tool_name} failed (attempt {attempt}/{_MAX_RETRIES}), retrying...")
-                                    import time
                                     time.sleep(_RETRY_DELAY)
                                     continue
                                 else:
@@ -178,7 +160,6 @@ def run(args: argparse.Namespace):
                     except Exception as e:
                         if attempt < _MAX_RETRIES:
                             logger.warning(f"{tool_name} exception (attempt {attempt}/{_MAX_RETRIES}): {e}")
-                            import time
                             time.sleep(_RETRY_DELAY)
                         else:
                             iteration_errors.append(f"{tool_name}: {str(e)}")
@@ -204,13 +185,15 @@ def run(args: argparse.Namespace):
                 if pre_fix_changed is None:
                     raise RuntimeError("missing pre-fix git baseline")
                 post_fix_changed = _git_changed_paths(project_root)
+                if post_fix_changed is None:
+                    raise RuntimeError("could not read post-fix git status")
                 changed_files = sorted(post_fix_changed - pre_fix_changed)
                 if changed_files:
                     from uidetox.git_policy import CommitPolicy, safe_commit
                     policy = CommitPolicy.from_config(config)
                     result = safe_commit(
                         touched_files=list(changed_files),
-                        message="[UIdetox] Mechanical auto-fix (formatting/linting)",
+                        message="fix(uidetox): mechanical auto-fix formatting and linting",
                         policy=policy,
                         cwd=project_root,
                     )
