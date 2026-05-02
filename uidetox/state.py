@@ -75,7 +75,19 @@ def load_state() -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         data = _default_state()
-        
+
+    # Validate expected types — a corrupted or hand-edited state.json can contain
+    # wrong types for critical fields, causing cryptic AttributeError crashes downstream.
+    if not isinstance(data, dict):
+        data = _default_state()
+    else:
+        if not isinstance(data.get("issues"), list):
+            data["issues"] = []
+        if not isinstance(data.get("resolved"), list):
+            data["resolved"] = []
+        if not isinstance(data.get("stats"), dict):
+            data["stats"] = {"total_found": 0, "total_resolved": 0, "scans_run": 0}
+
     # Ensure new fields exist for backwards compat
     data.setdefault("resolved", [])
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
@@ -124,14 +136,27 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
         return True
     return False
 
+
+def issue_dedup_key(issue: dict) -> str:
+    """Return a stable key for detecting duplicate pending issues."""
+    return "::".join(
+        str(issue.get(field, "")).strip()
+        for field in ("file", "issue", "command")
+    )
+
+
 def add_issue(issue: dict):
     state = load_state()
     issues = state.setdefault("issues", [])
+    new_key = issue_dedup_key(issue)
+    if any(issue_dedup_key(existing) == new_key for existing in issues):
+        return False
     issue["created_at"] = _now_iso()
     issues.append(issue)
     state.setdefault("stats", {})
     state["stats"]["total_found"] = state["stats"].get("total_found", 0) + 1
     save_state(state)
+    return True
 
 def increment_scans():
     """Track number of scans run."""
@@ -173,4 +198,3 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
     state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
     save_state(state)
     return removed
-

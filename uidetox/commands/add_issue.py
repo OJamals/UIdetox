@@ -2,8 +2,12 @@
 
 import argparse
 import fnmatch
+import sys
 import uuid
 from uidetox.state import add_issue, load_config
+
+_MAX_FILE_LEN = 300
+_MAX_ISSUE_LEN = 500
 
 def _is_suppressed(file_path: str, description: str, patterns: list[str]) -> bool:
     """Check if this issue matches any active suppress pattern."""
@@ -17,6 +21,22 @@ def _is_suppressed(file_path: str, description: str, patterns: list[str]) -> boo
     return False
 
 def run(args: argparse.Namespace):
+    # Validate required fields are non-empty
+    if not args.file or not args.file.strip():
+        print("Error: --file cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+    if not args.issue or not args.issue.strip():
+        print("Error: --issue cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+
+    # Enforce length limits to keep state.json sane
+    if len(args.file) > _MAX_FILE_LEN:
+        print(f"Error: --file exceeds maximum length of {_MAX_FILE_LEN} characters.", file=sys.stderr)
+        sys.exit(1)
+    if len(args.issue) > _MAX_ISSUE_LEN:
+        print(f"Error: --issue exceeds maximum length of {_MAX_ISSUE_LEN} characters.", file=sys.stderr)
+        sys.exit(1)
+
     config = load_config()
     ignore_patterns = config.get("ignore_patterns", [])
     

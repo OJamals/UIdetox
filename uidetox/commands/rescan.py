@@ -10,6 +10,8 @@ multiple rescans get auto-escalated in priority.
 """
 
 import argparse
+import os
+import sys
 import uuid
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
@@ -58,6 +60,11 @@ def run(args: argparse.Namespace):
 
     path = getattr(args, "path", ".")
 
+    # Validate path before doing anything
+    if not os.path.isdir(path):
+        print(f"Error: scan path '{path}' does not exist or is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
     print("=" * 58)
     print(" UIdetox Rescan (fresh analysis + smart dedup)")
     print("=" * 58)
@@ -105,8 +112,11 @@ def run(args: argparse.Namespace):
             "issue": issue["issue"],
             "command": issue["command"]
         }
-        add_issue(new_issue)
-        queued_count += 1
+        for meta_key in ("line", "column", "snippet"):
+            if meta_key in issue:
+                new_issue[meta_key] = issue[meta_key]
+        if add_issue(new_issue):
+            queued_count += 1
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")

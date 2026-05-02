@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from uidetox.state import load_config, load_state, save_state, ensure_uidetox_dir
 
 
@@ -9,6 +10,9 @@ def run(args: argparse.Namespace):
     score = getattr(args, "score", None)
 
     if score is not None:
+        if not (0 <= score <= 100):
+            print(f"Error: score must be between 0 and 100, got {score}.", file=sys.stderr)
+            sys.exit(1)
         # Store the subjective score
         _store_subjective_score(score)
         return
@@ -193,9 +197,6 @@ def _store_subjective_score(score: int):
     """Store the LLM's subjective design score."""
     ensure_uidetox_dir()
     state = load_state()
-
-    # Clamp to 0-100
-    score = max(0, min(100, score))
 
     state.setdefault("subjective", {})
     state["subjective"]["score"] = score
