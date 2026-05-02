@@ -29,7 +29,8 @@ const FEATURES = [
     },
 ]
 
-// Organic, specific stats — not round AI numbers
+// Error alert className — extracted to avoid duplication (SCAN-817DB3)
+const ERROR_ALERT = 'text-red-400 text-sm bg-red-950 border border-red-900 rounded-lg px-4 py-3 mb-6'
 const STATS = [
     { value: '47ms', label: 'Avg. sync latency' },
     { value: '3.2k', label: 'Teams active this week' },
@@ -118,7 +119,7 @@ export default function App() {
                 {/* Hero — left-aligned, asymmetric split layout */}
                 <section aria-labelledby="hero-heading" className="max-w-6xl mx-auto px-6 py-24 grid grid-cols-[1fr_16rem] gap-16 items-start">
                     <div>
-                        <p className="text-[11px] font-semibold tracking-[0.15em] text-emerald-500 mb-5 uppercase">Capture — share — act</p>
+                        <p className="text-[0.6875rem] font-semibold tracking-[0.15em] text-emerald-500 mb-5 uppercase">Capture — share — act</p>
                         <h1 id="hero-heading" className="text-6xl font-bold text-zinc-50 leading-[1.05] tracking-tight mb-7">
                             Capture ideas.<br />
                             <span className="text-zinc-400 font-semibold">Ship faster.</span>
@@ -189,13 +190,13 @@ export default function App() {
                     </p>
 
                     {fetchError && (
-                        <p role="alert" className="text-red-400 text-sm bg-red-950 border border-red-900 rounded-lg px-4 py-3 mb-6">
+                        <p role="alert" className={ERROR_ALERT}>
                             {fetchError}
                         </p>
                     )}
 
                     {actionError && (
-                        <p role="alert" className="text-red-400 text-sm bg-red-950 border border-red-900 rounded-lg px-4 py-3 mb-6">
+                        <p role="alert" className={ERROR_ALERT}>
                             {actionError}
                         </p>
                     )}
