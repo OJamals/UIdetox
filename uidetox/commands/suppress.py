@@ -2,14 +2,21 @@
 
 import argparse
 import fnmatch
+import sys
 from uidetox.state import load_state, save_state, load_config, save_config
+
+_MAX_PATTERN_LEN = 200
 
 def run(args: argparse.Namespace):
     pattern = getattr(args, "pattern", None)
-    
-    if not pattern:
+
+    if not pattern or not pattern.strip():
         _list_suppressed()
         return
+
+    if len(pattern) > _MAX_PATTERN_LEN:
+        print(f"Error: Pattern too long ({len(pattern)} chars, max {_MAX_PATTERN_LEN}).")
+        sys.exit(1)
         
     if getattr(args, "remove", False):
         _remove_pattern(pattern)
@@ -54,9 +61,13 @@ def _add_pattern(pattern: str):
         file_path = issue.get("file", "")
         desc = issue.get("issue", "")
         
-        # Simple glob matching on file or desc
-        matches_file = fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, f"*{pattern}*")
-        matches_desc = fnmatch.fnmatch(desc, pattern) or fnmatch.fnmatch(desc, f"*{pattern}*")
+        # Match the file path or description using glob patterns.
+        # fnmatch.fnmatch(path, f"*{pattern}*") already handles substring
+        # matching when the pattern has no glob chars, so the plain
+        # fnmatch.fnmatch(path, pattern) check would only add value for
+        # explicit glob patterns (e.g. "*.tsx") — cover both cleanly here.
+        matches_file = fnmatch.fnmatch(file_path, f"*{pattern}*") or fnmatch.fnmatch(file_path, pattern)
+        matches_desc = fnmatch.fnmatch(desc, f"*{pattern}*") or fnmatch.fnmatch(desc, pattern)
         matches_exact = pattern.lower() in file_path.lower() or pattern.lower() in desc.lower()
         
         if not (matches_file or matches_desc or matches_exact):

@@ -1,11 +1,38 @@
 """State and Config Management for UIdetox."""
 
+import contextlib
 import json
 import os
 import tempfile
 from pathlib import Path
 
 from uidetox.utils import now_iso
+
+try:
+    import fcntl as _fcntl
+    _HAS_FLOCK = True
+except ImportError:
+    _HAS_FLOCK = False  # Windows — locking is best-effort only
+
+
+@contextlib.contextmanager
+def _state_lock():
+    """Advisory POSIX file lock to serialize concurrent state mutations.
+
+    On platforms without fcntl (Windows), this is a no-op — concurrent
+    writes are still possible but won't crash.
+    """
+    if not _HAS_FLOCK:
+        yield
+        return
+    lock_path = get_uidetox_dir() / "state.lock"
+    ensure_uidetox_dir()
+    with open(lock_path, "a") as lf:
+        try:
+            _fcntl.flock(lf.fileno(), _fcntl.LOCK_EX)
+            yield
+        finally:
+            _fcntl.flock(lf.fileno(), _fcntl.LOCK_UN)
 
 UIDETOX_DIR = ".uidetox"
 CONFIG_FILE = "config.json"
@@ -119,22 +146,23 @@ def get_issue(issue_id: str) -> dict | None:
     return None
 
 def remove_issue(issue_id: str, note: str = "") -> bool:
-    state = load_state()
-    original_len = len(state.get("issues", []))
-    removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
-    state["issues"] = [i for i in state.get("issues", []) if i.get("id") != issue_id]
-    if len(state["issues"]) < original_len:
-        # Track resolved issues
-        for r in removed:
-            r["resolved_at"] = _now_iso()
-            if note:
-                r["note"] = note
-            state.setdefault("resolved", []).append(r)
-        state.setdefault("stats", {})
-        state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
-        save_state(state)
-        return True
-    return False
+    with _state_lock():
+        state = load_state()
+        original_len = len(state.get("issues", []))
+        removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
+        state["issues"] = [i for i in state.get("issues", []) if i.get("id") != issue_id]
+        if len(state["issues"]) < original_len:
+            # Track resolved issues
+            for r in removed:
+                r["resolved_at"] = _now_iso()
+                if note:
+                    r["note"] = note
+                state.setdefault("resolved", []).append(r)
+            state.setdefault("stats", {})
+            state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
+            save_state(state)
+            return True
+        return False
 
 
 def issue_dedup_key(issue: dict) -> str:
@@ -146,31 +174,34 @@ def issue_dedup_key(issue: dict) -> str:
 
 
 def add_issue(issue: dict):
-    state = load_state()
-    issues = state.setdefault("issues", [])
-    new_key = issue_dedup_key(issue)
-    if any(issue_dedup_key(existing) == new_key for existing in issues):
-        return False
-    issue["created_at"] = _now_iso()
-    issues.append(issue)
-    state.setdefault("stats", {})
-    state["stats"]["total_found"] = state["stats"].get("total_found", 0) + 1
-    save_state(state)
-    return True
+    with _state_lock():
+        state = load_state()
+        issues = state.setdefault("issues", [])
+        new_key = issue_dedup_key(issue)
+        if any(issue_dedup_key(existing) == new_key for existing in issues):
+            return False
+        issue["created_at"] = _now_iso()
+        issues.append(issue)
+        state.setdefault("stats", {})
+        state["stats"]["total_found"] = state["stats"].get("total_found", 0) + 1
+        save_state(state)
+        return True
 
 def increment_scans():
     """Track number of scans run."""
-    state = load_state()
-    state.setdefault("stats", {})
-    state["stats"]["scans_run"] = state["stats"].get("scans_run", 0) + 1
-    state["last_scan"] = _now_iso()
-    save_state(state)
+    with _state_lock():
+        state = load_state()
+        state.setdefault("stats", {})
+        state["stats"]["scans_run"] = state["stats"].get("scans_run", 0) + 1
+        state["last_scan"] = _now_iso()
+        save_state(state)
 
 def clear_issues():
     """Clear all pending issues (used by rescan)."""
-    state = load_state()
-    state["issues"] = []
-    save_state(state)
+    with _state_lock():
+        state = load_state()
+        state["issues"] = []
+        save_state(state)
 
 
 def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
@@ -183,18 +214,19 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
     Returns:
         List of removed issue dicts (empty if none found).
     """
-    state = load_state()
-    id_set = set(issue_ids)
-    removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
-    state["issues"] = [i for i in state.get("issues", []) if i.get("id") not in id_set]
+    with _state_lock():
+        state = load_state()
+        id_set = set(issue_ids)
+        removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
+        state["issues"] = [i for i in state.get("issues", []) if i.get("id") not in id_set]
 
-    for r in removed:
-        r["resolved_at"] = _now_iso()
-        if note:
-            r["note"] = note
-        state.setdefault("resolved", []).append(r)
+        for r in removed:
+            r["resolved_at"] = _now_iso()
+            if note:
+                r["note"] = note
+            state.setdefault("resolved", []).append(r)
 
-    state.setdefault("stats", {})
-    state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
-    save_state(state)
-    return removed
+        state.setdefault("stats", {})
+        state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
+        save_state(state)
+        return removed

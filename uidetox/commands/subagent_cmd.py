@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from uidetox.subagent import (
     STAGES,
     create_session,
@@ -33,7 +34,7 @@ def run(args: argparse.Namespace):
 def _handle_stage_prompt(stage: str, parallel: int):
     if stage not in STAGES:
         print(f"Unknown stage '{stage}'. Valid stages: {', '.join(STAGES)}")
-        return
+        sys.exit(1)
 
     prompts = generate_stage_prompt(stage, parallel)
     

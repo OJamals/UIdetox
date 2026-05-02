@@ -1,6 +1,7 @@
 """Zone command: show, set, and clear zone classifications for files."""
 
 import argparse
+import sys
 from pathlib import Path
 from uidetox.state import load_state, save_state, load_config, save_config
 
@@ -73,11 +74,11 @@ def _zone_show():
 def _zone_set(filepath: str, zone_value: str):
     if not filepath or not zone_value:
         print("Error: Missing file or zone.")
-        return
-        
+        sys.exit(1)
+
     if zone_value not in VALID_ZONES:
         print(f"Error: Invalid zone '{zone_value}'. Valid: {', '.join(sorted(VALID_ZONES))}")
-        return
+        sys.exit(1)
         
     config = load_config()
     overrides = config.get("zone_overrides", {})

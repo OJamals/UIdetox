@@ -1,6 +1,7 @@
 """Memory command: persistent agent storage with auto-saved session data."""
 
 import argparse
+import sys
 from uidetox.memory import (
     get_patterns,
     get_notes,
@@ -104,7 +105,7 @@ def run(args: argparse.Namespace):
         val = getattr(args, "value", None)
         if not val:
             print("Error: Must provide a pattern string.")
-            return
+            sys.exit(1)
         add_pattern(val)
         print(f"✓ Learned new architectural pattern: '{val}'")
 
@@ -112,7 +113,7 @@ def run(args: argparse.Namespace):
         val = getattr(args, "value", None)
         if not val:
             print("Error: Must provide a note string.")
-            return
+            sys.exit(1)
         add_note(val)
         print(f"✓ Saved agent note: '{val}'")
 
