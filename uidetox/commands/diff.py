@@ -17,6 +17,7 @@ import argparse
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from uidetox.analyzer import analyze_directory, analyze_file
@@ -130,15 +131,26 @@ def run(args: argparse.Namespace):
     # ── Persist fresh scan as new baseline if requested ──
     save = getattr(args, "save", False)
     if save:
+        # Ensure every saved issue has a valid SCAN-XXXXXX id; analyzer output
+        # uses rule IDs (e.g. "DIV_SOUP_SLOP") or omits the field entirely.
+        def _normalize_id(issue: dict) -> dict:
+            raw_id = issue.get("id", "")
+            if not raw_id or not raw_id.startswith("SCAN-"):
+                scan_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
+                issue = {**issue, "id": scan_id}
+                if raw_id:
+                    issue["rule_id"] = raw_id
+            return issue
+
         if scope_files is not None:
             # Partial diff: merge fresh into the full state (replace scoped files)
             other_issues = [
                 i for i in state.get("issues", [])
                 if str(Path(i.get("file", "")).resolve()) not in scope_files
             ]
-            state["issues"] = other_issues + fresh_issues
+            state["issues"] = other_issues + [_normalize_id(i) for i in fresh_issues]
         else:
-            state["issues"] = fresh_issues
+            state["issues"] = [_normalize_id(i) for i in fresh_issues]
         save_state(state)
         if output_fmt != "json":
             print(f"  [diff] Baseline updated — {len(state['issues'])} issue(s) saved to state.")

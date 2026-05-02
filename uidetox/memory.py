@@ -44,9 +44,14 @@ def load_memory() -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Ensure all fields exist
-        for key, default in _default_memory().items():
-            data.setdefault(key, default)
+        # Ensure all fields exist with correct types
+        defaults = _default_memory()
+        for key, default in defaults.items():
+            if key not in data:
+                data[key] = default
+            elif not isinstance(data[key], type(default)) and default is not None:
+                # Reset to default if type is wrong (e.g., list corrupted to string)
+                data[key] = default
         return data
     except (json.JSONDecodeError, OSError):
         return _default_memory()
