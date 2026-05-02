@@ -9,8 +9,13 @@ _MAX_PATTERN_LEN = 200
 
 def run(args: argparse.Namespace):
     pattern = getattr(args, "pattern", None)
+    is_remove = getattr(args, "remove", False)
 
-    if not pattern or not pattern.strip():
+    # Treat common 'list' aliases as a request to show current suppressions,
+    # but only when NOT combined with --remove (which means removing a pattern
+    # that literally matches the word "list").
+    _LIST_ALIASES = {"list", "show", "ls"}
+    if not pattern or not pattern.strip() or (not is_remove and pattern.strip().lower() in _LIST_ALIASES):
         _list_suppressed()
         return
 
