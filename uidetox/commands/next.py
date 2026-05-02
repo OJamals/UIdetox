@@ -292,6 +292,347 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "INPUT RULES: Solid borders, simple focus ring. No animated underlines or morphing shapes. Client-side validation must reflect database constraints. Error state must be inline, not toast.",
         "reference/interaction-design.md",
     ),
+    # Batch 18: Accessibility, semantic HTML, modern JS
+    "button type": (
+        "BUTTON RULES: Always set an explicit type attribute on every <button>. Inside a form, type defaults to 'submit', causing accidental form submissions. Use type='button' for non-submit actions, type='submit' for form submission.",
+        None,
+    ),
+    "tabindex": (
+        "TAB ORDER RULES: Positive tabIndex values (1, 2, 3...) break the natural tab order and confuse keyboard users. Use tabIndex={0} to add an element to tab flow, tabIndex={-1} to remove it. Let DOM order drive focus sequence.",
+        None,
+    ),
+    "float": (
+        "LAYOUT RULES: CSS float is a legacy layout technique from the 2000s. Replace with flexbox (display: flex) or CSS Grid (display: grid). Float still has legitimate uses for text-wrapping images — not for page layout.",
+        None,
+    ),
+    "autocomplete": (
+        "AUTOFILL RULES: autocomplete='off' disables password managers and browser autofill, hurting UX for users with motor impairments. Use specific autocomplete tokens: 'email', 'current-password', 'new-password', 'given-name', etc.",
+        None,
+    ),
+    "outline": (
+        "FOCUS RING RULES: Never use outline: none or outline: 0 without a replacement. Removing the focus ring is an WCAG 2.1 Level AA failure. Replace with outline: 2px solid currentColor; outline-offset: 2px; scoped to :focus-visible.",
+        None,
+    ),
+    "key prop": (
+        "REACT RECONCILIATION: Using array index as key causes React to misidentify elements during reorder/insert/delete operations, producing stale state and visual glitches. Always use a stable unique identifier: key={item.id}.",
+        None,
+    ),
+    "boolean comparison": (
+        "TYPESCRIPT STYLE: x === true is always redundant when x is boolean. Use direct truthy check (if (x)) or direct falsy check (if (!x)). The explicit comparison adds noise without adding clarity.",
+        None,
+    ),
+    "th scope": (
+        "TABLE ACCESSIBILITY: <th> elements without a scope attribute leave screen readers guessing whether the header applies to a row or column. Add scope='col' for column headers and scope='row' for row headers.",
+        None,
+    ),
+    "autoplay": (
+        "MEDIA RULES: Unmuted autoplay is blocked by Chrome, Firefox, Safari, and Edge. Always pair autoPlay with muted for background video. For audio, autoplay without user interaction is never permitted. Use a play button instead.",
+        None,
+    ),
+    "aria-label": (
+        "ARIA RULES: An empty aria-label (aria-label='') is worse than no label — it overrides visible text with nothing. Provide a meaningful description, or remove aria-label if the element already has visible text content.",
+        None,
+    ),
+    "alert": (
+        "UX ANTI-PATTERN: browser alert() is a native blocking dialog — it freezes the page thread, can't be styled, and has terrible UX. Replace with a toast (react-hot-toast, sonner), inline validation, or a modal component.",
+        None,
+    ),
+    "style tag": (
+        "CSS ARCHITECTURE: <style> tags inside JSX components create scoping issues and bypass the design system. Use CSS Modules (Component.module.css), Tailwind utilities, or a CSS-in-JS solution like styled-components or vanilla-extract.",
+        None,
+    ),
+    # Batch 19: React patterns, CSS quality, A11y improvements
+    "prop spread": (
+        "REACT SAFETY: {…props} spread passes arbitrary attributes to the DOM. Destructure only what you need: const { onClick, className } = props. This prevents unknown DOM attribute warnings and stops XSS if props come from user-controlled data.",
+        None,
+    ),
+    "empty rule": (
+        "CSS HYGIENE: Empty CSS rule blocks are dead code. Delete them or add the intended declarations. Run `npx stylelint --fix` to catch all instances automatically.",
+        None,
+    ),
+    "catch": (
+        "ERROR HANDLING: A catch block that only calls console.log swallows the error in production where console output is suppressed. Re-throw after logging: catch (e) { logger.error(e); throw e; } or update UI error state.",
+        None,
+    ),
+    "settimeout": (
+        "MAINTAINABILITY: Magic numbers in setTimeout/setInterval make delays impossible to understand or tune. Extract to a named constant: const DEBOUNCE_MS = 300; setTimeout(fn, DEBOUNCE_MS).",
+        None,
+    ),
+    "setinterval": (
+        "MAINTAINABILITY: Magic numbers in setInterval make poll intervals impossible to understand or tune. Extract to a named constant: const POLL_INTERVAL_MS = 5000; setInterval(fn, POLL_INTERVAL_MS).",
+        None,
+    ),
+    "finddomnode": (
+        "REACT MIGRATION: ReactDOM.findDOMNode() is deprecated in React 18 and removed in React 19. Replace with a ref callback: const ref = useRef<HTMLElement>(null); attach ref={ref} to the element you need.",
+        None,
+    ),
+    "passive": (
+        "PERFORMANCE: Scroll/touch/wheel event listeners block the browser's compositor thread unless marked passive. Add { passive: true } as the third argument: el.addEventListener('scroll', fn, { passive: true }).",
+        None,
+    ),
+    "class component": (
+        "REACT MODERNIZATION: Class components cannot use hooks and have worse tree-shaking than function components. Convert: componentDidMount → useEffect(fn, []), componentDidUpdate → useEffect(fn, [dep]), PureComponent → React.memo.",
+        None,
+    ),
+    "!important": (
+        "CSS SPECIFICITY: !important on animation/transition overrides prefers-reduced-motion queries and makes animations impossible to disable for accessibility. Fix the specificity conflict instead — never use !important on motion properties.",
+        None,
+    ),
+    "role=": (
+        "ACCESSIBILITY: A clickable div or span without a role attribute is invisible to screen readers. Use role='button' with tabIndex={0} and keyboard handlers, or replace with a semantic <button type='button'>.",
+        None,
+    ),
+    "overflow: hidden": (
+        "LAYOUT DANGER: overflow:hidden on body/html permanently hides the scrollbar and breaks scroll restoration. Use overflow:clip on a specific container, or add a modal-open class toggle only while a modal is open.",
+        None,
+    ),
+    "aria-label": (
+        "ACCESSIBILITY: Vague aria-label values like 'button', 'icon', 'close' tell screen reader users nothing useful. Describe the action or destination: 'Close settings panel', 'Add item to cart', 'Go to homepage'.",
+        None,
+    ),
+    "react.lazy": (
+        "REACT CODE SPLITTING: Every React.lazy() component must be wrapped in a <Suspense fallback=...> boundary or the app will crash when the chunk loads. Add <Suspense fallback={<PageSkeleton />}> at the nearest route or layout boundary.",
+        None,
+    ),
+    "lazy(": (
+        "REACT CODE SPLITTING: Every lazy() component must be wrapped in a <Suspense fallback=...> boundary or the app will crash when the chunk loads. Add <Suspense fallback={<Skeleton />}> at the nearest route or layout boundary.",
+        None,
+    ),
+    # Batch 20: TypeScript, CSS quality, accessibility, layout
+    "non-null assertion": (
+        "TYPE SAFETY: TypeScript non-null assertion (!) bypasses null/undefined checks at compile time — if the value is null at runtime, you get a crash. Replace foo!.bar with foo?.bar ?? fallback or guard explicitly: if (foo != null) { ... }.",
+        None,
+    ),
+    "eval(": (
+        "SECURITY: eval() executes arbitrary strings as code, making it the most direct XSS vector in JavaScript. It also prevents V8/JSC optimization and is always replaceable. Use JSON.parse() for data, dynamic import() for modules.",
+        None,
+    ),
+    "empty interface": (
+        "TYPESCRIPT STYLE: Empty interfaces (interface Foo {}) carry no type information and mislead readers into thinking constraints exist. Use type aliases: type Foo = Record<string, never> (nothing allowed) or type Foo = object (any non-null object).",
+        None,
+    ),
+    "react.fragment": (
+        "REACT STYLE: <React.Fragment> is verbose when the shorthand <> achieves the same result. Use <> / </> for fragments without key props. Only use the full <React.Fragment key={...}> when you need to pass a key.",
+        None,
+    ),
+    "fragment shorthand": (
+        "REACT STYLE: Use <> / </> shorthand for React fragments without key props. It reduces visual noise and is idiomatic in modern React codebases.",
+        None,
+    ),
+    "select element": (
+        "ACCESSIBILITY: <select> elements without aria-label or aria-labelledby are announced by screen readers without any field context. Always wrap in a <label> or add aria-label='Choose your country'.",
+        None,
+    ),
+    "select without": (
+        "ACCESSIBILITY: <select> without an accessible label is an WCAG 2.1 failure (SC 1.3.1 Info and Relationships). Wrap with <label> or add aria-label.",
+        None,
+    ),
+    "font-size on html": (
+        "ACCESSIBILITY: Setting font-size in px on html/body overrides the user's browser font scaling preference. Blind and low-vision users who increase their browser's base font size will see no effect. Use font-size: 100% instead.",
+        None,
+    ),
+    "font-size on body": (
+        "ACCESSIBILITY: Setting font-size in px on body blocks user font scaling. Replace with font-size: 100% and express all sizes in rem units relative to the user's chosen base.",
+        None,
+    ),
+    "auto-fit": (
+        "RESPONSIVE GRID: A fixed repeat count (repeat(3, 1fr)) overflows narrow viewports. Use repeat(auto-fit, minmax(min(300px, 100%), 1fr)) to let the grid reflow based on available space with no media queries required.",
+        "reference/responsive-design.md",
+    ),
+    "overflow: scroll": (
+        "CSS QUALITY: overflow: scroll always renders scrollbar gutters even when content fits — causing ugly empty tracks on Windows. Use overflow: auto so scrollbars only appear when content actually overflows the container.",
+        None,
+    ),
+    "background-attachment": (
+        "PERFORMANCE: background-attachment: fixed forces the browser to repaint the entire page on every scroll frame — it disables GPU compositing on iOS entirely (blank/white area bug). Replace with a dedicated parallax library or a sticky pseudo-element.",
+        "reference/motion-design.md",
+    ),
+    "resize: none": (
+        "UX RULES: resize: none removes the user's ability to expand a textarea for longer content. Use resize: vertical to allow height adjustment while preventing unwanted horizontal distortion.",
+        None,
+    ),
+    "type='reset'": (
+        "FORM UX: <button type='reset'> instantly discards all form data with no confirmation — users trigger it accidentally and lose work. Replace with type='button' and implement a manual reset with a confirmation step.",
+        None,
+    ),
+    "vendor prefix": (
+        "CSS MAINTENANCE: Manual vendor prefixes (-webkit-, -moz-, -ms-) are maintenance burden — browsers either no longer need them or autoprefixer handles them. Remove and configure autoprefixer (PostCSS plugin) to add only what browsers still require.",
+        None,
+    ),
+    "-webkit-": (
+        "CSS MAINTENANCE: -webkit- vendor prefixes are almost never needed for modern targets. Configure autoprefixer in your PostCSS/Vite/Next.js pipeline and remove manual prefixes.",
+        None,
+    ),
+    # Batch 21 — Security, SSR, Typography, Accessibility, Code Quality
+    "document.write": (
+        "SECURITY: document.write() executes synchronously, blocks the HTML parser, and is a direct XSS sink. It was deprecated in the HTML5 spec and is banned by ESLint's no-document-write rule. Replace with DOM manipulation (textContent, insertAdjacentHTML with DOMPurify) or framework rendering.",
+        None,
+    ),
+    "innerhtml assignment": (
+        "SECURITY: Direct .innerHTML assignment is an XSS vector — any unsanitized user input concatenated in will execute scripts. Use .textContent for plain text. For rich HTML: .innerHTML = DOMPurify.sanitize(value, { ALLOWED_TAGS: [...] }). Never concatenate user strings into innerHTML.",
+        None,
+    ),
+    "localstorage exposes": (
+        "SECURITY: localStorage is accessible to any JavaScript running on the page, making it an XSS target for session hijacking. Store auth tokens in httpOnly cookies (server-managed, unreadable to JS). For short-lived client state, use sessionStorage or in-memory state stores like Zustand.",
+        None,
+    ),
+    "open redirect": (
+        "SECURITY: Setting location.href from a variable without validation enables open redirect attacks — attackers craft URLs that appear to link to your domain but redirect to phishing sites. Always validate the target path against a hardcoded allowlist of safe routes before redirecting.",
+        None,
+    ),
+    "module scope without a typeof": (
+        "SSR SAFETY: navigator is a browser-only global — code that accesses it at module scope crashes in Next.js, Nuxt, and other SSR frameworks during server rendering. Guard with: if (typeof navigator !== 'undefined') { ... } or move the access inside useEffect(() => { ... }, []) where it runs client-side only.",
+        None,
+    ),
+    "process.browser": (
+        "SSR COMPAT: process.browser was a webpack 4 convention that shimmed to true in browser bundles and false on the server. Webpack 5 removed this shim — the value is now always undefined. Replace every occurrence with the standards-based check: typeof window !== 'undefined'.",
+        None,
+    ),
+    "text-transform: uppercase": (
+        "TYPOGRAPHY: All-caps text destroys word shape recognition — readers rely on ascenders and descenders to parse words at speed. Reserve uppercase for very short labels (2–3 words maximum). When using it, always pair with letter-spacing: 0.05–0.1em to compensate for the lost legibility cues.",
+        None,
+    ),
+    "hairline strokes": (
+        "TYPOGRAPHY: Ultra-thin weights (100–200) are display weights designed for large headings at 60px+. At body sizes (14–18px) on standard displays, they fall below the minimum stroke width for reliable rendering. Use weight 300 as the minimum for body copy, 400 for maximum compatibility on low-DPI screens.",
+        None,
+    ),
+    "inline-block whitespace hack": (
+        "TYPOGRAPHY/LAYOUT: font-size: 0 on a container was the pre-flex/pre-grid workaround for whitespace gaps between inline-block elements. Modern layout engines (flex, grid) don't have this problem — the hack is never needed in a contemporary codebase. Remove it and verify the layout holds with flexbox or grid.",
+        None,
+    ),
+    "screen readers announce it as 'frame'": (
+        "ACCESSIBILITY: Without a title attribute, screen readers announce iframes as just 'frame' — users with visual disabilities have no way to understand the embedded content's purpose. Every iframe needs a concise, descriptive title: title='Payment form', title='Map of store locations', title='Customer support chat'.",
+        None,
+    ),
+    "captions track": (
+        "ACCESSIBILITY: WCAG 1.2.2 (Level AA) requires captions for all prerecorded audio/video. Add a <track> element inside <video>: <track kind='captions' src='captions.vtt' srclang='en' label='English'>. For purely decorative background videos (muted, no meaningful audio), add aria-hidden='true' to exempt them from this requirement.",
+        None,
+    ),
+    "defeats tree-shaking": (
+        "BUNDLE SIZE: Wildcard imports (import * as X from 'library') import the entire library regardless of what you actually use. Modern bundlers can only tree-shake named imports. For lodash: import { debounce, throttle } from 'lodash-es'. For moment: switch to date-fns with named imports. For rxjs: import { map, filter } from 'rxjs/operators'.",
+        None,
+    ),
+    # ── Batch 22 ────────────────────────────────────────────────────────
+    "debugger statement": (
+        "DEAD CODE: Remove all debugger; statements before shipping. They pause execution in any browser dev-tools session and will break automated CI runners. git history preserves the context — you don't need the breakpoint in source.",
+        None,
+    ),
+    "prop-types imported": (
+        "TYPESCRIPT MIGRATION: Remove the prop-types package and its import. TypeScript interface/type props give you compile-time safety, auto-completion, and zero runtime overhead. Replace MyComp.propTypes = { ... } with an interface Props { ... } and type the component's parameters directly.",
+        None,
+    ),
+    "runtime proptypes": (
+        "TYPESCRIPT MIGRATION: Runtime PropTypes checks are redundant once a component is typed with TypeScript. Delete the .propTypes assignment and the prop-types import. The TypeScript compiler enforces the same contract with no runtime cost.",
+        None,
+    ),
+    "duplicate import": (
+        "CODE QUALITY: Two import statements from the same module should be merged into one. Multiple imports from the same path increase parse cost and confuse readers. Combine: `import { A } from 'x'; import { B } from 'x';` → `import { A, B } from 'x';`",
+        None,
+    ),
+    "same module": (
+        "CODE QUALITY: Duplicate imports from the same module path should be merged into a single import statement. Most linters enforce this with the no-duplicate-imports rule.",
+        None,
+    ),
+    "context provider": (
+        "REACT PERFORMANCE: Passing an inline object literal as a context value (value={{ a, b }}) creates a new reference on every render, causing every context consumer to re-render even when the values haven't changed. Wrap the value in useMemo: const ctxValue = useMemo(() => ({ a, b }), [a, b]);",
+        None,
+    ),
+    "inline object literal": (
+        "REACT PERFORMANCE: Inline object literals passed as props or context values produce a new reference on every render. Extract to useMemo (context, heavy derived state) or useCallback (functions). This is especially critical for context values since all consumers re-render.",
+        None,
+    ),
+    "new reference on every render": (
+        "REACT PERFORMANCE: Any value constructed inside a JSX expression (new Foo(), {}, []) creates a new reference on every render. Use useMemo to memoize objects and arrays, useCallback for functions, or move the value outside the component if it's constant.",
+        None,
+    ),
+    "usestate initialized with": (
+        "REACT PERFORMANCE: Passing `new SomeClass()` directly to useState runs the constructor on every render (only the first call's value is used). Use the lazy-initializer pattern instead: useState(() => new SomeClass()). The arrow function is only called once on mount.",
+        None,
+    ),
+    "constructor runs on every render": (
+        "REACT PERFORMANCE: useState's argument is only used on the first render, but it's still evaluated on every render. Pass a factory function to avoid the cost: useState(() => expensiveInit()) instead of useState(expensiveInit()).",
+        None,
+    ),
+    "document.cookie": (
+        "SSR COMPAT: document.cookie is browser-only. Reading it at module scope crashes in any Node.js SSR environment (Next.js, Remix, SvelteKit). Guard with: typeof document !== 'undefined'. Better: use the server-side cookies() helper from your framework so you get proper cookie handling in both environments.",
+        None,
+    ),
+    "typeof document": (
+        "SSR COMPAT: The typeof document !== 'undefined' guard is the correct way to protect browser-only APIs from running during server-side rendering. Alternatively, move the logic inside useEffect (which only runs in the browser) or use your framework's server-side cookie API.",
+        None,
+    ),
+    "app router": (
+        "NEXT.JS APP ROUTER: In the Next.js App Router, use the cookies() function from 'next/headers' to read cookies on the server. This is available in Server Components and Route Handlers and avoids SSR crashes from accessing document.cookie.",
+        None,
+    ),
+    "postmessage": (
+        "SECURITY: Always validate event.origin inside window.addEventListener('message') handlers. Without origin validation any page can inject arbitrary data into your message handler. Pattern: if (event.origin !== 'https://your-trusted-origin.com') return;. Maintain an explicit allowlist of trusted origins.",
+        None,
+    ),
+    "cross-origin data injection": (
+        "SECURITY: postMessage handlers without origin checks are a vector for cross-origin data injection. An attacker-controlled iframe or window can send crafted messages. Always check event.origin before processing event.data. Consider also checking event.source.",
+        None,
+    ),
+    "event.origin": (
+        "SECURITY: event.origin must be validated before processing postMessage data. Compare it against a hardcoded allowlist — never use a dynamic or user-supplied value as the expected origin. If the origin doesn't match, return early and do not process the message.",
+        None,
+    ),
+    "non-semantic element as focusable": (
+        "ACCESSIBILITY: Using tabIndex={0} on a <div> or <span> to make it keyboard-focusable is a sign you should use a native interactive element instead. Replace <div onClick={...} tabIndex={0}> with <button> or the appropriate semantic element. Native elements have built-in keyboard behavior, focus styles, and ARIA roles.",
+        None,
+    ),
+    "div tabindex": (
+        "ACCESSIBILITY: A <div tabIndex={0}> does not convey role or behavior to assistive technologies. Use <button> for clickable actions, <a href> for navigation, or add an explicit ARIA role. Native interactive elements require no tabIndex — they're focusable by default.",
+        None,
+    ),
+    "icon-only button": (
+        "ACCESSIBILITY: Buttons that contain only an icon (SVG or icon font) have no accessible name for screen readers. Add aria-label describing the action (aria-label='Close dialog') or add visually hidden text with sr-only. The icon alone is not sufficient.",
+        None,
+    ),
+    "icon only button": (
+        "ACCESSIBILITY: Icon-only buttons require an accessible label. Use aria-label on the button element, or include a <span className='sr-only'>Description</span> alongside the icon. title attributes are not reliable for accessibility.",
+        None,
+    ),
+    "accessible label": (
+        "ACCESSIBILITY: Every interactive element needs an accessible name. For icon buttons: aria-label on the button. For form inputs: an associated <label htmlFor>. For images: alt text. For SVGs used as graphics: role='img' and aria-label or an embedded <title> element.",
+        None,
+    ),
+    "svg without viewbox": (
+        "LAYOUT: SVGs without a viewBox attribute won't scale correctly in flexible layouts. The viewBox defines the coordinate system and enables CSS-controlled sizing. Use viewBox='0 0 W H' where W and H match the SVG's intrinsic dimensions. Then control size with width/height CSS properties.",
+        None,
+    ),
+    "won't scale": (
+        "LAYOUT: Without a viewBox, SVGs render at a fixed pixel size and ignore CSS width/height on the svg element. Always include viewBox='0 0 naturalWidth naturalHeight'. Remove explicit width/height attributes (or set them to the desired CSS size) after adding viewBox.",
+        None,
+    ),
+    "viewbox": (
+        "SVG: The viewBox attribute is essential for scalable SVGs. Format: viewBox='minX minY width height'. For icon SVGs that should fill their container, use viewBox matching the artboard and set width/height via CSS (e.g., className='w-6 h-6').",
+        None,
+    ),
+    "user agent": (
+        "BROWSER COMPAT: navigator.userAgent sniffing is unreliable — strings change, can be spoofed, and are deprecated as a feature-detection signal. Use feature detection instead: 'IntersectionObserver' in window, CSS.supports('display', 'grid'), or the @supports CSS rule. For touch: navigator.maxTouchPoints > 0.",
+        None,
+    ),
+    "useragent": (
+        "BROWSER COMPAT: UA string parsing breaks with new browser versions, is easily spoofed, and doesn't tell you what the browser can do. Replace UA sniffing with capability checks: check for the API or CSS property you need, not for a browser name. Modernizr or individual feature checks are more reliable.",
+        None,
+    ),
+    "browser sniffing": (
+        "BROWSER COMPAT: Feature detection is always preferred over browser sniffing. Instead of checking navigator.userAgent for 'Chrome', check if the specific API you need exists: if ('requestIdleCallback' in window) { ... }. This is future-proof and works correctly when browsers add or remove features.",
+        None,
+    ),
+    "position: sticky": (
+        "LAYOUT: position: sticky requires an offset property (top, bottom, left, or right) to know where to stick. Without it the element behaves identically to position: relative and will scroll away. Add top: 0 for headers, or the appropriate offset for your layout.",
+        None,
+    ),
+    "won't stick": (
+        "LAYOUT: Sticky positioning silently does nothing when the offset property is missing. Always pair position: sticky with at least one of: top, bottom, left, or right. Also ensure no ancestor has overflow: hidden or overflow: auto, which will contain the stacking context and break sticky.",
+        None,
+    ),
+    "sticky without": (
+        "LAYOUT: position: sticky without a top/bottom/left/right offset is a common silent failure. The browser needs the threshold value to trigger the sticky behavior. Add top: 0 (or the header height) to fix it. Also check for overflow: hidden on parent containers.",
+        None,
+    ),
 }
 
 
@@ -334,10 +675,10 @@ def run(args: argparse.Namespace):
     sorted_issues = sorted(issues, key=lambda x: tiers_order.get(x.get("tier", "T4"), 5))
 
     # Get the file of the highest priority issue
-    target_file = sorted_issues[0].get("file")
+    target_file = sorted_issues[0].get("file") or ""
 
     # Group issues by directory (component) for coherent batches
-    target_dir = str(Path(target_file).parent)
+    target_dir = str(Path(target_file).parent) if target_file else "."
     batch = [i for i in sorted_issues if str(Path(i.get("file", "")).parent) == target_dir][:15]
 
     # Derive component name
@@ -352,7 +693,11 @@ def run(args: argparse.Namespace):
     print()
 
     for idx, iss in enumerate(batch):
-        print(f"  [{idx+1}] ID: {iss['id']} | Tier: {iss['tier']}")
+        print(f"  [{idx+1}] ID: {iss.get('id', 'UNKNOWN')} | Tier: {iss.get('tier', '?')}")
+        if iss.get("line"):
+            print(f"      Where  : {iss.get('file')}:{iss.get('line')}:{iss.get('column', 1)}")
+            if iss.get("snippet"):
+                print(f"      Snip   : {iss.get('snippet')}")
         print(f"      Issue  : {iss['issue']}")
         print(f"      Action : {iss.get('command', 'manual fix')}")
         print()

@@ -15,6 +15,10 @@ def run(args: argparse.Namespace):
         print(f"Error: Issue {issue_id} not found in the queue.", file=sys.stderr)
         sys.exit(1)
 
+    if not args.note or not args.note.strip():
+        print("Error: --note cannot be empty. Provide a brief description of the fix.", file=sys.stderr)
+        sys.exit(1)
+
     skip_verify = getattr(args, "skip_verify", False)
     config = load_config()
 

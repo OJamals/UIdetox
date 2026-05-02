@@ -146,6 +146,10 @@ def run(args: argparse.Namespace):
     note = args.note
     skip_verify = getattr(args, "skip_verify", False)
 
+    if not note or not note.strip():
+        print("Error: --note cannot be empty. Provide a brief description of the fixes.", file=sys.stderr)
+        sys.exit(1)
+
     # Validate all IDs exist
     missing = []
     for iid in issue_ids:

@@ -14,7 +14,7 @@ def _detect_main_branch() -> str:
             capture_output=True, text=True, check=True,
         )
         return result.stdout.strip().removeprefix("refs/remotes/origin/")
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
     # Fall back to checking common branch names
@@ -26,10 +26,31 @@ def _detect_main_branch() -> str:
         for candidate in ("main", "master", "develop", "dev"):
             if candidate in branches:
                 return candidate
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
     return "main"  # Last-resort default
+
+
+def _ensure_clean_workspace() -> None:
+    """Refuse to finish if unrelated changes could be swept into the squash commit."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("❌ Error: Could not inspect git status.")
+        sys.exit(1)
+
+    if result.stdout.strip():
+        print("❌ Refusing to finish: workspace has uncommitted changes.")
+        print("   Commit, stash, or remove unrelated changes before running `uidetox finish`.")
+        print()
+        print(result.stdout.strip())
+        sys.exit(1)
 
 
 def run(args):
@@ -42,7 +63,7 @@ def run(args):
             ["git", "branch", "--show-current"], 
             capture_output=True, text=True, check=True
         ).stdout.strip()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         print("❌ Error: Could not determine current branch or git is not initialized.")
         sys.exit(1)
 
@@ -52,6 +73,7 @@ def run(args):
         sys.exit(1)
 
     target_branch = _detect_main_branch()
+    _ensure_clean_workspace()
 
     print(f"📦 Finishing UIdetox session on branch: {current_branch}")
     print(f"▶️  Target merge branch: {target_branch}")
@@ -76,7 +98,7 @@ def run(args):
         subprocess.run(["git", "branch", "-D", current_branch], check=True)
 
         print("✅ UIdetox aesthetics successfully merged to your workspace!")
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"❌ Error during finish operation: {e}")
         print(f"   You may need to manually resolve the merge and delete branch '{current_branch}'.")
         sys.exit(1)

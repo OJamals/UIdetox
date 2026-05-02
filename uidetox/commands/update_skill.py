@@ -3,6 +3,7 @@
 import argparse
 import os
 import shutil
+import sys
 from pathlib import Path
 
 
@@ -31,6 +32,21 @@ def _copy_dir(src: Path, dst: Path, label: str | None = None) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+    display = label or src.name
+    print(f"  ✓ {display}/ → {dst}/")
+
+
+def _merge_dir(src: Path, dst: Path, label: str | None = None) -> None:
+    """Copy a directory into an existing destination without deleting unrelated files."""
+    if not src.exists():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.rglob("*"):
+        if not item.is_file():
+            continue
+        target = dst / item.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, target)
     display = label or src.name
     print(f"  ✓ {display}/ → {dst}/")
 
@@ -106,8 +122,8 @@ def _install_codex(data: Path, cwd: Path) -> None:
     _copy_dir(data / "commands", dest / "commands")
 
     # Also copy commands as prompts
-    prompts_dir = Path.home() / ".codex" / "prompts"
-    _copy_dir(data / "commands", prompts_dir, label="commands (as prompts)")
+    prompts_dir = Path.home() / ".codex" / "prompts" / "uidetox"
+    _merge_dir(data / "commands", prompts_dir, label="commands (as prompts)")
 
 
 def _install_windsurf(data: Path, cwd: Path) -> None:
@@ -171,18 +187,18 @@ def run(args: argparse.Namespace) -> None:
     # Verify bundled data exists
     skill_src = data / "SKILL.md"
     if not skill_src.exists():
-        print(f"Error: Bundled SKILL.md not found at {skill_src}")
-        print("If you installed via pip, try reinstalling: pip install --force-reinstall uidetox")
-        return
+        print(f"Error: Bundled SKILL.md not found at {skill_src}", file=sys.stderr)
+        print("If you installed via pip, try reinstalling: pip install --force-reinstall uidetox", file=sys.stderr)
+        sys.exit(1)
 
     print(f"Installing UIdetox skill files for {agent.capitalize()}...\n")
 
     installer = _INSTALLERS.get(agent)
-    if installer:
-        installer(data, cwd)
-    else:
-        print(f"Unknown agent: {agent}")
-        return
+    if not installer:
+        valid = ", ".join(sorted(_INSTALLERS.keys()))
+        print(f"Error: Unknown agent '{agent}'. Valid options: {valid}", file=sys.stderr)
+        sys.exit(1)
+    installer(data, cwd)
 
     # Print the tailored guide from docs/
     doc_path = data / "docs" / f"{agent.upper()}.md"

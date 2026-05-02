@@ -263,5 +263,5 @@ def _ensure_session_branch():
             subprocess.run(["git", "checkout", "-b", branch], check=True)
         else:
             print(f"  Git: resuming session branch {current}")
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         print("  Git: not initialized or branching failed. Proceeding without isolation.")
