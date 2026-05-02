@@ -70,7 +70,12 @@ def load_config() -> dict:
         return default_config
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # Ensure numeric dials have correct types to prevent TypeError in comparisons
+        for key in ("DESIGN_VARIANCE", "MOTION_INTENSITY", "VISUAL_DENSITY", "target_score"):
+            if key in data and not isinstance(data[key], (int, float)):
+                data[key] = default_config.get(key, data[key])
+        return data
     except (json.JSONDecodeError, OSError):
         return default_config
 
