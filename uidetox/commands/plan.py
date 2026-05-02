@@ -82,7 +82,7 @@ def run(args: argparse.Namespace):
     tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
     total_effort = 0
     for i in issues:
-        t = i.get("tier", "T4")
+        t = i.get("tier") or "T4"
         tiers[t] = tiers.get(t, 0) + 1
         total_effort += _TIER_EFFORT.get(t, 45)
 
@@ -126,7 +126,7 @@ def run(args: argparse.Namespace):
         cat_breakdown = defaultdict(int)
         files_in_group = set()
         for i in comp_issues:
-            tier_breakdown[i.get("tier", "T4")] += 1
+            tier_breakdown[i.get("tier") or "T4"] += 1
             cat_breakdown[_categorize_issue(i.get("issue", ""))] += 1
             files_in_group.add(i.get("file", ""))
 
@@ -145,7 +145,8 @@ def run(args: argparse.Namespace):
                 print(f"       ... +{remaining} more")
                 break
             short_file = Path(i.get("file", "")).name
-            print(f"       [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}: {i.get('issue', '?')[:70]}")
+            location = f":{i.get('line')}:{i.get('column', 1)}" if i.get("line") else ""
+            print(f"       [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}{location}: {i.get('issue', '?')[:70]}")
             shown += 1
         print()
 

@@ -17,6 +17,18 @@ _COLORS = {
 }
 
 
+def format_issue_location(issue: dict) -> str:
+    """Return file:line:column when analyzer location metadata is available."""
+    file_path = issue.get("file", "?")
+    line = issue.get("line")
+    column = issue.get("column")
+    if line and column:
+        return f"{file_path}:{line}:{column}"
+    if line:
+        return f"{file_path}:{line}"
+    return file_path
+
+
 def run(args: argparse.Namespace):
     state = load_state()
     issues = state.get("issues", [])
@@ -61,7 +73,7 @@ def _render_grouped(issues: list[dict]):
     # Tier summary
     tiers = defaultdict(int)
     for i in issues:
-        tiers[i.get("tier", "T4")] += 1
+        tiers[i.get("tier") or "T4"] += 1
 
     tier_summary = " | ".join(
         f"{_COLORS.get(t, '')}{t}: {c}{_COLORS['reset']}"
@@ -77,7 +89,7 @@ def _render_grouped(issues: list[dict]):
         short_path = _shorten_path(filepath)
         file_tiers = defaultdict(int)
         for i in file_issues:
-            file_tiers[i.get("tier", "T4")] += 1
+            file_tiers[i.get("tier") or "T4"] += 1
         tier_str = " ".join(f"{t}:{c}" for t, c in sorted(file_tiers.items()))
 
         print(f"  {_COLORS['bold']}{short_path}{_COLORS['reset']}  ({len(file_issues)} issues: {tier_str})")
@@ -91,7 +103,10 @@ def _render_grouped(issues: list[dict]):
             # Truncate long issue descriptions
             if len(issue_text) > 80:
                 issue_text = issue_text[:77] + "..."
-            print(f"    {color}[{tier}]{reset} {i.get('id', '?'):<14} {issue_text}")
+            loc = ""
+            if i.get("line"):
+                loc = f" {dim}@{i.get('line')}:{i.get('column', 1)}{reset}"
+            print(f"    {color}[{tier}]{reset} {i.get('id', '?'):<14}{loc} {issue_text}")
 
         print()
 
@@ -107,8 +122,10 @@ def _render_detailed(issues: list[dict]):
         bold = _COLORS["bold"]
 
         print(f"\n  {bold}{i.get('id', '?')}{reset}  {color}[{tier}]{reset}")
-        print(f"  File    : {i.get('file', '?')}")
+        print(f"  File    : {format_issue_location(i)}")
         print(f"  Issue   : {i.get('issue', '?')}")
+        if i.get("snippet"):
+            print(f"  Snippet : {i.get('snippet')}")
         print(f"  Fix     : {i.get('command', '?')}")
         print()
 

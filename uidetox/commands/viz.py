@@ -48,15 +48,23 @@ def _build_tree(root_path: Path, issue_map: dict) -> dict:
                     "path": "/".join(parts[:i+1]),
                     "type": "file" if is_file else "dir",
                     "issues": 0,
-                    "issues_list": [] if is_file else None,
+                    "issues_list": [],
                     "children": {} if not is_file else None
                 }
-            
-            current["children"][part]["issues"] += len(file_issues)
+
+            node = current["children"][part]
+            node["issues"] += len(file_issues)
             if is_file:
-                current["children"][part]["issues_list"].extend(file_issues)
-                
-            current = current["children"][part]
+                # Ensure issues_list is always a list (node may have been created as dir-type)
+                if node["issues_list"] is None:
+                    node["issues_list"] = []
+                node["issues_list"].extend(file_issues)
+            else:
+                # Ensure children dict exists (node may have been created as file-type earlier)
+                if node["children"] is None:
+                    node["children"] = {}
+
+            current = node
 
     return tree
 

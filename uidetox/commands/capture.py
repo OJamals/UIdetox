@@ -141,10 +141,13 @@ def run(args: argparse.Namespace):
             captured = _capture_multi_viewport(url, "before")
             if captured:
                 print(f"\n✅ {len(captured)} responsive BEFORE screenshots saved.")
+            else:
+                sys.exit(1)
         else:
             out_file = snapshots / "before.png"
-            if _capture_screenshot(url, out_file):
-                print(f"✅ BEFORE screenshot saved to {out_file}")
+            if not _capture_screenshot(url, out_file):
+                sys.exit(1)
+            print(f"✅ BEFORE screenshot saved to {out_file}")
 
     elif stage == "after":
         # ── Capture AFTER screenshot and generate diff ──
@@ -165,29 +168,32 @@ def run(args: argparse.Namespace):
                         change_pct = diff.get("change_percentage", "?")
                         severity = diff.get("severity", "unknown")
                         print(f"  {vp_name}: {change_pct}% change ({severity})")
+            else:
+                sys.exit(1)
         else:
             out_file = snapshots / "after.png"
-            if _capture_screenshot(url, out_file):
-                print(f"✅ AFTER screenshot saved to {out_file}")
+            if not _capture_screenshot(url, out_file):
+                sys.exit(1)
+            print(f"✅ AFTER screenshot saved to {out_file}")
 
-                # Generate diff if before exists
-                before_file = snapshots / "before.png"
-                if before_file.exists():
-                    print("\n🔍 Generating visual diff...")
-                    diff = _generate_visual_diff(before_file, out_file)
-                    change_pct = diff.get("change_percentage", "?")
-                    severity = diff.get("severity", "unknown")
-                    print(f"   Change: {change_pct}% ({severity})")
-                    if diff.get("diff_image"):
-                        print(f"   Diff image: {diff['diff_image']}")
+            # Generate diff if before exists
+            before_file = snapshots / "before.png"
+            if before_file.exists():
+                print("\n🔍 Generating visual diff...")
+                diff = _generate_visual_diff(before_file, out_file)
+                change_pct = diff.get("change_percentage", "?")
+                severity = diff.get("severity", "unknown")
+                print(f"   Change: {change_pct}% ({severity})")
+                if diff.get("diff_image"):
+                    print(f"   Diff image: {diff['diff_image']}")
 
-                    # Save diff metadata
-                    import json
-                    diff_meta = snapshots / "diff_meta.json"
-                    with open(diff_meta, "w", encoding="utf-8") as f:
-                        json.dump(diff, f, indent=2)
-                else:
-                    print("   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first.")
+                # Save diff metadata
+                import json
+                diff_meta = snapshots / "diff_meta.json"
+                with open(diff_meta, "w", encoding="utf-8") as f:
+                    json.dump(diff, f, indent=2)
+            else:
+                print("   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first.")
 
         # Copy to latest for review command
         latest = snapshots / "latest.png"
@@ -199,8 +205,9 @@ def run(args: argparse.Namespace):
         # ── Default: single capture (legacy behavior) ──
         print(f"📸 Capturing screenshot of {url}...")
         out_file = snapshots / "latest.png"
-        if _capture_screenshot(url, out_file):
-            print(f"✅ Screenshot saved to {out_file}")
-            print()
-            print("  TIP: Use `uidetox capture --stage before` and `--stage after`")
-            print("  for visual regression validation during the fix loop.")
+        if not _capture_screenshot(url, out_file):
+            sys.exit(1)
+        print(f"✅ Screenshot saved to {out_file}")
+        print()
+        print("  TIP: Use `uidetox capture --stage before` and `--stage after`")
+        print("  for visual regression validation during the fix loop.")
