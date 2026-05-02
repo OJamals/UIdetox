@@ -7,22 +7,13 @@ Cursor natively supports custom rules and subagents. UIdetox leverages Cursor's 
 ```bash
 uidetox update-skill cursor
 ```
-If you are on Cursor Nightly, ensure Agent Skills is enabled in Settings → Beta, then Settings → Rules.
+This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root and auto-generates `.cursor/rules/uidetox.mdc`.
 
-Create a global `.cursor/rules/uidetox.mdc` file pointing to UIdetox:
-```markdown
----
-description: UIdetox Anti-Slop Guidelines
-globs: *.tsx, *.jsx, *.ts, *.js, *.css
----
-Before generating frontend code, ALWAYS cross-reference the anti-patterns listed in `SKILL.md` at the project root. DO NOT output purple-blue gradients, generic Inter typography, or arbitrary glassmorphism.
+If you are on Cursor Nightly, ensure Agent Skills is enabled in Settings → Beta → Agent Skills.
 
-**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
-```
+### 2. Optional Custom Cursor Agent
 
-### 2. The UIdetox Cursor Agent
-
-Define a UIdetox agent in `.cursor/agents/uidetox.md`:
+If you want a dedicated `uidetox` agent persona in Cursor, create `.cursor/agents/uidetox.md`:
 
 ```markdown
 ---
@@ -48,4 +39,40 @@ Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last c
 **CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs.
 ```
 
-Open Cursor Chat, switch to the `uidetox` agent, and type "Start the loop."
+The generated `.cursor/rules/uidetox.mdc` already activates the UIdetox rules on frontend files; the custom agent file is optional.
+
+Open Cursor Chat, switch to the `uidetox` agent, and type "Start the loop." if you created the optional agent.
+
+### 3. Visual Regression + Port Configuration
+
+Use `uidetox capture` when validating a redesigned surface. **Start your dev server first** — UIdetox does not launch it.
+
+```bash
+pnpm dev
+uidetox capture --stage before
+uidetox capture --stage after
+
+# Non-standard port
+uidetox capture --stage before --url http://localhost:5173
+```
+
+To persist the target URL for future runs, add this to `.uidetox/config.json`:
+
+```json
+{
+  "dev_server": "http://localhost:5173"
+}
+```
+
+Resolution order is: `--url` → `.uidetox/config.json` `dev_server` → `http://localhost:3000`.
+
+### 4. Diff + Watch Utilities
+
+```bash
+uidetox diff
+uidetox diff --since <sha>
+uidetox watch
+uidetox watch --path src/
+```
+
+Use `diff` to track regressions against the stored baseline and `watch` to re-scan continuously while Cursor edits files.

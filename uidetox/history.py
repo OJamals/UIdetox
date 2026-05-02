@@ -19,6 +19,16 @@ def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
 
 
+def _coerce_history_text(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _coerce_history_int(value: object) -> int:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value)
+    return 0
+
+
 def save_run_snapshot(*, trigger: str = "scan") -> Path:
     """Save a timestamped JSON snapshot of the current state.
 
@@ -62,9 +72,12 @@ def load_run_history() -> list[dict]:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                continue
+            data = dict(data)
             data["_file"] = str(p.name)
             runs.append(data)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             continue
     return runs
 
@@ -74,11 +87,11 @@ def compare_runs() -> list[dict]:
     runs = load_run_history()
     return [
         {
-            "timestamp": r.get("timestamp", ""),
-            "trigger": r.get("trigger", "?"),
-            "score": r.get("design_score", 0),
-            "pending": r.get("pending_issues", 0),
-            "resolved": r.get("resolved_issues", 0),
+            "timestamp": _coerce_history_text(r.get("timestamp"), ""),
+            "trigger": _coerce_history_text(r.get("trigger"), "?"),
+            "score": _coerce_history_int(r.get("design_score")),
+            "pending": _coerce_history_int(r.get("pending_issues")),
+            "resolved": _coerce_history_int(r.get("resolved_issues")),
         }
         for r in runs
     ]

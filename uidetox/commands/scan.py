@@ -14,7 +14,7 @@ import uuid
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import (
-    add_issue, ensure_uidetox_dir, load_config, load_state,
+    add_issue, ensure_uidetox_dir, get_project_root, load_config, load_state,
     save_config, increment_scans,
 )
 from uidetox.tooling import detect_all
@@ -55,9 +55,11 @@ _MANUAL_CATEGORIES = {
 
 def run(args: argparse.Namespace):
     ensure_uidetox_dir()
+    project_root = get_project_root()
 
     # Validate that the path exists and is a directory before doing anything
-    scan_path = getattr(args, "path", ".")
+    scan_path_arg = getattr(args, "path", ".")
+    scan_path = str(project_root) if scan_path_arg in (None, "", ".") else scan_path_arg
     if not os.path.isdir(scan_path):
         print(f"Error: scan path '{scan_path}' does not exist or is not a directory.", file=sys.stderr)
         sys.exit(1)
@@ -70,7 +72,7 @@ def run(args: argparse.Namespace):
 
     # Auto-detect tooling if not already configured
     if not config.get("tooling"):
-        profile = detect_all(args.path)
+        profile = detect_all(scan_path)
         config["tooling"] = profile.to_dict()
         save_config(config)
 
@@ -79,7 +81,7 @@ def run(args: argparse.Namespace):
     print("+" + "=" * 58 + "+")
     print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
     print("+" + "=" * 58 + "+")
-    print(f"  Path  : {args.path}")
+    print(f"  Path  : {scan_path}")
     print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
     print()
 
@@ -134,19 +136,19 @@ def run(args: argparse.Namespace):
 
     # Incremental mode: only scan files changed since a git SHA
     since_files: list[str] | None = None
-    since_root: str = os.path.abspath(args.path)  # fallback; overridden with git root below
+    since_root: str = os.path.abspath(scan_path)  # fallback; overridden with git root below
     if since_sha:
         try:
-            # git diff --name-only outputs paths relative to the repo root, not args.path
+            # git diff --name-only outputs paths relative to the repo root, not scan_path
             root_result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, cwd=args.path, timeout=10,
+                capture_output=True, text=True, cwd=scan_path, timeout=10,
             )
             if root_result.returncode == 0:
                 since_root = root_result.stdout.strip()
             result = subprocess.run(
                 ["git", "diff", "--name-only", since_sha],
-                capture_output=True, text=True, cwd=args.path, timeout=10,
+                capture_output=True, text=True, cwd=scan_path, timeout=10,
             )
             if result.returncode == 0:
                 since_files = [
@@ -163,7 +165,7 @@ def run(args: argparse.Namespace):
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
     slop_issues = analyze_directory(
-        args.path,
+        scan_path,
         exclude_paths=exclude_paths,
         zone_overrides=zone_overrides,
         design_variance=variance,
@@ -345,10 +347,10 @@ def run(args: argparse.Namespace):
     # ===========================================================
     increment_scans()
     save_run_snapshot(trigger="scan")
-    _save_scan_to_memory(slop_issues, queued_count, triggered_rules, args.path)
+    _save_scan_to_memory(slop_issues, queued_count, triggered_rules, scan_path)
     save_session(phase="scan_complete", last_command="scan",
-                 context=f"Found {queued_count} issues in {args.path}")
-    log_progress("scan", f"Scanned {args.path}: {queued_count} issues queued")
+                 context=f"Found {queued_count} issues in {scan_path}")
+    log_progress("scan", f"Scanned {scan_path}: {queued_count} issues queued")
 
     # Compute current score and show target check
     state = load_state()

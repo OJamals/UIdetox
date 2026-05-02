@@ -22,7 +22,14 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
     Dynamically reads the project's actual color configuration to cross-reference
     against accessibility standards, instead of relying on hardcoded defaults.
     """
+    colors, _ = _load_project_color_data(project_root)
+    return colors
+
+
+def _load_project_color_data(project_root: Path) -> tuple[dict[str, str], set[str]]:
+    """Return the resolved color map plus the keys explicitly declared by the project."""
     colors = TAILWIND_COLORS.copy()
+    declared_colors: set[str] = set()
 
     # 1. Try to read tailwind.config.js/ts/mjs via simple regex mapping
     for config_name in ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs", "tailwind.config.cjs"]:
@@ -34,6 +41,7 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                 matches = re.findall(r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"](#[0-9a-fA-F]{3,8})[\'"]', content)
                 for name, hexcode in matches:
                     colors[name] = hexcode
+                    declared_colors.add(name)
 
                 # Match nested color objects: brand: { 50: '#...', 100: '#...', ... }
                 nested_matches = re.findall(
@@ -45,11 +53,14 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                     for shade, hexcode in shade_matches:
                         key = f"{parent_name}-{shade}" if shade != "DEFAULT" else parent_name
                         colors[key] = hexcode
+                        declared_colors.add(key)
 
                 # Match CSS variable references in Tailwind v4 format
                 css_var_matches = re.findall(r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"]var\(--([^)]+)\)[\'"]', content)
                 for name, var_name in css_var_matches:
-                    colors[f"var-{name}"] = f"var(--{var_name})"
+                    key = f"var-{name}"
+                    colors[key] = f"var(--{var_name})"
+                    declared_colors.add(key)
 
             except (UnicodeDecodeError, OSError):
                 pass
@@ -72,6 +83,7 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                 matches = re.findall(r'--([a-zA-Z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})', content)
                 for name, hexcode in matches:
                     colors[name] = hexcode
+                    declared_colors.add(name)
 
                 # Match HSL color variables
                 hsl_matches = re.findall(
@@ -82,6 +94,7 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                     hex_val = _hsl_string_to_hex(hsl_val.strip())
                     if hex_val:
                         colors[name] = hex_val
+                        declared_colors.add(name)
 
                 # Match oklch color variables (Tailwind v4)
                 oklch_matches = re.findall(
@@ -90,7 +103,9 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
                 )
                 for name, oklch_val in oklch_matches:
                     # Store as-is for now; full oklch→hex conversion is complex
-                    colors[f"oklch-{name}"] = f"oklch({oklch_val})"
+                    key = f"oklch-{name}"
+                    colors[key] = f"oklch({oklch_val})"
+                    declared_colors.add(key)
 
             except (UnicodeDecodeError, OSError):
                 pass
@@ -101,11 +116,11 @@ def load_dynamic_colors(project_root: Path) -> dict[str, str]:
         if token_path.exists():
             try:
                 data = json.loads(token_path.read_text(encoding="utf-8"))
-                _extract_tokens_recursive(data, colors, prefix="")
+                _extract_tokens_recursive(data, colors, prefix="", declared_colors=declared_colors)
             except (json.JSONDecodeError, UnicodeDecodeError, OSError):
                 pass
 
-    return colors
+    return colors, declared_colors
 
 
 def find_color_config_sources(project_root: Path) -> list[Path]:
@@ -136,7 +151,8 @@ def find_color_config_sources(project_root: Path) -> list[Path]:
     return sources
 
 
-def _extract_tokens_recursive(data: dict, colors: dict[str, str], prefix: str):
+def _extract_tokens_recursive(data: dict, colors: dict[str, str], prefix: str,
+                              declared_colors: set[str] | None = None):
     """Recursively extract color tokens from a design token JSON."""
     if not isinstance(data, dict):
         return
@@ -144,13 +160,17 @@ def _extract_tokens_recursive(data: dict, colors: dict[str, str], prefix: str):
         full_key = f"{prefix}-{key}" if prefix else key
         if isinstance(value, str) and re.match(r'^#[0-9a-fA-F]{3,8}$', value):
             colors[full_key] = value
+            if declared_colors is not None:
+                declared_colors.add(full_key)
         elif isinstance(value, dict):
             if "value" in value and isinstance(value["value"], str):
                 val = value["value"]
                 if re.match(r'^#[0-9a-fA-F]{3,8}$', val):
                     colors[full_key] = val
+                    if declared_colors is not None:
+                        declared_colors.add(full_key)
             else:
-                _extract_tokens_recursive(value, colors, full_key)
+                _extract_tokens_recursive(value, colors, full_key, declared_colors=declared_colors)
 
 
 def _hsl_string_to_hex(hsl_str: str) -> str | None:
@@ -175,12 +195,24 @@ def audit_project_colors(project_root: Path) -> list[dict]:
 
     Returns a list of WCAG violations found in the project's color configuration.
     """
-    colors = load_dynamic_colors(project_root)
+    if not find_color_config_sources(project_root):
+        return []
+
+    colors, declared_colors = _load_project_color_data(project_root)
+    if not declared_colors:
+        return []
+
     violations = []
 
     # Find likely background/foreground pairings from CSS variable naming conventions
-    bg_names = {k: v for k, v in colors.items() if any(x in k.lower() for x in ["background", "bg", "surface", "card", "base"])}
-    fg_names = {k: v for k, v in colors.items() if any(x in k.lower() for x in ["foreground", "fg", "text", "content", "body"])}
+    bg_names = {
+        k: v for k, v in colors.items()
+        if k in declared_colors and any(x in k.lower() for x in ["background", "bg", "surface", "card", "base"])
+    }
+    fg_names = {
+        k: v for k, v in colors.items()
+        if k in declared_colors and any(x in k.lower() for x in ["foreground", "fg", "text", "content", "body"])
+    }
 
     # Check declared foreground/background pairs
     for fg_name, fg_hex in fg_names.items():
@@ -201,12 +233,13 @@ def audit_project_colors(project_root: Path) -> list[dict]:
                 })
 
     # Check common Tailwind pairings
-    _check_common_pairings(colors, violations)
+    _check_common_pairings(colors, violations, declared_colors)
 
     return violations
 
 
-def _check_common_pairings(colors: dict[str, str], violations: list[dict]):
+def _check_common_pairings(colors: dict[str, str], violations: list[dict],
+                           declared_colors: set[str] | None = None):
     """Check commonly paired Tailwind colors for contrast issues."""
     common_pairs = [
         # (text_color_key, bg_color_key)
@@ -214,6 +247,8 @@ def _check_common_pairings(colors: dict[str, str], violations: list[dict]):
         ("gray-300", "gray-800"), ("gray-400", "gray-900"),
     ]
     for text_key, bg_key in common_pairs:
+        if declared_colors is not None and (text_key not in declared_colors or bg_key not in declared_colors):
+            continue
         text_hex = colors.get(text_key)
         bg_hex = colors.get(bg_key)
         if text_hex and bg_hex and text_hex.startswith("#") and bg_hex.startswith("#"):

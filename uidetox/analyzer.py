@@ -2985,9 +2985,9 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     from concurrent.futures import ThreadPoolExecutor
     from uidetox.color_utils import load_dynamic_colors, audit_project_colors, find_color_config_sources
 
-    dynamic_colors = load_dynamic_colors(root)
-    color_audit_violations = audit_project_colors(root)
     color_sources = find_color_config_sources(root)
+    dynamic_colors = load_dynamic_colors(root)
+    color_audit_violations = audit_project_colors(root) if color_sources else []
     color_issue_file = str((color_sources[0] if color_sources else root).resolve())
 
     def _analyze_wrapper(fp: Path) -> list:

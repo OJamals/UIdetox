@@ -38,8 +38,8 @@ pip install uidetox
 # Install agent-specific skill assets
 uidetox update-skill [agent]    # supports: claude, cursor, gemini, windsurf, codex, copilot
 
-# Initialize project dials + optional auto-commit flow
-uidetox setup --auto-commit
+# Initialize project dials + optional auto-commit / preview URL
+uidetox setup --auto-commit --dev-server http://localhost:5173
 
 # Start autonomous protocol
 uidetox loop
@@ -57,7 +57,7 @@ Eliminate AI slop from this codebase. Make the frontend feel hand-crafted. Targe
 BOOTSTRAP:
   pip install uidetox
   uidetox update-skill <your_agent>   # claude | cursor | gemini | codex | windsurf | copilot
-  uidetox setup --auto-commit
+  uidetox setup --auto-commit         # add --dev-server if preview is not on :3000
   uidetox loop                        # prints the full protocol — follow it
 
 THE LOOP (repeat until score ≥ 95 and queue is empty):
@@ -91,7 +91,7 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 > **Self-Healing Mechanics**: If a fix breaks the build (TSC or Lint errors), UIdetox captures the compiler output, injects it back into the agent's context, and requires a fix before the issue can be resolved.
 
 > [!TIP]
-> **Visual Regression Workflow**: Use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive`) to generate screenshot diffs that are surfaced inside `uidetox review`.
+> **Visual Regression Workflow**: Start your dev server first, then use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive` or `--url http://localhost:5173`) to generate screenshot diffs that are surfaced inside `uidetox review`. For non-3000 ports, either pass `--url` or set `"dev_server"` in `.uidetox/config.json`.
 
 
 **Design Score** = Objective × 0.6 + Subjective × 0.4 — the agent keeps looping until this hits the target.
@@ -103,12 +103,15 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 | Command | Purpose |
 | :--- | :--- |
 | `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
-| `uidetox scan` | Run 60+ rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
+| `uidetox setup` | Persist design dials, `dev_server`, and auto-commit behavior (`--design-variance`, `--motion-intensity`, `--visual-density`, `--dev-server`, `--auto-commit`, `--no-auto-commit`). |
+| `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox next` | Get the highest-priority issue batch with SKILL.md context. |
 | `uidetox batch-resolve` | Resolve issues atomically with verification + auto-commit. |
 | `uidetox status` | Show blended Design Score, velocity, and queue health. |
 | `uidetox review` | Subjective quality scoring across 4 design dimensions. |
-| `uidetox capture` | Capture before/after screenshots and visual diffs (`--stage before/after`, `--responsive`). |
+| `uidetox capture` | Capture before/after screenshots and visual diffs (`--stage before/after`, `--url`, `--responsive`). **Start your dev server first** — uidetox does not launch it. Diff is amplified 8× for visibility. |
+| `uidetox diff` | Compare fresh static analysis against stored baseline — shows NEW / FIXED / UNCHANGED issues. Supports `--since <sha>`, `--output table/json/github`, `--save`. |
+| `uidetox watch` | Poll a directory for file changes and re-scan on each modification. Use `--interval` (default 1s) and `--no-clear`. |
 | `uidetox rescan` | Fresh re-analysis with dedup and auto-escalation. |
 | `uidetox check --fix` | Mechanical gate: tsc → lint → format. |
 | `uidetox plan` | Attack plan grouped by component with effort estimates. |
@@ -142,13 +145,18 @@ Set during `uidetox setup` and used throughout scan/fix prompts:
   - 4–7: balanced application density
   - 8–10: compact cockpit-like information layout
 
+- **`dev_server`**
+  - Used by `uidetox capture`
+  - Defaults to `http://localhost:3000`
+  - Override per run with `--url` or persist it with `uidetox setup --dev-server http://localhost:5173`
+
 Default baseline: **(8, 6, 4)**.
 
 ---
 
 ## Anti-Pattern Coverage
 
-The analyzer includes **60+ deterministic rules** organized across these categories:
+The analyzer includes **218+ deterministic rules** organized across these categories:
 
 | Category | Examples |
 | :--- | :--- |

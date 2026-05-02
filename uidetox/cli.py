@@ -15,26 +15,47 @@ def _get_version() -> str:
         return "0.1.0"
 
 
-def _get_commands_dir() -> Path | None:
-    """Find the commands/ directory — bundled data first, then project root."""
-    # 1. Bundled inside the installed package (uidetox/data/commands/)
-    pkg_data = Path(__file__).resolve().parent / "data" / "commands"
-    if pkg_data.exists():
-        return pkg_data
-    # 2. Project root commands/ (development / editable install)
+def _get_commands_dirs() -> list[Path]:
+    """Return all known commands/ directories in runtime lookup order."""
+    candidates: list[Path] = []
+
     try:
         from uidetox.state import get_project_root
-        cmd_dir = get_project_root() / "commands"
-        if cmd_dir.exists():
-            return cmd_dir
+        candidates.append(get_project_root() / "commands")
     except Exception:
         pass
-    # 3. Fallback: sibling to the package root
-    pkg_root = Path(__file__).resolve().parent.parent
-    cmd_dir = pkg_root / "commands"
-    if cmd_dir.exists():
-        return cmd_dir
-    return None
+
+    candidates.append(Path.cwd() / ".claude" / "skills" / "uidetox" / "commands")
+    candidates.append(Path(__file__).resolve().parent / "data" / "commands")
+    candidates.append(Path(__file__).resolve().parent.parent / "commands")
+
+    command_dirs: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        key = str(candidate.resolve())
+        if key not in seen:
+            seen.add(key)
+            command_dirs.append(candidate)
+
+    return command_dirs
+
+
+def _get_commands_dir() -> Path | None:
+    """Return the primary commands directory for compatibility callers."""
+    command_dirs = _get_commands_dirs()
+    return command_dirs[0] if command_dirs else None
+
+
+def _iter_dynamic_skill_names() -> list[str]:
+    """Return the union of dynamic skill names across all known command sources."""
+    skills: set[str] = set()
+    for cmd_dir in _get_commands_dirs():
+        for md_file in cmd_dir.glob("*.md"):
+            if md_file.stem not in {"scan", "setup", "fix"}:
+                skills.add(md_file.stem)
+    return sorted(skills)
 
 
 def parse_args(args_list=None):
@@ -47,7 +68,14 @@ def parse_args(args_list=None):
 
     # Command: setup
     setup_parser = subparsers.add_parser("setup", help="Gather project design context and configure dials")
-    setup_parser.add_argument("--auto-commit", action="store_true", help="Enable automated git commits for resolved issues")
+    setup_parser.set_defaults(auto_commit=None)
+    auto_commit_group = setup_parser.add_mutually_exclusive_group()
+    auto_commit_group.add_argument("--auto-commit", dest="auto_commit", action="store_true", help="Enable automated git commits for resolved issues")
+    auto_commit_group.add_argument("--no-auto-commit", dest="auto_commit", action="store_false", help="Disable automated git commits for resolved issues")
+    setup_parser.add_argument("--design-variance", type=int, choices=range(0, 11), help="Persist DESIGN_VARIANCE (0-10)")
+    setup_parser.add_argument("--motion-intensity", type=int, choices=range(0, 11), help="Persist MOTION_INTENSITY (0-10)")
+    setup_parser.add_argument("--visual-density", type=int, choices=range(0, 11), help="Persist VISUAL_DENSITY (0-10)")
+    setup_parser.add_argument("--dev-server", type=str, help="Persist the default preview URL used by capture (e.g. http://localhost:5173)")
 
     # Command: scan
     scan_parser = subparsers.add_parser("scan", help="Full diagnostic audit of frontend interface quality")
@@ -196,13 +224,9 @@ def parse_args(args_list=None):
     watch_parser.add_argument("--no-clear", dest="clear", action="store_false", default=True, help="Disable screen clear between updates")
 
     # Dynamic Slash Commands (e.g., /audit, /polish) from the commands/ directory
-    cmd_dir = _get_commands_dir()
-    if cmd_dir:
-        for md_file in cmd_dir.glob("*.md"):
-            skill_name = md_file.stem
-            if skill_name not in ["scan", "setup", "fix"]:
-                skill_parser = subparsers.add_parser(skill_name, help=f"Execute the '{skill_name}' UX design skill")
-                skill_parser.add_argument("target", nargs="?", default=".", help="Target file, directory, or component pattern")
+    for skill_name in _iter_dynamic_skill_names():
+        skill_parser = subparsers.add_parser(skill_name, help=f"Execute the '{skill_name}' UX design skill")
+        skill_parser.add_argument("target", nargs="?", default=".", help="Target file, directory, or component pattern")
 
     # Catch common mistake: uidetox --check → redirect to uidetox check
     if args_list is None and len(sys.argv) > 1 and sys.argv[1] == "--check":
@@ -221,10 +245,7 @@ def main():
     # Dispatch to the specific command module
     try:
         # Check dynamic skills
-        cmd_dir = _get_commands_dir()
-        dynamic_skills = []
-        if cmd_dir:
-            dynamic_skills = [f.stem for f in cmd_dir.glob("*.md") if f.stem not in ["scan", "setup", "fix"]]
+        dynamic_skills = _iter_dynamic_skill_names()
 
         if args.command in dynamic_skills:
             command_name = "skill_cmd"

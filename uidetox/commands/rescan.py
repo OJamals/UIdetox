@@ -15,7 +15,7 @@ import sys
 import uuid
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.state import load_state, load_config, clear_issues, add_issue, increment_scans
+from uidetox.state import get_project_root, load_state, load_config, clear_issues, add_issue, increment_scans
 from uidetox.history import save_run_snapshot
 from uidetox.utils import compute_design_score
 from uidetox.memory import log_progress
@@ -35,6 +35,7 @@ def _auto_escalate_tier(tier: str) -> str:
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
+    project_root = get_project_root()
     old_issues = state.get("issues", [])
     old_count = len(old_issues)
     resolved = state.get("resolved", [])
@@ -58,7 +59,8 @@ def run(args: argparse.Namespace):
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
 
-    path = getattr(args, "path", ".")
+    path_arg = getattr(args, "path", ".")
+    path = str(project_root) if path_arg in (None, "", ".") else path_arg
 
     # Validate path before doing anything
     if not os.path.isdir(path):

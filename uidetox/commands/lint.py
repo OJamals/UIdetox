@@ -5,18 +5,19 @@ import subprocess
 import re
 import uuid
 from uidetox.tooling import detect_all
-from uidetox.state import add_issue, load_config
-from uidetox.utils import safe_split_cmd
+from uidetox.state import add_issue, get_project_root, load_config
+from uidetox.utils import prepare_subprocess_cmd
 
 
 def run(args: argparse.Namespace):
+    project_root = get_project_root()
     config = load_config()
     tooling = config.get("tooling")
 
     if tooling and tooling.get("linter"):
         linter = tooling["linter"]
     else:
-        profile = detect_all()
+        profile = detect_all(project_root)
         if not profile.linter:
             print("No linter detected. Install biome or eslint.")
             return
@@ -33,9 +34,10 @@ def run(args: argparse.Namespace):
     print()
 
     try:
+        argv, env = prepare_subprocess_cmd(cmd)
         result = subprocess.run(
-            safe_split_cmd(cmd),
-            capture_output=True, text=True, cwd=".", timeout=120
+            argv,
+            capture_output=True, text=True, cwd=project_root, timeout=120, env=env
         )
     except FileNotFoundError:
         print(f"Command not found. Install {linter['name']}.")

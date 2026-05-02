@@ -13,6 +13,29 @@ from uidetox.utils import now_iso # type: ignore
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
 
+_GITNEXUS_PNPM_ANALYZE_CMD = (
+    "pnpm "
+    "--allow-build=@ladybugdb/core "
+    "--allow-build=tree-sitter "
+    "--allow-build=tree-sitter-c "
+    "--allow-build=tree-sitter-c-sharp "
+    "--allow-build=tree-sitter-cpp "
+    "--allow-build=tree-sitter-dart "
+    "--allow-build=tree-sitter-go "
+    "--allow-build=tree-sitter-java "
+    "--allow-build=tree-sitter-javascript "
+    "--allow-build=tree-sitter-kotlin "
+    "--allow-build=tree-sitter-php "
+    "--allow-build=tree-sitter-python "
+    "--allow-build=tree-sitter-ruby "
+    "--allow-build=tree-sitter-rust "
+    "--allow-build=tree-sitter-swift "
+    "--allow-build=tree-sitter-typescript "
+    "--allow-build=tree-sitter-cli "
+    "dlx gitnexus analyze"
+)
+_GITNEXUS_PNPM_ANALYZE_EMBEDDINGS_CMD = f"{_GITNEXUS_PNPM_ANALYZE_CMD} --embeddings"
+
 
 def _sessions_dir() -> Path:
     d = get_uidetox_dir() / "sessions"
@@ -459,10 +482,15 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
 
-## Tools Available
-Use GitNexus to map codebase flows before deep diving!
-- `npx gitnexus analyze --embeddings` (or `npx gitnexus analyze` if embeddings are not needed)
-- npx gitnexus query <concept>
+## GitNexus Workflow
+Prefer GitNexus MCP tools to map codebase flows before deep diving:
+- `gitnexus_query({{query: "concept"}})`
+- `gitnexus_context({{name: "symbolName"}})` when you need callers/callees for a hotspot
+- If GitNexus reports a stale index or missing `.gitnexus/lbug`, refresh the local database with:
+    `{_GITNEXUS_PNPM_ANALYZE_CMD}`
+- Preserve embeddings with:
+    `{_GITNEXUS_PNPM_ANALYZE_EMBEDDINGS_CMD}`
+- If `pnpm` is unavailable, fall back to `npx gitnexus analyze`
 
 ## What to Catalog
 For every frontend file, note:
@@ -677,7 +705,10 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 {context_block}
 
 ## Tools & Rules
-- Use `npx gitnexus impact <symbol>` before refactoring any exports
+- Use `gitnexus_impact({{target: "symbolName", direction: "upstream"}})` before refactoring any exports
+- Use `gitnexus_context({{name: "symbolName"}})` when you need callers/callees before moving shared logic
+- If GitNexus reports a stale index or missing `.gitnexus/lbug`, refresh the local database with:
+    `{_GITNEXUS_PNPM_ANALYZE_CMD}`
 - Follow SKILL.md design rules for every change
 - Fix ALL issues in one pass per component, then batch-resolve:
   `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`
