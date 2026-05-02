@@ -1,6 +1,7 @@
 """Visualization command: generates HTML treemaps and terminal trees of codebase health."""
 
 import argparse
+import html
 import json
 from pathlib import Path
 from collections import defaultdict
@@ -211,16 +212,21 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
         # Calculate flexible width based on issue weight (more issues = larger block)
         flex_basis = f["issues"] * 50
         
-        tooltip_li = "".join(f"<li>[{i.get('tier', '?')}] {i.get('issue', '')}</li>" for i in f["issue_details"])
-        
+        tooltip_li = "".join(
+            f"<li>[{html.escape(str(i.get('tier', '?')))}] {html.escape(i.get('issue', ''))}</li>"
+            for i in f["issue_details"]
+        )
+        safe_name = html.escape(f["name"])
+        safe_path = html.escape(f["path"])
+
         html_content += f"""
         <div class="file-block {heat_class}" style="flex-basis: {flex_basis}px;">
             <div class="file-info">
-                <div class="file-name">{f["name"]}</div>
+                <div class="file-name">{safe_name}</div>
                 <div class="issue-count">{f["issues"]}</div>
             </div>
             <div class="tooltip">
-                <strong>{f["path"]}</strong>
+                <strong>{safe_path}</strong>
                 <ul>{tooltip_li}</ul>
             </div>
         </div>

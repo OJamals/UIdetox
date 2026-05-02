@@ -10,6 +10,13 @@ from uidetox.commands import lint as lint_cmd
 from uidetox.commands import format_cmd
 
 
+def _auto_commit_changed_files(files: set, message: str) -> None:
+    """Stage specific changed files and commit them."""
+    for f in sorted(files):
+        subprocess.run(["git", "add", str(f)], check=False)
+    subprocess.run(["git", "commit", "-m", message, "--no-verify"], check=False)
+
+
 def run(args: argparse.Namespace):
     # First, ensure tooling is detected
     config = load_config()
@@ -40,8 +47,7 @@ def run(args: argparse.Namespace):
                 if cmd:
                     try:
                         res = subprocess.run(safe_split_cmd(cmd), capture_output=True, text=True, cwd=".")
-                        # If formatter changed files, it usually outputs file names or has exit code
-                        if res.returncode != 0 or "fixed" in res.stdout.lower() or "formatted" in res.stdout.lower():
+                        if "fixed" in res.stdout.lower() or "formatted" in res.stdout.lower():
                             changed = True
                     except FileNotFoundError:
                         print(f"Warning: Formatter command not found ({cmd})")

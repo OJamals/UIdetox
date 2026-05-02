@@ -228,7 +228,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "!important": (
-        "CSS QUALITY: Fix CSS specificity instead of using !important. Use CSS layers (@layer), lower-specificity selectors, or BEM naming to avoid specificity wars.",
+        "CSS QUALITY: Fix CSS specificity instead of using !important. Use CSS layers (@layer), lower-specificity selectors, or BEM naming to avoid specificity wars. Note: !important on animation/transition properties also overrides prefers-reduced-motion queries, making animations impossible to disable for accessibility — this is especially harmful.",
         None,
     ),
     # Duplication
@@ -330,7 +330,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "aria-label": (
-        "ARIA RULES: An empty aria-label (aria-label='') is worse than no label — it overrides visible text with nothing. Provide a meaningful description, or remove aria-label if the element already has visible text content.",
+        "ARIA RULES: An empty aria-label (aria-label='') is worse than no label — it overrides visible text with nothing. Provide a meaningful description, or remove aria-label if the element already has visible text content. Vague values like 'button', 'icon', 'close' also tell screen reader users nothing useful — describe the action or destination: 'Close settings panel', 'Add item to cart', 'Go to homepage'.",
         None,
     ),
     "alert": (
@@ -374,20 +374,12 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "REACT MODERNIZATION: Class components cannot use hooks and have worse tree-shaking than function components. Convert: componentDidMount → useEffect(fn, []), componentDidUpdate → useEffect(fn, [dep]), PureComponent → React.memo.",
         None,
     ),
-    "!important": (
-        "CSS SPECIFICITY: !important on animation/transition overrides prefers-reduced-motion queries and makes animations impossible to disable for accessibility. Fix the specificity conflict instead — never use !important on motion properties.",
-        None,
-    ),
     "role=": (
         "ACCESSIBILITY: A clickable div or span without a role attribute is invisible to screen readers. Use role='button' with tabIndex={0} and keyboard handlers, or replace with a semantic <button type='button'>.",
         None,
     ),
     "overflow: hidden": (
         "LAYOUT DANGER: overflow:hidden on body/html permanently hides the scrollbar and breaks scroll restoration. Use overflow:clip on a specific container, or add a modal-open class toggle only while a modal is open.",
-        None,
-    ),
-    "aria-label": (
-        "ACCESSIBILITY: Vague aria-label values like 'button', 'icon', 'close' tell screen reader users nothing useful. Describe the action or destination: 'Close settings panel', 'Add item to cart', 'Go to homepage'.",
         None,
     ),
     "react.lazy": (

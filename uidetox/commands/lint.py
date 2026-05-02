@@ -6,6 +6,7 @@ import re
 import uuid
 from uidetox.tooling import detect_all
 from uidetox.state import add_issue, load_config
+from uidetox.utils import safe_split_cmd
 
 
 def run(args: argparse.Namespace):
@@ -33,7 +34,7 @@ def run(args: argparse.Namespace):
 
     try:
         result = subprocess.run(
-            cmd.split(),
+            safe_split_cmd(cmd),
             capture_output=True, text=True, cwd=".", timeout=120
         )
     except FileNotFoundError:

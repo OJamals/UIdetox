@@ -34,7 +34,7 @@ _AUTO_CATEGORIES = {
     "content": {"GENERIC_COPY_SLOP", "AI_COPY_CLICHE_SLOP", "LOREM_IPSUM_SLOP", "GENERIC_NAME_SLOP", "EMOJI_HEAVY_SLOP", "EXCLAMATION_UX_SLOP", "OOPS_ERROR_SLOP", "STAR_RATING_SLOP", "FAKE_METRIC_SLOP", "EMOJI_BULLET_LIST_SLOP", "TESTIMONIAL_GRID_SLOP", "PRICING_TABLE_SLOP", "ROUND_NUMBER_SLOP", "UNSPLASH_URL_SLOP", "BROKEN_IMAGE_SLOP", "SAME_DATE_REPEAT_SLOP", "HARDCODED_COPYRIGHT_YEAR_SLOP", "VAGUE_BUTTON_LABEL_SLOP", "GENERIC_LOADING_TEXT_SLOP"},
     "code quality": {"DIV_SOUP_SLOP", "HARDCODED_ZINDEX_SLOP", "INLINE_STYLE_SLOP", "IMPORTANT_ABUSE_SLOP", "NESTED_TERNARY_SLOP", "MAGIC_NUMBER_SLOP", "ANY_TYPE_SLOP", "TS_IGNORE_SLOP", "DISABLED_LINT_RULE", "HARDCODED_COLOR_STYLE_SLOP", "TAILWIND_FONT_CONFLICT_SLOP", "TAILWIND_WEIGHT_CONFLICT_SLOP", "TAILWIND_DISPLAY_CONFLICT_SLOP", "NO_SELECT_CONTENT_SLOP", "UGLY_SCROLLBAR_SLOP", "ARBITRARY_PX_VALUE_SLOP", "VERBOSE_HANDLER_NAME_SLOP", "MISSING_TABULAR_NUMS_SLOP", "VALUE_NAMED_TOKEN_SLOP", "WINDOW_CONFIRM_SLOP", "DIALOG_ROLE_ON_DIV_SLOP", "SRCSET_MISSING_SLOP", "EMPTY_CATCH_SLOP", "TYPE_ASSERTION_ABUSE_SLOP", "ASYNC_USEEFFECT_SLOP", "HARDCODED_DEV_URL_SLOP", "REDUNDANT_BOOL_COMPARE_SLOP", "ALERT_USAGE_SLOP", "USE_INDEX_AS_KEY_SLOP", "STYLE_TAG_IN_JSX_SLOP", "FLOAT_LAYOUT_SLOP", "BUTTON_TYPE_MISSING_SLOP", "CATCH_CONSOLE_ONLY_SLOP", "HARDCODED_TIMEOUT_SLOP", "CSS_EMPTY_RULE_SLOP", "CSS_IMPORTANT_ANIMATION_SLOP", "PROP_SPREADING_SLOP", "CSS_UNIVERSAL_SELECTOR_SLOP", "TAILWIND_APPLY_OVERUSE_SLOP", "NON_NULL_ASSERTION_SLOP", "EVAL_USAGE_SLOP", "EMPTY_INTERFACE_SLOP", "FRAGMENT_SHORTHAND_SLOP", "CSS_OVERFLOW_SCROLL_SLOP", "CSS_VENDOR_PREFIX_SLOP", "BUTTON_TYPE_RESET_SLOP", "GRID_AUTO_FIT_MISSING_SLOP", "STAR_IMPORT_SLOP", "USER_AGENT_SNIFF_SLOP"},
     "components": {"HERO_DASHBOARD_SLOP", "ICONOGRAPHY_SLOP", "PILL_BADGE_SLOP", "MISSING_LOADING_STATE_SLOP", "MISSING_ERROR_STATE_SLOP", "ACCORDION_FAQ_SLOP", "DARK_MODE_TOGGLE_SLOP", "FORM_NO_SUBMIT_SLOP"},
-    "accessibility": {"IMG_ALT_MISSING_SLOP", "ICON_ARIA_MISSING_SLOP", "ORPHANED_LABEL_SLOP", "LOW_CONTRAST_SLOP", "POSITIVE_TABINDEX_SLOP", "MODAL_NO_ARIA_SLOP", "TOUCH_TARGET_SLOP", "AUTOFOCUS_SLOP", "SVG_HARDCODED_FILL_SLOP", "MISSING_META_DESCRIPTION_SLOP", "SKIP_TO_CONTENT_MISSING_SLOP", "FONT_DISPLAY_MISSING_SLOP", "IMG_MISSING_DIMENSIONS_SLOP", "PLACEHOLDER_ONLY_INPUT_SLOP", "USER_SCALABLE_DISABLED_SLOP", "MISSING_FAVICON_SLOP", "INPUT_NO_TYPE_SLOP", "EMPTY_HREF_SLOP", "MISSING_LANG_SLOP", "INPUT_AUTOCOMPLETE_MISSING_SLOP", "ARIA_HIDDEN_INTERACTIVE_SLOP", "FOCUS_VISIBLE_MISSING_SLOP", "TABINDEX_POSITIVE_SLOP", "TABLE_HEADER_NO_SCOPE_SLOP", "MEDIA_AUTOPLAY_SLOP", "AUTOCOMPLETE_OFF_SLOP", "MISSING_ARIA_ROLE_SLOP", "VAGUE_ARIA_LABEL_SLOP", "SELECT_NO_LABEL_SLOP", "IFRAME_NO_TITLE_SLOP", "VIDEO_NO_CAPTIONS_SLOP", "TABINDEX_ZERO_DIV_SLOP", "ICON_ONLY_BUTTON_SLOP"},
+    "accessibility": {"IMG_ALT_MISSING_SLOP", "ICON_ARIA_MISSING_SLOP", "ORPHANED_LABEL_SLOP", "LOW_CONTRAST_SLOP", "MODAL_NO_ARIA_SLOP", "TOUCH_TARGET_SLOP", "AUTOFOCUS_SLOP", "SVG_HARDCODED_FILL_SLOP", "MISSING_META_DESCRIPTION_SLOP", "SKIP_TO_CONTENT_MISSING_SLOP", "FONT_DISPLAY_MISSING_SLOP", "IMG_MISSING_DIMENSIONS_SLOP", "PLACEHOLDER_ONLY_INPUT_SLOP", "USER_SCALABLE_DISABLED_SLOP", "MISSING_FAVICON_SLOP", "INPUT_NO_TYPE_SLOP", "EMPTY_HREF_SLOP", "MISSING_LANG_SLOP", "INPUT_AUTOCOMPLETE_MISSING_SLOP", "ARIA_HIDDEN_INTERACTIVE_SLOP", "FOCUS_VISIBLE_MISSING_SLOP", "TABINDEX_POSITIVE_SLOP", "TABLE_HEADER_NO_SCOPE_SLOP", "MEDIA_AUTOPLAY_SLOP", "AUTOCOMPLETE_OFF_SLOP", "MISSING_ARIA_ROLE_SLOP", "VAGUE_ARIA_LABEL_SLOP", "SELECT_NO_LABEL_SLOP", "IFRAME_NO_TITLE_SLOP", "VIDEO_NO_CAPTIONS_SLOP", "TABINDEX_ZERO_DIV_SLOP", "ICON_ONLY_BUTTON_SLOP"},
     "security": {"ANCHOR_TARGET_BLANK_SLOP", "DANGEROUS_HTML_SLOP", "HARDCODED_SECRET_SLOP", "DOCUMENT_WRITE_SLOP", "INNER_HTML_ASSIGN_SLOP", "LOCALSTORAGE_SENSITIVE_SLOP", "OPEN_REDIRECT_SLOP", "POSTMESSAGE_ORIGIN_MISSING_SLOP"},
     "ssr": {"LOCALSTORAGE_SSR_SLOP", "WINDOW_OBJECT_SSR_SLOP", "USE_CLIENT_DIRECTIVE_SLOP", "NAVIGATOR_SSR_SLOP", "PROCESS_BROWSER_DEPRECATED_SLOP", "DOCUMENT_COOKIE_SSR_SLOP"},
     "react": {"MISSING_KEY_PROP_SLOP", "USEEFFECT_EMPTY_DEPS_SLOP", "FRAMER_NO_REDUCED_MOTION_SLOP", "NEXT_IMAGE_RAW_SLOP", "ASYNC_USEEFFECT_SLOP", "DEPRECATED_FINDDOMNODE_SLOP", "DEPRECATED_CLASS_COMPONENT_SLOP", "LAZY_WITHOUT_SUSPENSE_SLOP", "NO_PASSIVE_SCROLL_LISTENER_SLOP", "CONTEXT_VALUE_INLINE_SLOP", "USE_STATE_INIT_SLOP"},
@@ -134,8 +134,16 @@ def run(args: argparse.Namespace):
 
     # Incremental mode: only scan files changed since a git SHA
     since_files: list[str] | None = None
+    since_root: str = os.path.abspath(args.path)  # fallback; overridden with git root below
     if since_sha:
         try:
+            # git diff --name-only outputs paths relative to the repo root, not args.path
+            root_result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, cwd=args.path, timeout=10,
+            )
+            if root_result.returncode == 0:
+                since_root = root_result.stdout.strip()
             result = subprocess.run(
                 ["git", "diff", "--name-only", since_sha],
                 capture_output=True, text=True, cwd=args.path, timeout=10,
@@ -163,7 +171,7 @@ def run(args: argparse.Namespace):
 
     # Filter to only changed files in incremental mode
     if since_files is not None:
-        since_abs = {os.path.abspath(os.path.join(args.path, f)) for f in since_files}
+        since_abs = {os.path.abspath(os.path.join(since_root, f)) for f in since_files}
         slop_issues = [i for i in slop_issues if os.path.abspath(i.get("file", "")) in since_abs]
 
     # JSON output: print all issues as JSON and exit early
@@ -179,7 +187,7 @@ def run(args: argparse.Namespace):
             filepath = issue.get("file", "")
             msg = issue.get("issue", "").replace("\n", " ")
             tier = issue.get("tier", "T2")
-            level = "error" if tier in ("T1", "T4") else "warning"
+            level = "error" if tier in ("T3", "T4") else "warning"
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
 
@@ -200,9 +208,8 @@ def run(args: argparse.Namespace):
                     new_issue[key] = issue[key]
             if add_issue(new_issue):
                 queued_count += 1
-            for rule in RULES:
-                if rule["description"] in issue["issue"]:
-                    triggered_rules.add(rule["id"])
+            if rule_id := issue.get("id"):
+                triggered_rules.add(rule_id)
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")

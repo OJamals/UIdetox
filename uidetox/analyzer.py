@@ -287,7 +287,7 @@ RULES = [
     },
     {
         "id": "OVERPADDED_LAYOUT_SLOP",
-        "pattern": re.compile(r'(p-(?:8|10|12|16))(?:.*\1){3,}', re.DOTALL),
+        "pattern": re.compile(r'(p-(?:8|10|12|16))(?:.*\1){2,}', re.DOTALL),
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Excessive large padding repetition detected (overpadded layout).",
@@ -345,7 +345,7 @@ RULES = [
     },
     {
         "id": "LAZY_FLEX_CENTER_SLOP",
-        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*flex(?:\s+)justify-center(?:\s+)items-center[^"\']*["\']', re.IGNORECASE),
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*flex[^"\']*(?:items-center[^"\']*justify-center|justify-center[^"\']*items-center)[^"\']*["\']', re.IGNORECASE),
         "tier": "T1",
         "exts": _JSX_EXTS,
         "description": "Verbose flex centering detected.",
@@ -640,6 +640,1297 @@ RULES = [
         "command": "Increase text contrast against background color.",
         "_custom_check": "contrast_ratio"
     },
+    # ──────────────────────────────────────────────
+    # ACCESSIBILITY RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "ARIA_HIDDEN_INTERACTIVE_SLOP",
+        "pattern": re.compile(r'<(?:button|a)\b[^>]+aria-hidden=["\']true["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Interactive element with aria-hidden=true — invisible to screen readers.",
+        "command": "Remove aria-hidden from interactive elements or replace with visually-hidden span.",
+    },
+    {
+        "id": "EMPTY_ARIA_LABEL_SLOP",
+        "pattern": re.compile(r'aria-label=(?:""|\'\')', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Empty aria-label provides no accessible name — worse than no label.",
+        "command": "Provide a meaningful aria-label value or remove the attribute.",
+    },
+    {
+        "id": "VAGUE_ARIA_LABEL_SLOP",
+        "pattern": re.compile(r'aria-label=["\'](?:button|close|icon|link|image)["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Generic single-word aria-label detected — not descriptive enough.",
+        "command": "Use specific aria-label values that describe the action (e.g. 'Close dialog', 'Share article').",
+    },
+    {
+        "id": "TABINDEX_POSITIVE_SLOP",
+        "pattern": re.compile(r'tabIndex=\{[1-9]\d*\}|tabindex="[1-9]', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Positive tabindex breaks natural focus order (WCAG 2.4.3).",
+        "command": "Remove positive tabindex. Use DOM order and tabIndex={0} for focusable elements.",
+    },
+    {
+        "id": "TABINDEX_ZERO_DIV_SLOP",
+        "pattern": re.compile(r'<div\b[^>]+tabIndex=\{0\}|<div\b[^>]+tabindex="0"', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "tabIndex={0} on a <div> — use a semantic interactive element instead.",
+        "command": "Replace <div tabIndex={0}> with <button> or <a> for proper keyboard semantics.",
+    },
+    {
+        "id": "TABLE_HEADER_NO_SCOPE_SLOP",
+        "pattern": re.compile(r'<th\b(?![^>]*scope=)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<th> without scope attribute — table accessibility gap.",
+        "command": "Add scope='col' or scope='row' to all <th> elements.",
+    },
+    {
+        "id": "IFRAME_NO_TITLE_SLOP",
+        "pattern": re.compile(r'<iframe\b(?![^>]*title=)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<iframe> without title attribute — inaccessible to screen readers.",
+        "command": "Add a descriptive title attribute to every <iframe>.",
+    },
+    {
+        "id": "INPUT_NO_TYPE_SLOP",
+        "pattern": re.compile(r'<input\b(?![^>]*(?:\btype=|\.\.\.))', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<input> without type attribute defaults to text — may surprise mobile users.",
+        "command": "Always specify type= on <input> elements (text, email, password, number, etc.).",
+    },
+    {
+        "id": "BUTTON_TYPE_MISSING_SLOP",
+        "pattern": re.compile(r'<button\b(?![^>]*\btype=)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<button> without type= attribute defaults to submit inside forms.",
+        "command": "Add type='button' to buttons that don't submit forms.",
+    },
+    {
+        "id": "BUTTON_TYPE_RESET_SLOP",
+        "pattern": re.compile(r'type=["\']reset["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "type='reset' button — resets entire form unexpectedly.",
+        "command": "Remove reset buttons or implement controlled form state reset manually.",
+    },
+    {
+        "id": "USER_SCALABLE_DISABLED_SLOP",
+        "pattern": re.compile(r'user-scalable=(?:no|0)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".html"},
+        "description": "user-scalable=no disables pinch-zoom — WCAG 1.4.4 violation.",
+        "command": "Remove user-scalable=no from viewport meta tag.",
+    },
+    {
+        "id": "MISSING_ARIA_ROLE_SLOP",
+        "pattern": None,
+        "_custom_check": "missing_aria_role",
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Div/span with click/key handler but no role= — not accessible.",
+        "command": "Add role='button' or role='link' and keyboard handler to interactive divs.",
+    },
+    {
+        "id": "AUTOCOMPLETE_OFF_SLOP",
+        "pattern": re.compile(r'auto[Cc]omplete=["\']off["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "autocomplete=off — blocks password managers and hurts UX.",
+        "command": "Remove autocomplete=off. Use appropriate autocomplete values instead.",
+    },
+    {
+        "id": "AUTOFOCUS_SLOP",
+        "pattern": re.compile(r'autoFocus(?!\s*=\s*\{false\})', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "autoFocus hijacks keyboard flow — disorienting for screen reader users.",
+        "command": "Remove autoFocus or manage focus programmatically with useEffect + ref.focus().",
+    },
+    {
+        "id": "ALL_CAPS_HEADER_SLOP",
+        "pattern": re.compile(r'<h[123][^>]*class(?:Name)?=["\'][^"\']*\buppercase\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Uppercase heading via CSS class — WCAG 1.3.1, screen readers announce as shouting.",
+        "command": "Use proper case in heading text. Apply text-transform only to decorative elements.",
+    },
+    {
+        "id": "VAGUE_BUTTON_LABEL_SLOP",
+        "pattern": re.compile(r'<[Bb]utton[^>]*>\s*(?:Submit|OK|Click here)\s*</[Bb]utton>', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Generic button label (Submit/OK/Click here) — not descriptive.",
+        "command": "Use specific action labels: 'Save settings', 'Complete order', 'Learn more about X'.",
+    },
+    {
+        "id": "DIALOG_ROLE_ON_DIV_SLOP",
+        "pattern": re.compile(r'<(?:div|section|span)[^>]+role=["\']dialog["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "role='dialog' on non-<dialog> element — missing focus trap and ARIA attrs.",
+        "command": "Use native <dialog> element or a headless library (Radix, HeadlessUI) for accessible modals.",
+    },
+    {
+        "id": "EMPTY_HREF_SLOP",
+        "pattern": re.compile(r'''href=(?:"#"|'#'|"javascript:|'javascript:)''', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "href='#' or javascript: link — bad accessibility and UX.",
+        "command": "Use a <button> for actions. Use a real URL for links.",
+    },
+    {
+        "id": "VIDEO_NO_CAPTIONS_SLOP",
+        "pattern": re.compile(r'<video\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<video> element — verify captions/subtitles are provided (WCAG 1.2.2).",
+        "command": "Add <track kind='captions'> inside <video> for accessibility.",
+        "_custom_check": "video_no_captions"
+    },
+    {
+        "id": "GENERIC_LOADING_TEXT_SLOP",
+        "pattern": re.compile(r'"Loading\.\.\."|\>Loading\.\.\.<', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".js"},
+        "description": "Generic 'Loading...' text — not descriptive for screen readers.",
+        "command": "Use descriptive loading messages with aria-live='polite' and meaningful context.",
+    },
+    # ──────────────────────────────────────────────
+    # CSS RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "HARDCODED_BREAKPOINT_SLOP",
+        "pattern": re.compile(r'@media\s*\((?:max|min)-width:\s*\d+px\)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Hardcoded px breakpoint in @media query — no responsive token system.",
+        "command": "Extract breakpoints to CSS custom properties or use a design token system.",
+    },
+    {
+        "id": "WILL_CHANGE_ABUSE_SLOP",
+        "pattern": re.compile(r'will-change:\s*(?:transform|opacity|all)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "will-change used — confirm it actually improves performance (overuse causes memory issues).",
+        "command": "Apply will-change only to elements that actually animate. Remove after animation via JS.",
+    },
+    {
+        "id": "HEIGHT_ANIMATION_SLOP",
+        "pattern": re.compile(r'transition:\s*height', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Animating height triggers layout — janky and battery-draining.",
+        "command": "Use max-height animation, grid-template-rows, or JS for smooth expand/collapse.",
+    },
+    {
+        "id": "TRANSITION_ALL_SLOP",
+        "pattern": re.compile(r'transition:\s*all\b|\btransition-all\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less", ".tsx", ".jsx"},
+        "description": "transition: all — animates everything including layout properties.",
+        "command": "Specify only compositor-safe properties: transition: transform, opacity, filter.",
+    },
+    {
+        "id": "HSL_COLOR_TOKEN_SLOP",
+        "pattern": re.compile(r'--[a-z][-a-z0-9]*:\s*hsl\(', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "CSS custom property defined as hsl() function — use channel notation for composability.",
+        "command": "Use oklch() or HSL channels: --color: 220 100% 50% (no hsl() wrapper).",
+    },
+    {
+        "id": "OVERSIZED_BORDER_RADIUS_SLOP",
+        "pattern": re.compile(r'border-radius:\s*(?:(?!9999)(?:[2-9]\d|[1-9]\d{2,3})px|[3-9]rem)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Excessive border-radius detected — pill/blob shape overuse.",
+        "command": "Use modest radius (4-12px). Reserve large radius for intentional pill shapes.",
+    },
+    {
+        "id": "HEIGHT_100VH_SLOP",
+        "pattern": re.compile(r'(?<![a-z-])height:\s*100vh', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "height: 100vh clips content on iOS Safari (address bar collapse).",
+        "command": "Use min-height: 100vh or min-height: 100dvh instead.",
+    },
+    {
+        "id": "OUTER_GLOW_SLOP",
+        "pattern": re.compile(r'box-shadow:\s*0\s+0\s+\d+px', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Outer glow box-shadow (0 0 Npx) detected — cheap AI decoration pattern.",
+        "command": "Use directional shadows or inner borders instead of glow effects.",
+    },
+    {
+        "id": "PURE_GRAY_NEUTRAL_SLOP",
+        "pattern": re.compile(r'--[a-z][-a-z0-9]*:\s*oklch\([^)]*\s+0\s+', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Pure gray oklch neutral (chroma=0) — no color temperature or tint.",
+        "command": "Add slight chroma (0.01-0.03) for warm or cool-tinted neutrals.",
+    },
+    {
+        "id": "VALUE_NAMED_TOKEN_SLOP",
+        "pattern": re.compile(r'--[a-z][a-z-]*-\d+\s*:', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Value-embedded CSS token name (--font-size-16) — encode semantics, not values.",
+        "command": "Rename to semantic tokens: --font-size-sm, --font-size-base, --color-brand-primary.",
+    },
+    {
+        "id": "PURE_WHITE_BACKGROUND_SLOP",
+        "pattern": re.compile(r'(?<!:root\s)background(?:-color)?:\s*(?:#fff(?:fff)?|white)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Pure white (#fff) background — rarely used in premium designs.",
+        "command": "Use off-white with subtle warm/cool tint: #fafaf9, oklch(98% 0.005 85).",
+    },
+    {
+        "id": "PURE_BLACK_TEXT_SLOP",
+        "pattern": re.compile(r'(?<!:root\s)color:\s*(?:#000(?:000)?|black)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Pure black (#000) text — too harsh, no premium designs use pure black.",
+        "command": "Use off-black: #1a1a1a, #0f172a, or oklch(18% 0 0).",
+    },
+    {
+        "id": "GRADIENT_TEXT_CSS_SLOP",
+        "pattern": re.compile(r'background-clip:\s*text', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "CSS gradient text (background-clip: text) detected — AI decoration cliche.",
+        "command": "Replace with solid color and intentional font weight.",
+    },
+    {
+        "id": "FOCUS_OUTLINE_REMOVED_SLOP",
+        "pattern": re.compile(r':focus\s*\{[^}]*outline:\s*(?:none|0)\b', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": ":focus outline removed — keyboard users cannot see focus (WCAG 2.4.7).",
+        "command": "Use :focus-visible instead of :focus. Never remove outline entirely.",
+        "_custom_check": "focus_outline_removed"
+    },
+    {
+        "id": "TEXT_TRANSFORM_UPPERCASE_SLOP",
+        "pattern": re.compile(r'text-transform:\s*uppercase', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "text-transform: uppercase — over-used in AI UIs, reduces readability.",
+        "command": "Use uppercase sparingly for short labels (3 words max). Never for paragraphs.",
+    },
+    {
+        "id": "FONT_WEIGHT_TOO_LIGHT_SLOP",
+        "pattern": re.compile(r'font-weight:\s*(?:100|200)\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Ultra-light font weight (100/200) — poor readability on most screens.",
+        "command": "Use font-weight 300+ for body text. Reserve ultra-light only for large display headings.",
+    },
+    {
+        "id": "FONT_SIZE_ZERO_SLOP",
+        "pattern": re.compile(r'font-size:\s*0\b(?!\.)(?!\d)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "font-size: 0 hiding text — use clip/sr-only pattern for screen reader text.",
+        "command": "Use .sr-only utility class instead of font-size: 0.",
+    },
+    {
+        "id": "CSS_OVERFLOW_SCROLL_SLOP",
+        "pattern": re.compile(r'overflow(?:-x|-y)?:\s*scroll\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "overflow: scroll always shows scrollbar even when not needed.",
+        "command": "Use overflow: auto to show scrollbar only when content overflows.",
+    },
+    {
+        "id": "BACKGROUND_ATTACHMENT_FIXED_SLOP",
+        "pattern": re.compile(r'background-attachment:\s*fixed', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "background-attachment: fixed — broken on iOS Safari, causes repaint on scroll.",
+        "command": "Remove or use JS-based parallax with transform instead.",
+    },
+    {
+        "id": "RESIZE_NONE_SLOP",
+        "pattern": re.compile(r'resize:\s*none', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "resize: none on textarea removes user control — accessibility concern.",
+        "command": "Allow vertical resize at minimum: resize: vertical.",
+    },
+    {
+        "id": "CSS_VENDOR_PREFIX_SLOP",
+        "pattern": re.compile(r'\s-(?:webkit|moz|ms|o)-', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Manual vendor prefix detected — use autoprefixer/PostCSS instead.",
+        "command": "Remove manual prefixes and configure autoprefixer in your build toolchain.",
+    },
+    {
+        "id": "FLOAT_LAYOUT_SLOP",
+        "pattern": re.compile(r'float:\s*(?:left|right)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "float layout detected — obsolete, use flexbox or grid.",
+        "command": "Replace float-based layouts with flexbox (display: flex) or grid.",
+    },
+    {
+        "id": "CSS_OVERFLOW_HIDDEN_BODY_SLOP",
+        "pattern": re.compile(r'(?:body|html)\s*\{[^}]*overflow:\s*hidden', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "overflow: hidden on body/html — blocks all page scrolling.",
+        "command": "Remove body overflow:hidden or implement proper modal scroll-lock via JS.",
+    },
+    {
+        "id": "ABSOLUTE_FONT_SIZE_BODY_SLOP",
+        "pattern": re.compile(r'(?:html|body)\s*\{[^}]*font-size:\s*\d+px', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Absolute px font-size on html/body overrides user browser preferences.",
+        "command": "Use font-size: 100% or remove body font-size to respect user settings.",
+    },
+    {
+        "id": "CSS_UNIVERSAL_SELECTOR_SLOP",
+        "pattern": re.compile(r'^\*\s*\{', re.MULTILINE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Universal selector (*) reset — performance concern on large DOMs.",
+        "command": "Use targeted resets (*, *::before, *::after) with only box-sizing.",
+    },
+    {
+        "id": "FOCUS_VISIBLE_MISSING_SLOP",
+        "pattern": re.compile(r':focus\s*\{', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": ":focus styles without :focus-visible pairing — over-triggers on mouse clicks.",
+        "command": "Use :focus-visible instead of :focus for ring/outline styles.",
+        "_custom_check": "focus_visible_missing"
+    },
+    {
+        "id": "GRADIENT_BORDER_SLOP",
+        "pattern": re.compile(r'border-image:\s*linear-gradient', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Gradient border via border-image — AI decoration cliche.",
+        "command": "Use a solid accent border or subtle outline. Gradient borders are a cheap effect.",
+    },
+    {
+        "id": "CSS_SCROLL_BEHAVIOR_SLOP",
+        "pattern": re.compile(r'scroll-behavior:\s*smooth', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "scroll-behavior: smooth without prefers-reduced-motion guard.",
+        "command": "Wrap in @media (prefers-reduced-motion: no-preference) { scroll-behavior: smooth; }",
+        "_custom_check": "css_scroll_behavior"
+    },
+    {
+        "id": "CSS_IMPORTANT_ANIMATION_SLOP",
+        "pattern": re.compile(r'(?:transition|animation):[^;]*!important', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "!important on transition/animation — cannot be overridden by prefers-reduced-motion.",
+        "command": "Remove !important from animation properties to allow accessibility overrides.",
+    },
+    {
+        "id": "CSS_EMPTY_RULE_SLOP",
+        "pattern": re.compile(r'\.[a-zA-Z][\w-]*\s*\{\s*\}', re.MULTILINE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Empty CSS rule with no declarations — dead code.",
+        "command": "Remove empty CSS classes or add declarations.",
+    },
+    {
+        "id": "STICKY_WITHOUT_TOP_SLOP",
+        "pattern": re.compile(r'position:\s*sticky', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "position: sticky without top/left offset — won't stick.",
+        "command": "Add top: 0 (or appropriate offset) alongside position: sticky.",
+        "_custom_check": "sticky_without_top"
+    },
+    {
+        "id": "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP",
+        "pattern": re.compile(r'scroll-snap-type:', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "scroll-snap-type without scroll-behavior: smooth — abrupt snapping.",
+        "command": "Add scroll-behavior: smooth to the scroll container for smooth snap transitions.",
+        "_custom_check": "scroll_snap_without_behavior"
+    },
+    {
+        "id": "ASPECT_RATIO_HACK_SLOP",
+        "pattern": re.compile(r'padding-(?:top|bottom):\s*(?:56\.25|75|66\.67|33\.33)%', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Padding-based aspect ratio hack — use aspect-ratio property instead.",
+        "command": "Replace padding-top hack with aspect-ratio: 16/9 (or appropriate ratio).",
+    },
+    {
+        "id": "GENERIC_FONT_FAMILY_SLOP",
+        "pattern": re.compile(r"font-family:\s*(?:'Inter'|Inter|'Roboto'|Roboto|'Open Sans'|'Montserrat'|Montserrat|'Poppins'|Poppins|'Lato'|Lato)\b", re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Generic 'web default' font family — Inter/Roboto/Poppins are AI defaults.",
+        "command": "Choose a distinctive typeface pairing that reflects the brand personality.",
+        "_custom_check": "generic_font_family"
+    },
+    {
+        "id": "FONT_DISPLAY_MISSING_SLOP",
+        "pattern": re.compile(r'@font-face\s*\{', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".css", ".scss", ".less"},
+        "description": "@font-face block — verify font-display is specified to avoid FOIT.",
+        "command": "Add font-display: swap or font-display: optional inside @font-face.",
+        "_custom_check": "font_display_missing"
+    },
+    {
+        "id": "ALPHA_COLOR_ABUSE_SLOP",
+        "pattern": re.compile(r'(?:rgba|hsla)\s*\(', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Excessive alpha colors detected — overuse creates muddy compositions.",
+        "command": "Limit rgba/hsla to 4 or fewer per file. Use oklch() with / for alpha.",
+        "_custom_check": "alpha_color_abuse"
+    },
+    {
+        "id": "GRID_AUTO_FIT_MISSING_SLOP",
+        "pattern": re.compile(r'grid-template-columns:\s*repeat\(\s*(?:[2-9]|\d{2,})\s*,', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Fixed-count grid without auto-fit — breaks at narrow viewports.",
+        "command": "Use repeat(auto-fit, minmax(min(100%, 280px), 1fr)) for responsive grids.",
+        "_custom_check": "grid_auto_fit_missing"
+    },
+    # ──────────────────────────────────────────────
+    # TAILWIND RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "ARBITRARY_PX_VALUE_SLOP",
+        "pattern": re.compile(r'(?:w|h|p|m|gap|space)-\[\d+px\]', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Tailwind arbitrary px value detected — use spacing scale instead.",
+        "command": "Use Tailwind's spacing scale (w-8, p-4) or CSS custom property instead of w-[42px].",
+    },
+    {
+        "id": "TAILWIND_V4_GRADIENT_SLOP",
+        "pattern": re.compile(r'from-(?:blue|indigo|purple|violet|cyan|sky)-\d+.*?to-(?:blue|indigo|purple|violet|cyan|sky)-\d+', re.IGNORECASE | re.DOTALL),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "Purple-to-blue Tailwind gradient — #1 AI default gradient. Banned.",
+        "command": "Remove gradient or use brand-specific color stops. No blue/purple rainbow.",
+    },
+    {
+        "id": "EASE_DEFAULT_SLOP",
+        "pattern": re.compile(r'\bease-in-out\b|\bease-in\b|\bease\b(?!-)'),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less", ".tsx", ".jsx"},
+        "description": "CSS 'ease' easing — generic browser default, use intentional curves.",
+        "command": "Use cubic-bezier(0.16, 1, 0.3, 1) (expo-out) or linear() for spring-like motion.",
+    },
+    {
+        "id": "SVG_HARDCODED_FILL_SLOP",
+        "pattern": re.compile(r'fill=["\'](?:#000000|#000|white|black)["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "SVG with hardcoded fill color — won't adapt to theme changes.",
+        "command": "Use fill='currentColor' so SVG inherits text color from parent.",
+    },
+    {
+        "id": "SCROLL_SMOOTH_NO_MOTION_SLOP",
+        "pattern": re.compile(r'\bscroll-smooth\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "scroll-smooth Tailwind class without motion-reduce:scroll-auto.",
+        "command": "Add motion-reduce:scroll-auto alongside scroll-smooth for accessibility.",
+        "_custom_check": "scroll_smooth_no_motion"
+    },
+    {
+        "id": "NO_SELECT_CONTENT_SLOP",
+        "pattern": re.compile(r'\bselect-none\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "select-none (user-select: none) prevents text selection — UX concern.",
+        "command": "Only use select-none on UI controls (buttons, sliders), not on content.",
+        "_custom_check": "no_select_content"
+    },
+    {
+        "id": "TAILWIND_APPLY_OVERUSE_SLOP",
+        "pattern": re.compile(r'@apply\s+[\w\s-]{40,}', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "@apply with 6+ utility classes — defeats Tailwind's purpose.",
+        "command": "Extract to a React component instead of @apply mega-blocks.",
+    },
+    {
+        "id": "OUTLINE_NONE_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*outline-none[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "outline-none/outline-0 without focus-visible: replacement — invisible keyboard focus (WCAG 2.4.7).",
+        "command": "Replace outline-none with focus-visible:ring-2.",
+        "_custom_check": "outline_none"
+    },
+    {
+        "id": "REDUCED_MOTION_MISSING_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*animate-[^"\']*["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Tailwind animate- class without motion-reduce: variant.",
+        "command": "Add motion-reduce:animate-none alongside every animate- class.",
+        "_custom_check": "reduced_motion_missing"
+    },
+    {
+        "id": "TAILWIND_FONT_CONFLICT_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*text-(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "Conflicting Tailwind font-size classes in same className (e.g. text-sm text-lg).",
+        "command": "Remove redundant size class.",
+        "_custom_check": "tailwind_font_conflict"
+    },
+    {
+        "id": "TAILWIND_WEIGHT_CONFLICT_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*font-(?:bold|medium|semibold|light|thin|normal|extrabold|black)[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "Conflicting Tailwind font-weight classes in same className.",
+        "command": "Remove redundant font-weight class.",
+        "_custom_check": "tailwind_weight_conflict"
+    },
+    {
+        "id": "TAILWIND_DISPLAY_CONFLICT_SLOP",
+        "pattern": re.compile(r'class(?:Name)?=["\'][^"\']*(?:flex|block|inline)[^"\']*["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "Conflicting Tailwind display classes (flex + hidden, flex + block) in same className.",
+        "command": "Remove conflicting display class — only one display class per element.",
+        "_custom_check": "tailwind_display_conflict"
+    },
+    # ──────────────────────────────────────────────
+    # TYPESCRIPT / JS RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "TYPE_ASSERTION_ABUSE_SLOP",
+        "pattern": re.compile(r'as\s+unknown\s+as\s+|as\s+any\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "Unsafe type assertion (as unknown as X, as any) detected.",
+        "command": "Use proper generics or type guards instead of unsafe casts.",
+    },
+    {
+        "id": "ASYNC_USEEFFECT_SLOP",
+        "pattern": re.compile(r'useEffect\(async\s*\(', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "async useEffect callback — can't cancel, leaks on unmount.",
+        "command": "Declare async function inside useEffect body: const load = async () => { ... }; load();",
+    },
+    {
+        "id": "HARDCODED_COLOR_STYLE_SLOP",
+        "pattern": re.compile(r'style=\{\{[^}]*(?:#[0-9a-fA-F]{3,6}|rgb\()[^}]*\}\}', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Hardcoded color in inline style — use CSS variables or Tailwind.",
+        "command": "Extract color to CSS custom property or Tailwind class.",
+    },
+    {
+        "id": "CONTEXT_VALUE_INLINE_SLOP",
+        "pattern": re.compile(r'\.Provider\s+value=\{\{', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Context Provider with inline object value — re-creates object on every render.",
+        "command": "Memoize context value: const value = useMemo(() => ({...}), [deps]);",
+    },
+    {
+        "id": "USE_STATE_INIT_SLOP",
+        "pattern": re.compile(r'useState\s*\(\s*new\s+(?:Map|Set|Array)\s*\(', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "useState initializer creates new Map/Set/Array on every render.",
+        "command": "Use lazy initializer: useState(() => new Map()) to avoid recreating on re-renders.",
+    },
+    {
+        "id": "NON_NULL_ASSERTION_SLOP",
+        "pattern": re.compile(r'\w+![.\[]'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "Non-null assertion (!) detected — runtime risk if value is actually null.",
+        "command": "Use optional chaining (?.) or explicit null check instead of !.",
+    },
+    {
+        "id": "EVAL_USAGE_SLOP",
+        "pattern": re.compile(r'\beval\s*\((?!uate\()'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "eval() detected — critical security and performance issue.",
+        "command": "Remove eval(). Parse JSON with JSON.parse, compute with actual functions.",
+    },
+    {
+        "id": "EMPTY_INTERFACE_SLOP",
+        "pattern": re.compile(r'interface\s+\w+(?:\s+extends\s+\w+)?\s*\{\s*\}', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "Empty interface declaration — use type alias or add members.",
+        "command": "Replace empty interface with type alias or add required members.",
+    },
+    {
+        "id": "FRAGMENT_SHORTHAND_SLOP",
+        "pattern": re.compile(r'<React\.Fragment>'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Verbose React.Fragment syntax — use shorthand <>...</>.",
+        "command": "Replace <React.Fragment> with the shorthand fragment syntax <>...</>.",
+    },
+    {
+        "id": "USER_AGENT_SNIFF_SLOP",
+        "pattern": re.compile(r'navigator\.userAgent\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "navigator.userAgent sniffing — brittle, use feature detection instead.",
+        "command": "Use feature detection (if ('geolocation' in navigator)) or CSS @supports.",
+    },
+    {
+        "id": "DEBUGGER_STATEMENT_SLOP",
+        "pattern": re.compile(r'\bdebugger\s*;'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "debugger statement in production code — halts execution in DevTools.",
+        "command": "Remove all debugger statements before shipping.",
+    },
+    {
+        "id": "PROCESS_BROWSER_DEPRECATED_SLOP",
+        "pattern": re.compile(r'\bprocess\.browser\b'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "process.browser is deprecated — use typeof window !== 'undefined'.",
+        "command": "Replace process.browser with typeof window !== 'undefined'.",
+    },
+    {
+        "id": "WINDOW_CONFIRM_SLOP",
+        "pattern": re.compile(r'\bwindow\.confirm\s*\('),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "window.confirm() blocks the UI thread — use a modal instead.",
+        "command": "Replace window.confirm with a custom confirmation modal component.",
+    },
+    {
+        "id": "HARDCODED_DEV_URL_SLOP",
+        "pattern": re.compile(r'["\']https?://(?:localhost(?::\d+)?|127\.0\.0\.1(?::\d+)?)(?:[/"\']|$)'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Hardcoded localhost/127.0.0.1 URL in code — breaks in production.",
+        "command": "Use environment variables: process.env.NEXT_PUBLIC_API_URL",
+    },
+    {
+        "id": "EMPTY_CATCH_SLOP",
+        "pattern": re.compile(r'catch\s*\([^)]*\)\s*\{\s*\}'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Empty catch block silently swallows errors.",
+        "command": "Log the error at minimum: catch (err) { console.error(err); }",
+    },
+    {
+        "id": "HARDCODED_SECRET_SLOP",
+        "pattern": re.compile(r'["\'](?:sk-|AKIA|ghp_|xoxb-)[A-Za-z0-9_\-]{16,}["\']'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Hardcoded API secret/token detected — CRITICAL security issue.",
+        "command": "Move to environment variables immediately. Rotate the exposed secret.",
+    },
+    {
+        "id": "REDUNDANT_BOOL_COMPARE_SLOP",
+        "pattern": re.compile(r'===\s*true\b|!==\s*false\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Redundant boolean comparison (=== true, !== false) — verbose.",
+        "command": "Use the value directly: if (isLoading) instead of if (isLoading === true).",
+    },
+    {
+        "id": "ALERT_USAGE_SLOP",
+        "pattern": re.compile(r'\balert\s*\('),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "alert() detected — blocks UI, terrible UX.",
+        "command": "Replace alert() with a toast notification or inline error message.",
+    },
+    {
+        "id": "DEPRECATED_FINDDOMNODE_SLOP",
+        "pattern": re.compile(r'(?:ReactDOM\.)?findDOMNode\s*\('),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "findDOMNode() is deprecated in React 18 — use ref callback instead.",
+        "command": "Replace findDOMNode with useRef() and attach ref directly to the element.",
+    },
+    {
+        "id": "DEPRECATED_CLASS_COMPONENT_SLOP",
+        "pattern": re.compile(r'extends\s+(?:React\.)?(?:Component|PureComponent)\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Class component detected — migrate to functional component + hooks.",
+        "command": "Rewrite as functional component using useState, useEffect, useMemo.",
+    },
+    {
+        "id": "USEEFFECT_EMPTY_DEPS_SLOP",
+        "pattern": re.compile(r'useEffect\s*\([^,]{30,},\s*\[\]\)'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Large useEffect with empty deps — likely missing dependencies.",
+        "command": "Add all referenced variables to deps array or extract to a custom hook.",
+    },
+    {
+        "id": "USE_CLIENT_DIRECTIVE_SLOP",
+        "pattern": re.compile(r"""^['"]use client['"]""", re.MULTILINE),
+        "tier": "T2",
+        "exts": {".tsx"},
+        "description": "'use client' directive — verify this component actually needs client-side rendering.",
+        "command": "Move state/effects to a small child component. Keep parent as RSC.",
+    },
+    {
+        "id": "STAR_RATING_SLOP",
+        "pattern": re.compile(r'★{5}|⭐{5}'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Hardcoded 5-star rating emoji — fake social proof, AI cliche.",
+        "command": "Use a real rating component with dynamic data or remove.",
+    },
+    {
+        "id": "FAKE_METRIC_SLOP",
+        "pattern": re.compile(r'99\.9+%|10x\s+faster|\$\d+[KM]\+\s+saved|\d{1,3}x\s+(?:faster|more|better)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Unverified marketing metric detected (99.9%, 10x faster) — AI credibility filler.",
+        "command": "Use real, sourced metrics or remove. Fake metrics erode user trust.",
+    },
+    {
+        "id": "ROUND_NUMBER_SLOP",
+        "pattern": re.compile(r'(?<!\d)99%(?!\d)|(?<!\d)100%(?!\.\d)|(?<!\d)\d+\.0+%'),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Suspiciously round metric percentage (99%, 100%, N.00%) — fake precision.",
+        "command": "Use real measurements or remove. Round numbers signal fabricated metrics.",
+    },
+    {
+        "id": "STYLE_TAG_IN_JSX_SLOP",
+        "pattern": re.compile(r'<style\s*(?:jsx)?\s*(?:global)?\s*>'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "<style> tag in JSX — use CSS modules or Tailwind instead.",
+        "command": "Extract styles to .module.css, Tailwind classes, or CSS-in-JS properly.",
+    },
+    {
+        "id": "USE_INDEX_AS_KEY_SLOP",
+        "pattern": re.compile(r'\.map\s*\(\s*\([^)]*,\s*(?:index|idx|i)\s*\)\s*=>\s*(?:[^)]*\bkey=\{(?:index|idx|i)\})', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Array index used as React key — breaks reconciliation on reorder.",
+        "command": "Use a stable unique identifier (id, slug, UUID) as key.",
+    },
+    {
+        "id": "PROP_SPREADING_SLOP",
+        "pattern": re.compile(r'\{\.\.\.(?:props|rest|other)\}'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Prop spreading ({...props}) passes unknown props to DOM elements.",
+        "command": "Destructure only the props you need. Avoid blind spreading.",
+    },
+    {
+        "id": "STAR_IMPORT_SLOP",
+        "pattern": re.compile(r'import\s*\*\s*as\s+\w+\s+from\s+["\'](?!react)'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Star import (import * as) — defeats tree-shaking.",
+        "command": "Use named imports: import { specific, exports } from 'module'.",
+    },
+    {
+        "id": "PROP_TYPES_IN_TS_SLOP",
+        "pattern": re.compile(r"import\s+PropTypes\s+from\s+['\"]prop-types['\"]"),
+        "tier": "T2",
+        "exts": {".tsx", ".ts"},
+        "description": "PropTypes import in TypeScript file — TypeScript types replace PropTypes.",
+        "command": "Remove prop-types and use TypeScript interfaces/types instead.",
+    },
+    {
+        "id": "DUPLICATE_IMPORT_SLOP",
+        "pattern": None,
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Duplicate import from same module detected.",
+        "command": "Merge duplicate imports into a single import statement.",
+        "_custom_check": "duplicate_import"
+    },
+    {
+        "id": "HARDCODED_TIMEOUT_SLOP",
+        "pattern": re.compile(r'set(?:Timeout|Interval)\s*\([^,]+,\s*(\d{4,})'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Hardcoded long timeout/interval value — extract to named constant.",
+        "command": "Define as const POLL_INTERVAL_MS = 5000; and reference by name.",
+    },
+    {
+        "id": "DOCUMENT_WRITE_SLOP",
+        "pattern": re.compile(r'\bdocument\.write\s*\('),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "document.write() is dangerous and blocks parsing.",
+        "command": "Use DOM manipulation APIs (createElement, appendChild) instead.",
+    },
+    {
+        "id": "DOCUMENT_COOKIE_SSR_SLOP",
+        "pattern": re.compile(r'\bdocument\.cookie\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "document.cookie without typeof window guard — SSR crash risk.",
+        "command": "Guard with: if (typeof window !== 'undefined') { document.cookie = ...; }",
+        "_custom_check": "document_cookie_ssr"
+    },
+    {
+        "id": "CATCH_CONSOLE_ONLY_SLOP",
+        "pattern": re.compile(r'catch\s*\([^)]*\)\s*\{\s*console\.\w+\s*\([^)]*\)\s*;?\s*\}'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Catch block only logs to console — no user feedback or error recovery.",
+        "command": "Add user-facing error handling: set error state, show toast, or rethrow.",
+    },
+    {
+        "id": "NO_PASSIVE_SCROLL_LISTENER_SLOP",
+        "pattern": re.compile(r"addEventListener\s*\(\s*['\"](?:scroll|touchstart|touchmove|wheel)['\"]"),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Scroll event listener without {passive: true} — janks scroll performance.",
+        "command": "Add passive option: addEventListener('scroll', handler, { passive: true })",
+    },
+    {
+        "id": "INNER_HTML_ASSIGN_SLOP",
+        "pattern": re.compile(r'\.innerHTML\s*[+]?=\s*'),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "innerHTML assignment — XSS risk without sanitization.",
+        "command": "Use DOMPurify.sanitize() before assigning innerHTML, or use textContent.",
+        "_custom_check": "inner_html_assign"
+    },
+    {
+        "id": "LOCALSTORAGE_SENSITIVE_SLOP",
+        "pattern": re.compile(r"localStorage\.setItem\s*\(\s*['\"](?:token|password|secret|auth|jwt)['\"]", re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Sensitive data stored in localStorage — vulnerable to XSS.",
+        "command": "Use httpOnly cookies for tokens/secrets. Never store credentials in localStorage.",
+    },
+    {
+        "id": "OPEN_REDIRECT_SLOP",
+        "pattern": re.compile(r'(?:window\.)?location(?:\.href)?\s*=\s*[a-zA-Z_]\w*\s*(?:[+;]|$)', re.MULTILINE),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Potential open redirect — location.href set from variable without validation.",
+        "command": "Validate redirect URLs against an allowlist before assigning to location.href.",
+    },
+    {
+        "id": "NAVIGATOR_SSR_SLOP",
+        "pattern": re.compile(r'\bnavigator\.\w+'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "navigator.* access without typeof window guard — SSR crash risk.",
+        "command": "Guard with: if (typeof window !== 'undefined') { ... navigator.xxx }",
+        "_custom_check": "navigator_ssr"
+    },
+    {
+        "id": "POSTMESSAGE_ORIGIN_MISSING_SLOP",
+        "pattern": re.compile(r"addEventListener\s*\(\s*['\"]message['\"]"),
+        "tier": "T1",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "postMessage listener without event.origin validation — XSS/phishing risk.",
+        "command": "Add origin check: if (event.origin !== 'https://trusted.example.com') return;",
+        "_custom_check": "postmessage_origin_missing"
+    },
+    {
+        "id": "LOCALSTORAGE_SSR_SLOP",
+        "pattern": re.compile(r'\blocalStorage\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "localStorage access without typeof window guard — SSR crash risk.",
+        "command": "Guard with: if (typeof window !== 'undefined') { localStorage.xxx }",
+        "_custom_check": "localstorage_ssr"
+    },
+    {
+        "id": "WINDOW_OBJECT_SSR_SLOP",
+        "pattern": re.compile(r'\bwindow\.\w+'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "window.* access without typeof window guard — SSR crash risk.",
+        "command": "Guard with: if (typeof window !== 'undefined') { window.xxx }",
+        "_custom_check": "window_object_ssr"
+    },
+    # ──────────────────────────────────────────────
+    # HTML / SEMANTIC RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "UNSPLASH_URL_SLOP",
+        "pattern": re.compile(r'images\.unsplash\.com', re.IGNORECASE),
+        "tier": "T1",
+        "exts": _ALL_FE_EXTS,
+        "description": "Direct Unsplash image URL detected — hotlinking, unreliable in production.",
+        "command": "Use picsum.photos/seed/{name}/800/600 or download and self-host images.",
+    },
+    {
+        "id": "TITLE_CASE_HEADER_SLOP",
+        "pattern": re.compile(r'<h[123][^>]*>\s*(?:[A-Z][a-z]+\s+){3,}[A-Z][a-z]+\s*</h[123]>'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Title Case heading detected — reads as UI template, not intentional copy.",
+        "command": "Use sentence case for headings. Reserve Title Case for proper nouns.",
+    },
+    {
+        "id": "MISSING_META_DESCRIPTION_SLOP",
+        "pattern": re.compile(r'<head\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".html"},
+        "description": "<head> present — verify a <meta name='description'> tag exists.",
+        "command": "Add <meta name='description' content='...'> for SEO.",
+        "_custom_check": "missing_meta_description"
+    },
+    {
+        "id": "SKIP_TO_CONTENT_MISSING_SLOP",
+        "pattern": re.compile(r'<nav\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".html"},
+        "description": "Navigation present without skip-to-content link — keyboard accessibility.",
+        "command": "Add <a href='#main-content' class='sr-only focus:not-sr-only'>Skip to content</a> as first element.",
+        "_custom_check": "skip_to_content_missing"
+    },
+    {
+        "id": "MISSING_FAVICON_SLOP",
+        "pattern": re.compile(r'<head\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".html"},
+        "description": "<head> without rel='icon' favicon link.",
+        "command": "Add <link rel='icon' href='/favicon.ico'> to <head>.",
+        "_custom_check": "missing_favicon"
+    },
+    {
+        "id": "MISSING_LANG_SLOP",
+        "pattern": re.compile(r'<html\b(?![^>]*\blang=)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".html"},
+        "description": "<html> without lang attribute — screen readers can't determine language.",
+        "command": "Add lang='en' (or appropriate language code) to the <html> tag.",
+    },
+    {
+        "id": "IMG_ALT_MISSING_SLOP",
+        "pattern": re.compile(r'<img\b(?![^>]*\balt=)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<img> without alt attribute — WCAG 1.1.1 failure.",
+        "command": "Add meaningful alt text or alt='' for decorative images.",
+    },
+    {
+        "id": "IMG_MISSING_DIMENSIONS_SLOP",
+        "pattern": re.compile(r'<img\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<img> without explicit width and height — causes layout shift (CLS).",
+        "command": "Add width and height attributes to all <img> tags.",
+        "_custom_check": "img_missing_dimensions"
+    },
+    {
+        "id": "MISSING_TABULAR_NUMS_SLOP",
+        "pattern": re.compile(r'<table\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<table> without tabular-nums — numbers shift alignment when they change.",
+        "command": "Add font-variant-numeric: tabular-nums to the table or use Tailwind tabular-nums.",
+        "_custom_check": "missing_tabular_nums"
+    },
+    {
+        "id": "PLACEHOLDER_ONLY_INPUT_SLOP",
+        "pattern": re.compile(r'<input\b[^>]*\bplaceholder=', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<input> with placeholder but no accessible label (id/aria-label) — WCAG fail.",
+        "command": "Add a <label htmlFor='id'> or aria-label to identify the input.",
+        "_custom_check": "placeholder_only_input"
+    },
+    {
+        "id": "SRCSET_MISSING_SLOP",
+        "pattern": re.compile(r'<img\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<img> without srcset — serves same large image to all viewports.",
+        "command": "Add srcset with multiple resolutions or use next/image for automatic optimization.",
+        "_custom_check": "srcset_missing"
+    },
+    {
+        "id": "ANCHOR_TARGET_BLANK_SLOP",
+        "pattern": re.compile(r'target=["\']_blank["\']', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "target='_blank' without rel='noopener noreferrer' — security risk.",
+        "command": "Add rel='noopener noreferrer' to all target='_blank' links.",
+        "_custom_check": "anchor_target_blank"
+    },
+    {
+        "id": "DANGEROUS_HTML_SLOP",
+        "pattern": re.compile(r'dangerouslySetInnerHTML', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "dangerouslySetInnerHTML without DOMPurify — XSS risk.",
+        "command": "Sanitize with DOMPurify.sanitize() before passing to dangerouslySetInnerHTML.",
+        "_custom_check": "dangerous_html"
+    },
+    {
+        "id": "FORM_NO_SUBMIT_SLOP",
+        "pattern": re.compile(r'<form\b(?![^>]*(?:onSubmit|action)=)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<form> without onSubmit handler or action — form does nothing.",
+        "command": "Add onSubmit handler with e.preventDefault() or server action attribute.",
+    },
+    {
+        "id": "INPUT_AUTOCOMPLETE_MISSING_SLOP",
+        "pattern": re.compile(r'<input\s[^>]*type=["\'](?:email|password)["\'](?![^>]*(?:autocomplete|autoComplete)=)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Email/password input without autocomplete attribute.",
+        "command": "Add autocomplete='email' or autocomplete='current-password' for password managers.",
+    },
+    {
+        "id": "ICON_ARIA_MISSING_SLOP",
+        "pattern": re.compile(r'<(?:svg|i)\s[^>]*class[^>]*>', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Icon (SVG/i) element — verify aria-label or aria-hidden is present.",
+        "command": "Add aria-hidden='true' for decorative icons, aria-label for meaningful ones.",
+        "_custom_check": "icon_aria_missing"
+    },
+    {
+        "id": "SVG_WITHOUT_VIEWBOX_SLOP",
+        "pattern": re.compile(r'<svg\b(?![^>]*viewBox=)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<svg> without viewBox — won't scale properly.",
+        "command": "Add viewBox='0 0 24 24' (or appropriate dimensions) to all SVG elements.",
+    },
+    {
+        "id": "ICON_ONLY_BUTTON_SLOP",
+        "pattern": re.compile(r'<button\b[^>]*>(?:\s*<(?:svg|i)\b[^>]*>)', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": "Icon-only button without aria-label — inaccessible to screen readers.",
+        "command": "Add aria-label='Descriptive action' to icon-only buttons.",
+        "_custom_check": "icon_only_button"
+    },
+    {
+        "id": "TOUCH_TARGET_SLOP",
+        "pattern": re.compile(r'<button\b[^>]*className=["\'][^"\']*(?:w-[1-6]|h-[1-6])\b[^"\']*["\']', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Button with small w-/h- class — may be below 44px touch target (WCAG 2.5.5).",
+        "command": "Ensure all touch targets are at least 44x44px (w-11 h-11 minimum).",
+    },
+    {
+        "id": "NEXT_IMAGE_RAW_SLOP",
+        "pattern": re.compile(r'<img\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "<img> tag in a Next.js file — use next/image for automatic optimization.",
+        "command": "Import Image from 'next/image' and replace <img> with <Image width={} height={}>.",
+        "_custom_check": "next_image_raw"
+    },
+    # ──────────────────────────────────────────────
+    # REACT PATTERNS
+    # ──────────────────────────────────────────────
+    {
+        "id": "MISSING_KEY_PROP_SLOP",
+        "pattern": re.compile(r'\.map\s*\('),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx"},
+        "description": ".map() call returning JSX — verify each element has a key prop.",
+        "command": "Add key={item.id} to each element returned from .map().",
+        "_custom_check": "missing_key_prop"
+    },
+    {
+        "id": "FRAMER_NO_REDUCED_MOTION_SLOP",
+        "pattern": re.compile(r"from ['\"]framer-motion['\"]"),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "framer-motion import without useReducedMotion hook — ignores user motion preferences.",
+        "command": "Import useReducedMotion and conditionally disable animations.",
+        "_custom_check": "framer_no_reduced_motion"
+    },
+    {
+        "id": "LAZY_WITHOUT_SUSPENSE_SLOP",
+        "pattern": re.compile(r'(?:React\.)?lazy\s*\('),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".js"},
+        "description": "React.lazy() without nearby Suspense boundary — runtime error.",
+        "command": "Wrap lazy-loaded component with <Suspense fallback={<Loading />}>.",
+        "_custom_check": "lazy_without_suspense"
+    },
+    {
+        "id": "MEDIA_AUTOPLAY_SLOP",
+        "pattern": re.compile(r'<(?:video|audio)\b[^>]*autoPlay', re.IGNORECASE),
+        "tier": "T1",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "autoPlay media without muted attribute — browsers block autoplaying with sound.",
+        "command": "Add muted attribute to autoPlay videos. Autoplaying audio is banned.",
+        "_custom_check": "media_autoplay"
+    },
+    {
+        "id": "SELECT_NO_LABEL_SLOP",
+        "pattern": re.compile(r'<select\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "<select> without accessible label — WCAG 1.3.1 failure.",
+        "command": "Add <label htmlFor='id'> or aria-label attribute to all <select> elements.",
+        "_custom_check": "select_no_label"
+    },
+    # ──────────────────────────────────────────────
+    # CONTENT / COPY RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "SAME_DATE_REPEAT_SLOP",
+        "pattern": re.compile(r'(\d{4}-\d{2}-\d{2})(?:.*\1){2,}', re.DOTALL),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Same ISO date repeated 3+ times — hardcoded placeholder date.",
+        "command": "Extract the date to a constant or use dynamic date formatting.",
+    },
+    {
+        "id": "HARDCODED_COPYRIGHT_YEAR_SLOP",
+        "pattern": re.compile(r'©\s*20\d{2}|&copy;\s*20\d{2}', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Hardcoded copyright year — will be stale next year.",
+        "command": "Use {new Date().getFullYear()} for dynamic copyright year.",
+        "_custom_check": "hardcoded_copyright_year"
+    },
+    {
+        "id": "EMOJI_BULLET_LIST_SLOP",
+        "pattern": re.compile(r'(?:^|\n)\s*[\u2600-\u27FF\U0001F000-\U0001FFFF].*(?:\n\s*[\u2600-\u27FF\U0001F000-\U0001FFFF].*){2,}'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html", ".md"},
+        "description": "Emoji-as-bullets list detected (3+ lines) — AI content pattern.",
+        "command": "Use semantic <ul>/<li> elements with proper icons or remove emoji bullets.",
+    },
+    {
+        "id": "TESTIMONIAL_GRID_SLOP",
+        "pattern": re.compile(r'(?:\"[^\"]{20,}\".*?[\u2014\u2013-]\s*\w+.*?(?:\n|$)){3,}', re.DOTALL),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "Testimonial grid pattern (3+ quote — Name blocks) — generic AI social proof.",
+        "command": "Use varied testimonial formats: video quotes, inline stats, or real customer logos.",
+    },
+    {
+        "id": "PRICING_TABLE_SLOP",
+        "pattern": None,
+        "_custom_check": "pricing_table",
+        "tier": "T3",
+        "exts": {".tsx", ".jsx", ".html"},
+        "description": "3-tier pricing table detected (Free/Pro/Enterprise) — #1 AI landing page cliche.",
+        "command": "Redesign pricing with varied layouts: comparison table, slider, or interactive calculator.",
+    },
+    {
+        "id": "VERBOSE_HANDLER_NAME_SLOP",
+        "pattern": re.compile(r'\bhandle(?!Submit\b|Change\b|Click\b|Focus\b|Blur\b|Key)[A-Z][a-z]+(?:Click|Change|Submit|Press)\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".ts", ".js"},
+        "description": "Verbose event handler name (handleXxxClick) — redundant suffix.",
+        "command": "Use action-focused names: onSave, onDelete, submitOrder instead of handleSaveClick.",
+    },
+    # ──────────────────────────────────────────────
+    # LAYOUT / COMPONENT RULES
+    # ──────────────────────────────────────────────
+    {
+        "id": "THREE_EQUAL_COLUMN_SLOP",
+        "pattern": re.compile(r'grid-cols-3\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Uniform 3-column grid — classic AI feature-grid layout.",
+        "command": "Break the 3-col monotony: vary column spans, use bento layout, or asymmetric grid.",
+        "_custom_check": "three_equal_column"
+    },
+    {
+        "id": "FONT_WEIGHT_EXTREMES_SLOP",
+        "pattern": re.compile(r'\bfont-bold\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Only bold/normal weight usage without intermediate weights — poor typographic hierarchy.",
+        "command": "Add font-medium or font-semibold for intermediate hierarchy levels.",
+        "_custom_check": "font_weight_extremes"
+    },
+    {
+        "id": "MISSING_LOADING_STATE_SLOP",
+        "pattern": re.compile(r'\buseQuery\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "useQuery without isLoading handling — blank screen during fetch.",
+        "command": "Handle loading state: const { data, isLoading } = useQuery(...); if (isLoading) return <Skeleton/>",
+        "_custom_check": "missing_loading_state"
+    },
+    {
+        "id": "MISSING_ERROR_STATE_SLOP",
+        "pattern": re.compile(r'\buseQuery\b'),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "useQuery without isError handling — silent failure on network errors.",
+        "command": "Handle error state: const { data, isLoading, isError } = useQuery(...); if (isError) return <Error/>",
+        "_custom_check": "missing_error_state"
+    },
+    {
+        "id": "ACCORDION_FAQ_SLOP",
+        "pattern": re.compile(r'\bAccordion\b', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Accordion used as FAQ section — #2 AI landing page cliche.",
+        "command": "Replace FAQ accordion with a search box, contextual help tooltips, or docs link.",
+        "_custom_check": "accordion_faq"
+    },
+    {
+        "id": "DARK_MODE_TOGGLE_SLOP",
+        "pattern": re.compile(r'(?:ThemeToggle|toggleDarkMode|DarkModeToggle|darkMode)', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Dark mode toggle without respecting prefers-color-scheme.",
+        "command": "Use CSS prefers-color-scheme as the default, with user toggle as override.",
+        "_custom_check": "dark_mode_toggle"
+    },
+    {
+        "id": "CENTERED_PARAGRAPH_SLOP",
+        "pattern": re.compile(r'<p\b[^>]*className=["\'][^"\']*text-center[^"\']*["\'][^>]*>[^<]{30,}', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Centered paragraph text — readability degrades beyond 2 lines.",
+        "command": "Left-align body text. Reserve text-center for headings and short captions only.",
+    },
+    {
+        "id": "MODAL_NO_ARIA_SLOP",
+        "pattern": re.compile(r'(?:modal|Modal)(?![^"]*role=["\']dialog["\'])', re.IGNORECASE),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx"},
+        "description": "Modal component without role='dialog' and ARIA attributes.",
+        "command": "Add role='dialog', aria-modal='true', and aria-labelledby to modal containers.",
+        "_custom_check": "modal_no_aria"
+    },
+    {
+        "id": "FLEXBOX_PERCENTAGE_MATH_SLOP",
+        "pattern": re.compile(r'width:\s*(?:33\.33|25|16\.67|12\.5|20)%'),
+        "tier": "T2",
+        "exts": {".css", ".scss", ".less"},
+        "description": "Percentage-based flex column width — use grid with auto-fit instead.",
+        "command": "Replace manual percentage math with CSS grid: grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))",
+    },
 ]
 
 def _get_parser(ext: str):
@@ -756,6 +2047,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
 
         if state["div_count"] > 20 and state["semantic_count"] == 0:
             issues.append({
+                "id": "DIV_SOUP_SLOP",
                 "file": fpath,
                 "tier": "T2",
                 "issue": f"Div-heavy file with no semantic HTML elements detected via AST. ({state['div_count']} divs, 0 semantic elements)",
@@ -764,6 +2056,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
 
         if state["nested_ternaries"] >= 2:
             issues.append({
+                "id": "NESTED_TERNARY_SLOP",
                 "file": fpath,
                 "tier": "T2",
                 "issue": f"Nested ternary operator detected via AST — harms readability in JSX. ({state['nested_ternaries']} nested ternaries found)",
@@ -772,6 +2065,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
 
         if state["cards"] >= 3 and state["charts"] >= 1:
             issues.append({
+                "id": "HERO_DASHBOARD_SLOP",
                 "file": fpath,
                 "tier": "T3",
                 "issue": f"Hero metric dashboard pattern detected via AST ({state['cards']} cards, {state['charts']} charts) — cliché AI layout.",
@@ -786,6 +2080,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
         if drilled_props:
             sample = ", ".join(sorted(drilled_props)[:5])
             issues.append({
+                "id": "PROP_DRILLING_SLOP",
                 "file": fpath,
                 "tier": "T3",
                 "issue": f"Deep prop drilling detected via AST — prop(s) '{sample}' passed through 4+ components.",
@@ -795,6 +2090,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
         # ── AST: useState for animation values ──
         if state["usestate_for_animation"]:
             issues.append({
+                "id": "ANIMATE_STATE_SLOP",
                 "file": fpath,
                 "tier": "T2",
                 "issue": "React useState used for animation values — causes re-renders on every frame.",
@@ -809,6 +2105,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
                 for comp_name, count in counts.items():
                     if count >= 4:
                         issues.append({
+                            "id": "IDENTICAL_SIBLINGS_SLOP",
                             "file": fpath,
                             "tier": "T3",
                             "issue": f"Generic layout pattern detected via AST: {count} identical <{comp_name}/> siblings — dashboard/feature-grid slop.",
@@ -819,6 +2116,7 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
         # ── AST: Deeply nested styled-components ──
         if state["styled_nesting_depth"] >= 5:
             issues.append({
+                "id": "STYLED_NESTING_SLOP",
                 "file": fpath,
                 "tier": "T2",
                 "issue": f"Deeply nested styled-component selectors detected ({state['styled_nesting_depth']} levels) — specificity war.",
@@ -859,6 +2157,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     )
     if len(card_patterns) >= 4 and len(chart_patterns) >= 1:
         issues.append({
+            "id": "DASHBOARD_LAYOUT_SLOP",
             "file": fpath,
             "tier": "T3",
             "issue": f"Generic dashboard layout: {len(card_patterns)} KPI/stat cards + {len(chart_patterns)} chart(s) — classic AI dashboard slop.",
@@ -878,6 +2177,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     )
     if len(feature_block) >= 3:
         issues.append({
+            "id": "FEATURE_GRID_SLOP",
             "file": fpath,
             "tier": "T3",
             "issue": f"Feature grid slop: {len(feature_block)} identical icon+heading+description blocks — generic SaaS landing pattern.",
@@ -889,6 +2189,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     pricing_cards = len(re.findall(r'(?:PricingCard|PricingTier|PricingPlan|price-card)', content, re.IGNORECASE))
     if pricing_signals >= 6 or pricing_cards >= 3:
         issues.append({
+            "id": "PRICING_TABLE_SLOP",
             "file": fpath,
             "tier": "T3",
             "issue": "Pricing table cliché detected — 3-column pricing grid with 'Popular' badge is the #1 AI SaaS template.",
@@ -903,6 +2204,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     jsx_count = len(re.findall(r'<[A-Z]\w+', content))
     if not has_interactivity and jsx_count >= 5 and file_len > 50:
         issues.append({
+            "id": "STATIC_COMPONENT_SLOP",
             "file": fpath,
             "tier": "T2",
             "issue": f"Static component detected: {jsx_count} JSX elements but zero interactivity (no handlers, no hover/focus, no animation).",
@@ -914,6 +2216,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     section_count = len(re.findall(r'<(?:section|Section)\b', content, re.IGNORECASE))
     if hero_count >= 2 and section_count <= 3:
         issues.append({
+            "id": "HERO_HEAVY_SLOP",
             "file": fpath,
             "tier": "T2",
             "issue": "Hero-section-heavy page — multiple hero blocks without enough content sections.",
@@ -927,6 +2230,7 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     ))
     if testimonial_signals >= 6:
         issues.append({
+            "id": "TESTIMONIAL_GRID_SLOP",
             "file": fpath,
             "tier": "T2",
             "issue": "Generic testimonial grid detected — avatar + quote + name pattern repeated.",
@@ -991,6 +2295,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
             ))
             if div_count > 20 and semantic_count == 0:
                 issues.append({
+                    "id": rule["id"],
                     "file": str(filepath.resolve()),
                     "tier": rule["tier"],
                     "issue": f"{rule['description']} ({div_count} divs, 0 semantic elements)",
@@ -1004,6 +2309,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 classes = m.group(1)
                 if "hover:" not in classes:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
@@ -1018,6 +2324,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 classes = m.group(1)
                 if "focus:" not in classes:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
@@ -1032,6 +2339,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 classes = m.group(1)
                 if "hover:" in classes and "transition" not in classes:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
@@ -1046,6 +2354,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 classes = m.group(1)
                 if re.search(r'overflow-[xy]-(?:auto|scroll)', classes) and "scrollbar" not in classes:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
@@ -1062,6 +2371,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
             ternary_nests = len(re.findall(r'\?[^:?\n]{0,80}\?', content))
             if ternary_nests >= 2:
                 issues.append({
+                    "id": rule["id"],
                     "file": str(filepath.resolve()),
                     "tier": rule["tier"],
                     "issue": f"{rule['description']} ({ternary_nests} nested ternaries found)",
@@ -1079,6 +2389,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
             for classes in disabled_elements:
                 if "cursor-not-allowed" not in classes and "disabled:" not in classes:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
@@ -1108,6 +2419,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                     commented_code_lines += 1
             if commented_code_lines >= 3:
                 issues.append({
+                    "id": rule["id"],
                     "file": str(filepath.resolve()),
                     "tier": rule["tier"],
                     "issue": f"{rule['description']} ({commented_code_lines} lines of commented-out code)",
@@ -1137,6 +2449,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                     ratio = contrast_ratio(text_color, bg_color)
                     if ratio < 4.5:
                         issues.append({
+                            "id": rule["id"],
                             "file": str(filepath.resolve()),
                             "tier": rule["tier"],
                             "issue": f"Low contrast detected: {text_color} on {bg_color} (ratio {ratio:.1f}:1).",
@@ -1181,6 +2494,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 sample = ", ".join(unused_names[:5])
                 suffix = f" (+{len(unused_names) - 5} more)" if len(unused_names) > 5 else ""
                 issues.append({
+                    "id": rule["id"],
                     "file": str(filepath.resolve()),
                     "tier": rule["tier"],
                     "issue": f"{rule['description']} Likely unused: {sample}{suffix}",
@@ -1196,6 +2510,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                 occurrences = len(re.findall(r'\b' + re.escape(state_var) + r'\b', content))
                 if occurrences <= 1:
                     issues.append({
+                        "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": f"{rule['description']} `{state_var}` appears unused.",
@@ -1204,15 +2519,439 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
                     break  # Flag once per file
             continue
 
+        # ── New custom check handlers ─────────────────────────────────────
+        if custom == "video_no_captions":
+            if re.search(r'<video\b', content, re.IGNORECASE) and not re.search(r'<track\b', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "focus_outline_removed":
+            # :focus { outline: none } or :focus { outline: 0 }
+            if re.search(r':focus\s*\{[^}]*outline:\s*(?:none|0)\b', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "focus_visible_missing":
+            if re.search(r':focus\s*\{', content, re.IGNORECASE) and not re.search(r':focus-visible\s*\{', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "css_scroll_behavior":
+            if re.search(r'scroll-behavior:\s*smooth', content, re.IGNORECASE) and not re.search(r'prefers-reduced-motion', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "sticky_without_top":
+            for block_m in re.finditer(r'position:\s*sticky[^}]*', content, re.IGNORECASE | re.DOTALL):
+                block = block_m.group(0)
+                if not re.search(r'\btop\s*:', block, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "scroll_snap_without_behavior":
+            if re.search(r'scroll-snap-type:', content, re.IGNORECASE) and not re.search(r'scroll-behavior:', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "generic_font_family":
+            AI_FONTS = re.compile(r"font-family:\s*(?:'Inter'|Inter|'Roboto'|Roboto|'Open Sans'|Open Sans|'Montserrat'|Montserrat|'Poppins'|Poppins|'Lato'|Lato)", re.IGNORECASE)
+            if AI_FONTS.search(content) and not re.search(r'-apple-system', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "font_display_missing":
+            for ff_m in re.finditer(r'@font-face\s*\{([^}]*)\}', content, re.IGNORECASE | re.DOTALL):
+                if 'font-display' not in ff_m.group(1):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "alpha_color_abuse":
+            count = len(re.findall(r'(?:rgba|hsla)\s*\(', content, re.IGNORECASE))
+            if count >= 5:
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": f"{rule['description']} ({count} instances found)", "command": rule["command"]})
+            continue
+
+        if custom == "grid_auto_fit_missing":
+            if re.search(r'grid-template-columns:\s*repeat\(\s*(?:[2-9]|\d{2,})\s*,', content, re.IGNORECASE):
+                if not re.search(r'auto-fit|auto-fill', content, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "scroll_smooth_no_motion":
+            if re.search(r'\bscroll-smooth\b', content) and not re.search(r'motion-reduce:scroll-auto', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "no_select_content":
+            if re.search(r'\bselect-none\b', content):
+                # Flag if used on non-button elements (not inside <button>)
+                # Simple heuristic: flag if it appears in className on a non-button
+                if re.search(r'<(?!button)(?:[a-z][a-z0-9]*)(?:\s[^>]*)?\bclassName=[^>]*select-none', content, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "outline_none":
+            for m_cls in re.finditer(r'class(?:Name)?=["\']([^"\']*outline-none[^"\']*)["\']', content, re.IGNORECASE):
+                cls = m_cls.group(1)
+                if 'focus-visible:' not in cls and 'focus:ring' not in cls:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "reduced_motion_missing":
+            for m_cls in re.finditer(r'class(?:Name)?=["\']([^"\']*animate-[^"\']*)["\']', content, re.IGNORECASE):
+                cls = m_cls.group(1)
+                if 'motion-reduce:' not in cls:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "tailwind_font_conflict":
+            SIZE_CLASSES = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl',
+                            'text-2xl', 'text-3xl', 'text-4xl', 'text-5xl', 'text-6xl', 'text-7xl', 'text-8xl', 'text-9xl']
+            for m_cls in re.finditer(r'class(?:Name)?=["\']([^"\']+)["\']', content, re.IGNORECASE):
+                cls = m_cls.group(1)
+                found = [s for s in SIZE_CLASSES if re.search(r'(?<![a-z-])' + re.escape(s) + r'(?![a-zA-Z0-9-])', cls)]
+                if len(found) >= 2:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": f"{rule['description']} Found: {', '.join(found)}", "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "tailwind_weight_conflict":
+            WEIGHT_CLASSES = ['font-thin', 'font-extralight', 'font-light', 'font-normal',
+                               'font-medium', 'font-semibold', 'font-bold', 'font-extrabold', 'font-black']
+            for m_cls in re.finditer(r'class(?:Name)?=["\']([^"\']+)["\']', content, re.IGNORECASE):
+                cls = m_cls.group(1)
+                found = [w for w in WEIGHT_CLASSES if re.search(r'(?<![a-z-])' + re.escape(w) + r'(?![a-zA-Z0-9-])', cls)]
+                if len(found) >= 2:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": f"{rule['description']} Found: {', '.join(found)}", "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "tailwind_display_conflict":
+            DISPLAY_CLASSES = ['flex', 'block', 'inline-flex', 'inline-block', 'inline', 'hidden', 'grid', 'contents']
+            for m_cls in re.finditer(r'class(?:Name)?=["\']([^"\']+)["\']', content, re.IGNORECASE):
+                cls = m_cls.group(1)
+                found = [d for d in DISPLAY_CLASSES if re.search(r'(?<![a-z-])' + re.escape(d) + r'(?![a-zA-Z0-9-])', cls)]
+                # Conflict: flex+hidden, flex+block, etc.
+                if ('hidden' in found and ('flex' in found or 'block' in found or 'grid' in found)) or \
+                   ('flex' in found and 'block' in found) or \
+                   ('grid' in found and 'block' in found):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": f"{rule['description']} Found: {', '.join(found)}", "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "missing_meta_description":
+            if re.search(r'<head\b', content, re.IGNORECASE) and not re.search(r'<meta\s[^>]*name=["\']description["\']', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "skip_to_content_missing":
+            if re.search(r'<nav\b', content, re.IGNORECASE) and re.search(r'<main\b', content, re.IGNORECASE):
+                if not re.search(r'href=["\']#', content, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "missing_favicon":
+            if re.search(r'<head\b', content, re.IGNORECASE) and not re.search(r'rel=["\'](?:shortcut icon|icon)["\']', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "img_missing_dimensions":
+            for m_img in re.finditer(r'<img\b[^>]*>', content, re.IGNORECASE):
+                img_tag = m_img.group(0)
+                has_width = re.search(r'\bwidth=', img_tag, re.IGNORECASE)
+                has_height = re.search(r'\bheight=', img_tag, re.IGNORECASE)
+                if not (has_width and has_height):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "missing_tabular_nums":
+            if re.search(r'<table\b', content, re.IGNORECASE) and not re.search(r'tabular-nums', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "placeholder_only_input":
+            for m_inp in re.finditer(r'<input\b[^>]*>', content, re.IGNORECASE):
+                tag = m_inp.group(0)
+                if re.search(r'\bplaceholder=', tag, re.IGNORECASE):
+                    has_id = re.search(r'\bid=', tag, re.IGNORECASE)
+                    has_label = re.search(r'\baria-label(?:ledby)?=', tag, re.IGNORECASE)
+                    if not (has_id or has_label):
+                        issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                        "issue": rule["description"], "command": rule["command"]})
+                        break
+            continue
+
+        if custom == "srcset_missing":
+            if re.search(r'<img\b', content, re.IGNORECASE) and not re.search(r'\bsrcset=|\bsrcSet=', content):
+                # Skip if all img tags use data URIs or Next.js Image component is used
+                img_tags = re.findall(r'<img\b[^>]*>', content, re.IGNORECASE)
+                non_data_imgs = [t for t in img_tags if not re.search(r'src=["\']data:', t, re.IGNORECASE)]
+                if non_data_imgs:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "anchor_target_blank":
+            if re.search(r'target=["\']_blank["\']', content, re.IGNORECASE):
+                if not re.search(r'noopener', content, re.IGNORECASE) or not re.search(r'noreferrer', content, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "dangerous_html":
+            if re.search(r'dangerouslySetInnerHTML', content) and not re.search(r'DOMPurify', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "duplicate_import":
+            import_modules: list[str] = []
+            for m_imp in re.finditer(r"import\s+[^;]+\s+from\s+['\"]([^'\"]+)['\"]", content):
+                mod = m_imp.group(1)
+                if mod in import_modules:
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": f"{rule['description']} Module: '{mod}'", "command": rule["command"]})
+                    break
+                import_modules.append(mod)
+            continue
+
+        if custom == "document_cookie_ssr":
+            if re.search(r'\bdocument\.cookie\b', content) and not re.search(r'typeof\s+(?:window|document)\s*!==', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "inner_html_assign":
+            if re.search(r'\.innerHTML\s*[+]?=\s*', content) and not re.search(r'DOMPurify', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "navigator_ssr":
+            if re.search(r'\bnavigator\.\w+', content) and not re.search(r'typeof\s+window\s*!==', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "postmessage_origin_missing":
+            if re.search(r"addEventListener\s*\(\s*['\"]message['\"]", content) and not re.search(r'event\.origin|e\.origin', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "localstorage_ssr":
+            if re.search(r'\b(?:localStorage|sessionStorage)\b', content):
+                if not re.search(r'typeof\s+window\s*!==\s*["\']undefined["\']', content):
+                    # Don't flag if it's inside a useEffect (client-only)
+                    in_use_effect = bool(re.search(r'useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*(?:localStorage|sessionStorage)', content, re.DOTALL))
+                    if not in_use_effect:
+                        issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                        "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "window_object_ssr":
+            if re.search(r'\bwindow\.\w+', content):
+                if not re.search(r'typeof\s+window\s*!==\s*["\']undefined["\']', content):
+                    in_use_effect = bool(re.search(r'useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*window\.', content, re.DOTALL))
+                    if not in_use_effect:
+                        issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                        "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "missing_key_prop":
+            # .map() that returns JSX but none of the returned elements have key=
+            for m_map in re.finditer(r'\.map\s*\(', content):
+                start = m_map.end()
+                # Grab up to 500 chars of context
+                chunk = content[start:start + 500]
+                if re.search(r'<[A-Z][a-zA-Z]*\b|<[a-z][a-z-]+\b', chunk) and not re.search(r'\bkey=', chunk):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "framer_no_reduced_motion":
+            if re.search(r"from ['\"]framer-motion['\"]", content) and re.search(r'\bmotion\.', content):
+                if not re.search(r'useReducedMotion', content):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "lazy_without_suspense":
+            if re.search(r'(?:React\.)?lazy\s*\(', content) and not re.search(r'Suspense', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "media_autoplay":
+            for m_av in re.finditer(r'<(?:video|audio)\b([^>]*)', content, re.IGNORECASE):
+                attrs = m_av.group(1)
+                if re.search(r'\bautoPlay\b|\bautoplay\b', attrs, re.IGNORECASE) and not re.search(r'\bmuted\b', attrs, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "select_no_label":
+            for m_sel in re.finditer(r'<select\b([^>]*)', content, re.IGNORECASE):
+                attrs = m_sel.group(1)
+                # Check nearby (within 200 chars) for a label
+                pos = m_sel.start()
+                context = content[max(0, pos - 200):pos + 200]
+                if not re.search(r'<label\b|aria-label=|aria-labelledby=', context, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "icon_aria_missing":
+            for m_icon in re.finditer(r'<svg\b[^>]*>|<i\s+class=[^>]+>', content, re.IGNORECASE):
+                pos = m_icon.start()
+                context = content[max(0, pos - 100):pos + 200]
+                if not re.search(r'aria-(?:label|hidden|labelledby)=', context, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "icon_only_button":
+            for m_btn in re.finditer(r'<button\b([^>]*)>\s*<(?:svg|i)\b', content, re.IGNORECASE):
+                attrs = m_btn.group(1)
+                if not re.search(r'aria-label=', attrs, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        if custom == "next_image_raw":
+            if re.search(r"from ['\"]next/", content) and re.search(r'<img\b', content, re.IGNORECASE):
+                if not re.search(r"from ['\"]next/image['\"]", content):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "three_equal_column":
+            if re.search(r'grid-cols-3\b', content, re.IGNORECASE):
+                # Flag if there are 3+ child elements with identical classNames (crude check)
+                child_classes = re.findall(r'className=["\']([^"\']+)["\']', content)
+                if len(child_classes) >= 3:
+                    from collections import Counter
+                    cls_counts = Counter(child_classes)
+                    if cls_counts.most_common(1)[0][1] >= 3:
+                        issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                        "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "font_weight_extremes":
+            if re.search(r'\bfont-bold\b', content) and re.search(r'\bfont-normal\b', content):
+                if not re.search(r'\bfont-medium\b|\bfont-semibold\b', content):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "missing_loading_state":
+            if re.search(r'\buseQuery\b', content) and not re.search(r'\bisLoading\b', content):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "missing_error_state":
+            if re.search(r'\buseQuery\b', content) and re.search(r'\bisLoading\b', content):
+                if not re.search(r'\bisError\b|\berror\b', content):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "accordion_faq":
+            if re.search(r'\bAccordion\b', content, re.IGNORECASE) and re.search(r'\bFAQ\b', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "dark_mode_toggle":
+            if re.search(r'(?:ThemeToggle|toggleDarkMode|DarkModeToggle|darkMode)', content, re.IGNORECASE):
+                if not re.search(r'prefers-color-scheme', content, re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "hardcoded_copyright_year":
+            if re.search(r'©\s*20\d{2}|&copy;\s*20\d{2}', content, re.IGNORECASE):
+                if not re.search(r'getFullYear\s*\(\s*\)', content):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "modal_no_aria":
+            if re.search(r'(?:modal|Modal)', content) and not re.search(r'role=["\']dialog["\']', content, re.IGNORECASE):
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "pricing_table":
+            PRICING_KW = ['Free', 'Pro', 'Enterprise', 'Starter', 'Basic', 'Premium']
+            count = sum(1 for kw in PRICING_KW if re.search(r'\b' + kw + r'\b', content, re.IGNORECASE))
+            if count >= 3:
+                issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                "issue": rule["description"], "command": rule["command"]})
+            continue
+
+        if custom == "missing_aria_role":
+            for m_el in re.finditer(r'<(?:div|span)\s[^>]*on(?:Click|Keydown|Keyup)[^>]*>', content, re.IGNORECASE):
+                if not re.search(r'\brole=', m_el.group(0), re.IGNORECASE):
+                    issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
+                                    "issue": rule["description"], "command": rule["command"]})
+                    break
+            continue
+
+        # ── End of new custom check handlers ─────────────────────────────
+
         # Standard regex match — flag once per file
         pattern = rule.get("pattern")
-        if isinstance(pattern, re.Pattern) and pattern.search(content):
-            issues.append({
-                "file": str(filepath.resolve()),
-                "tier": rule["tier"],
-                "issue": rule["description"],
-                "command": rule["command"]
-            })
+        if isinstance(pattern, re.Pattern):
+            m = pattern.search(content)
+            if m:
+                line_number = content.count('\n', 0, m.start()) + 1
+                col = m.start() - content.rfind('\n', 0, m.start())
+                lines_list = content.splitlines()
+                snippet = lines_list[line_number - 1].strip() if line_number <= len(lines_list) else ""
+                issues.append({
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                    "line": line_number,
+                    "column": col,
+                    "snippet": snippet,
+                })
 
     return issues
 
@@ -1278,6 +3017,7 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     # Cap output to keep the queue actionable rather than overwhelming.
     for violation in color_audit_violations[:8]:
         all_issues.append({
+            "id": "LOW_CONTRAST_SLOP",
             "file": color_issue_file,
             "tier": "T1" if violation.get("severity") == "critical" else "T2",
             "issue": (

@@ -52,6 +52,8 @@ def parse_args(args_list=None):
     # Command: scan
     scan_parser = subparsers.add_parser("scan", help="Full diagnostic audit of frontend interface quality")
     scan_parser.add_argument("--path", default=".", help="Directory to scan")
+    scan_parser.add_argument("--since", default=None, metavar="SHA", help="Only scan files changed since this git SHA (incremental mode)")
+    scan_parser.add_argument("--output", default="table", choices=["table", "json", "github"], help="Output format (default: table)")
 
     # Command: add-issue (For agent use during scan)
     add_parser = subparsers.add_parser("add-issue", help="Add an issue to the state queue (Agent use)")
@@ -110,6 +112,13 @@ def parse_args(args_list=None):
     # Command: rescan
     rescan_parser = subparsers.add_parser("rescan", help="Clear queue and re-scan the project fresh")
     rescan_parser.add_argument("--path", default=".", help="Directory to rescan")
+
+    # Command: diff
+    diff_parser = subparsers.add_parser("diff", help="Compare fresh static analysis against the stored issue baseline (shows new/fixed/unchanged issues)")
+    diff_parser.add_argument("--path", default=".", help="Target path to diff (file or directory, default: current directory)")
+    diff_parser.add_argument("--since", default=None, metavar="SHA", help="Only diff files changed since this git SHA")
+    diff_parser.add_argument("--output", default="table", choices=["table", "json", "github"], help="Output format (default: table)")
+    diff_parser.add_argument("--save", action="store_true", help="Save fresh analysis as new baseline in state")
 
     # Command: loop
     loop_parser = subparsers.add_parser("loop", help="Instruct the AI agent to enter an autonomous fix loop")
@@ -179,6 +188,12 @@ def parse_args(args_list=None):
     # Command: format
     format_parser = subparsers.add_parser("format", help="Run detected formatter")
     format_parser.add_argument("--fix", action="store_true", help="Auto-fix formatting")
+
+    # Command: watch
+    watch_parser = subparsers.add_parser("watch", help="Poll a directory for file changes and re-scan on modification")
+    watch_parser.add_argument("--path", default=".", help="Directory to watch (default: current directory)")
+    watch_parser.add_argument("--interval", type=float, default=1.0, help="Poll interval in seconds (default: 1.0)")
+    watch_parser.add_argument("--no-clear", dest="clear", action="store_false", default=True, help="Disable screen clear between updates")
 
     # Dynamic Slash Commands (e.g., /audit, /polish) from the commands/ directory
     cmd_dir = _get_commands_dir()

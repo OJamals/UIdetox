@@ -1,6 +1,7 @@
 """Batch-resolve command: resolve multiple issues with a single coherent commit."""
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -131,13 +132,12 @@ def _derive_component_name(files: list[str]) -> str:
                 return part
         return "root"
 
-    # Multiple directories — find deepest common ancestor
-    common: Path = Path(dirs[0])
-    for i in range(1, len(dirs)):
-        d = dirs[i]
-        while not str(d).startswith(str(common)):
-            common = common.parent # type: ignore
-    name = common.name or "project" # type: ignore
+    # Multiple directories — find deepest common ancestor using proper path semantics
+    try:
+        common_path = os.path.commonpath(dirs)
+        name = Path(common_path).name or "project"
+    except ValueError:
+        name = "project"
     return name
 
 

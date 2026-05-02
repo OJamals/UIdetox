@@ -19,7 +19,11 @@ def run(args: argparse.Namespace):
         # Interactive prompt if not set
         current_ac = config.get('auto_commit', False)
         print(f"\nCurrent auto_commit status: {current_ac}")
-        ans = input("Enable automated git commits for each resolved issue? (y/n): ").strip().lower()
+        try:
+            ans = input("Enable automated git commits for each resolved issue? (y/n): ").strip().lower()
+        except EOFError:
+            # Non-interactive mode (CI, piped stdin, subprocess) — keep existing value
+            ans = ""
         if ans == 'y':
             config['auto_commit'] = True
         elif ans == 'n':

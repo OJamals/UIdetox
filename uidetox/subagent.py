@@ -80,7 +80,10 @@ def record_result(session_id: str, result: dict) -> bool:
 
     # Update meta
     meta_path = session_dir / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    try:
+        meta = json.loads(meta_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        meta = {"session_id": session_id, "stage": "unknown", "status": "pending"}
 
     # Parse confidence score if provided (multiple formats supported)
     confidence = _extract_confidence(result)
@@ -229,11 +232,20 @@ def get_session(session_id: str) -> dict | None:
 
     result = {}
     if meta_path.exists():
-        result["meta"] = json.loads(meta_path.read_text())
+        try:
+            result["meta"] = json.loads(meta_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            result["meta"] = {"session_id": session_id, "status": "corrupted"}
     if prompt_path.exists():
-        result["prompt"] = prompt_path.read_text()
+        try:
+            result["prompt"] = prompt_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
     if result_path.exists():
-        result["result"] = json.loads(result_path.read_text())
+        try:
+            result["result"] = json.loads(result_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            result["result"] = {"error": "corrupted result file"}
     return result
 
 

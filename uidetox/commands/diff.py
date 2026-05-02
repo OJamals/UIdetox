@@ -56,7 +56,7 @@ def _issue_fingerprint(issue: dict) -> str:
 
 def _analyze_target(path: str, config: dict) -> list[dict]:
     """Run fresh static analysis on `path`, respecting config excludes/zones."""
-    exclude_paths = config.get("ignore_patterns", [])
+    exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
     variance = config.get("DESIGN_VARIANCE", 8)
     suppressions = config.get("ignore_patterns", [])
@@ -93,7 +93,19 @@ def run(args: argparse.Namespace):
                 file=sys.stderr,
             )
         else:
-            root_abs = str(Path(path).resolve())
+            # git diff --name-only always returns paths relative to the git root,
+            # regardless of cwd. Find the actual git root to construct correct
+            # absolute paths — using `path` directly would double path segments
+            # when path is a subdirectory (e.g. "src/components").
+            try:
+                gr = subprocess.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True,
+                    cwd=str(Path(path).resolve()), timeout=5,
+                )
+                root_abs = gr.stdout.strip() if gr.returncode == 0 and gr.stdout.strip() else str(Path(path).resolve())
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                root_abs = str(Path(path).resolve())
             scope_files = {str(Path(root_abs) / f) for f in changed}
             if not scope_files:
                 _emit(output_fmt, [], [], [], since_sha)

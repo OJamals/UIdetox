@@ -30,3 +30,7 @@ production_test_audit/
 # User-specific agent config
 .claude/
 .gitnexus
+dist/
+build/
+slop-harness/
+test-slop-app/

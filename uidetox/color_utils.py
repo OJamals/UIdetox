@@ -230,7 +230,7 @@ def _check_common_pairings(colors: dict[str, str], violations: list[dict]):
 def luminance(hex_code: str) -> float:
     try:
         hex_code = hex_code.lstrip('#')
-        if len(hex_code) == 3:
+        if len(hex_code) in (3, 4):
             hex_code = ''.join(c + c for c in hex_code)
         r, g, b = tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
         a = [v / 255.0 for v in (r, g, b)]
