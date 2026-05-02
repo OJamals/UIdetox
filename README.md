@@ -1,4 +1,4 @@
-![UIdetox Banner](assets/banner.png)
+![UIdetox Banner](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/banner.png)
 
 **The anti-slop harness for AI-generated frontends.**
 
@@ -16,7 +16,7 @@ It combines:
 
 ### The AI Slop Problem
 
-![Slop vs Crafted](assets/slop-vs-crafted.png)
+![Slop vs Crafted](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/slop-vs-crafted.png)
 
 AI tools can produce UI quickly, but often converge on the same visual clichés: default font stacks, purple-blue gradients, glass cards, repetitive metric blocks, and shallow interaction states.
 
@@ -80,12 +80,12 @@ RULES:
 ### The Intelligence Layer
 UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
 
-![The Intelligence Layer](assets/intelligence.png)
+![The Intelligence Layer](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/intelligence.png)
 
 ### The Remediation Flow
 Each iteration follows a strict quality gate. Issues are batched by component, skill rules are injected, and fixes are verified against the project's build system before being committed.
 
-![UIdetox Flow](assets/explained.png)
+![UIdetox Flow](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/explained.png)
 
 > [!TIP]
 > **Self-Healing Mechanics**: If a fix breaks the build (TSC or Lint errors), UIdetox captures the compiler output, injects it back into the agent's context, and requires a fix before the issue can be resolved.
