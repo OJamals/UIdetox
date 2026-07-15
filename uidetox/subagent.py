@@ -459,10 +459,13 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
 
-## Tools Available
-Use GitNexus to map codebase flows before deep diving!
-- `npx gitnexus analyze --embeddings` (or `npx gitnexus analyze` if embeddings are not needed)
-- npx gitnexus query <concept>
+## Codebase Memory Workflow
+Prefer codebase-memory MCP tools to map codebase flows before deep diving:
+- `search_graph(name_pattern=".*symbolName.*")` to locate exact symbols
+- `trace_path(function_name="symbolName", mode="calls", direction="inbound")` for callers
+- `get_code_snippet(qualified_name="exact.qualified.name")` for focused source
+- `query_graph(query="MATCH ...")` for complex graph questions
+- If the project is missing, run `index_repository(repo_path="/absolute/project/path")` first
 
 ## What to Catalog
 For every frontend file, note:
@@ -677,7 +680,9 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 {context_block}
 
 ## Tools & Rules
-- Use `npx gitnexus impact <symbol>` before refactoring any exports
+- Use `search_graph(name_pattern=".*symbolName.*")` to resolve the exact symbol before editing
+- Use `trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)` before refactoring exports
+- Use `get_code_snippet(qualified_name="exact.qualified.name")` before moving shared logic
 - Follow SKILL.md design rules for every change
 - Fix ALL issues in one pass per component, then batch-resolve:
   `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`

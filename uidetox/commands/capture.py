@@ -2,10 +2,20 @@
 
 import argparse
 import shutil
+import urllib.request
 from pathlib import Path
 from uidetox.state import ensure_uidetox_dir, load_config
 from uidetox.utils import now_iso
 import sys
+
+
+def _server_is_reachable(url: str) -> bool:
+    """Return True if the URL responds within 3 seconds."""
+    try:
+        urllib.request.urlopen(url, timeout=3)  # noqa: S310
+        return True
+    except Exception:
+        return False
 
 
 def _snapshots_dir() -> Path:
@@ -98,9 +108,13 @@ def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
         total_pixels = diff_img.width * diff_img.height
         change_pct = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0
 
+        # Amplify diff so subtle changes are visible (raw pixel deltas are too dark).
+        # 8x amplification: a 10-unit change becomes 80, clearly visible.
+        diff_visible = diff_img.point(lambda x: min(255, x * 8))
+
         # Save the diff image
         diff_path = before_path.parent / f"diff_{before_path.stem}_{after_path.stem}.png"
-        diff_img.save(str(diff_path))
+        diff_visible.save(str(diff_path))
 
         diff_info["diff_image"] = str(diff_path)
         diff_info["change_percentage"] = round(change_pct, 2)
@@ -132,6 +146,12 @@ def run(args: argparse.Namespace):
     responsive = getattr(args, "responsive", False)
 
     snapshots = _snapshots_dir()
+
+    if not _server_is_reachable(url):
+        print(f"❌ Cannot reach {url}", file=sys.stderr)
+        print("   ⚠️  uidetox does NOT start your dev server — you must start it first.", file=sys.stderr)
+        print(f"   Start your dev server (e.g. npm run dev / pnpm dev), then re-run capture.", file=sys.stderr)
+        sys.exit(1)
 
     if stage == "before":
         # ── Capture BEFORE screenshot (pre-fix baseline) ──

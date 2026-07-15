@@ -8,8 +8,73 @@ database ORMs, and API layers are present.
 from __future__ import annotations
 
 import json
+import re
+import tomllib
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+
+
+_PYTHON_BACKEND_DEPS = {
+    "aiohttp",
+    "bottle",
+    "django",
+    "falcon",
+    "fastapi",
+    "flask",
+    "gunicorn",
+    "hypercorn",
+    "pyramid",
+    "quart",
+    "sanic",
+    "starlette",
+    "tornado",
+    "uvicorn",
+}
+
+_PYTHON_BACKEND_PATTERNS = [
+    re.compile(r"\bFastAPI\s*\(", re.IGNORECASE),
+    re.compile(r"\bFlask\s*\(", re.IGNORECASE),
+    re.compile(r"\bAPIRouter\s*\(", re.IGNORECASE),
+    re.compile(r"\bStarlette\s*\(", re.IGNORECASE),
+    re.compile(r"\bSanic\s*\(", re.IGNORECASE),
+    re.compile(r"\bQuart\s*\(", re.IGNORECASE),
+    re.compile(r"uvicorn\.run\s*\(", re.IGNORECASE),
+    re.compile(r"WSGI_APPLICATION", re.IGNORECASE),
+    re.compile(r"ASGI_APPLICATION", re.IGNORECASE),
+]
+
+_PYTHON_BACKEND_ENTRY_FILES = [
+    "manage.py",
+    "wsgi.py",
+    "asgi.py",
+    "app.py",
+    "main.py",
+    "server.py",
+    "api.py",
+]
+
+_PYTHON_BACKEND_ALWAYS_ENTRY_FILES = {
+    "manage.py",
+    "wsgi.py",
+    "asgi.py",
+}
+
+_PYTHON_BACKEND_SKIP_DIRS = {
+    ".git",
+    ".mypy_cache",
+    ".nox",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".uidetox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "tests",
+    "venv",
+}
 
 
 @dataclass
@@ -73,13 +138,163 @@ def _has_dep(root: Path, dep: str) -> bool:
         return False
     try:
         data = json.loads(pkg.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return False
+        deps = data.get("dependencies", {}) or {}
+        dev_deps = data.get("devDependencies", {}) or {}
+        if not isinstance(deps, dict):
+            deps = {}
+        if not isinstance(dev_deps, dict):
+            dev_deps = {}
         all_deps = {
-            **data.get("dependencies", {}),
-            **data.get("devDependencies", {}),
+            **deps,
+            **dev_deps,
         }
         return dep in all_deps
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return False
+
+
+def _normalize_dep_name(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
+
+
+def _extract_requirement_name(spec: str) -> str | None:
+    spec = spec.split("#", 1)[0].split(";", 1)[0].strip()
+    if not spec or spec.startswith(("-", "--")):
+        return None
+    match = re.match(r"([A-Za-z0-9_.-]+)", spec)
+    if not match:
+        return None
+    return _normalize_dep_name(match.group(1))
+
+
+def _read_pyproject_dependency_names(root: Path) -> set[str]:
+    pyproject = root / "pyproject.toml"
+    if not pyproject.exists():
+        return set()
+
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
+        return set()
+
+    deps: set[str] = set()
+
+    def add_spec(spec: str) -> None:
+        dep_name = _extract_requirement_name(spec)
+        if dep_name:
+            deps.add(dep_name)
+
+    project = data.get("project", {})
+    if isinstance(project, dict):
+        for spec in project.get("dependencies", []) or []:
+            if isinstance(spec, str):
+                add_spec(spec)
+
+        optional = project.get("optional-dependencies", {}) or {}
+        if isinstance(optional, dict):
+            for group_specs in optional.values():
+                if isinstance(group_specs, list):
+                    for spec in group_specs:
+                        if isinstance(spec, str):
+                            add_spec(spec)
+
+    dependency_groups = data.get("dependency-groups", {}) or {}
+    if isinstance(dependency_groups, dict):
+        for group_specs in dependency_groups.values():
+            if isinstance(group_specs, list):
+                for spec in group_specs:
+                    if isinstance(spec, str):
+                        add_spec(spec)
+
+    tool = data.get("tool", {}) or {}
+    if isinstance(tool, dict):
+        poetry = tool.get("poetry", {}) or {}
+        if isinstance(poetry, dict):
+            poetry_deps = poetry.get("dependencies", {}) or {}
+            if isinstance(poetry_deps, dict):
+                for name in poetry_deps:
+                    dep_name = _normalize_dep_name(name)
+                    if dep_name and dep_name != "python":
+                        deps.add(dep_name)
+
+            poetry_groups = poetry.get("group", {}) or {}
+            if isinstance(poetry_groups, dict):
+                for group in poetry_groups.values():
+                    if not isinstance(group, dict):
+                        continue
+                    group_deps = group.get("dependencies", {}) or {}
+                    if isinstance(group_deps, dict):
+                        for name in group_deps:
+                            dep_name = _normalize_dep_name(name)
+                            if dep_name and dep_name != "python":
+                                deps.add(dep_name)
+
+    return deps
+
+
+def _iter_requirements_files(root: Path) -> list[Path]:
+    files = list(root.glob("requirements*.txt"))
+    req_dir = root / "requirements"
+    if req_dir.exists():
+        files.extend(req_dir.glob("*.txt"))
+
+    unique_files: list[Path] = []
+    seen: set[str] = set()
+    for file_path in files:
+        key = str(file_path.resolve())
+        if key not in seen:
+            seen.add(key)
+            unique_files.append(file_path)
+    return unique_files
+
+
+def _requirements_file_has_backend_dep(req_path: Path) -> bool:
+    try:
+        for line in req_path.read_text(encoding="utf-8").splitlines():
+            dep_name = _extract_requirement_name(line)
+            if dep_name in _PYTHON_BACKEND_DEPS:
+                return True
+    except (OSError, UnicodeDecodeError):
+        return False
+    return False
+
+
+def _path_is_in_skipped_dir(path: Path) -> bool:
+    return any(part in _PYTHON_BACKEND_SKIP_DIRS for part in path.parts)
+
+
+def _find_python_backend_entrypoint(root: Path) -> str | None:
+    for entry_name in _PYTHON_BACKEND_ALWAYS_ENTRY_FILES:
+        direct = root / entry_name
+        if direct.exists():
+            return entry_name
+
+    for entry_name in _PYTHON_BACKEND_ENTRY_FILES:
+        for candidate in root.rglob(entry_name):
+            if _path_is_in_skipped_dir(candidate):
+                continue
+            try:
+                content = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if any(pattern.search(content) for pattern in _PYTHON_BACKEND_PATTERNS):
+                return candidate.relative_to(root).as_posix()
+
+    return None
+
+
+def _detect_python_backend_config(root: Path) -> str | None:
+    pyproject_deps = _read_pyproject_dependency_names(root)
+    if pyproject_deps & _PYTHON_BACKEND_DEPS:
+        return "pyproject.toml"
+
+    for req_file in _iter_requirements_files(root):
+        if _requirements_file_has_backend_dep(req_file):
+            return req_file.relative_to(root).as_posix()
+
+    return _find_python_backend_entrypoint(root)
 
 
 def _npx_or_local(root: Path, cmd: str) -> str:
@@ -203,9 +418,10 @@ def detect_backend(root: Path) -> list[ToolInfo]:
         found.append(ToolInfo(name="nestjs", config_file="nest-cli.json", run_cmd=_npx_or_local(root, "nest build")))
     elif _has_dep(root, "express") or _has_dep(root, "fastify") or _has_dep(root, "koa"):
         found.append(ToolInfo(name="node.js", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
-        
-    if (root / "requirements.txt").exists() or (root / "pyproject.toml").exists():
-        found.append(ToolInfo(name="python", config_file="pyproject.toml", run_cmd="python -m pytest"))
+
+    python_backend_config = _detect_python_backend_config(root)
+    if python_backend_config:
+        found.append(ToolInfo(name="python", config_file=python_backend_config, run_cmd="python -m pytest"))
     if (root / "go.mod").exists():
         found.append(ToolInfo(name="go", config_file="go.mod", run_cmd="go vet ./..."))
     if (root / "Cargo.toml").exists():

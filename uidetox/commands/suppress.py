@@ -7,6 +7,49 @@ from uidetox.state import load_state, save_state, load_config, save_config
 
 _MAX_PATTERN_LEN = 200
 
+
+def _issue_matches_pattern(issue: object, pattern: str) -> bool:
+    if not isinstance(issue, dict):
+        return False
+
+    file_path = issue.get("file", "")
+    desc = issue.get("issue", "")
+
+    # Match the file path or description using glob patterns.
+    # fnmatch.fnmatch(path, f"*{pattern}*") already handles substring
+    # matching when the pattern has no glob chars, so the plain
+    # fnmatch.fnmatch(path, pattern) check would only add value for
+    # explicit glob patterns (e.g. "*.tsx") — cover both cleanly here.
+    matches_file = fnmatch.fnmatch(file_path, f"*{pattern}*") or fnmatch.fnmatch(file_path, pattern)
+    matches_desc = fnmatch.fnmatch(desc, f"*{pattern}*") or fnmatch.fnmatch(desc, pattern)
+    matches_exact = pattern.lower() in file_path.lower() or pattern.lower() in desc.lower()
+
+    return matches_file or matches_desc or matches_exact
+
+
+def _prune_matching_state_entries(pattern: str) -> tuple[int, int]:
+    state = load_state()
+    issues = state.get("issues", [])
+    diff_baseline = state.get("diff_baseline", [])
+
+    if not isinstance(issues, list):
+        issues = []
+    if not isinstance(diff_baseline, list):
+        diff_baseline = []
+
+    kept_issues = [issue for issue in issues if not _issue_matches_pattern(issue, pattern)]
+    kept_baseline = [issue for issue in diff_baseline if not _issue_matches_pattern(issue, pattern)]
+
+    removed_issues = len(issues) - len(kept_issues)
+    removed_baseline = len(diff_baseline) - len(kept_baseline)
+
+    if removed_issues > 0 or removed_baseline > 0:
+        state["issues"] = kept_issues
+        state["diff_baseline"] = kept_baseline
+        save_state(state)
+
+    return removed_issues, removed_baseline
+
 def run(args: argparse.Namespace):
     pattern = getattr(args, "pattern", None)
     is_remove = getattr(args, "remove", False)
@@ -44,48 +87,24 @@ def _list_suppressed():
 def _add_pattern(pattern: str):
     config = load_config()
     patterns = set(config.get("ignore_patterns", []))
-    
-    if pattern in patterns:
+
+    pattern_already_exists = pattern in patterns
+    if not pattern_already_exists:
+        patterns.add(pattern)
+        config["ignore_patterns"] = sorted(list(patterns))
+        save_config(config)
+
+    removed_issues, removed_baseline = _prune_matching_state_entries(pattern)
+
+    if pattern_already_exists:
         print(f"Pattern '{pattern}' is already suppressed.")
-        return
-        
-    patterns.add(pattern)
-    config["ignore_patterns"] = sorted(list(patterns))
-    save_config(config)
-    
-    # Prune existing issues
-    state = load_state()
-    issues = state.get("issues", [])
-    before_count = len(issues)
-    
-    # A pattern could match the file path OR the issue description itself
-    # Desloppify supports wildcards
-    kept_issues = []
-    
-    for issue in issues:
-        file_path = issue.get("file", "")
-        desc = issue.get("issue", "")
-        
-        # Match the file path or description using glob patterns.
-        # fnmatch.fnmatch(path, f"*{pattern}*") already handles substring
-        # matching when the pattern has no glob chars, so the plain
-        # fnmatch.fnmatch(path, pattern) check would only add value for
-        # explicit glob patterns (e.g. "*.tsx") — cover both cleanly here.
-        matches_file = fnmatch.fnmatch(file_path, f"*{pattern}*") or fnmatch.fnmatch(file_path, pattern)
-        matches_desc = fnmatch.fnmatch(desc, f"*{pattern}*") or fnmatch.fnmatch(desc, pattern)
-        matches_exact = pattern.lower() in file_path.lower() or pattern.lower() in desc.lower()
-        
-        if not (matches_file or matches_desc or matches_exact):
-            kept_issues.append(issue)
-            
-    removed = before_count - len(kept_issues)
-    if removed > 0:
-        state["issues"] = kept_issues
-        save_state(state)
-        
-    print(f"Added suppress pattern: {pattern}")
-    if removed > 0:
-        print(f"  Removed {removed} matching issue(s) from the current queue.")
+    else:
+        print(f"Added suppress pattern: {pattern}")
+
+    if removed_issues > 0:
+        print(f"  Removed {removed_issues} matching issue(s) from the current queue.")
+    if removed_baseline > 0:
+        print(f"  Removed {removed_baseline} matching issue(s) from the diff baseline.")
 
 def _remove_pattern(pattern: str):
     config = load_config()

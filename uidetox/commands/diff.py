@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+from collections import defaultdict
 import json
 import subprocess
 import sys
@@ -22,7 +23,7 @@ from pathlib import Path
 
 from uidetox.analyzer import analyze_directory, analyze_file
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.state import load_config, load_state, save_state
+from uidetox.state import get_project_root, load_config, load_state, save_state
 
 
 def _get_changed_files(since_sha: str, cwd: str) -> list[str] | None:
@@ -43,15 +44,50 @@ def _get_changed_files(since_sha: str, cwd: str) -> list[str] | None:
 
 
 def _issue_fingerprint(issue: dict) -> str:
-    """Stable key identifying a unique issue occurrence: file + rule/category + first-line context.
+    """Stable key identifying a unique issue occurrence.
 
-    Deliberately excludes the ``id`` field because fresh analysis generates
-    new UUIDs on every run — including it would make every issue appear as
-    NEW and the carry count would always be zero.
+    We intentionally key on normalized file path + issue text instead of the
+    mutable ``SCAN-*`` ids or optional rule metadata. Stored baselines and
+    fresh analyzer output do not always carry the same rule fields, but they do
+    consistently share the issue description. When location metadata is
+    available, we include it so repeated identical messages in the same file do
+    not collapse into a single occurrence.
     """
-    # Prefer rule_id/rule over the mutable UUID ``id``
-    rule = issue.get("rule_id") or issue.get("rule") or issue.get("category", "")
-    return f"{issue.get('file', '')}::{rule}::{issue.get('issue', '')[:60]}"
+    line = issue.get("line")
+    column = issue.get("column")
+    location = f"{line}:{column}" if line is not None or column is not None else ""
+    return f"{issue.get('file', '')}::{issue.get('issue', '')[:120]}::{location}"
+
+
+def _resolve_issue_file(file_path: str, project_root: Path) -> str:
+    if not file_path:
+        return ""
+
+    path = Path(file_path)
+    if not path.is_absolute():
+        path = project_root / path
+    return str(path.resolve())
+
+
+def _normalize_issue_file(issue: dict, project_root: Path) -> dict:
+    resolved_file = _resolve_issue_file(issue.get("file", ""), project_root)
+    if resolved_file and issue.get("file") != resolved_file:
+        return {**issue, "file": resolved_file}
+    return issue
+
+
+def _group_issues_by_fingerprint(issues: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for issue in issues:
+        grouped[_issue_fingerprint(issue)].append(issue)
+    return grouped
+
+
+def _load_diff_baseline(state: dict, project_root: Path) -> list[dict]:
+    baseline = state.get("diff_baseline", [])
+    if not isinstance(baseline, list):
+        return []
+    return [_normalize_issue_file(issue, project_root) for issue in baseline if isinstance(issue, dict)]
 
 
 def _analyze_target(path: str, config: dict) -> list[dict]:
@@ -78,8 +114,10 @@ def _analyze_target(path: str, config: dict) -> list[dict]:
 def run(args: argparse.Namespace):
     config = load_config()
     state = load_state()
+    project_root = get_project_root()
 
-    path = getattr(args, "path", ".") or "."
+    path_arg = getattr(args, "path", ".")
+    path = str(project_root) if path_arg in (None, "", ".") else path_arg
     since_sha = getattr(args, "since", None)
     output_fmt = getattr(args, "output", "table")
 
@@ -112,60 +150,56 @@ def run(args: argparse.Namespace):
                 return
 
     # ── Baseline: issues currently stored in state ──
-    baseline_issues: list[dict] = state.get("issues", [])
+    stored_baseline = _load_diff_baseline(state, project_root)
+    baseline_issues: list[dict] = stored_baseline
     if scope_files is not None:
         baseline_issues = [
             i for i in baseline_issues
-            if str(Path(i.get("file", "")).resolve()) in scope_files
+            if i.get("file", "") in scope_files
         ]
 
     # ── Fresh: re-run static analysis ──
-    fresh_issues = _analyze_target(path, config)
+    fresh_issues = [_normalize_issue_file(issue, project_root) for issue in _analyze_target(path, config)]
     if scope_files is not None:
         fresh_issues = [
             i for i in fresh_issues
-            if str(Path(i.get("file", "")).resolve()) in scope_files
+            if i.get("file", "") in scope_files
         ]
 
     # ── Compute diff sets ──
-    baseline_fps = {_issue_fingerprint(i): i for i in baseline_issues}
-    fresh_fps = {_issue_fingerprint(i): i for i in fresh_issues}
+    baseline_groups = _group_issues_by_fingerprint(baseline_issues)
+    fresh_groups = _group_issues_by_fingerprint(fresh_issues)
 
-    baseline_keys = set(baseline_fps)
-    fresh_keys = set(fresh_fps)
+    new_issues: list[dict] = []
+    fixed_issues: list[dict] = []
+    unchanged_issues: list[dict] = []
 
-    new_issues = [fresh_fps[k] for k in sorted(fresh_keys - baseline_keys)]
-    fixed_issues = [baseline_fps[k] for k in sorted(baseline_keys - fresh_keys)]
-    unchanged_issues = [fresh_fps[k] for k in sorted(fresh_keys & baseline_keys)]
+    for key in sorted(set(baseline_groups) | set(fresh_groups)):
+        baseline_group = baseline_groups.get(key, [])
+        fresh_group = fresh_groups.get(key, [])
+        shared_count = min(len(baseline_group), len(fresh_group))
+
+        unchanged_issues.extend(fresh_group[:shared_count])
+        new_issues.extend(fresh_group[shared_count:])
+        fixed_issues.extend(baseline_group[shared_count:])
 
     _emit(output_fmt, new_issues, fixed_issues, unchanged_issues, since_sha)
 
     # ── Persist fresh scan as new baseline if requested ──
     save = getattr(args, "save", False)
     if save:
-        # Ensure every saved issue has a valid SCAN-XXXXXX id; analyzer output
-        # uses rule IDs (e.g. "DIV_SOUP_SLOP") or omits the field entirely.
-        def _normalize_id(issue: dict) -> dict:
-            raw_id = issue.get("id", "")
-            if not raw_id or not raw_id.startswith("SCAN-"):
-                scan_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
-                issue = {**issue, "id": scan_id}
-                if raw_id:
-                    issue["rule_id"] = raw_id
-            return issue
-
         if scope_files is not None:
             # Partial diff: merge fresh into the full state (replace scoped files)
             other_issues = [
-                i for i in state.get("issues", [])
-                if str(Path(i.get("file", "")).resolve()) not in scope_files
+                i for i in stored_baseline
+                if i.get("file", "") not in scope_files
             ]
-            state["issues"] = other_issues + [_normalize_id(i) for i in fresh_issues]
+            state["diff_baseline"] = other_issues + fresh_issues
         else:
-            state["issues"] = [_normalize_id(i) for i in fresh_issues]
+            state["diff_baseline"] = fresh_issues
         save_state(state)
         if output_fmt != "json":
-            print(f"  [diff] Baseline updated — {len(state['issues'])} issue(s) saved to state.")
+            print(f"  [diff] Baseline updated — {len(state['diff_baseline'])} issue(s) saved to diff baseline.")
 
 
 def _emit(
@@ -243,10 +277,14 @@ def _print_issue(issue: dict, prefix: str = "  "):
     description = issue.get("issue", "")
     command = issue.get("command", "")
 
-    try:
-        rel = Path(file_path).relative_to(Path.cwd())
-    except ValueError:
-        rel = Path(file_path).name
+    path_obj = Path(file_path)
+    if not path_obj.is_absolute():
+        rel = path_obj
+    else:
+        try:
+            rel = path_obj.relative_to(get_project_root())
+        except ValueError:
+            rel = path_obj.name
 
     print(f"{prefix}[{tier}] {rule_id}")
     print(f"       {rel}")

@@ -8,7 +8,10 @@ Run:
 ```bash
 uidetox update-skill windsurf
 ```
-Because Windsurf uses Global Rules and Workspace Rules, we recommend placing the core UIdetox directives into `.windsurfrules`:
+
+This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root and creates or updates `.windsurfrules` with the UIdetox directives.
+
+If you maintain your own `.windsurfrules`, keep the inserted UIdetox block alongside your existing rules:
 
 ```markdown
 # UI Directives (Anti-Slop)
@@ -34,3 +37,37 @@ The loop guides the agent through:
 5. Finalize (`uidetox finish`)
 
 Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last checkpoint.
+
+### 3. Visual Regression + Port Configuration
+
+Use `uidetox capture` when validating a redesigned flow. **Start your dev server first** — UIdetox does not launch it.
+
+```bash
+pnpm dev
+uidetox capture --stage before
+uidetox capture --stage after
+
+# Override a non-standard port
+uidetox capture --stage before --url http://localhost:5173
+```
+
+To persist the target URL, set `dev_server` in `.uidetox/config.json`:
+
+```json
+{
+  "dev_server": "http://localhost:5173"
+}
+```
+
+Resolution order is: `--url` → `.uidetox/config.json` `dev_server` → `http://localhost:3000`.
+
+### 4. Diff + Watch Utilities
+
+```bash
+uidetox diff
+uidetox diff --since <sha>
+uidetox watch
+uidetox watch --path src/
+```
+
+Use `diff` to compare against the stored issue baseline and `watch` to keep analysis running while Cascade iterates.

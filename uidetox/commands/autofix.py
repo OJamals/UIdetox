@@ -1,7 +1,11 @@
 """Autofix command: automatically apply safe T1 fixes."""
 
 import argparse
-from uidetox.state import load_state, save_state, load_config
+import subprocess
+from pathlib import Path
+
+from uidetox.state import get_project_root, load_state, load_config
+from uidetox.utils import tracked_changed_files
 
 
 # Category classification + specific replacement guidance
@@ -194,6 +198,7 @@ def _categorize_issue(issue: dict) -> str:
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
+    project_root = get_project_root()
     issues = state.get("issues", [])
 
     t1_issues = [i for i in issues if i.get("tier") == "T1"]
@@ -229,10 +234,10 @@ def run(args: argparse.Namespace):
         print(f"[DRY RUN] No changes applied. Remove --dry-run to apply.")
         return
 
-    import subprocess
-    from pathlib import Path
-
     transforms_dir = Path(__file__).parent.parent / "data" / "transforms"
+    pre_existing_changes: set[str] = set()
+    if config.get("auto_commit", False):
+        pre_existing_changes = tracked_changed_files()
 
     # Map categories to transform files (multiple categories can share transforms)
     _TRANSFORM_MAP = {
@@ -246,8 +251,14 @@ def run(args: argparse.Namespace):
         "accessibility": "spacing.js",   # Spacing transform handles outline-none → focus-visible
     }
 
-    applied_files = set()
+    changed_files = set()
     transforms_run = set()
+
+    def _normalize_issue_path(file_path: str) -> Path:
+        path = Path(file_path)
+        if path.is_absolute():
+            return path
+        return (project_root / path).resolve()
 
     for cat_name, cat_issues in grouped.items():
         # Check for exact category match, then mapped match
@@ -281,51 +292,70 @@ def run(args: argparse.Namespace):
         transforms_run.add(transform_key)
 
         for file_path in files_to_fix:
+            normalized_path = _normalize_issue_path(file_path)
+            before_contents = None
+            try:
+                before_contents = normalized_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
             try:
                 result = subprocess.run(
-                    ["npx", "jscodeshift", "-t", str(transform_file), "--parser", "tsx", file_path],
-                    capture_output=True, text=True, timeout=30,
+                    ["npx", "jscodeshift", "-t", str(transform_file), "--parser", "tsx", str(normalized_path)],
+                    capture_output=True, text=True, timeout=30, cwd=project_root,
                 )
                 if result.returncode == 0:
-                    applied_files.add(file_path)
-                    # Check if file was actually modified
-                    if "0 unchanged" not in result.stdout and "0 ok" not in result.stdout:
-                        print(f"    ✓ {Path(file_path).name}")
+                    after_contents = before_contents
+                    try:
+                        after_contents = normalized_path.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
+
+                    if before_contents != after_contents:
+                        changed_files.add(str(normalized_path))
+                        print(f"    ✓ {normalized_path.name}")
                 else:
                     stderr = result.stderr.strip()
                     if stderr:
-                        print(f"    ⚠️  {Path(file_path).name}: {stderr[:80]}")
+                        print(f"    ⚠️  {normalized_path.name}: {stderr[:80]}")
             except FileNotFoundError:
                 print("    ⚠️  npx not found. Install Node.js/npm for mechanical auto-fixing.")
                 print("    Falling back to agent-assisted fixing.")
                 break
             except subprocess.TimeoutExpired:
-                print(f"    ⚠️  Timeout transforming {Path(file_path).name}")
+                print(f"    ⚠️  Timeout transforming {normalized_path.name}")
             except OSError as e:
                 # subprocess.run raises OSError (not CalledProcessError) on bad exit
                 # when check=False; catch generic OS errors from the child process.
-                print(f"    ⚠️  Failed to transform {Path(file_path).name}: {e}")
+                print(f"    ⚠️  Failed to transform {normalized_path.name}: {e}")
 
-    if applied_files:
-        print(f"\n✅ Automatically transformed {len(applied_files)} file(s) using jscodeshift.")
+    if changed_files:
+        print(f"\n✅ Automatically transformed {len(changed_files)} file(s) using jscodeshift.")
 
         # Auto-commit the mechanical fixes if enabled
         if config.get("auto_commit", False):
-            try:
-                for f in applied_files:
-                    subprocess.run(["git", "add", f], check=True, capture_output=True)
-                subprocess.run(
-                    ["git", "commit", "-m", f"[UIdetox] Autofix: mechanical T1 transforms ({len(applied_files)} files)", "--no-verify"],
-                    check=True, capture_output=True,
-                )
-                print(f"   📦 Auto-committed mechanical fixes to git.")
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                print(f"   ⚠️  Git auto-commit failed.")
+            if pre_existing_changes:
+                print("   ⚠️  Skipped git auto-commit because tracked changes already existed before autofix.")
+            else:
+                try:
+                    for f in changed_files:
+                        subprocess.run(["git", "add", f], check=True, capture_output=True, cwd=project_root)
+                    subprocess.run(
+                        ["git", "commit", "-m", f"[UIdetox] Autofix: mechanical T1 transforms ({len(changed_files)} files)", "--no-verify"],
+                        check=True, capture_output=True, cwd=project_root,
+                    )
+                    print(f"   📦 Auto-committed mechanical fixes to git.")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    print(f"   ⚠️  Git auto-commit failed.")
 
         print(f"Run `uidetox rescan` to update the issue queue.")
 
         # Mark the issues in transformed files as needing verification
-        remaining_t1 = [i for i in t1_issues if i.get("file") not in applied_files]
+        remaining_t1 = [
+            issue
+            for issue in t1_issues
+            if str(_normalize_issue_path(issue.get("file", ""))) not in changed_files
+        ]
         if remaining_t1:
             print(f"\n{len(remaining_t1)} T1 issue(s) in non-JS files need manual fixing:")
             for issue in remaining_t1[:10]:

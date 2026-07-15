@@ -3,9 +3,20 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
-dist/
-build/
 *.egg
+.pytest_cache/
+.coverage
+.coverage.*
+.mypy_cache/
+.nox/
+.ruff_cache/
+.tox/
+.venv/
+build/
+coverage.xml
+dist/
+htmlcov/
+venv/
 
 # UIdetox runtime state (per-project, not repo)
 .uidetox/
@@ -29,8 +40,9 @@ production_test_audit/
 
 # User-specific agent config
 .claude/
-.gitnexus
-dist/
-build/
+.cursor/
+.windsurfrules
+GEMINI.md
 slop-harness/
 test-slop-app/
+tmp_scan_probe/

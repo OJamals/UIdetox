@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from uidetox.analyzer import analyze_file
+from uidetox.state import get_project_root
 
 # All extensions the analyzer cares about (mirrors _FE_EXTS + _JSX_EXTS + .ts/.js/.svelte etc.)
 _WATCH_EXTS = {
@@ -86,7 +87,8 @@ def _print_issues(issues: list[dict], filepath: str) -> None:
 
 
 def run(args) -> None:
-    root = Path(getattr(args, "path", ".")).resolve()
+    path_arg = getattr(args, "path", ".")
+    root = (Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)).resolve()
     interval: float = getattr(args, "interval", 1.0)
     clear: bool = getattr(args, "clear", True)
 

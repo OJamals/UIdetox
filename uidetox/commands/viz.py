@@ -5,13 +5,14 @@ import html
 import json
 from pathlib import Path
 from collections import defaultdict
-from uidetox.state import load_state, ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import load_state, ensure_uidetox_dir, get_project_root, get_uidetox_dir
 
 
 def run(args: argparse.Namespace):
     # Depending on how the command was invoked (viz or tree)
     cmd = getattr(args, "viz_cmd", "viz")
-    path_root = Path(getattr(args, "path", "."))
+    path_arg = getattr(args, "path", ".")
+    path_root = Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)
     
     state = load_state()
     issues = state.get("issues", [])
@@ -28,6 +29,16 @@ def run(args: argparse.Namespace):
         _render_html_treemap(path_root, issue_map)
 
 
+def _issue_display_path(root_path: Path, file_path_str: str) -> Path:
+    path = Path(file_path_str)
+    if path.is_absolute():
+        try:
+            return path.resolve().relative_to(root_path.resolve())
+        except ValueError:
+            return Path(path.name)
+    return path
+
+
 def _build_tree(root_path: Path, issue_map: dict) -> dict:
     """Builds a nested dictionary representing the directory structure with issue counts."""
     tree = {"name": root_path.name or str(root_path), "path": str(root_path), "type": "dir", "issues": 0, "children": {}}
@@ -35,8 +46,12 @@ def _build_tree(root_path: Path, issue_map: dict) -> dict:
     for file_path_str, file_issues in issue_map.items():
         if not file_path_str:
             continue
-            
-        parts = Path(file_path_str).parts
+
+        display_path = _issue_display_path(root_path, file_path_str)
+        parts = display_path.parts
+        if not parts:
+            continue
+
         current = tree
         current["issues"] += len(file_issues)
         
@@ -46,7 +61,7 @@ def _build_tree(root_path: Path, issue_map: dict) -> dict:
             if part not in current["children"]:
                 current["children"][part] = {
                     "name": part,
-                    "path": "/".join(parts[:i+1]),
+                    "path": str(Path(*parts[:i+1])),
                     "type": "file" if is_file else "dir",
                     "issues": 0,
                     "issues_list": [],
@@ -192,10 +207,12 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
     # Flatten just the files with issues for the simple heatmap
     files_with_issues = []
     for file_path, file_issues in issue_map.items():
-        if not file_path: continue
+        if not file_path:
+            continue
+        display_path = _issue_display_path(root_path, file_path)
         files_with_issues.append({
-            "path": file_path,
-            "name": Path(file_path).name,
+            "path": str(display_path),
+            "name": display_path.name,
             "issues": len(file_issues),
             "issue_details": file_issues
         })

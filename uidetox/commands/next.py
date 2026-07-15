@@ -644,6 +644,75 @@ def _get_relevant_context(batch: list) -> list[tuple[str, str | None]]:
     return contexts
 
 
+TIER_ORDER = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
+DIAL_SPECS = (
+    (
+        "DESIGN_VARIANCE",
+        8,
+        (
+            (3, "clean, centered, standard grids"),
+            (7, "varied sizes, offset margins, overlapping elements"),
+            (10, "asymmetric, masonry, massive whitespace zones"),
+        ),
+    ),
+    (
+        "MOTION_INTENSITY",
+        6,
+        (
+            (3, "CSS hover/active only"),
+            (7, "fade-ins, transitions, staggered entry"),
+            (10, "scroll-triggered, spring physics, magnetic effects"),
+        ),
+    ),
+    (
+        "VISUAL_DENSITY",
+        4,
+        (
+            (3, "art gallery, spacious, luxury"),
+            (7, "standard web app spacing"),
+            (10, "cockpit mode, dense data, monospace numbers"),
+        ),
+    ),
+)
+
+
+def _select_batch(issues: list[dict]) -> tuple[str, list[dict], list[str], str]:
+    sorted_issues = sorted(
+        issues,
+        key=lambda issue: TIER_ORDER.get(issue.get("tier", "T4"), 5),
+    )
+    target_file = sorted_issues[0].get("file") or ""
+    target_dir = str(Path(target_file).parent) if target_file else "."
+    batch = [
+        issue
+        for issue in sorted_issues
+        if str(Path(issue.get("file", "")).parent) == target_dir
+    ][:15]
+    batch_files = list(dict.fromkeys(issue.get("file", "") for issue in batch))
+    component = target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
+    return target_dir, batch, batch_files, component
+
+
+def _dial_description(value: int, descriptions: tuple[tuple[int, str], ...]) -> str:
+    for maximum, description in descriptions:
+        if value <= maximum:
+            return description
+    return descriptions[-1][1]
+
+
+def _count_tiers(issues: list[dict]) -> dict[str, int]:
+    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
+    for issue in issues:
+        tier = issue.get("tier", "T4")
+        if tier in tiers:
+            tiers[tier] += 1
+    return tiers
+
+
+def _unique_reference_files(contexts: list[tuple[str, str | None]]) -> list[str]:
+    return list(dict.fromkeys(ref for _, ref in contexts if ref))
+
+
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
@@ -657,25 +726,7 @@ def run(args: argparse.Namespace):
         print("If score < target, run 'uidetox rescan' to find more issues.")
         sys.exit(1)
 
-    # Design dials
-    variance = config.get("DESIGN_VARIANCE", 8)
-    intensity = config.get("MOTION_INTENSITY", 6)
-    density = config.get("VISUAL_DENSITY", 4)
-
-    # Sort by tier priority: T1 > T2 > T3 > T4
-    tiers_order = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
-    sorted_issues = sorted(issues, key=lambda x: tiers_order.get(x.get("tier", "T4"), 5))
-
-    # Get the file of the highest priority issue
-    target_file = sorted_issues[0].get("file") or ""
-
-    # Group issues by directory (component) for coherent batches
-    target_dir = str(Path(target_file).parent) if target_file else "."
-    batch = [i for i in sorted_issues if str(Path(i.get("file", "")).parent) == target_dir][:15]
-
-    # Derive component name
-    batch_files = list(set(i.get("file", "") for i in batch))
-    component = target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
+    target_dir, batch, batch_files, component = _select_batch(issues)
 
     print("╔═════════════════════════════════════════════╗")
     print(f"║ Next Component: {component} ({len(batch_files)} file(s))")
@@ -694,42 +745,22 @@ def run(args: argparse.Namespace):
         print(f"      Action : {iss.get('command', 'manual fix')}")
         print()
 
-    # Inject design dials — critical for calibrating fixes
-    print(f"  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
-    print(f"  DESIGN_VARIANCE  = {variance}  ", end="")
-    if variance <= 3:
-        print("(clean, centered, standard grids)")
-    elif variance <= 7:
-        print("(varied sizes, offset margins, overlapping elements)")
-    else:
-        print("(asymmetric, masonry, massive whitespace zones)")
-    print(f"  MOTION_INTENSITY = {intensity}  ", end="")
-    if intensity <= 3:
-        print("(CSS hover/active only)")
-    elif intensity <= 7:
-        print("(fade-ins, transitions, staggered entry)")
-    else:
-        print("(scroll-triggered, spring physics, magnetic effects)")
-    print(f"  VISUAL_DENSITY   = {density}  ", end="")
-    if density <= 3:
-        print("(art gallery, spacious, luxury)")
-    elif density <= 7:
-        print("(standard web app spacing)")
-    else:
-        print("(cockpit mode, dense data, monospace numbers)")
+    print("  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
+    for name, default, descriptions in DIAL_SPECS:
+        value = config.get(name, default)
+        description = _dial_description(value, descriptions)
+        print(f"  {name:<17}= {value}  ({description})")
     print()
 
     # Inject relevant SKILL.md context with reference file pointers
     contexts = _get_relevant_context(batch)
     if contexts:
         print("  ━━━ SKILL.md DESIGN RULES (relevant to this batch) ━━━")
-        seen_refs: set[str] = set()
-        for ctx, ref_file in contexts:
+        for ctx, _ in contexts:
             print(f"  > {ctx}")
         print()
 
-        # Collect unique reference file pointers
-        ref_files = [ref for _, ref in contexts if ref and ref not in seen_refs and not seen_refs.add(ref)]  # type: ignore[func-returns-value]
+        ref_files = _unique_reference_files(contexts)
         if ref_files:
             print("  Deep-dive references:")
             for ref in ref_files:
@@ -739,7 +770,10 @@ def run(args: argparse.Namespace):
     # Inject semantic memory context based on current issues
     try:
         from uidetox.subagent import _build_memory_block # type: ignore
-        query_text = " ".join([i.get("issue", "") + " " + i.get("command", "") for i in batch])
+        query_text = " ".join(
+            issue.get("issue", "") + " " + issue.get("command", "")
+            for issue in batch
+        )
         memory_block = _build_memory_block(query=query_text)
         if memory_block:
             print("  ━━━ PERSISTENT AGENT MEMORY (semantically matched) ━━━")
@@ -757,11 +791,7 @@ def run(args: argparse.Namespace):
         print()
 
     remaining = len(issues) - len(batch)
-    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
-    for i in issues:
-        t = i.get("tier", "T4")
-        if t in tiers:
-            tiers[t] += 1
+    tiers = _count_tiers(issues)
 
     print(f"  Queue : {remaining} remaining after this batch")
     print(f"  Stats : {tiers['T1']}xT1, {tiers['T2']}xT2, {tiers['T3']}xT3, {tiers['T4']}xT4 | {resolved_count} resolved so far")

@@ -18,7 +18,7 @@ import subprocess
 import sys
 import uuid
 
-from ..state import load_config, save_config, load_state, ensure_uidetox_dir
+from ..state import get_project_root, load_config, save_config, load_state, ensure_uidetox_dir
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
 from ..utils import compute_design_score
@@ -27,12 +27,13 @@ from ..utils import compute_design_score
 def run(args: argparse.Namespace):
     target = getattr(args, "target", 95)
     ensure_uidetox_dir()
+    project_root = get_project_root()
 
     # ---- Auto-detect tooling ----
     config = load_config()
     if not config.get("tooling"):
         print("Auto-detecting project tooling...")
-        profile = detect_all()
+        profile = detect_all(project_root)
         config["tooling"] = profile.to_dict()
         save_config(config)
 
@@ -50,9 +51,9 @@ def run(args: argparse.Namespace):
     frontend_exts = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html", ".css", ".scss", ".sass"}
     exclude_dirs = {"node_modules", ".git", "dist", "build", ".next", "out", ".uidetox"}
     frontend_count = sum(
-        1 for p in pathlib.Path('.').rglob('*')
+        1 for p in project_root.rglob('*')
         if p.is_file() and p.suffix in frontend_exts
-        and not any(d in p.parts for d in exclude_dirs)
+        and not any(d in p.relative_to(project_root).parts for d in exclude_dirs)
     )
     unique_files = len(set(i.get("file", "") for i in issues))
     spread = unique_files if unique_files > 0 else (frontend_count // 5)

@@ -1,6 +1,7 @@
 """Persistent agent memory: tracks reviewed files, learned patterns, session progress, and continuation state."""
 
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -36,6 +37,148 @@ def _now_iso() -> str:
     return now_iso()
 
 
+def _normalize_pattern_entries(entries: object) -> list[dict]:
+    if not isinstance(entries, list):
+        return []
+
+    normalized: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        pattern = entry.get("pattern")
+        if not isinstance(pattern, str):
+            continue
+        clean_entry = {"pattern": pattern}
+        if isinstance(entry.get("category"), str):
+            clean_entry["category"] = entry["category"]
+        if isinstance(entry.get("learned_at"), str):
+            clean_entry["learned_at"] = entry["learned_at"]
+        normalized.append(clean_entry)
+    return normalized
+
+
+def _normalize_note_entries(entries: object) -> list[dict]:
+    if not isinstance(entries, list):
+        return []
+
+    normalized: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        note = entry.get("note")
+        if not isinstance(note, str):
+            continue
+        clean_entry = {"note": note}
+        if isinstance(entry.get("created_at"), str):
+            clean_entry["created_at"] = entry["created_at"]
+        normalized.append(clean_entry)
+    return normalized
+
+
+def _normalize_counter(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return 0
+        return int(value)
+    return 0
+
+
+def _normalize_count_mapping(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, int] = {}
+    for key, raw_value in value.items():
+        normalized[key if isinstance(key, str) else str(key)] = _normalize_counter(raw_value)
+    return normalized
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _normalize_last_scan(value: object) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return None
+
+    normalized = dict(value)
+    normalized["timestamp"] = normalized.get("timestamp") if isinstance(normalized.get("timestamp"), str) else ""
+    normalized["total_found"] = _normalize_counter(normalized.get("total_found"))
+    normalized["files_scanned"] = _normalize_counter(normalized.get("files_scanned"))
+    normalized["by_tier"] = _normalize_count_mapping(normalized.get("by_tier"))
+    normalized["by_category"] = _normalize_count_mapping(normalized.get("by_category"))
+    normalized["top_files"] = _normalize_string_list(normalized.get("top_files"))
+    return normalized
+
+
+def _normalize_session(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized = dict(value)
+    issues_fixed = _normalize_counter(normalized.get("issues_fixed_this_session", 0))
+    has_explicit_counter = "issues_fixed_this_session" in normalized
+    has_display_context = any(
+        isinstance(normalized.get(key), str) and bool(normalized.get(key))
+        for key in ("phase", "last_command", "last_component", "saved_at", "context")
+    )
+
+    if has_explicit_counter:
+        normalized["issues_fixed_this_session"] = issues_fixed
+    elif has_display_context:
+        normalized["issues_fixed_this_session"] = 0
+
+    known_session_keys = {
+        "phase",
+        "last_command",
+        "last_component",
+        "issues_fixed_this_session",
+        "saved_at",
+        "context",
+    }
+    if not has_display_context and issues_fixed == 0 and set(normalized).issubset(known_session_keys):
+        return {}
+
+    return normalized
+
+
+def _normalize_progress_entry(entry: object) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+
+    action = entry.get("action")
+    details = entry.get("details")
+    timestamp = entry.get("timestamp")
+    if not any(isinstance(value, str) for value in (action, details, timestamp)):
+        return None
+
+    normalized = dict(entry)
+    normalized["action"] = action if isinstance(action, str) else ""
+    normalized["details"] = details if isinstance(details, str) else ""
+    normalized["timestamp"] = timestamp if isinstance(timestamp, str) else ""
+    return normalized
+
+
+def _normalize_progress_log(entries: object) -> list[dict]:
+    if not isinstance(entries, list):
+        return []
+
+    normalized: list[dict] = []
+    for entry in entries:
+        clean_entry = _normalize_progress_entry(entry)
+        if clean_entry is not None:
+            normalized.append(clean_entry)
+    return normalized
+
+
 def load_memory() -> dict:
     """Load persistent agent memory, creating defaults if missing."""
     path = _memory_path()
@@ -44,17 +187,30 @@ def load_memory() -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Ensure all fields exist with correct types
-        defaults = _default_memory()
-        for key, default in defaults.items():
-            if key not in data:
-                data[key] = default
-            elif not isinstance(data[key], type(default)) and default is not None:
-                # Reset to default if type is wrong (e.g., list corrupted to string)
-                data[key] = default
-        return data
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return _default_memory()
+
+    if not isinstance(data, dict):
+        return _default_memory()
+
+    # Ensure all fields exist with correct types.
+    defaults = _default_memory()
+    for key, default in defaults.items():
+        if key not in data:
+            data[key] = default
+        elif default is None:
+            if data[key] is not None and not isinstance(data[key], dict):
+                data[key] = None
+        elif not isinstance(data[key], type(default)):
+            # Reset to default if type is wrong (e.g., list corrupted to string)
+            data[key] = default
+
+    data["patterns"] = _normalize_pattern_entries(data.get("patterns"))
+    data["notes"] = _normalize_note_entries(data.get("notes"))
+    data["last_scan"] = _normalize_last_scan(data.get("last_scan"))
+    data["session"] = _normalize_session(data.get("session"))
+    data["progress_log"] = _normalize_progress_log(data.get("progress_log"))
+    return data
 
 
 def _default_memory() -> dict:

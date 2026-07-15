@@ -77,9 +77,750 @@ def test_check_auto_commit_stages_only_changed_files(monkeypatch):
 
     check._auto_commit_changed_files({"src/App.tsx"}, "[UIdetox] Mechanical auto-fix")
 
-    assert ["git", "add", "src/App.tsx"] in calls
+    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
+    assert expected_add in calls
     assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
     assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"] in calls
+
+
+def test_check_run_skips_auto_commit_when_workspace_already_dirty(monkeypatch, capsys):
+    fmt_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/App.tsx\n", stderr="")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+
+    config = {
+        "auto_commit": True,
+        "tooling": {
+            "typescript": None,
+            "linter": None,
+            "formatter": {"fix_cmd": "fmt"},
+        },
+    }
+    monkeypatch.setattr(check, "load_config", lambda: config)
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+    assert not any(cmd[:2] == ["git", "commit"] for cmd in calls)
+
+
+def test_check_run_auto_commits_only_new_mechanical_changes(monkeypatch):
+    fmt_runs = 0
+    status_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs, status_runs
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            status_runs += 1
+            stdout = "" if status_runs == 1 else " M src/App.tsx\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+
+    config = {
+        "auto_commit": True,
+        "tooling": {
+            "typescript": None,
+            "linter": None,
+            "formatter": {"fix_cmd": "fmt"},
+        },
+    }
+    monkeypatch.setattr(check, "load_config", lambda: config)
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+
+    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
+    assert expected_add in calls
+    assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"] in calls
+    assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
+
+
+def test_check_run_auto_commits_from_subdirectory(monkeypatch, tmp_path, capsys):
+    root = tmp_path
+    src_dir = root / "src"
+    nested_dir = src_dir / "nested"
+    nested_dir.mkdir(parents=True)
+
+    monkeypatch.chdir(root)
+    ensure_uidetox_dir()
+    monkeypatch.chdir(nested_dir)
+
+    fmt_runs = 0
+    status_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs, status_runs
+        calls.append((cmd, kwargs))
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            status_runs += 1
+            stdout = "" if status_runs == 1 else " M src/App.tsx\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+
+    config = {
+        "auto_commit": True,
+        "tooling": {
+            "typescript": None,
+            "linter": None,
+            "formatter": {"fix_cmd": "fmt"},
+        },
+    }
+    monkeypatch.setattr(check, "load_config", lambda: config)
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    expected_add = ["git", "add", str((root / "src/App.tsx").resolve())]
+    expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"]
+
+    assert "Auto-committed mechanical fixes" in output
+    assert any(cmd == expected_add and kwargs.get("cwd") == root for cmd, kwargs in calls)
+    assert any(cmd == expected_commit and kwargs.get("cwd") == root for cmd, kwargs in calls)
+
+
+def test_check_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+    saved_configs = []
+
+    class FakeProfile:
+        def to_dict(self):
+            return {
+                "package_manager": "npm",
+                "typescript": None,
+                "linter": None,
+                "formatter": None,
+                "frontend": [],
+                "backend": [],
+                "database": [],
+                "api": [],
+            }
+
+    def fake_detect_all(root_arg=None):
+        nonlocal captured_root
+        captured_root = Path(root_arg) if root_arg is not None else None
+        return FakeProfile()
+
+    monkeypatch.setattr(check, "detect_all", fake_detect_all)
+    monkeypatch.setattr(check, "load_config", lambda: {})
+    monkeypatch.setattr(check, "save_config", lambda cfg: saved_configs.append(cfg))
+
+    check.run(argparse.Namespace(fix=False))
+    output = capsys.readouterr().out
+
+    assert captured_root == root.resolve()
+    assert saved_configs[0]["tooling"]["package_manager"] == "npm"
+    assert "Auto-detected project tooling" in output
+
+
+def test_check_run_executes_mechanical_fix_commands_from_project_root(monkeypatch, tmp_path, capsys):
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    calls = []
+    fmt_runs = 0
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs
+        calls.append((cmd, kwargs))
+
+        if cmd == ["fmt", "--write", "."]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check, "load_config", lambda: {"auto_commit": False, "tooling": {"typescript": None, "linter": None, "formatter": {"fix_cmd": "fmt --write ."}}})
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    assert "Auto-fix phase complete" in output
+    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+
+
+def test_detect_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import detect as detect_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+    saved_configs = []
+
+    class FakeProfile:
+        def to_dict(self):
+            return {
+                "package_manager": "npm",
+                "typescript": None,
+                "linter": None,
+                "formatter": None,
+                "frontend": [],
+                "backend": [],
+                "database": [],
+                "api": [],
+            }
+
+        package_manager = "npm"
+        typescript = None
+        linter = None
+        formatter = None
+        frontend = []
+        backend = []
+        database = []
+        api = []
+
+    def fake_detect_all(root_arg=None):
+        nonlocal captured_root
+        captured_root = Path(root_arg) if root_arg is not None else None
+        return FakeProfile()
+
+    monkeypatch.setattr(detect_cmd, "detect_all", fake_detect_all)
+    monkeypatch.setattr(detect_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(detect_cmd, "save_config", lambda cfg: saved_configs.append(cfg))
+
+    detect_cmd.run(argparse.Namespace(path="."))
+    output = capsys.readouterr().out
+
+    assert captured_root == root.resolve()
+    assert saved_configs[0]["tooling"]["package_manager"] == "npm"
+    assert "Package Manager : npm" in output
+
+
+def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import scan as scan_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_detect_root = None
+    analyzed_path = None
+    saved_configs = []
+
+    class FakeProfile:
+        def to_dict(self):
+            return {
+                "package_manager": "npm",
+                "typescript": None,
+                "linter": None,
+                "formatter": None,
+                "frontend": [],
+                "backend": [],
+                "database": [],
+                "api": [],
+            }
+
+    def fake_detect_all(root_arg=None):
+        nonlocal captured_detect_root
+        captured_detect_root = Path(root_arg) if root_arg is not None else None
+        return FakeProfile()
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal analyzed_path
+        analyzed_path = Path(path).resolve()
+        return []
+
+    monkeypatch.setattr(scan_cmd, "detect_all", fake_detect_all)
+    monkeypatch.setattr(scan_cmd, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(scan_cmd, "save_config", lambda cfg: saved_configs.append(cfg))
+    monkeypatch.setattr(scan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(scan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(scan_cmd, "_save_scan_to_memory", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan_cmd, "save_session", lambda **kwargs: None)
+    monkeypatch.setattr(scan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan_cmd, "load_state", lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}})
+    monkeypatch.setattr(scan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+
+    scan_cmd.run(argparse.Namespace(path=".", output="json", since=None))
+    output = capsys.readouterr().out
+
+    assert captured_detect_root == root.resolve()
+    assert analyzed_path == root.resolve()
+    assert saved_configs[0]["tooling"]["package_manager"] == "npm"
+    assert output.rstrip().endswith("[]")
+
+
+def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import scan as scan_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    analyzed_path = None
+    git_call_cwds = []
+
+    issue = {
+        "file": str(root / "frontend" / "src" / "Button.tsx"),
+        "tier": "T2",
+        "issue": "test issue",
+        "id": "TEST_RULE",
+        "command": "fix",
+    }
+
+    def fake_run(cmd, **kwargs):
+        git_call_cwds.append(Path(kwargs["cwd"]).resolve())
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="frontend/src/Button.tsx\n", stderr="")
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal analyzed_path
+        analyzed_path = Path(path).resolve()
+        return [issue]
+
+    monkeypatch.setattr(scan_cmd.subprocess, "run", fake_run)
+    monkeypatch.setattr(scan_cmd, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan_cmd, "load_config", lambda: {"tooling": {"package_manager": "npm", "typescript": None, "linter": None, "formatter": None, "frontend": [], "backend": [], "database": [], "api": []}})
+
+    scan_cmd.run(argparse.Namespace(path=".", output="json", since="abc123"))
+    output = capsys.readouterr().out
+
+    assert analyzed_path == root.resolve()
+    assert git_call_cwds == [root.resolve(), root.resolve()]
+    assert "frontend/src/Button.tsx" in output
+
+
+def test_batch_resolve_verification_runs_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import batch_resolve
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    config = {
+        "tooling": {
+            "typescript": {"run_cmd": "tsc --noEmit"},
+            "linter": {"fix_cmd": "lint --fix ."},
+            "formatter": {"fix_cmd": "fmt --write ."},
+        }
+    }
+
+    assert batch_resolve._run_verification(config) is True
+    output = capsys.readouterr().out
+
+    assert "TypeScript passed" in output
+    assert any(cmd == ["tsc", "--noEmit"] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+    assert any(cmd == ["lint", "--fix", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+
+
+def test_get_project_root_uses_git_root_on_cold_start_from_subdirectory(tmp_path, monkeypatch):
+    project_root = tmp_path / "repo"
+    nested_dir = project_root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (project_root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    from uidetox.state import get_project_root
+
+    assert get_project_root() == project_root.resolve()
+
+
+def test_format_run_detects_and_executes_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import format_cmd as format_cmd_module
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+    calls = []
+
+    class FakeFormatter:
+        name = "prettier"
+        run_cmd = "fmt --check ."
+        fix_cmd = "fmt --write ."
+
+    class FakeProfile:
+        formatter = FakeFormatter()
+
+    def fake_detect_all(root_arg=None):
+        nonlocal captured_root
+        captured_root = Path(root_arg) if root_arg is not None else None
+        return FakeProfile()
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(format_cmd_module, "detect_all", fake_detect_all)
+    monkeypatch.setattr(format_cmd_module, "load_config", lambda: {})
+    monkeypatch.setattr(format_cmd_module.subprocess, "run", fake_run)
+
+    format_cmd_module.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    assert captured_root == root.resolve()
+    assert "Formatting applied successfully" in output
+    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+
+
+def test_loop_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import loop as loop_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+    saved_configs = []
+
+    class FakeProfile:
+        def to_dict(self):
+            return {
+                "package_manager": "npm",
+                "typescript": None,
+                "linter": None,
+                "formatter": None,
+                "frontend": [],
+                "backend": [],
+                "database": [],
+                "api": [],
+            }
+
+    def fake_detect_all(root_arg=None):
+        nonlocal captured_root
+        captured_root = Path(root_arg) if root_arg is not None else None
+        return FakeProfile()
+
+    monkeypatch.setattr(loop_cmd, "detect_all", fake_detect_all)
+    monkeypatch.setattr(loop_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: saved_configs.append(dict(cfg)))
+    monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
+    monkeypatch.setattr(loop_cmd, "get_notes", lambda: [])
+    monkeypatch.setattr(loop_cmd, "get_session", lambda: {})
+    monkeypatch.setattr(loop_cmd, "get_last_scan", lambda: None)
+    monkeypatch.setattr(loop_cmd, "ensure_uidetox_dir", lambda: root / ".uidetox")
+
+    loop_cmd.run(argparse.Namespace(target=95, orchestrator=False))
+    output = capsys.readouterr().out
+
+    assert captured_root == root.resolve()
+    assert saved_configs[0]["tooling"]["package_manager"] == "npm"
+    assert "Auto-detecting project tooling" in output
+
+
+def test_loop_run_counts_frontend_files_when_repo_root_path_contains_excluded_dir_name(monkeypatch, tmp_path, capsys):
+    from uidetox.commands import loop as loop_cmd
+
+    root = tmp_path / "build" / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "src" / "App.tsx").write_text("export const App = () => null;\n", encoding="utf-8")
+
+    monkeypatch.chdir(root)
+
+    monkeypatch.setattr(loop_cmd, "load_config", lambda: {"tooling": {"typescript": None, "linter": None, "formatter": None}, "auto_commit": False})
+    monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: None)
+    monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
+    monkeypatch.setattr(loop_cmd, "get_notes", lambda: [])
+    monkeypatch.setattr(loop_cmd, "get_session", lambda: {})
+    monkeypatch.setattr(loop_cmd, "get_last_scan", lambda: None)
+    monkeypatch.setattr(loop_cmd, "ensure_uidetox_dir", lambda: root / ".uidetox")
+
+    loop_cmd.run(argparse.Namespace(target=95, orchestrator=False))
+    output = capsys.readouterr().out
+
+    assert "Files: 1" in output
+
+
+def test_ensure_uidetox_dir_creates_state_dir_at_git_root_on_cold_start(tmp_path, monkeypatch):
+    project_root = tmp_path / "repo"
+    nested_dir = project_root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (project_root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    from uidetox.state import ensure_uidetox_dir
+
+    uidetox_dir = ensure_uidetox_dir()
+
+    assert uidetox_dir == (project_root / ".uidetox").resolve()
+    assert uidetox_dir.exists()
+
+
+def test_get_project_root_uses_manifest_marker_when_git_and_uidetox_are_missing(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    nested_dir = project_root / "app" / "components"
+    nested_dir.mkdir(parents=True)
+    (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+
+    monkeypatch.chdir(nested_dir)
+
+    from uidetox.state import get_project_root
+
+    assert get_project_root() == project_root.resolve()
+
+
+def test_get_project_root_prefers_git_root_over_nested_manifest_on_cold_start(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    nested_dir = repo_root / "packages" / "app" / "src"
+    nested_dir.mkdir(parents=True)
+    (repo_root / ".git").mkdir()
+    (repo_root / "packages" / "app" / "package.json").write_text('{"name":"app"}\n', encoding="utf-8")
+
+    monkeypatch.chdir(nested_dir)
+
+    from uidetox.state import get_project_root
+
+    assert get_project_root() == repo_root.resolve()
+
+
+def test_check_run_with_missing_git_does_not_raise(monkeypatch):
+    fmt_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            raise FileNotFoundError("git")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should not be reached when git is missing")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+
+    config = {
+        "auto_commit": True,
+        "tooling": {
+            "typescript": None,
+            "linter": None,
+            "formatter": {"fix_cmd": "fmt"},
+        },
+    }
+    monkeypatch.setattr(check, "load_config", lambda: config)
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+
+    assert ["fmt"] in calls
+
+
+def test_prepare_subprocess_cmd_extracts_env_prefixes_and_preserves_quotes():
+    from uidetox.utils import prepare_subprocess_cmd
+
+    argv, env = prepare_subprocess_cmd("CI=1 NODE_OPTIONS='--max-old-space-size=4096' prettier --check 'src/App File.tsx'")
+
+    assert argv == ["prettier", "--check", "src/App File.tsx"]
+    assert env is not None
+    assert env["CI"] == "1"
+    assert env["NODE_OPTIONS"] == "--max-old-space-size=4096"
+
+
+def test_tracked_changed_files_returns_empty_when_git_missing(monkeypatch):
+    from uidetox.utils import tracked_changed_files
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert tracked_changed_files() == set()
+
+
+def test_tracked_changed_files_unquotes_paths_with_spaces(monkeypatch):
+    from uidetox.utils import tracked_changed_files
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=' M "src/file with space.txt"\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert tracked_changed_files() == {"src/file with space.txt"}
+
+
+def test_tracked_changed_files_preserves_arrow_in_quoted_non_rename_paths(monkeypatch):
+    from uidetox.utils import tracked_changed_files
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=' M "src/a -> b.txt"\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert tracked_changed_files() == {"src/a -> b.txt"}
+
+
+def test_tracked_changed_files_uses_destination_for_quoted_renames(monkeypatch):
+    from uidetox.utils import tracked_changed_files
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='R  "src/old name.txt" -> "src/new name.txt"\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert tracked_changed_files() == {"src/new name.txt"}
+
+
+def test_tracked_changed_files_handles_quoted_rename_sources_with_arrows(monkeypatch):
+    from uidetox.utils import tracked_changed_files
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='R  "src/old -> name.txt" -> "src/new name.txt"\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert tracked_changed_files() == {"src/new name.txt"}
+
+
+def test_tsc_run_supports_env_prefixed_command(monkeypatch):
+    from uidetox.commands import tsc as tsc_mod
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(tsc_mod, "load_config", lambda: {"tooling": {"typescript": {"run_cmd": "CI=1 tsc --noEmit"}}})
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(tsc_mod.subprocess, "run", fake_run)
+
+    tsc_mod.run(argparse.Namespace(fix=False))
+
+    assert captured["cmd"] == ["tsc", "--noEmit"]
+    assert captured["env"] is not None and captured["env"]["CI"] == "1"
+
+
+def test_batch_resolve_verification_supports_env_prefixed_commands(monkeypatch):
+    from uidetox.commands import batch_resolve
+
+    calls = []
+    config = {"tooling": {"linter": {"fix_cmd": "CI=1 lint --fix"}}}
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("env")))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    assert batch_resolve._run_verification(config) is True
+    assert calls[0][0] == ["lint", "--fix"]
+    assert calls[0][1] is not None and calls[0][1]["CI"] == "1"
 
 
 def test_finish_preflight_rejects_dirty_workspace(monkeypatch):
@@ -97,6 +838,59 @@ def test_finish_preflight_rejects_dirty_workspace(monkeypatch):
 def test_package_version_matches_runtime_version():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     assert uidetox.__version__ == pyproject["project"]["version"]
+
+
+def test_detect_backend_skips_python_tooling_only_repo(tmp_path):
+    from uidetox.tooling import detect_backend
+
+    (tmp_path / "pyproject.toml").write_text(
+        dedent("""\
+            [project]
+            name = "tool-only"
+            version = "0.1.0"
+            dependencies = ["typer>=0.12", "rich>=13"]
+        """),
+        encoding="utf-8",
+    )
+
+    assert detect_backend(tmp_path) == []
+
+
+def test_detect_backend_detects_fastapi_from_pyproject(tmp_path):
+    from uidetox.tooling import detect_backend
+
+    (tmp_path / "pyproject.toml").write_text(
+        dedent("""\
+            [project]
+            name = "api"
+            version = "0.1.0"
+            dependencies = ["fastapi>=0.110", "uvicorn>=0.29"]
+        """),
+        encoding="utf-8",
+    )
+
+    backends = detect_backend(tmp_path)
+
+    assert len(backends) == 1
+    assert backends[0].name == "python"
+    assert backends[0].config_file == "pyproject.toml"
+
+
+def test_detect_backend_skips_generic_root_main_py_without_backend_markers(tmp_path):
+    from uidetox.tooling import detect_backend
+
+    (tmp_path / "main.py").write_text(
+        dedent("""\
+            def main():
+                print("hello")
+
+            if __name__ == "__main__":
+                main()
+        """),
+        encoding="utf-8",
+    )
+
+    assert detect_backend(tmp_path) == []
 
 
 def test_analyzer_reports_line_and_column_for_frontend_issue(tmp_path):
@@ -271,6 +1065,564 @@ def test_autofix_loads_config_before_transform_auto_commit_check(tmp_path, monke
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     autofix.run(argparse.Namespace(dry_run=False))
+
+
+def test_autofix_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"auto_commit": True})
+
+    target = tmp_path / "App.tsx"
+    target.write_text("before", encoding="utf-8")
+
+    from uidetox.state import add_issue
+
+    add_issue({
+        "id": "SCAN-DIRTY1",
+        "file": str(target),
+        "tier": "T1",
+        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+        "command": "Swap font family.",
+    })
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M App.tsx\n", stderr="")
+
+        if cmd[:3] == ["npx", "jscodeshift", "-t"]:
+            target.write_text("after", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
+
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    autofix.run(argparse.Namespace(dry_run=False))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+
+
+def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"auto_commit": True})
+
+    nested_dir = tmp_path / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    target = tmp_path / "src" / "App.tsx"
+    target.write_text("before", encoding="utf-8")
+
+    from uidetox.state import add_issue
+
+    add_issue({
+        "id": "SCAN-RELATIVE1",
+        "file": "src/App.tsx",
+        "tier": "T1",
+        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+        "command": "Swap font family.",
+    })
+
+    monkeypatch.chdir(nested_dir)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        if cmd[:3] == ["npx", "jscodeshift", "-t"]:
+            assert cmd[-1] == str(target.resolve())
+            assert kwargs.get("cwd") == tmp_path.resolve()
+            target.write_text("after", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    autofix.run(argparse.Namespace(dry_run=False))
+    output = capsys.readouterr().out
+
+    assert "Automatically transformed 1 file(s)" in output
+    assert ["git", "add", str(target.resolve())] in calls
+
+
+def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_transform(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"auto_commit": False})
+
+    target = tmp_path / "src" / "App.tsx"
+    target.parent.mkdir(parents=True)
+    target.write_text("before", encoding="utf-8")
+
+    from uidetox.state import add_issue
+
+    add_issue({
+        "id": "SCAN-RELATIVE2",
+        "file": "src/App.tsx",
+        "tier": "T1",
+        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+        "command": "Swap font family.",
+    })
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["npx", "jscodeshift", "-t"]:
+            target.write_text("after", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    autofix.run(argparse.Namespace(dry_run=False))
+    output = capsys.readouterr().out
+
+    assert "need manual fixing" not in output
+
+
+def test_batch_resolve_verification_fails_when_linter_command_missing(monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    config = {"tooling": {"linter": {"fix_cmd": "missing-linter --fix"}}}
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("missing-linter")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    assert batch_resolve._run_verification(config) is False
+    output = capsys.readouterr().out
+    assert "Linter auto-fix failed" in output
+
+
+def test_batch_resolve_verification_fails_when_formatter_times_out(monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    config = {"tooling": {"formatter": {"fix_cmd": "fmt --write ."}}}
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=120)
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    assert batch_resolve._run_verification(config) is False
+    output = capsys.readouterr().out
+    assert "Formatter auto-fix timed out" in output
+
+
+def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    issue_file = tmp_path / "src" / "App.tsx"
+    unrelated_file = tmp_path / "src" / "Other.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
+    unrelated_file.write_text("export const Other = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-BATCH1",
+        "file": str(issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Other.tsx\n", stderr="")
+
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH1"], note="Applied fix", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+
+
+def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    issue_file = tmp_path / "src" / "App.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-BATCH2",
+        "file": str(issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/App.tsx\n", stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH2"], note="Applied fix", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Auto-committed" in output
+    assert ["git", "add", str(issue_file)] in calls
+    assert ["git", "add", str((tmp_path / ".uidetox/state.json").resolve())] in calls
+    assert ["git", "commit", "-m", "[UIdetox] Detoxed src: Applied fix (1 issues resolved)", "--no-verify"] in calls
+
+
+def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    old_issue_file = tmp_path / "src" / "OldApp.tsx"
+    new_issue_file = tmp_path / "src" / "NewApp.tsx"
+    old_issue_file.parent.mkdir(parents=True)
+    old_issue_file.write_text("export const App = () => null;", encoding="utf-8")
+    old_issue_file.unlink()
+    new_issue_file.write_text("export const App = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-BATCH-RENAME",
+        "file": str(old_issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=' D src/OldApp.tsx\n',
+                stderr="",
+            )
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=' D src/OldApp.tsx\n?? src/NewApp.tsx\n',
+                stderr="",
+            )
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH-RENAME"], note="Renamed file", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Auto-committed" in output
+    assert ["git", "add", str(old_issue_file)] in calls
+    assert ["git", "add", str(new_issue_file)] in calls
+
+
+def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import batch_resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    old_issue_file = tmp_path / "src" / "OldApp.tsx"
+    old_issue_file.parent.mkdir(parents=True)
+    old_issue_file.write_text("export const App = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-BATCH-UNTRACKED",
+        "file": str(old_issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldApp.tsx\n', stderr="")
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldApp.tsx\n?? src/NewApp.tsx\n?? src/UNRELATED.txt\n', stderr="")
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped when unrelated untracked files exist")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
+
+    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH-UNTRACKED"], note="Renamed file", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+
+
+def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    issue_file = tmp_path / "src" / "Button.tsx"
+    unrelated_file = tmp_path / "src" / "Other.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+    unrelated_file.write_text("export const Other = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-RESOLVE1",
+        "file": str(issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Other.tsx\n", stderr="")
+
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+
+    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE1", note="Applied fix", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+
+
+def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    issue_file = tmp_path / "src" / "Button.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-RESOLVE2",
+        "file": str(issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Button.tsx\n", stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+
+    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE2", note="Applied fix", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Auto-committed to git" in output
+    assert ["git", "add", str(issue_file)] in calls
+    assert ["git", "add", str((tmp_path / ".uidetox/state.json").resolve())] in calls
+    assert ["git", "commit", "-m", "[UIdetox] Fixed SCAN-RESOLVE2: Applied fix", "--no-verify"] in calls
+
+
+def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    old_issue_file = tmp_path / "src" / "OldButton.tsx"
+    new_issue_file = tmp_path / "src" / "NewButton.tsx"
+    old_issue_file.parent.mkdir(parents=True)
+    old_issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+    old_issue_file.unlink()
+    new_issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-RESOLVE-RENAME",
+        "file": str(old_issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=' D src/OldButton.tsx\n',
+                stderr="",
+            )
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=' D src/OldButton.tsx\n?? src/NewButton.tsx\n',
+                stderr="",
+            )
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+
+    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-RENAME", note="Renamed file", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Auto-committed to git" in output
+    assert ["git", "add", str(old_issue_file)] in calls
+    assert ["git", "add", str(new_issue_file)] in calls
+
+
+def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import resolve
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+
+    from uidetox.state import add_issue
+
+    old_issue_file = tmp_path / "src" / "OldButton.tsx"
+    old_issue_file.parent.mkdir(parents=True)
+    old_issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-RESOLVE-UNTRACKED",
+        "file": str(old_issue_file),
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldButton.tsx\n', stderr="")
+        if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldButton.tsx\n?? src/NewButton.tsx\n?? src/UNRELATED.txt\n', stderr="")
+        if cmd[:2] in (["git", "add"], ["git", "commit"]):
+            raise AssertionError("git add/commit should be skipped when unrelated untracked files exist")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+
+    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-UNTRACKED", note="Renamed file", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Skipped git auto-commit" in output
+
+
+def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_path(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import resolve
+
+    root = tmp_path
+    src_dir = root / "src"
+    src_dir.mkdir(parents=True)
+    monkeypatch.chdir(root)
+    ensure_uidetox_dir()
+    monkeypatch.chdir(src_dir)
+
+    from uidetox.state import add_issue
+
+    issue_file = root / "src" / "Button.tsx"
+    issue_file.write_text("export const Button = () => null;", encoding="utf-8")
+
+    add_issue({
+        "id": "SCAN-RESOLVE-SUBDIR",
+        "file": "src/Button.tsx",
+        "tier": "T1",
+        "issue": "Example issue",
+        "command": "fix",
+    })
+
+    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Button.tsx\n", stderr="")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+
+    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-SUBDIR", note="Applied fix", skip_verify=False))
+    output = capsys.readouterr().out
+
+    assert "Auto-committed to git" in output
+    assert ["git", "add", str(issue_file)] in calls
+    assert ["git", "add", str((root / ".uidetox/state.json").resolve())] in calls
 
 
 # ── Batch 3: new detection rule tests ───────────────────────────────────────
@@ -2805,6 +4157,39 @@ def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
     assert not any(i.get("id") == "LOW_CONTRAST_SLOP" for i in issues)
 
 
+def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_path):
+    from uidetox.analyzer import analyze_directory
+
+    (tmp_path / "pyproject.toml").write_text(
+        dedent("""\
+            [project]
+            name = "tool-only"
+            version = "0.1.0"
+        """),
+        encoding="utf-8",
+    )
+
+    issues = analyze_directory(str(tmp_path))
+
+    assert not any(
+        i.get("id") == "LOW_CONTRAST_SLOP" and "Dynamic color audit" in i.get("issue", "")
+        for i in issues
+    )
+
+
+def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(tmp_path):
+    from uidetox.color_utils import audit_project_colors
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "globals.css").write_text(
+        ":root { --brand: #123456; --accent: #abcdef; }",
+        encoding="utf-8",
+    )
+
+    violations = audit_project_colors(tmp_path)
+    assert violations == []
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # EMOJI_BULLET_LIST_SLOP — 3+ emoji-prefixed bullet lines
 # ──────────────────────────────────────────────────────────────────────────────
@@ -4424,6 +5809,752 @@ def test_diff_scope_files_uses_git_root(monkeypatch, tmp_path):
     assert bad_path not in scope_files, "Old doubled-path construction must not appear"
 
 
+def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    analyzed_path = None
+
+    def fake_analyze_target(path, config):
+        nonlocal analyzed_path
+        analyzed_path = Path(path).resolve()
+        return []
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []})
+    monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert analyzed_path == root.resolve()
+
+
+def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_as_fixed(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue = {
+        "id": "SCAN-ABC123",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    emitted = {}
+
+    def fake_git_run(cmd, **kwargs):
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+
+    def fake_analyze_target(path, config):
+        if Path(path).resolve() == root.resolve():
+            return [issue]
+        return []
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["summary"] = {
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        }
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]})
+    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+
+    assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 1}
+
+
+def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue = {
+        "id": "SCAN-ABC123",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    saved_states = []
+
+    def fake_git_run(cmd, **kwargs):
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+
+    def fake_analyze_target(path, config):
+        if Path(path).resolve() == root.resolve():
+            return [issue]
+        return []
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]})
+    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
+    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=True))
+
+    assert saved_states, "diff --save should persist updated state"
+    assert saved_states[-1]["issues"] == []
+    assert saved_states[-1]["diff_baseline"][0]["file"] == issue["file"]
+
+
+def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as_unchanged(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    baseline_issue = {
+        "id": "SCAN-ABC123",
+        "file": "src/App.tsx",
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+    fresh_issue = {
+        "id": "DIV_SOUP_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    emitted = {}
+
+    def fake_git_run(cmd, **kwargs):
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["summary"] = {
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        }
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [baseline_issue]})
+    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [fresh_issue])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+
+    assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 1}
+
+
+def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseline_issue(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "frontend" / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    baseline_issue = {
+        "id": "SCAN-ABC123",
+        "file": "src/App.tsx",
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+    fresh_issue = {
+        "id": "DIV_SOUP_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    saved_states = []
+
+    def fake_git_run(cmd, **kwargs):
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [baseline_issue]})
+    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
+    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [fresh_issue])
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=True))
+
+    assert saved_states, "diff --save should persist updated state"
+    assert saved_states[-1]["issues"] == []
+    assert len(saved_states[-1]["diff_baseline"]) == 1
+    assert saved_states[-1]["diff_baseline"][0]["file"] == str(root / "src" / "App.tsx")
+
+
+def test_diff_run_save_round_trip_keeps_unchanged_issue_stable(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue = {
+        "id": "DIV_SOUP_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    state_store = {"issues": [], "diff_baseline": []}
+    emitted = []
+
+    def fake_load_state():
+        return {
+            "issues": list(state_store["issues"]),
+            "diff_baseline": list(state_store["diff_baseline"]),
+        }
+
+    def fake_save_state(state):
+        state_store["issues"] = list(state.get("issues", []))
+        state_store["diff_baseline"] = list(state.get("diff_baseline", []))
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted.append({
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        })
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
+    monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert len(state_store["diff_baseline"]) == 1
+    assert emitted[0] == {"new": 1, "fixed": 0, "unchanged": 0}
+    assert emitted[1] == {"new": 0, "fixed": 0, "unchanged": 1}
+
+
+def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue1 = {
+        "id": "IMG_ALT_MISSING_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "img tag missing alt attribute",
+        "command": "add alt",
+        "line": 3,
+        "column": 1,
+    }
+    issue2 = {
+        "id": "IMG_ALT_MISSING_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "img tag missing alt attribute",
+        "command": "add alt",
+        "line": 8,
+        "column": 1,
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    emitted = {}
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["summary"] = {
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        }
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue1, issue2]})
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 2}
+
+
+def test_diff_run_save_round_trip_preserves_duplicate_issue_texts_at_different_lines(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue1 = {
+        "id": "IMG_ALT_MISSING_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "img tag missing alt attribute",
+        "command": "add alt",
+        "line": 3,
+        "column": 1,
+    }
+    issue2 = {
+        "id": "IMG_ALT_MISSING_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "img tag missing alt attribute",
+        "command": "add alt",
+        "line": 8,
+        "column": 1,
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    state_store = {"issues": [], "diff_baseline": []}
+    emitted = []
+
+    def fake_load_state():
+        return {
+            "issues": list(state_store["issues"]),
+            "diff_baseline": list(state_store["diff_baseline"]),
+        }
+
+    def fake_save_state(state):
+        state_store["issues"] = list(state.get("issues", []))
+        state_store["diff_baseline"] = list(state.get("diff_baseline", []))
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted.append({
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        })
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
+    monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert len(state_store["issues"]) == 0
+    assert len(state_store["diff_baseline"]) == 2
+    assert emitted[0] == {"new": 2, "fixed": 0, "unchanged": 0}
+    assert emitted[1] == {"new": 0, "fixed": 0, "unchanged": 2}
+
+
+def test_diff_run_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue = {
+        "id": "SCAN-ABC123",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "manual design issue without location",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    emitted = {}
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["summary"] = {
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        }
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [dict(issue), dict(issue)]})
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 2}
+
+
+def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    issue = {
+        "id": "SCAN-ABC123",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "manual design issue without location",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    state_store = {"issues": [], "diff_baseline": []}
+    emitted = []
+
+    def fake_load_state():
+        return {
+            "issues": list(state_store["issues"]),
+            "diff_baseline": list(state_store["diff_baseline"]),
+        }
+
+    def fake_save_state(state):
+        state_store["issues"] = list(state.get("issues", []))
+        state_store["diff_baseline"] = list(state.get("diff_baseline", []))
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted.append({
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        })
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
+    monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert len(state_store["issues"]) == 0
+    assert len(state_store["diff_baseline"]) == 2
+    assert emitted[0] == {"new": 2, "fixed": 0, "unchanged": 0}
+    assert emitted[1] == {"new": 0, "fixed": 0, "unchanged": 2}
+
+
+def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    manual_issue = {
+        "id": "SCAN-MANUAL",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T3",
+        "issue": "Subjective spacing note from manual review",
+        "command": "manual-fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    emitted = {}
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["summary"] = {
+            "new": len(new_issues),
+            "fixed": len(fixed_issues),
+            "unchanged": len(unchanged_issues),
+        }
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []})
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [])
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
+
+    assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 0}
+
+
+def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    manual_issue = {
+        "id": "SCAN-MANUAL",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T3",
+        "issue": "Subjective spacing note from manual review",
+        "command": "manual-fix",
+    }
+    static_issue = {
+        "id": "DIV_SOUP_SLOP",
+        "file": str(root / "src" / "App.tsx"),
+        "tier": "T2",
+        "issue": "existing repo issue",
+        "command": "fix",
+    }
+
+    monkeypatch.chdir(nested_dir)
+
+    saved_states = []
+
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []})
+    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
+    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [static_issue])
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
+
+    assert saved_states, "diff --save should persist updated state"
+    assert saved_states[-1]["issues"] == [manual_issue]
+    assert saved_states[-1]["diff_baseline"] == [static_issue]
+
+
+def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(tmp_path, monkeypatch):
+    from uidetox.commands import suppress as suppress_cmd
+    from uidetox.state import load_config, save_state
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"ignore_patterns": []})
+
+    live_match = {
+        "id": "SCAN-LIVE-MATCH",
+        "file": "src/App.tsx",
+        "tier": "T3",
+        "issue": "Manual spacing note",
+        "command": "manual-fix",
+    }
+    live_keep = {
+        "id": "SCAN-LIVE-KEEP",
+        "file": "src/Card.tsx",
+        "tier": "T2",
+        "issue": "Keep this live issue",
+        "command": "fix-card",
+    }
+    baseline_match = {
+        "id": "DIV_SOUP_SLOP",
+        "file": "src/App.tsx",
+        "tier": "T2",
+        "issue": "Static spacing smell",
+        "command": "fix-static",
+    }
+    baseline_keep = {
+        "id": "BUTTON_HIERARCHY_SLOP",
+        "file": "src/Button.tsx",
+        "tier": "T2",
+        "issue": "Keep this baseline issue",
+        "command": "fix-button",
+    }
+
+    save_state(
+        {
+            "last_scan": None,
+            "issues": [live_match, live_keep],
+            "diff_baseline": [baseline_match, baseline_keep],
+            "resolved": [],
+            "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
+        }
+    )
+
+    suppress_cmd.run(argparse.Namespace(pattern="spacing", remove=False))
+
+    state = load_state()
+    config = load_config()
+
+    assert config["ignore_patterns"] == ["spacing"]
+    assert state["issues"] == [live_keep]
+    assert state["diff_baseline"] == [baseline_keep]
+
+
+def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(tmp_path, monkeypatch):
+    from uidetox.commands import suppress as suppress_cmd
+    from uidetox.state import load_config, save_state
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"ignore_patterns": ["spacing"]})
+
+    manual_issue = {
+        "id": "SCAN-MANUAL-SPACING",
+        "file": "src/App.tsx",
+        "tier": "T3",
+        "issue": "Manual spacing note",
+        "command": "manual-fix",
+    }
+    baseline_issue = {
+        "id": "STATIC-SPACING",
+        "file": "src/App.tsx",
+        "tier": "T2",
+        "issue": "Static spacing smell",
+        "command": "fix-static",
+    }
+
+    save_state(
+        {
+            "last_scan": None,
+            "issues": [manual_issue],
+            "diff_baseline": [baseline_issue],
+            "resolved": [],
+            "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
+        }
+    )
+
+    suppress_cmd.run(argparse.Namespace(pattern="spacing", remove=False))
+
+    state = load_state()
+    config = load_config()
+
+    assert config["ignore_patterns"] == ["spacing"]
+    assert state["issues"] == []
+    assert state["diff_baseline"] == []
+
+
+def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+    from uidetox.commands import rescan as rescan_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    analyzed_path = None
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal analyzed_path
+        analyzed_path = Path(path).resolve()
+        return []
+
+    monkeypatch.setattr(rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", fake_analyze_directory)
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert analyzed_path == root.resolve()
+
+
+def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+    from uidetox.commands import viz as viz_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+
+    def fake_render_html_treemap(root_path, issue_map):
+        nonlocal captured_root
+        captured_root = root_path.resolve()
+
+    monkeypatch.setattr(viz_cmd, "load_state", lambda: {"issues": []})
+    monkeypatch.setattr(viz_cmd, "_render_html_treemap", fake_render_html_treemap)
+
+    viz_cmd.run(argparse.Namespace(path=".", viz_cmd="viz"))
+
+    assert captured_root == root.resolve()
+
+
+def test_watch_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+    from uidetox.commands import watch as watch_cmd
+
+    root = tmp_path / "repo"
+    nested_dir = root / "src" / "nested"
+    nested_dir.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    captured_root = None
+
+    def fake_snapshot(root_path):
+        nonlocal captured_root
+        captured_root = root_path.resolve()
+        return {}
+
+    def interrupt_sleep(_interval):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(watch_cmd, "_snapshot", fake_snapshot)
+    monkeypatch.setattr(watch_cmd, "analyze_file", lambda path: [])
+    monkeypatch.setattr(watch_cmd.time, "sleep", interrupt_sleep)
+
+    watch_cmd.run(argparse.Namespace(path=".", interval=0.01, clear=False))
+
+    assert captured_root == root.resolve()
+
+
+def test_viz_build_tree_uses_root_relative_paths_for_absolute_issue_files(tmp_path):
+    from uidetox.commands.viz import _build_tree
+
+    root = tmp_path / "repo"
+    issue_map = {
+        str(root / "src" / "App.tsx"): [{"tier": "T2", "issue": "x", "command": "fix"}],
+    }
+
+    tree = _build_tree(root, issue_map)
+
+    assert "/" not in tree["children"], "Tree should not start from filesystem root for absolute issue paths"
+    assert "src" in tree["children"]
+    assert "App.tsx" in tree["children"]["src"]["children"]
+
+
 # ── viz.py: HTML injection prevention ─────────────────────────────────────
 
 def test_viz_treemap_html_escapes_issue_descriptions(tmp_path, monkeypatch):
@@ -4745,6 +6876,52 @@ class TestSubagentCorruptedJsonResilience:
         assert sa.get_session("does_not_exist") is None
 
 
+class TestSubagentCodebaseMemoryPromptGuidance:
+    """Sub-agent prompts should prefer codebase-memory MCP tools."""
+
+    def test_observe_prompt_prefers_codebase_memory_tools(self):
+        import uidetox.subagent as sa
+
+        prompt = sa._observe_prompt({}, [], "## Active Design Dials")
+        legacy_tool = "git" + "nexus"
+
+        assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
+        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound")' in prompt
+        assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
+        assert legacy_tool not in prompt.lower()
+
+    def test_fix_prompt_requires_codebase_memory_impact_check(self, monkeypatch):
+        import uidetox.subagent as sa
+        import uidetox.commands.next as next_mod
+
+        monkeypatch.setattr(sa, "_build_memory_block", lambda *args, **kwargs: "")
+        monkeypatch.setattr(sa, "_build_deconfliction_block", lambda *args, **kwargs: "")
+        monkeypatch.setattr(next_mod, "_get_relevant_context", lambda batch: [])
+
+        prompt = sa._fix_prompt(
+            [{"id": "SCAN-1", "tier": "T1", "file": "src/App.tsx", "issue": "Example issue"}],
+            "## Active Design Dials",
+        )
+        legacy_tool = "git" + "nexus"
+
+        assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
+        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)' in prompt
+        assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
+        assert legacy_tool not in prompt.lower()
+
+
+def test_agents_docs_use_only_codebase_memory():
+    root_agents = Path("AGENTS.md").read_text(encoding="utf-8")
+    bundled_agents = Path("uidetox/data/AGENTS.md").read_text(encoding="utf-8")
+
+    legacy_tool = "git" + "nexus"
+    for content in (root_agents, bundled_agents):
+        assert "codebase-memory-mcp" in content
+        assert "search_graph" in content
+        assert "trace_path" in content
+        assert legacy_tool not in content.lower()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # setup.py — EOFError resilience in non-interactive mode
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4761,10 +6938,16 @@ class TestSetupEOFErrorResilience:
         monkeypatch.setattr(setup_mod, "load_config", lambda: {"auto_commit": False})
         monkeypatch.setattr(setup_mod, "save_config", lambda cfg: None)
 
+        class _FakeInteractiveStdin:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(setup_mod.sys, "stdin", _FakeInteractiveStdin())
+
         # Simulate closed stdin: input() raises EOFError
         monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError))
 
-        args = argparse.Namespace(path=".", auto_commit=False)
+        args = argparse.Namespace(path=".", auto_commit=None)
         # Must not raise
         setup_mod.run(args)
 
@@ -4781,13 +6964,53 @@ class TestSetupEOFErrorResilience:
         monkeypatch.setattr(setup_mod, "ensure_uidetox_dir", lambda: None)
         monkeypatch.setattr(setup_mod, "load_config", lambda: {"auto_commit": False})
         monkeypatch.setattr(setup_mod, "save_config", _capture_save)
+
+        class _FakeInteractiveStdin:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(setup_mod.sys, "stdin", _FakeInteractiveStdin())
         monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError))
 
-        args = argparse.Namespace(path=".", auto_commit=False)
+        args = argparse.Namespace(path=".", auto_commit=None)
         setup_mod.run(args)
 
         # auto_commit should remain False (not erroneously changed to True)
         assert captured_cfg.get("auto_commit") is False
+
+    def test_setup_non_interactive_applies_flags_without_prompt(self, tmp_path, monkeypatch, capsys):
+        import uidetox.commands.setup as setup_mod
+
+        captured_cfg = {}
+
+        class _FakeStdin:
+            def isatty(self):
+                return False
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(setup_mod, "ensure_uidetox_dir", lambda: None)
+        monkeypatch.setattr(setup_mod, "load_config", lambda: {})
+        monkeypatch.setattr(setup_mod, "save_config", lambda cfg: captured_cfg.update(cfg))
+        monkeypatch.setattr(setup_mod.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("input() should not be called")))
+
+        args = argparse.Namespace(
+            path=".",
+            auto_commit=None,
+            design_variance=9,
+            motion_intensity=7,
+            visual_density=5,
+            dev_server="http://localhost:5173",
+        )
+
+        setup_mod.run(args)
+        output = capsys.readouterr().out
+
+        assert "Enable automated git commits" not in output
+        assert captured_cfg["DESIGN_VARIANCE"] == 9
+        assert captured_cfg["MOTION_INTENSITY"] == 7
+        assert captured_cfg["VISUAL_DENSITY"] == 5
+        assert captured_cfg["dev_server"] == "http://localhost:5173"
 
 
 class _FakeToolingProfile:
@@ -4824,6 +7047,35 @@ class TestWatchSubcommandRegistration:
         from uidetox.cli import parse_args
         ns = parse_args(["watch"])
         assert ns.clear is True
+
+
+class TestSetupSubcommandRegistration:
+    """uidetox setup should expose explicit config flags for non-interactive workflows."""
+
+    def test_setup_accepts_dials_and_dev_server(self):
+        from uidetox.cli import parse_args
+
+        ns = parse_args([
+            "setup",
+            "--design-variance", "9",
+            "--motion-intensity", "7",
+            "--visual-density", "5",
+            "--dev-server", "http://localhost:5173",
+            "--auto-commit",
+        ])
+
+        assert ns.command == "setup"
+        assert ns.design_variance == 9
+        assert ns.motion_intensity == 7
+        assert ns.visual_density == 5
+        assert ns.dev_server == "http://localhost:5173"
+        assert ns.auto_commit is True
+
+    def test_setup_defaults_auto_commit_to_none(self):
+        from uidetox.cli import parse_args
+
+        ns = parse_args(["setup"])
+        assert ns.auto_commit is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4933,3 +7185,836 @@ class TestDiffSubcommandRegistration:
             return
         skill_names = {f.stem for f in cmd_dir.glob("*.md") if f.stem not in ["scan", "setup", "fix"]}
         assert "diff" not in skill_names, "diff should be a real command, not a dynamic skill"
+
+
+def test_cli_get_commands_dir_prefers_project_root_commands(tmp_path, monkeypatch):
+    from uidetox.cli import _get_commands_dir
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".uidetox").mkdir()
+    (tmp_path / "commands").mkdir()
+
+    cmd_dir = _get_commands_dir()
+    assert cmd_dir == tmp_path / "commands"
+
+
+def test_cli_parse_args_registers_custom_claude_skill_directory(tmp_path, monkeypatch):
+    from uidetox.cli import parse_args
+
+    monkeypatch.chdir(tmp_path)
+    skill_dir = tmp_path / ".claude" / "skills" / "uidetox" / "commands"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "custom-skill.md").write_text("Custom skill", encoding="utf-8")
+
+    ns = parse_args(["custom-skill", "src/App.tsx"])
+
+    assert ns.command == "custom-skill"
+    assert ns.target == "src/App.tsx"
+
+
+class TestStateAndMemoryChaosResilience:
+    """Persistent JSON stores should survive wrong-but-valid JSON shapes."""
+
+    def test_load_config_wrong_top_level_type_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        from uidetox.state import load_config
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "config.json").write_text("[]", encoding="utf-8")
+
+        config = load_config()
+
+        assert isinstance(config, dict)
+        assert config["DESIGN_VARIANCE"] == 8
+        assert config["MOTION_INTENSITY"] == 6
+        assert config["VISUAL_DENSITY"] == 4
+
+    def test_load_config_invalid_utf8_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        from uidetox.state import load_config
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "config.json").write_bytes(b"\xff\xfe\x00")
+
+        config = load_config()
+
+        assert config["DESIGN_VARIANCE"] == 8
+        assert config["MOTION_INTENSITY"] == 6
+        assert config["VISUAL_DENSITY"] == 4
+
+    def test_load_config_normalizes_runtime_critical_nested_types(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_config
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "DESIGN_VARIANCE": "loud",
+                    "MOTION_INTENSITY": "fast",
+                    "VISUAL_DENSITY": "dense",
+                    "target_score": "ninety-five",
+                    "tooling": [],
+                    "ignore_patterns": "*.tmp",
+                    "exclude": "node_modules",
+                    "zone_overrides": [],
+                    "auto_commit": "yes",
+                    "dev_server": 5173,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config()
+
+        assert config["DESIGN_VARIANCE"] == 8
+        assert config["MOTION_INTENSITY"] == 6
+        assert config["VISUAL_DENSITY"] == 4
+        assert config["target_score"] == 95
+        assert config["tooling"] == {}
+        assert config["ignore_patterns"] == []
+        assert config["exclude"] == []
+        assert config["zone_overrides"] == {}
+        assert config["auto_commit"] is False
+        assert "dev_server" not in config
+
+    def test_load_config_normalizes_nested_tooling_entries(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_config
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "tooling": {
+                        "typescript": [],
+                        "linter": 7,
+                        "formatter": "prettier",
+                        "frontend": "vite",
+                        "backend": {},
+                        "database": "sqlite",
+                        "api": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config()
+
+        assert config["tooling"]["typescript"] is None
+        assert config["tooling"]["linter"] is None
+        assert config["tooling"]["formatter"] is None
+        assert config["tooling"]["frontend"] == []
+        assert config["tooling"]["backend"] == []
+        assert config["tooling"]["database"] == []
+        assert config["tooling"]["api"] == []
+
+    def test_load_config_filters_invalid_collection_members_and_tool_commands(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_config
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "ignore_patterns": [123, "*.tmp", None],
+                    "exclude": ["node_modules", 7],
+                    "tooling": {
+                        "formatter": {
+                            "name": "prettier",
+                            "run_cmd": ["prettier", "."],
+                            "fix_cmd": 99,
+                        },
+                        "frontend": [
+                            {"name": "vite", "run_cmd": "npx vite build"},
+                            "broken-entry",
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config()
+
+        assert config["ignore_patterns"] == ["*.tmp"]
+        assert config["exclude"] == ["node_modules"]
+        assert config["tooling"]["formatter"] is None
+        assert config["tooling"]["frontend"] == [{"name": "vite", "run_cmd": "npx vite build"}]
+
+    def test_load_state_invalid_utf8_falls_back_to_default_state(self, tmp_path, monkeypatch):
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_bytes(b"\xff\xfe\x00")
+
+        state = load_state()
+
+        assert state["last_scan"] is None
+        assert state["diff_baseline"] == []
+        assert state["issues"] == []
+        assert state["resolved"] == []
+        assert state["stats"] == {"total_found": 0, "total_resolved": 0, "scans_run": 0}
+
+    def test_load_state_normalizes_nested_stats_and_issue_shapes(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "last_scan": "2026-05-02T00:00:00Z",
+                    "issues": ["oops", {"id": "ISSUE-1", "file": "src/App.tsx"}],
+                    "resolved": [123, {"id": "ISSUE-2", "file": "src/App.tsx"}],
+                    "stats": {
+                        "total_found": "oops",
+                        "total_resolved": None,
+                        "scans_run": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_state()
+
+        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
+        assert state["resolved"] == [{"id": "ISSUE-2", "file": "src/App.tsx"}]
+        assert state["stats"] == {"total_found": 0, "total_resolved": 0, "scans_run": 0}
+
+    def test_load_state_normalizes_diff_baseline_shapes(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "diff_baseline": [
+                        "oops",
+                        {"id": "BASE-1", "file": "src/App.tsx"},
+                        42,
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_state()
+
+        assert state["diff_baseline"] == [{"id": "BASE-1", "file": "src/App.tsx"}]
+
+    def test_load_state_backfills_missing_diff_baseline_for_legacy_state(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "last_scan": "2026-05-02T00:00:00Z",
+                    "issues": [{"id": "ISSUE-1", "file": "src/App.tsx"}],
+                    "resolved": [],
+                    "stats": {"total_found": 1, "total_resolved": 0, "scans_run": 1},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_state()
+
+        assert state["diff_baseline"] == []
+        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
+
+    def test_load_state_normalizes_subjective_score_and_history(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "subjective": {
+                        "score": "loud",
+                        "history": [
+                            "oops",
+                            {"score": "bad"},
+                            {"score": 88, "timestamp": 123, "source": "agent"},
+                            {"score": 91, "timestamp": "2026-05-02T00:00:00Z"},
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_state()
+
+        assert "score" not in state["subjective"]
+        assert state["subjective"]["history"] == [
+            {"score": 88, "timestamp": "", "source": "agent"},
+            {"score": 91, "timestamp": "2026-05-02T00:00:00Z"},
+        ]
+
+    def test_load_state_preserves_extra_stats_keys_and_subjective_history_metadata(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "stats": {
+                        "total_found": "oops",
+                        "total_resolved": 2,
+                        "scans_run": 3,
+                        "future_metric": {"keep": True},
+                    },
+                    "subjective": {
+                        "history": [
+                            {"score": 88, "timestamp": 123, "source": "agent", "notes": {"keep": True}},
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_state()
+
+        assert state["stats"]["total_found"] == 0
+        assert state["stats"]["future_metric"] == {"keep": True}
+        assert state["subjective"]["history"] == [
+            {"score": 88, "timestamp": "", "source": "agent", "notes": {"keep": True}}
+        ]
+
+    def test_store_subjective_score_recovers_from_non_dict_subjective_state(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.commands import review as review_cmd
+        from uidetox.state import load_state
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "subjective": [],
+                    "issues": [],
+                    "resolved": [],
+                    "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        review_cmd._store_subjective_score(87)
+        state = load_state()
+
+        assert state["subjective"]["score"] == 87
+        assert state["subjective"]["history"][-1]["score"] == 87
+
+    def test_status_run_tolerates_corrupted_subjective_state(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import status as status_cmd
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "subjective": [],
+                    "issues": [],
+                    "resolved": [],
+                    "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status_cmd.run(argparse.Namespace(json=True))
+        payload = json.loads(capsys.readouterr().out)
+
+        assert payload["subjective_score"] is None
+        assert payload["design_score"] == 50
+
+    def test_load_run_history_skips_non_dict_snapshot_files(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.history import load_run_history
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text("[]", encoding="utf-8")
+        (history_dir / "run_2026-05-02T00-00-01.json").write_text(
+            json.dumps({"timestamp": "2026-05-02T00:00:01Z", "design_score": 97}),
+            encoding="utf-8",
+        )
+
+        runs = load_run_history()
+
+        assert len(runs) == 1
+        assert runs[0]["timestamp"] == "2026-05-02T00:00:01Z"
+        assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
+
+    def test_load_run_history_skips_invalid_utf8_snapshot_files(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.history import load_run_history
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_bytes(b"\xff\xfe\x00")
+        (history_dir / "run_2026-05-02T00-00-01.json").write_text(
+            json.dumps({"timestamp": "2026-05-02T00:00:01Z", "design_score": 97}),
+            encoding="utf-8",
+        )
+
+        runs = load_run_history()
+
+        assert len(runs) == 1
+        assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
+
+    def test_history_command_tolerates_malformed_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import history_cmd
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": ["not-a-string"],
+                    "trigger": {"oops": True},
+                    "design_score": "loud",
+                    "pending_issues": "many",
+                    "resolved_issues": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        history_cmd.run(argparse.Namespace(full=False, json=False))
+        output = capsys.readouterr().out
+
+        assert "UIdetox Run History" in output
+        assert "?" in output
+        assert "loud" not in output
+        assert "many" not in output
+
+    def test_history_command_full_json_includes_raw_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import history_cmd
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-05-02T00:00:00Z",
+                    "trigger": "scan",
+                    "design_score": 91,
+                    "objective_score": 88,
+                    "subjective_score": 96,
+                    "pending_issues": 3,
+                    "resolved_issues": 5,
+                    "total_found": 8,
+                    "scans_run": 2,
+                    "issues": [{"id": "ISSUE-1"}],
+                    "resolved": [{"id": "ISSUE-2"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        history_cmd.run(argparse.Namespace(full=True, json=True))
+        payload = json.loads(capsys.readouterr().out)
+
+        assert payload["total"] == 1
+        assert payload["runs"][0]["objective_score"] == 88
+        assert payload["runs"][0]["subjective_score"] == 96
+        assert payload["runs"][0]["issues"] == [{"id": "ISSUE-1"}]
+        assert payload["runs"][0]["_file"] == "run_2026-05-02T00-00-00.json"
+
+    def test_history_command_full_text_prints_per_run_details(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import history_cmd
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-05-02T00:00:00Z",
+                    "trigger": "scan",
+                    "design_score": 91,
+                    "objective_score": 88,
+                    "subjective_score": 96,
+                    "pending_issues": 3,
+                    "resolved_issues": 5,
+                    "total_found": 8,
+                    "scans_run": 2,
+                    "issues": [{"id": "ISSUE-1"}],
+                    "resolved": [{"id": "ISSUE-2"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        history_cmd.run(argparse.Namespace(full=True, json=False))
+        output = capsys.readouterr().out
+
+        assert "run_2026-05-02T00-00-00.json" in output
+        assert "Objective" in output
+        assert "Subjective" in output
+        assert "Pending issues" in output
+
+    def test_history_command_full_text_tolerates_malformed_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import history_cmd
+
+        monkeypatch.chdir(tmp_path)
+        history_dir = tmp_path / ".uidetox" / "history"
+        history_dir.mkdir(parents=True)
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": ["not-a-string"],
+                    "trigger": {"oops": True},
+                    "design_score": "loud",
+                    "objective_score": None,
+                    "subjective_score": [],
+                    "pending_issues": "many",
+                    "resolved_issues": {},
+                    "issues": "not-a-list",
+                    "resolved": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        history_cmd.run(argparse.Namespace(full=True, json=False))
+        output = capsys.readouterr().out
+
+        assert "Full Run Details" in output
+        assert "n/a" in output
+        assert "loud" not in output
+        assert "many" not in output
+
+    def test_load_memory_wrong_top_level_type_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text("[]", encoding="utf-8")
+
+        memory = load_memory()
+
+        assert isinstance(memory, dict)
+        assert memory["reviewed_files"] == {}
+        assert memory["patterns"] == []
+        assert memory["notes"] == []
+        assert memory["session"] == {}
+
+    def test_load_memory_invalid_utf8_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_bytes(b"\xff\xfe\x00")
+
+        memory = load_memory()
+
+        assert memory["reviewed_files"] == {}
+        assert memory["patterns"] == []
+        assert memory["notes"] == []
+        assert memory["session"] == {}
+
+    def test_load_memory_resets_wrong_nested_types_but_preserves_valid_fields(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps(
+                {
+                    "reviewed_files": [],
+                    "patterns": "bad",
+                    "notes": {},
+                    "exclusions": "vendor",
+                    "session": [],
+                    "last_scan": {"total_found": 3},
+                    "progress_log": "oops",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        memory = load_memory()
+
+        assert memory["reviewed_files"] == {}
+        assert memory["patterns"] == []
+        assert memory["notes"] == []
+        assert memory["exclusions"] == []
+        assert memory["session"] == {}
+        assert memory["last_scan"]["total_found"] == 3
+        assert memory["last_scan"]["timestamp"] == ""
+        assert memory["last_scan"]["by_tier"] == {}
+        assert memory["last_scan"]["by_category"] == {}
+        assert memory["last_scan"]["top_files"] == []
+        assert memory["last_scan"]["files_scanned"] == 0
+        assert memory["progress_log"] == []
+
+    def test_load_memory_does_not_fabricate_session_checkpoint_for_missing_session(self, tmp_path, monkeypatch, capsys):
+        import json
+        import contextlib
+        import io
+        from uidetox.commands import memory_cmd
+        from uidetox.memory import get_session, load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps({"patterns": [{"pattern": "x"}]}),
+            encoding="utf-8",
+        )
+
+        assert load_memory()["session"] == {}
+        assert get_session() == {}
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            memory_cmd.run(argparse.Namespace(memory_action="show", value=None))
+
+        assert "Session Checkpoint" not in buffer.getvalue()
+
+    def test_load_memory_filters_invalid_pattern_and_note_entries(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.memory import load_memory
+        from uidetox.subagent import _build_memory_block
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps(
+                {
+                    "patterns": ["oops", {"pattern": "Keep this pattern", "category": "general"}],
+                    "notes": ["oops", {"note": "Keep this note"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        memory = load_memory()
+        block = _build_memory_block(query="keep")
+
+        assert memory["patterns"] == [{"pattern": "Keep this pattern", "category": "general"}]
+        assert memory["notes"] == [{"note": "Keep this note"}]
+        assert "Keep this pattern" in block
+        assert "Keep this note" in block
+
+    def test_save_session_recovers_from_corrupted_issue_counter(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.memory import get_session, save_session
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps({"session": {"issues_fixed_this_session": "oops"}}),
+            encoding="utf-8",
+        )
+
+        save_session(phase="fix", last_command="uidetox next", issues_fixed=2)
+        session = get_session()
+
+        assert session["phase"] == "fix"
+        assert session["last_command"] == "uidetox next"
+        assert session["issues_fixed_this_session"] == 2
+
+    def test_load_memory_normalizes_last_scan_counts_and_progress_log_entries(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps(
+                {
+                    "last_scan": {
+                        "timestamp": ["bad"],
+                        "total_found": "many",
+                        "files_scanned": None,
+                        "by_tier": {"T1": "oops", "T2": 2, 7: 3},
+                        "by_category": {"layout": "bad", "motion": 3},
+                        "top_files": ["src/App.tsx", 7, None],
+                        "future_meta": {"keep": True},
+                    },
+                    "progress_log": [
+                        "oops",
+                        {"action": ["bad"], "details": {"bad": True}, "timestamp": 123},
+                        {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z", "source": "agent"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        memory = load_memory()
+
+        assert memory["last_scan"]["timestamp"] == ""
+        assert memory["last_scan"]["total_found"] == 0
+        assert memory["last_scan"]["files_scanned"] == 0
+        assert memory["last_scan"]["by_tier"] == {"T1": 0, "T2": 2, "7": 3}
+        assert memory["last_scan"]["by_category"] == {"layout": 0, "motion": 3}
+        assert memory["last_scan"]["top_files"] == ["src/App.tsx"]
+        assert memory["last_scan"]["future_meta"] == {"keep": True}
+        assert memory["progress_log"] == [
+            {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z", "source": "agent"},
+        ]
+
+    def test_load_memory_preserves_extra_last_scan_and_progress_log_metadata(self, tmp_path, monkeypatch):
+        import json
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps(
+                {
+                    "last_scan": {
+                        "timestamp": "2026-05-02T00:00:00Z",
+                        "total_found": 4,
+                        "files_scanned": 2,
+                        "by_tier": {"T1": 1},
+                        "by_category": {"layout": 3},
+                        "top_files": ["src/App.tsx"],
+                        "future_meta": {"keep": True},
+                    },
+                    "progress_log": [
+                        {
+                            "action": "scan",
+                            "details": "ok",
+                            "timestamp": "2026-05-02T00:00:00Z",
+                            "source": "agent",
+                            "meta": {"keep": True},
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        memory = load_memory()
+
+        assert memory["last_scan"]["future_meta"] == {"keep": True}
+        assert memory["progress_log"] == [
+            {
+                "action": "scan",
+                "details": "ok",
+                "timestamp": "2026-05-02T00:00:00Z",
+                "source": "agent",
+                "meta": {"keep": True},
+            }
+        ]
+
+    def test_load_memory_normalizes_non_finite_counters(self, tmp_path, monkeypatch):
+        from uidetox.memory import load_memory
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            '{"last_scan": {"total_found": NaN, "files_scanned": Infinity, "by_tier": {"T1": NaN}, "by_category": {"layout": Infinity}}, "session": {"issues_fixed_this_session": NaN}}',
+            encoding="utf-8",
+        )
+
+        memory = load_memory()
+
+        assert memory["last_scan"]["total_found"] == 0
+        assert memory["last_scan"]["files_scanned"] == 0
+        assert memory["last_scan"]["by_tier"] == {"T1": 0}
+        assert memory["last_scan"]["by_category"] == {"layout": 0}
+        assert memory["session"] == {}
+
+    def test_memory_command_show_tolerates_malformed_last_scan_and_progress_log(self, tmp_path, monkeypatch, capsys):
+        import json
+        from uidetox.commands import memory_cmd
+
+        monkeypatch.chdir(tmp_path)
+        uidetox_dir = tmp_path / ".uidetox"
+        uidetox_dir.mkdir()
+        (uidetox_dir / "memory.json").write_text(
+            json.dumps(
+                {
+                    "last_scan": {
+                        "timestamp": ["bad"],
+                        "total_found": "many",
+                        "files_scanned": None,
+                        "by_tier": {"T1": "oops", "T2": 2},
+                        "by_category": {"layout": "bad", "motion": 3},
+                        "top_files": ["src/App.tsx", 7],
+                    },
+                    "progress_log": [
+                        "oops",
+                        {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        memory_cmd.run(argparse.Namespace(memory_action="show", value=None))
+        output = capsys.readouterr().out
+
+        assert "Agent Memory Bank" in output
+        assert "Last Scan Summary" in output
+        assert "many" not in output
+        assert "Recent Progress" in output
+        assert "scan: ok" in output
+
+
+def test_detect_all_survives_wrong_top_level_package_json(tmp_path):
+    from uidetox.tooling import detect_all
+
+    (tmp_path / "package.json").write_text("[]", encoding="utf-8")
+
+    profile = detect_all(tmp_path)
+
+    assert profile.package_manager == "npm"
+    assert profile.linter is None
+    assert profile.formatter is None

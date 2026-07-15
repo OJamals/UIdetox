@@ -3,10 +3,11 @@
 import argparse
 import json
 from uidetox.tooling import detect_all
-from uidetox.state import load_config, save_config
+from uidetox.state import get_project_root, load_config, save_config
 
 def run(args: argparse.Namespace):
-    path = getattr(args, "path", ".")
+    path_arg = getattr(args, "path", ".")
+    path = str(get_project_root()) if path_arg in (None, "", ".") else path_arg
     profile = detect_all(path)
     
     # Store detected tooling in config
