@@ -19,6 +19,7 @@ import sys
 import uuid
 
 from ..state import get_project_root, load_config, save_config, load_state, ensure_uidetox_dir
+from ..fileset import ProjectFileSet
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
 from ..utils import compute_design_score
@@ -48,13 +49,11 @@ def run(args: argparse.Namespace):
     has_mechanical = tooling.get("typescript") or tooling.get("linter") or tooling.get("formatter")
 
     # ---- Codebase sizing ----
-    frontend_exts = {".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html", ".css", ".scss", ".sass"}
-    exclude_dirs = {"node_modules", ".git", "dist", "build", ".next", "out", ".uidetox"}
-    frontend_count = sum(
-        1 for p in project_root.rglob('*')
-        if p.is_file() and p.suffix in frontend_exts
-        and not any(d in p.relative_to(project_root).parts for d in exclude_dirs)
-    )
+    frontend_count = len(ProjectFileSet(
+        project_root,
+        excludes=config.get("exclude", []),
+        zone_overrides=config.get("zone_overrides", {}),
+    ).discover())
     unique_files = len(set(i.get("file", "") for i in issues))
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))

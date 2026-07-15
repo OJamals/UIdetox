@@ -1,14 +1,13 @@
 """Sub-agent session management: create, track, and record sub-agent work."""
 
 import json
-import os
 import re
 import uuid
 from pathlib import Path
 
-from uidetox.analyzer import IGNORE_DIRS # type: ignore
+from uidetox.fileset import ProjectFileSet
 from uidetox.prompt_safety import render_untrusted_data
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
+from uidetox.state import get_project_root, get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
 from uidetox.utils import now_iso # type: ignore
 
 
@@ -250,18 +249,17 @@ def get_session(session_id: str) -> dict | None:
     return result
 
 
-def get_frontend_files() -> list[str]:
-    frontend_exts = {".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte", ".ts", ".js"}
-    files = []
-
-    for dirpath, dirnames, filenames in os.walk("."):
-        new_dir = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
-        dirnames.clear()
-        dirnames.extend(new_dir)
-        for filename in filenames:
-            if Path(filename).suffix.lower() in frontend_exts:
-                files.append(os.path.join(dirpath, filename))
-    return sorted(files)
+def get_frontend_files(
+    project_root: str | Path | None = None,
+    config: dict | None = None,
+) -> list[str]:
+    root = Path(project_root).resolve() if project_root is not None else get_project_root()
+    active_config = load_config() if config is None else config
+    return ProjectFileSet(
+        root,
+        excludes=active_config.get("exclude", []),
+        zone_overrides=active_config.get("zone_overrides", {}),
+    ).relative_paths()
 
 
 def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:

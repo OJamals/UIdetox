@@ -1,14 +1,12 @@
 """Static Slop Analyzer: Detects AI anti-patterns via regex/AST rules."""
 
-import os
 import re
 from pathlib import Path
 
+from uidetox.fileset import IGNORED_DIRECTORY_NAMES, ProjectFileSet, find_project_root
+
 # Directories to always skip during traversal
-IGNORE_DIRS = {
-    ".git", "node_modules", "dist", "build", "out", ".next",
-    ".nuxt", "coverage", ".uidetox", ".claude", ".cursor", "vendor"
-}
+IGNORE_DIRS = IGNORED_DIRECTORY_NAMES
 
 # File extensions frequently scanned
 _FE_EXTS = {".css", ".scss", ".tsx", ".jsx", ".html", ".svelte", ".vue"}
@@ -3290,66 +3288,16 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     """
     all_issues = []
     root = Path(root_path).resolve()
-
-    # Merge user excludes with built-in ignore list
-    skip_dirs = set(IGNORE_DIRS)
-    if exclude_paths:
-        for ep in exclude_paths:
-            skip_dirs.add(ep.strip("/").split("/")[-1] if "/" in ep else ep)
-
-    # Build a set of absolute paths to skip via zone overrides
-    zone_skip: set[str] = set()
-    if zone_overrides:
-        for fpath, zone in zone_overrides.items():
-            if zone in ("vendor", "generated"):
-                zone_skip.add(str(Path(fpath).resolve()))
-
-    def _relative_path(file_path: Path) -> Path | None:
-        try:
-            return file_path.relative_to(root)
-        except ValueError:
-            return None
-
-    def _is_excluded(file_path: Path) -> bool:
-        relative = _relative_path(file_path)
-        if relative is None:
-            return True
-        return any(
-            part in skip_dirs or part.startswith(".")
-            for part in relative.parts[:-1]
-        )
-
-    target_candidates: set[Path] | None = None
-    analysis_targets: list[Path] | None = None
-    if target_files is not None:
-        target_candidates = set()
-        for target in target_files:
-            file_path = Path(target)
-            if not file_path.is_absolute():
-                file_path = root / file_path
-            file_path = file_path.resolve()
-            if (
-                not file_path.is_file()
-                or _is_excluded(file_path)
-                or str(file_path) in zone_skip
-            ):
-                continue
-            target_candidates.add(file_path)
-
-        supported_extensions = {
-            ext
-            for rule in RULES
-            for ext in rule.get("exts", [])
-            if isinstance(ext, str)
-        }
-        analysis_targets = sorted(
-            (
-                file_path
-                for file_path in target_candidates
-                if file_path.suffix.lower() in supported_extensions
-            ),
-            key=str,
-        )
+    file_set = ProjectFileSet(
+        find_project_root(root),
+        excludes=exclude_paths or (),
+        zone_overrides=zone_overrides or {},
+        explicit_targets=target_files,
+        scope_root=root,
+    )
+    target_candidates = file_set.explicit_candidates(require_extension=False)
+    target_candidate_set = set(target_candidates or ())
+    analysis_targets = file_set.discover()
 
     from concurrent.futures import ThreadPoolExecutor
     from uidetox.color_utils import load_dynamic_colors, audit_project_colors, find_color_config_sources
@@ -3358,7 +3306,7 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     dynamic_colors = load_dynamic_colors(root)
     should_audit_colors = bool(color_sources) and (
         target_candidates is None
-        or any(source.resolve() in target_candidates for source in color_sources)
+        or any(source.resolve() in target_candidate_set for source in color_sources)
     )
     color_audit_violations = audit_project_colors(root) if should_audit_colors else []
     color_issue_file = str((color_sources[0] if color_sources else root).resolve())
@@ -3368,24 +3316,8 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
 
     futures = []
     with ThreadPoolExecutor() as executor:
-        if analysis_targets is not None:
-            for file_path in analysis_targets:
-                futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
-        else:
-            for dirpath, dirnames, filenames in os.walk(root):
-                # Mutate dirnames in-place to skip IGNORE_DIRS + user excludes
-                new_dir = [d for d in dirnames if d not in skip_dirs and not d.startswith('.')]
-                dirnames.clear()
-                dirnames.extend(new_dir)
-
-                for filename in filenames:
-                    file_path = Path(dirpath) / filename
-
-                    # Respect zone overrides
-                    if zone_skip and str(file_path.resolve()) in zone_skip:
-                        continue
-
-                    futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
+        for file_path in analysis_targets:
+            futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
 
         for future in futures:
             all_issues.extend(future.result())

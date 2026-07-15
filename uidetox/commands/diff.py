@@ -23,6 +23,7 @@ from pathlib import Path
 
 from uidetox.analyzer import analyze_directory, analyze_file
 from uidetox.commands.add_issue import _is_suppressed
+from uidetox.fileset import ProjectFileSet, find_project_root
 from uidetox.state import get_project_root, load_config, load_state, save_state
 
 
@@ -90,7 +91,11 @@ def _load_diff_baseline(state: dict, project_root: Path) -> list[dict]:
     return [_normalize_issue_file(issue, project_root) for issue in baseline if isinstance(issue, dict)]
 
 
-def _analyze_target(path: str, config: dict) -> list[dict]:
+def _analyze_target(
+    path: str,
+    config: dict,
+    target_files: list[str | Path] | set[str] | None = None,
+) -> list[dict]:
     """Run fresh static analysis on `path`, respecting config excludes/zones."""
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
@@ -99,14 +104,24 @@ def _analyze_target(path: str, config: dict) -> list[dict]:
 
     target = Path(path).resolve()
     if target.is_file():
-        raw = analyze_file(target, design_variance=variance)
+        file_set = ProjectFileSet(
+            find_project_root(target),
+            excludes=exclude_paths,
+            zone_overrides=zone_overrides,
+            explicit_targets=[target],
+            scope_root=target.parent,
+        )
+        raw = analyze_file(target, design_variance=variance) if file_set.accepts(target) else []
     else:
-        raw = analyze_directory(
+        kwargs = dict(
             root_path=path,
             exclude_paths=exclude_paths,
             zone_overrides=zone_overrides,
             design_variance=variance,
         )
+        if target_files is not None:
+            kwargs["target_files"] = list(target_files)
+        raw = analyze_directory(**kwargs)
 
     return [i for i in raw if not _is_suppressed(i.get("file", ""), i.get("issue", ""), suppressions)]
 
@@ -124,7 +139,9 @@ def run(args: argparse.Namespace):
     # ── Determine which files to scope the diff to ──
     scope_files: set[str] | None = None
     if since_sha:
-        changed = _get_changed_files(since_sha, cwd=path)
+        scan_scope = Path(path).resolve()
+        git_cwd = scan_scope if scan_scope.is_dir() else scan_scope.parent
+        changed = _get_changed_files(since_sha, cwd=str(git_cwd))
         if changed is None:
             print(
                 f"[diff] Warning: could not run `git diff --name-only {since_sha}` — diffing all files.",
@@ -139,12 +156,27 @@ def run(args: argparse.Namespace):
                 gr = subprocess.run(
                     ["git", "rev-parse", "--show-toplevel"],
                     capture_output=True, text=True,
-                    cwd=str(Path(path).resolve()), timeout=5,
+                    cwd=str(git_cwd), timeout=5,
                 )
-                root_abs = gr.stdout.strip() if gr.returncode == 0 and gr.stdout.strip() else str(Path(path).resolve())
+                root_abs = gr.stdout.strip() if gr.returncode == 0 and gr.stdout.strip() else str(git_cwd)
             except (subprocess.TimeoutExpired, FileNotFoundError):
-                root_abs = str(Path(path).resolve())
-            scope_files = {str(Path(root_abs) / f) for f in changed}
+                root_abs = str(git_cwd)
+            requested_files = {str((Path(root_abs) / f).resolve()) for f in changed}
+            if scan_scope.is_file():
+                requested_files.intersection_update({str(scan_scope)})
+                scope_root = scan_scope.parent
+            else:
+                scope_root = scan_scope
+            scope_files = {
+                str(file_path)
+                for file_path in ProjectFileSet(
+                    project_root,
+                    excludes=config.get("exclude", []),
+                    zone_overrides=config.get("zone_overrides", {}),
+                    explicit_targets=requested_files,
+                    scope_root=scope_root,
+                ).discover()
+            }
             if not scope_files:
                 _emit(output_fmt, [], [], [], since_sha)
                 return
@@ -159,7 +191,14 @@ def run(args: argparse.Namespace):
         ]
 
     # ── Fresh: re-run static analysis ──
-    fresh_issues = [_normalize_issue_file(issue, project_root) for issue in _analyze_target(path, config)]
+    if scope_files is None:
+        analyzed_issues = _analyze_target(path, config)
+    else:
+        analyzed_issues = _analyze_target(path, config, target_files=scope_files)
+    fresh_issues = [
+        _normalize_issue_file(issue, project_root)
+        for issue in analyzed_issues
+    ]
     if scope_files is not None:
         fresh_issues = [
             i for i in fresh_issues
