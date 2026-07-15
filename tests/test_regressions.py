@@ -129,6 +129,146 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
     }
 
 
+def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
+    tooling = {
+        "package_manager": "npm",
+        "typescript": None,
+        "linter": None,
+        "formatter": None,
+        "frontend": [],
+        "backend": [],
+        "database": [],
+        "api": [],
+    }
+    monkeypatch.setattr(scan, "ensure_uidetox_dir", lambda: None)
+    monkeypatch.setattr(scan, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(scan, "load_config", lambda: {"tooling": tooling})
+    monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(scan, "add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(scan, "increment_scans", lambda: None)
+    monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "_save_scan_to_memory", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "save_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        scan,
+        "load_state",
+        lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
+    )
+    monkeypatch.setattr(scan, "compute_design_score", lambda state: {"blended_score": 100})
+
+
+def test_scan_json_output_is_standalone_for_empty_results(monkeypatch, tmp_path, capsys):
+    import json
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    scan.run(argparse.Namespace(path=".", output="json", since=None))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.out == "[]\n"
+    assert captured.err == ""
+    assert "SCAN CODEBASE" not in captured.out
+
+
+def test_scan_json_output_preserves_issue_schema(monkeypatch, tmp_path, capsys):
+    import json
+
+    issue = {
+        "id": "COLOR_GRADIENT_SLOP",
+        "file": "src/Hero.tsx",
+        "tier": "T2",
+        "issue": "Purple-blue gradient detected.",
+        "command": "Replace gradient.",
+        "line": 12,
+        "column": 7,
+        "snippet": "bg-gradient-to-r",
+    }
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [issue])
+
+    scan.run(argparse.Namespace(path=".", output="json", since=None))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == [issue]
+    assert captured.err == ""
+    assert captured.out.lstrip().startswith("[")
+    assert captured.out.rstrip().endswith("]")
+
+
+def test_scan_github_output_contains_annotations_only(monkeypatch, tmp_path, capsys):
+    findings = [
+        {
+            "file": f"src/Tier{tier[-1]}.tsx",
+            "tier": tier,
+            "issue": f"{tier} finding",
+            "command": "fix",
+            "line": index + 2,
+            "column": index + 3,
+        }
+        for index, tier in enumerate(("T1", "T2", "T3", "T4"))
+    ]
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, findings)
+
+    scan.run(argparse.Namespace(path=".", output="github", since=None))
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+
+    assert lines == [
+        "::warning file=src/Tier1.tsx,line=2,col=3::T1 finding",
+        "::warning file=src/Tier2.tsx,line=3,col=4::T2 finding",
+        "::error file=src/Tier3.tsx,line=4,col=5::T3 finding",
+        "::error file=src/Tier4.tsx,line=5,col=6::T4 finding",
+    ]
+    assert captured.err == ""
+    assert all(line.startswith("::") for line in lines)
+    assert "SCAN CODEBASE" not in captured.out
+
+
+def test_scan_table_output_preserves_human_banner(monkeypatch, tmp_path, capsys):
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    scan.run(argparse.Namespace(path=".", output="table", since=None))
+    captured = capsys.readouterr()
+
+    assert "SCAN CODEBASE -- Static Analysis + Subjective Review" in captured.out
+    assert "PART 1: MECHANICAL ISSUES" in captured.out
+    assert "PART 2: SUBJECTIVE ANALYSIS" in captured.out
+    assert "Running" in captured.out
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("failure", ["invalid_sha", "missing_git"])
+def test_scan_json_output_routes_since_fallback_diagnostics_to_stderr(
+    failure, monkeypatch, tmp_path, capsys
+):
+    import json
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    def fake_run(cmd, **kwargs):
+        if failure == "missing_git":
+            raise FileNotFoundError("git")
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{tmp_path}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd,
+            128,
+            stdout="",
+            stderr="fatal: bad revision 'missing-sha'",
+        )
+
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=".", output="json", since="missing-sha"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert "Warning: could not run git diff for --since=missing-sha" in captured.err
+    assert "Warning:" not in captured.out
+    assert "SCAN CODEBASE" not in captured.out
+
+
 def test_check_auto_commit_stages_only_changed_files(monkeypatch):
     calls = []
 

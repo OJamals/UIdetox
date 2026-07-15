@@ -53,7 +53,44 @@ _MANUAL_CATEGORIES = {
 }
 
 
+_OUTPUT_FORMATS = frozenset({"table", "json", "github"})
+
+
+def _get_output_format(args: argparse.Namespace) -> str:
+    """Return a validated output format before scan work emits anything."""
+    output_format = getattr(args, "output", "table")
+    if output_format not in _OUTPUT_FORMATS:
+        print(
+            f"Error: unsupported scan output format '{output_format}'.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return output_format
+
+
+def _is_table_output(output_format: str) -> bool:
+    return output_format == "table"
+
+
+def _is_json_output(output_format: str) -> bool:
+    return output_format == "json"
+
+
+def _is_github_output(output_format: str) -> bool:
+    return output_format == "github"
+
+
+def _print_fallback_warning(message: str, *, table_output: bool) -> None:
+    """Keep machine stdout parseable while preserving table diagnostics."""
+    print(message, file=sys.stdout if table_output else sys.stderr)
+
+
 def run(args: argparse.Namespace):
+    output_format = _get_output_format(args)
+    table_output = _is_table_output(output_format)
+    json_output = _is_json_output(output_format)
+    github_output = _is_github_output(output_format)
+
     ensure_uidetox_dir()
     project_root = get_project_root()
 
@@ -78,12 +115,13 @@ def run(args: argparse.Namespace):
 
     tooling = config.get("tooling", {})
 
-    print("+" + "=" * 58 + "+")
-    print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
-    print("+" + "=" * 58 + "+")
-    print(f"  Path  : {scan_path}")
-    print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
-    print()
+    if table_output:
+        print("+" + "=" * 58 + "+")
+        print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
+        print("+" + "=" * 58 + "+")
+        print(f"  Path  : {scan_path}")
+        print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
+        print()
 
     # --- Tooling Summary ---
     pm = tooling.get("package_manager")
@@ -95,43 +133,44 @@ def run(args: argparse.Namespace):
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
 
-    print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
-    if frontends:
-        print(f"           frontend={', '.join(f['name'] for f in frontends)}")
-    if backends or databases or apis:
-        layers = []
-        if backends:
-            layers.append(f"backend={', '.join(b['name'] for b in backends)}")
-        if databases:
-            layers.append(f"db={', '.join(d['name'] for d in databases)}")
-        if apis:
-            layers.append(f"api={', '.join(a['name'] for a in apis)}")
-        print(f"           {', '.join(layers)}")
-    print()
+    if table_output:
+        print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
+        if frontends:
+            print(f"           frontend={', '.join(f['name'] for f in frontends)}")
+        if backends or databases or apis:
+            layers = []
+            if backends:
+                layers.append(f"backend={', '.join(b['name'] for b in backends)}")
+            if databases:
+                layers.append(f"db={', '.join(d['name'] for d in databases)}")
+            if apis:
+                layers.append(f"api={', '.join(a['name'] for a in apis)}")
+            print(f"           {', '.join(layers)}")
+        print()
 
     # --- Suppressions & Zones ---
     ignore_patterns = config.get("ignore_patterns", [])
     overrides = config.get("zone_overrides", {})
-    if ignore_patterns:
+    if table_output and ignore_patterns:
         print(f"  Active suppressions: {len(ignore_patterns)} pattern(s)")
-    if overrides:
+    if table_output and overrides:
         print(f"  Active zone overrides: {len(overrides)}")
 
     # ===========================================================
     # PART 1: MECHANICAL ISSUES (deterministic static analysis)
     # ===========================================================
-    print()
-    print("=" * 58)
-    print(" PART 1: MECHANICAL ISSUES (static analyzer)")
-    print("=" * 58)
+    if table_output:
+        print()
+        print("=" * 58)
+        print(" PART 1: MECHANICAL ISSUES (static analyzer)")
+        print("=" * 58)
 
     # Run tsc/lint/format pre-pass if tooling is available
-    if ts or linter or fmt:
+    if table_output and (ts or linter or fmt):
         print("  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first.")
         print()
 
     # Run static slop analyzer
-    output_format = getattr(args, "output", "table")
     since_sha = getattr(args, "since", None)
 
     # Incremental mode: only scan files changed since a git SHA
@@ -155,13 +194,21 @@ def run(args: argparse.Namespace):
                     line.strip() for line in result.stdout.splitlines()
                     if line.strip()
                 ]
-                if output_format == "table":
+                if table_output:
                     print(f"  Incremental: scanning {len(since_files)} file(s) changed since {since_sha}")
+            else:
+                _print_fallback_warning(
+                    f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
+                    table_output=table_output,
+                )
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            if output_format == "table":
-                print(f"  Warning: could not run git diff for --since={since_sha}, scanning all files")
+            _print_fallback_warning(
+                f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
+                table_output=table_output,
+            )
 
-    print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
+    if table_output:
+        print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
     slop_issues = analyze_directory(
@@ -177,12 +224,12 @@ def run(args: argparse.Namespace):
         slop_issues = [i for i in slop_issues if os.path.abspath(i.get("file", "")) in since_abs]
 
     # JSON output: print all issues as JSON and exit early
-    if output_format == "json":
+    if json_output:
         print(json.dumps(slop_issues, indent=2))
         return
 
     # GitHub Actions annotation output
-    if output_format == "github":
+    if github_output:
         for issue in slop_issues:
             line = issue.get("line", 1)
             col = issue.get("column", 1)
