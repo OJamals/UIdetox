@@ -1933,6 +1933,39 @@ RULES = [
     },
 ]
 
+_USESTATE_BINDING_RE = re.compile(
+    r"\b(?:const|let|var)\s+\[\s*(?P<state>[A-Za-z_$][\w$]*)\s*,"
+    r"\s*[A-Za-z_$][\w$]*\s*\]\s*=\s*(?:React\.)?useState\b"
+)
+_IDENTIFIER_TOKEN_RE = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
+)
+_ANIMATION_STATE_TOKENS = frozenset({
+    "x", "y", "top", "left", "right", "bottom", "opacity", "scale",
+    "rotate", "position", "transform",
+})
+_ANIMATION_STATE_PREFIXES = ("animat", "transit", "translate")
+
+
+def _extract_usestate_binding(declaration_text: str) -> str | None:
+    """Return the first state binding from a standard destructured useState declaration."""
+    match = _USESTATE_BINDING_RE.search(declaration_text)
+    return match.group("state") if match else None
+
+
+def _identifier_tokens(identifier: str) -> tuple[str, ...]:
+    """Split an identifier across separators, digits, and camel/Pascal case."""
+    return tuple(token.lower() for token in _IDENTIFIER_TOKEN_RE.findall(identifier))
+
+
+def _is_animation_state_identifier(identifier: str) -> bool:
+    """Classify animation state from identifier tokens, never raw substrings."""
+    return any(
+        token in _ANIMATION_STATE_TOKENS
+        or token.startswith(_ANIMATION_STATE_PREFIXES)
+        for token in _identifier_tokens(identifier)
+    )
+
 def _get_parser(ext: str):
     if not HAS_AST:
         return None
@@ -2017,16 +2050,9 @@ def _analyze_ast(filepath: Path, content: str, ext: str) -> list[dict]:
 
             # Detect useState used for animation values (bad pattern)
             elif node.type == "lexical_declaration":
-                text = _node_text(node)
-                if "useState" in text:
-                    animation_signals = ["opacity", "scale", "translate", "rotate", "transform",
-                                          "position", "top", "left", "right", "bottom",
-                                          "animat", "transit", "x", "y"]
-                    text_lower = text.lower()
-                    for sig in animation_signals:
-                        if sig in text_lower and "useState" in text:
-                            state["usestate_for_animation"] = True
-                            break
+                binding = _extract_usestate_binding(_node_text(node))
+                if binding and _is_animation_state_identifier(binding):
+                    state["usestate_for_animation"] = True
 
             # Detect deeply nested styled-components tagged templates
             elif node.type == "tagged_template_expression":

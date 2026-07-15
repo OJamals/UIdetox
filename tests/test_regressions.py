@@ -5705,23 +5705,113 @@ export default function Root() {
         os.unlink(tmp)
 
 
-def test_analyze_ast_animate_state_has_id():
-    """useState for animation detected via AST should have id='ANIMATE_STATE_SLOP'."""
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ("const [opacity, setOpacity] = useState(0);", "opacity"),
+        ("const [translateX, setTranslateX] = React.useState(0);", "translateX"),
+        ("let [x, setX] = useState<number>(0);", "x"),
+        ("const [query, setQuery] = useState('');", "query"),
+        ("const opacity = useState(0);", None),
+        ("const [opacity, setOpacity] = useReducer(reducer, 0);", None),
+    ],
+)
+def test_animate_state_extracts_declared_binding(declaration, expected):
+    from uidetox.analyzer import _extract_usestate_binding
+
+    assert _extract_usestate_binding(declaration) == expected
+
+
+@pytest.mark.parametrize(
+    ("identifier", "expected"),
+    [
+        ("translateX", ("translate", "x")),
+        ("AnimationProgress", ("animation", "progress")),
+        ("animation_progress2D", ("animation", "progress", "2", "d")),
+        ("user-profile", ("user", "profile")),
+    ],
+)
+def test_animate_state_tokenizes_identifier_semantics(identifier, expected):
+    from uidetox.analyzer import _identifier_tokens
+
+    assert _identifier_tokens(identifier) == expected
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["opacity", "scale", "translateX", "x", "y", "animationProgress"],
+)
+def test_animate_state_identifier_positive(identifier):
+    from uidetox.analyzer import _is_animation_state_identifier
+
+    assert _is_animation_state_identifier(identifier)
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["query", "story", "text", "country", "ready", "userProfile", "display"],
+)
+def test_animate_state_identifier_negative(identifier):
+    from uidetox.analyzer import _is_animation_state_identifier
+
+    assert not _is_animation_state_identifier(identifier)
+
+
+def _analyze_animate_state_code(code):
+    import os
+    import tempfile
+
     from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile, os
-    code = "const [opacity, setOpacity] = useState(0);"
+
     with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
         f.write(code)
         tmp = f.name
     try:
         issues = _analyze_ast(Path(tmp), code, ".tsx")
-        for issue in issues:
-            assert "id" in issue, f"AST issue missing 'id' key: {issue}"
-        animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
-        assert len(animate_issues) == 1
+        return issues, str(Path(tmp).resolve())
     finally:
         os.unlink(tmp)
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["opacity", "scale", "translateX", "x", "y", "animationProgress"],
+)
+def test_analyze_ast_animate_state_positive_identifiers(identifier):
+    code = f"const [{identifier}, setValue] = useState(0);"
+    issues, filepath = _analyze_animate_state_code(code)
+    animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
+
+    assert animate_issues == [{
+        "id": "ANIMATE_STATE_SLOP",
+        "file": filepath,
+        "tier": "T2",
+        "issue": "React useState used for animation values — causes re-renders on every frame.",
+        "command": "Use CSS transitions/animations, Framer Motion, or useRef for animation state. Never drive 60fps animations through React state.",
+    }]
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["query", "story", "text", "country", "ready", "userProfile", "display"],
+)
+def test_analyze_ast_animate_state_negative_identifiers(identifier):
+    code = f"const [{identifier}, setValue] = useState(0);"
+    issues, _ = _analyze_animate_state_code(code)
+
+    assert not any(i.get("id") == "ANIMATE_STATE_SLOP" for i in issues)
+
+
+def test_analyze_ast_animate_state_multiple_declarations_emit_one_issue():
+    code = """
+const [query, setQuery] = useState('');
+const [opacity, setOpacity] = useState(0);
+const [story, setStory] = useState(null);
+"""
+    issues, _ = _analyze_animate_state_code(code)
+    animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
+
+    assert len(animate_issues) == 1
 
 
 def test_analyze_ast_identical_siblings_has_id():
