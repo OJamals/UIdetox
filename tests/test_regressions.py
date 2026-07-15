@@ -4107,6 +4107,29 @@ def test_unused_import_skips_when_identifier_is_used():
     assert not _rule_fired(code, "UNUSED_IMPORT")
 
 
+def test_unused_import_reports_local_alias_and_namespace_names():
+    code = dedent("""\
+        import React, { Button as PrimaryButton } from 'react';
+        import * as Icons from './icons';
+        export const Card = () => React.createElement('div');
+    """)
+    issues = [issue for issue in _issues_for(code) if issue["id"] == "UNUSED_IMPORT"]
+    assert len(issues) == 1
+    assert "PrimaryButton" in issues[0]["issue"]
+    assert "Icons" in issues[0]["issue"]
+
+
+def test_unused_import_skips_used_default_alias_and_namespace_names():
+    code = dedent("""\
+        import React, { Button as PrimaryButton } from 'react';
+        import * as Icons from './icons';
+        export const Card = () => (
+          <PrimaryButton icon={Icons.Check}>{React.version}</PrimaryButton>
+        );
+    """)
+    assert not _rule_fired(code, "UNUSED_IMPORT")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # UNUSED_STATE — useState state variable never read
 # ──────────────────────────────────────────────────────────────────────────────
