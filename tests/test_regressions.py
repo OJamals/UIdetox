@@ -273,17 +273,149 @@ def test_check_auto_commit_stages_only_changed_files(monkeypatch):
     calls = []
 
     def fake_run(cmd, **kwargs):
-        calls.append(cmd)
+        calls.append((cmd, kwargs))
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(check.subprocess, "run", fake_run)
 
-    check._auto_commit_changed_files({"src/App.tsx"}, "[UIdetox] Mechanical auto-fix")
+    result = check._auto_commit_changed_files(
+        {"src/Zed.tsx", "src/App.tsx"},
+        "[UIdetox] Mechanical auto-fix",
+    )
 
-    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
-    assert expected_add in calls
-    assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
-    assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"] in calls
+    expected_paths = tuple(
+        sorted(
+            [
+                str((Path.cwd() / "src/App.tsx").resolve()),
+                str((Path.cwd() / "src/Zed.tsx").resolve()),
+            ]
+        )
+    )
+    expected_add = ["git", "add", "--", *expected_paths]
+    expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"]
+
+    assert [cmd for cmd, _ in calls] == [expected_add, expected_commit]
+    assert result.staged_paths == expected_paths
+    for _, kwargs in calls:
+        assert kwargs["check"] is False
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["cwd"] == Path.cwd()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_detail"),
+    [
+        ("add", "git add failed (exit 17): add rejected TOKEN=[REDACTED]"),
+        ("commit", "git commit failed (exit 23): hook rejected SECRET=[REDACTED]"),
+        ("missing", "git add failed: git executable not found"),
+    ],
+)
+def test_check_auto_commit_failure_reports_and_omits_success(
+    monkeypatch,
+    capsys,
+    failure,
+    expected_detail,
+):
+    fmt_runs = 0
+    status_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs, status_runs
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            status_runs += 1
+            stdout = "" if status_runs == 1 else " M src/App.tsx\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd[:3] == ["git", "add", "--"]:
+            if failure == "missing":
+                raise FileNotFoundError("git")
+            if failure == "add":
+                return subprocess.CompletedProcess(cmd, 17, stdout="", stderr="add rejected TOKEN=top-secret")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        if cmd[:2] == ["git", "commit"]:
+            if failure == "commit":
+                return subprocess.CompletedProcess(cmd, 23, stdout="", stderr="hook rejected SECRET=top-secret")
+            raise AssertionError("git commit should not run after add failure")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+    monkeypatch.setattr(
+        check,
+        "load_config",
+        lambda: {
+            "auto_commit": True,
+            "tooling": {
+                "typescript": None,
+                "linter": None,
+                "formatter": {"fix_cmd": "fmt"},
+            },
+        },
+    )
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    assert expected_detail in output
+    assert "top-secret" not in output
+    assert "Auto-committed mechanical fixes" not in output
+    if failure != "commit":
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in calls)
+
+
+def test_check_auto_commit_real_git_repo_stages_exact_paths(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init")
+    git("config", "user.name", "UIdetox Tests")
+    git("config", "user.email", "uidetox@example.invalid")
+    (repo / "nested").mkdir()
+    for relative_path in ("a.txt", "nested/b.txt", "unrelated.txt"):
+        (repo / relative_path).write_text("initial\n", encoding="utf-8")
+    git("add", "--", "a.txt", "nested/b.txt", "unrelated.txt")
+    git("commit", "-m", "initial")
+
+    (repo / "a.txt").write_text("selected a\n", encoding="utf-8")
+    (repo / "nested/b.txt").write_text("selected b\n", encoding="utf-8")
+    (repo / "unrelated.txt").write_text("leave dirty\n", encoding="utf-8")
+    (repo / "untracked.txt").write_text("leave untracked\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = check._auto_commit_changed_files(
+        {"nested/b.txt", "a.txt"},
+        "[UIdetox] Mechanical auto-fix",
+    )
+
+    committed = git("show", "--pretty=format:", "--name-only", "HEAD").stdout.splitlines()
+    status = git("status", "--porcelain").stdout.splitlines()
+    expected_paths = tuple(sorted([str((repo / "a.txt").resolve()), str((repo / "nested/b.txt").resolve())]))
+
+    assert committed == ["a.txt", "nested/b.txt"]
+    assert result.staged_paths == expected_paths
+    assert " M unrelated.txt" in status
+    assert "?? untracked.txt" in status
 
 
 def test_check_run_skips_auto_commit_when_workspace_already_dirty(monkeypatch, capsys):
@@ -365,7 +497,7 @@ def test_check_run_auto_commits_only_new_mechanical_changes(monkeypatch):
 
     check.run(argparse.Namespace(fix=True))
 
-    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
+    expected_add = ["git", "add", "--", str((Path.cwd() / "src/App.tsx").resolve())]
     assert expected_add in calls
     assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"] in calls
     assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
@@ -418,10 +550,10 @@ def test_check_run_auto_commits_from_subdirectory(monkeypatch, tmp_path, capsys)
     check.run(argparse.Namespace(fix=True))
     output = capsys.readouterr().out
 
-    expected_add = ["git", "add", str((root / "src/App.tsx").resolve())]
+    expected_add = ["git", "add", "--", str((root / "src/App.tsx").resolve())]
     expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"]
 
-    assert "Auto-committed mechanical fixes" in output
+    assert output.count("Auto-committed mechanical fixes") == 1
     assert any(cmd == expected_add and kwargs.get("cwd") == root for cmd, kwargs in calls)
     assert any(cmd == expected_commit and kwargs.get("cwd") == root for cmd, kwargs in calls)
 
