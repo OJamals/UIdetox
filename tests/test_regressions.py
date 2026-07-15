@@ -269,6 +269,88 @@ def test_scan_json_output_routes_since_fallback_diagnostics_to_stderr(
     assert "SCAN CODEBASE" not in captured.out
 
 
+def test_scan_since_passes_only_changed_files_under_requested_subdirectory(
+    monkeypatch, tmp_path, capsys
+):
+    import json
+
+    root = tmp_path / "repo"
+    scan_root = root / "frontend"
+    changed = scan_root / "src" / "Changed.tsx"
+    unchanged = scan_root / "src" / "Unchanged.tsx"
+    outside = root / "api" / "handler.ts"
+    changed.parent.mkdir(parents=True)
+    outside.parent.mkdir(parents=True)
+    for file_path in (changed, unchanged, outside):
+        file_path.write_text("export default null", encoding="utf-8")
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+    captured_targets = None
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal captured_targets
+        assert Path(path).resolve() == scan_root.resolve()
+        captured_targets = kwargs["target_files"]
+        return []
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root}\n", stderr="")
+        assert cmd[:3] == ["git", "diff", "--name-only"]
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="frontend/src/Changed.tsx\napi/handler.ts\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(scan, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=str(scan_root), output="json", since="base"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.err == ""
+    assert captured_targets == [str(changed.resolve())]
+    assert str(unchanged.resolve()) not in captured_targets
+    assert str(outside.resolve()) not in captured_targets
+
+
+@pytest.mark.parametrize("changed_output", ["", "api/handler.ts\n"])
+def test_scan_since_empty_or_out_of_scope_diff_never_falls_back_to_full_scan(
+    changed_output, monkeypatch, tmp_path, capsys
+):
+    import json
+
+    root = tmp_path / "repo"
+    scan_root = root / "frontend"
+    scan_root.mkdir(parents=True)
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+    captured_targets = None
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal captured_targets
+        captured_targets = kwargs["target_files"]
+        return []
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root}\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=changed_output, stderr="")
+
+    monkeypatch.setattr(scan, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=str(scan_root), output="json", since="base"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.err == ""
+    assert captured_targets == []
+
+
 def test_check_auto_commit_stages_only_changed_files(monkeypatch):
     calls = []
 
@@ -753,6 +835,7 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
     monkeypatch.chdir(nested_dir)
 
     analyzed_path = None
+    analyzed_targets = None
     git_call_cwds = []
 
     issue = {
@@ -772,8 +855,9 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
         raise AssertionError(f"Unexpected command: {cmd}")
 
     def fake_analyze_directory(path, **kwargs):
-        nonlocal analyzed_path
+        nonlocal analyzed_path, analyzed_targets
         analyzed_path = Path(path).resolve()
+        analyzed_targets = kwargs["target_files"]
         return [issue]
 
     monkeypatch.setattr(scan_cmd.subprocess, "run", fake_run)
@@ -784,6 +868,7 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
     output = capsys.readouterr().out
 
     assert analyzed_path == root.resolve()
+    assert analyzed_targets == [str((root / "frontend" / "src" / "Button.tsx").resolve())]
     assert git_call_cwds == [root.resolve(), root.resolve()]
     assert "frontend/src/Button.tsx" in output
 
@@ -4533,6 +4618,106 @@ def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_p
         i.get("id") == "LOW_CONTRAST_SLOP" and "Dynamic color audit" in i.get("issue", "")
         for i in issues
     )
+
+
+def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    files = [tmp_path / "src" / f"Component{index}.tsx" for index in range(4)]
+    files[0].parent.mkdir()
+    for file_path in files:
+        file_path.write_text("export default null", encoding="utf-8")
+
+    analyzed = []
+
+    def fake_analyze_file(file_path, **kwargs):
+        analyzed.append(Path(file_path).resolve())
+        return []
+
+    monkeypatch.setattr(analyzer_module, "analyze_file", fake_analyze_file)
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    issues = analyzer_module.analyze_directory(
+        str(tmp_path),
+        target_files=[files[2], files[0], files[1]],
+    )
+
+    assert issues == []
+    assert len(analyzed) == 3
+    assert set(analyzed) == {file_path.resolve() for file_path in files[:3]}
+    assert files[3].resolve() not in analyzed
+
+
+def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    accepted = tmp_path / "src" / "Accepted.tsx"
+    excluded = tmp_path / "excluded" / "Excluded.tsx"
+    zoned = tmp_path / "src" / "Generated.tsx"
+    unsupported = tmp_path / "src" / "notes.txt"
+    outside = tmp_path.parent / "Outside.tsx"
+    for file_path in (accepted, excluded, zoned, unsupported, outside):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("content", encoding="utf-8")
+    missing = tmp_path / "src" / "Deleted.tsx"
+
+    analyzed = []
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze_file",
+        lambda file_path, **kwargs: analyzed.append(Path(file_path).resolve()) or [],
+    )
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    issues = analyzer_module.analyze_directory(
+        str(tmp_path),
+        exclude_paths=["excluded"],
+        zone_overrides={str(zoned): "generated"},
+        target_files=[accepted, excluded, zoned, unsupported, outside, missing],
+    )
+
+    assert issues == []
+    assert analyzed == [accepted.resolve()]
+
+    analyzed.clear()
+    assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []
+    assert analyzed == []
+
+
+def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    component = tmp_path / "src" / "Component.tsx"
+    component.parent.mkdir()
+    component.write_text("export default null", encoding="utf-8")
+    color_source = tmp_path / "tailwind.config.js"
+    color_source.write_text("module.exports = { theme: { colors: {} } }", encoding="utf-8")
+
+    audit_calls = []
+    monkeypatch.setattr(analyzer_module, "analyze_file", lambda *args, **kwargs: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+    monkeypatch.setattr(
+        color_utils,
+        "audit_project_colors",
+        lambda root: audit_calls.append(Path(root).resolve()) or [],
+    )
+
+    analyzer_module.analyze_directory(str(tmp_path), target_files=[component])
+    assert audit_calls == []
+
+    analyzer_module.analyze_directory(str(tmp_path), target_files=[color_source])
+    assert audit_calls == [tmp_path.resolve()]
 
 
 def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(tmp_path):

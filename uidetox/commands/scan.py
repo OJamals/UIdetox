@@ -8,6 +8,7 @@ happen together, with mechanical informing subjective.
 import argparse
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import uuid
@@ -174,8 +175,7 @@ def run(args: argparse.Namespace):
     since_sha = getattr(args, "since", None)
 
     # Incremental mode: only scan files changed since a git SHA
-    since_files: list[str] | None = None
-    since_root: str = os.path.abspath(scan_path)  # fallback; overridden with git root below
+    since_targets: list[str] | None = None
     if since_sha:
         try:
             # git diff --name-only outputs paths relative to the repo root, not scan_path
@@ -183,19 +183,32 @@ def run(args: argparse.Namespace):
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True, text=True, cwd=scan_path, timeout=10,
             )
-            if root_result.returncode == 0:
-                since_root = root_result.stdout.strip()
-            result = subprocess.run(
-                ["git", "diff", "--name-only", since_sha],
-                capture_output=True, text=True, cwd=scan_path, timeout=10,
-            )
-            if result.returncode == 0:
-                since_files = [
-                    line.strip() for line in result.stdout.splitlines()
-                    if line.strip()
-                ]
+            git_root_text = root_result.stdout.strip()
+            if root_result.returncode == 0 and git_root_text:
+                since_root = Path(git_root_text).resolve()
+                result = subprocess.run(
+                    ["git", "diff", "--name-only", since_sha],
+                    capture_output=True, text=True, cwd=str(since_root), timeout=10,
+                )
+            else:
+                result = None
+
+            if result is not None and result.returncode == 0:
+                scan_root = Path(scan_path).resolve()
+                resolved_targets: set[str] = set()
+                for relative_path in result.stdout.splitlines():
+                    relative_path = relative_path.strip()
+                    if not relative_path:
+                        continue
+                    candidate = (since_root / relative_path).resolve()
+                    try:
+                        candidate.relative_to(scan_root)
+                    except ValueError:
+                        continue
+                    resolved_targets.add(str(candidate))
+                since_targets = sorted(resolved_targets)
                 if table_output:
-                    print(f"  Incremental: scanning {len(since_files)} file(s) changed since {since_sha}")
+                    print(f"  Incremental: scanning {len(since_targets)} file(s) changed since {since_sha}")
             else:
                 _print_fallback_warning(
                     f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
@@ -216,12 +229,8 @@ def run(args: argparse.Namespace):
         exclude_paths=exclude_paths,
         zone_overrides=zone_overrides,
         design_variance=variance,
+        target_files=since_targets,
     )
-
-    # Filter to only changed files in incremental mode
-    if since_files is not None:
-        since_abs = {os.path.abspath(os.path.join(since_root, f)) for f in since_files}
-        slop_issues = [i for i in slop_issues if os.path.abspath(i.get("file", "")) in since_abs]
 
     # JSON output: print all issues as JSON and exit early
     if json_output:
