@@ -41,7 +41,6 @@ production_test_audit/
 # User-specific agent config
 .claude/
 .cursor/
-.gitnexus/
 .windsurfrules
 GEMINI.md
 slop-harness/

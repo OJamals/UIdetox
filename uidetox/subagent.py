@@ -13,29 +13,6 @@ from uidetox.utils import now_iso # type: ignore
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
 
-_GITNEXUS_PNPM_ANALYZE_CMD = (
-    "pnpm "
-    "--allow-build=@ladybugdb/core "
-    "--allow-build=tree-sitter "
-    "--allow-build=tree-sitter-c "
-    "--allow-build=tree-sitter-c-sharp "
-    "--allow-build=tree-sitter-cpp "
-    "--allow-build=tree-sitter-dart "
-    "--allow-build=tree-sitter-go "
-    "--allow-build=tree-sitter-java "
-    "--allow-build=tree-sitter-javascript "
-    "--allow-build=tree-sitter-kotlin "
-    "--allow-build=tree-sitter-php "
-    "--allow-build=tree-sitter-python "
-    "--allow-build=tree-sitter-ruby "
-    "--allow-build=tree-sitter-rust "
-    "--allow-build=tree-sitter-swift "
-    "--allow-build=tree-sitter-typescript "
-    "--allow-build=tree-sitter-cli "
-    "dlx gitnexus analyze"
-)
-_GITNEXUS_PNPM_ANALYZE_EMBEDDINGS_CMD = f"{_GITNEXUS_PNPM_ANALYZE_CMD} --embeddings"
-
 
 def _sessions_dir() -> Path:
     d = get_uidetox_dir() / "sessions"
@@ -482,15 +459,13 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
 ## Your Mission
 {target_directive} DO NOT fix anything yet.
 
-## GitNexus Workflow
-Prefer GitNexus MCP tools to map codebase flows before deep diving:
-- `gitnexus_query({{query: "concept"}})`
-- `gitnexus_context({{name: "symbolName"}})` when you need callers/callees for a hotspot
-- If GitNexus reports a stale index or missing `.gitnexus/lbug`, refresh the local database with:
-    `{_GITNEXUS_PNPM_ANALYZE_CMD}`
-- Preserve embeddings with:
-    `{_GITNEXUS_PNPM_ANALYZE_EMBEDDINGS_CMD}`
-- If `pnpm` is unavailable, fall back to `npx gitnexus analyze`
+## Codebase Memory Workflow
+Prefer codebase-memory MCP tools to map codebase flows before deep diving:
+- `search_graph(name_pattern=".*symbolName.*")` to locate exact symbols
+- `trace_path(function_name="symbolName", mode="calls", direction="inbound")` for callers
+- `get_code_snippet(qualified_name="exact.qualified.name")` for focused source
+- `query_graph(query="MATCH ...")` for complex graph questions
+- If the project is missing, run `index_repository(repo_path="/absolute/project/path")` first
 
 ## What to Catalog
 For every frontend file, note:
@@ -705,10 +680,9 @@ Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 {context_block}
 
 ## Tools & Rules
-- Use `gitnexus_impact({{target: "symbolName", direction: "upstream"}})` before refactoring any exports
-- Use `gitnexus_context({{name: "symbolName"}})` when you need callers/callees before moving shared logic
-- If GitNexus reports a stale index or missing `.gitnexus/lbug`, refresh the local database with:
-    `{_GITNEXUS_PNPM_ANALYZE_CMD}`
+- Use `search_graph(name_pattern=".*symbolName.*")` to resolve the exact symbol before editing
+- Use `trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)` before refactoring exports
+- Use `get_code_snippet(qualified_name="exact.qualified.name")` before moving shared logic
 - Follow SKILL.md design rules for every change
 - Fix ALL issues in one pass per component, then batch-resolve:
   `uidetox batch-resolve <ID1> <ID2> ... --note "what you changed"`

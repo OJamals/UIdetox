@@ -15,6 +15,35 @@ WCAG_AA_NORMAL = 4.5   # Normal text (< 18pt or < 14pt bold)
 WCAG_AA_LARGE = 3.0    # Large text (>= 18pt or >= 14pt bold)
 WCAG_AAA_NORMAL = 7.0  # Enhanced contrast for normal text
 
+TAILWIND_CONFIG_FILES = (
+    "tailwind.config.js",
+    "tailwind.config.ts",
+    "tailwind.config.mjs",
+    "tailwind.config.cjs",
+)
+CSS_COLOR_FILES = (
+    "globals.css",
+    "index.css",
+    "app.css",
+    "styles.css",
+    "src/globals.css",
+    "src/index.css",
+    "src/app.css",
+    "src/styles.css",
+    "src/styles/globals.css",
+    "src/styles/index.css",
+    "app/globals.css",
+    "app/layout.css",
+    "styles/globals.css",
+    "styles/index.css",
+)
+TOKEN_COLOR_FILES = (
+    "tokens.json",
+    "design-tokens.json",
+    "src/tokens.json",
+    "theme.json",
+)
+
 
 def load_dynamic_colors(project_root: Path) -> dict[str, str]:
     """Parse tailwind.config.js/ts, CSS variables, and theme files for custom colors.
@@ -31,124 +60,97 @@ def _load_project_color_data(project_root: Path) -> tuple[dict[str, str], set[st
     colors = TAILWIND_COLORS.copy()
     declared_colors: set[str] = set()
 
-    # 1. Try to read tailwind.config.js/ts/mjs via simple regex mapping
-    for config_name in ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs", "tailwind.config.cjs"]:
-        tailwind_cfg = project_root / config_name
-        if tailwind_cfg.exists():
-            try:
-                content = tailwind_cfg.read_text(encoding="utf-8")
-                # Match colors: { brand: '#123456', ... }
-                matches = re.findall(r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"](#[0-9a-fA-F]{3,8})[\'"]', content)
-                for name, hexcode in matches:
-                    colors[name] = hexcode
-                    declared_colors.add(name)
+    for config_name in TAILWIND_CONFIG_FILES:
+        config_path = project_root / config_name
+        if config_path.exists():
+            _merge_tailwind_colors(config_path, colors, declared_colors)
+            break
 
-                # Match nested color objects: brand: { 50: '#...', 100: '#...', ... }
-                nested_matches = re.findall(
-                    r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*\{([^}]+)\}',
-                    content
-                )
-                for parent_name, inner in nested_matches:
-                    shade_matches = re.findall(r'[\'"]?(\d+|DEFAULT)[\'"]?\s*:\s*[\'"](#[0-9a-fA-F]{3,8})[\'"]', inner)
-                    for shade, hexcode in shade_matches:
-                        key = f"{parent_name}-{shade}" if shade != "DEFAULT" else parent_name
-                        colors[key] = hexcode
-                        declared_colors.add(key)
-
-                # Match CSS variable references in Tailwind v4 format
-                css_var_matches = re.findall(r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"]var\(--([^)]+)\)[\'"]', content)
-                for name, var_name in css_var_matches:
-                    key = f"var-{name}"
-                    colors[key] = f"var(--{var_name})"
-                    declared_colors.add(key)
-
-            except (UnicodeDecodeError, OSError):
-                pass
-            break  # Only read the first found config
-
-    # 2. Try to read CSS variables from common CSS entry points
-    css_candidates = [
-        "globals.css", "index.css", "app.css", "styles.css",
-        "src/globals.css", "src/index.css", "src/app.css", "src/styles.css",
-        "src/styles/globals.css", "src/styles/index.css",
-        "app/globals.css", "app/layout.css",
-        "styles/globals.css", "styles/index.css",
-    ]
-    for css_file in css_candidates:
+    for css_file in CSS_COLOR_FILES:
         css_path = project_root / css_file
         if css_path.exists():
-            try:
-                content = css_path.read_text(encoding="utf-8")
-                # Match hex color variables
-                matches = re.findall(r'--([a-zA-Z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})', content)
-                for name, hexcode in matches:
-                    colors[name] = hexcode
-                    declared_colors.add(name)
+            _merge_css_colors(css_path, colors, declared_colors)
 
-                # Match HSL color variables
-                hsl_matches = re.findall(
-                    r'--([a-zA-Z0-9-]+)\s*:\s*((?:\d+\.?\d*)\s+(?:\d+\.?\d*%?)\s+(?:\d+\.?\d*%?))',
-                    content
-                )
-                for name, hsl_val in hsl_matches:
-                    hex_val = _hsl_string_to_hex(hsl_val.strip())
-                    if hex_val:
-                        colors[name] = hex_val
-                        declared_colors.add(name)
-
-                # Match oklch color variables (Tailwind v4)
-                oklch_matches = re.findall(
-                    r'--([a-zA-Z0-9-]+)\s*:\s*oklch\(([^)]+)\)',
-                    content
-                )
-                for name, oklch_val in oklch_matches:
-                    # Store as-is for now; full oklch→hex conversion is complex
-                    key = f"oklch-{name}"
-                    colors[key] = f"oklch({oklch_val})"
-                    declared_colors.add(key)
-
-            except (UnicodeDecodeError, OSError):
-                pass
-
-    # 3. Try to read design token JSON files
-    for token_file in ["tokens.json", "design-tokens.json", "src/tokens.json", "theme.json"]:
+    for token_file in TOKEN_COLOR_FILES:
         token_path = project_root / token_file
         if token_path.exists():
-            try:
-                data = json.loads(token_path.read_text(encoding="utf-8"))
-                _extract_tokens_recursive(data, colors, prefix="", declared_colors=declared_colors)
-            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-                pass
+            _merge_token_colors(token_path, colors, declared_colors)
 
     return colors, declared_colors
 
 
+def _merge_tailwind_colors(path: Path, colors: dict[str, str], declared_colors: set[str]) -> None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return
+
+    for name, hexcode in re.findall(
+        r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"](#[0-9a-fA-F]{3,8})[\'"]',
+        content,
+    ):
+        colors[name] = hexcode
+        declared_colors.add(name)
+
+    nested_pattern = r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*\{([^}]+)\}'
+    shade_pattern = r'[\'"]?(\d+|DEFAULT)[\'"]?\s*:\s*[\'"](#[0-9a-fA-F]{3,8})[\'"]'
+    for parent_name, inner in re.findall(nested_pattern, content):
+        for shade, hexcode in re.findall(shade_pattern, inner):
+            key = parent_name if shade == "DEFAULT" else f"{parent_name}-{shade}"
+            colors[key] = hexcode
+            declared_colors.add(key)
+
+    css_var_pattern = r'[\'"]?([a-zA-Z0-9-]+)[\'"]?\s*:\s*[\'"]var\(--([^)]+)\)[\'"]'
+    for name, var_name in re.findall(css_var_pattern, content):
+        key = f"var-{name}"
+        colors[key] = f"var(--{var_name})"
+        declared_colors.add(key)
+
+
+def _merge_css_colors(path: Path, colors: dict[str, str], declared_colors: set[str]) -> None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return
+
+    for name, hexcode in re.findall(
+        r'--([a-zA-Z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})',
+        content,
+    ):
+        colors[name] = hexcode
+        declared_colors.add(name)
+
+    hsl_pattern = (
+        r'--([a-zA-Z0-9-]+)\s*:\s*'
+        r'((?:\d+\.?\d*)\s+(?:\d+\.?\d*%?)\s+(?:\d+\.?\d*%?))'
+    )
+    for name, hsl_value in re.findall(hsl_pattern, content):
+        hex_value = _hsl_string_to_hex(hsl_value.strip())
+        if hex_value:
+            colors[name] = hex_value
+            declared_colors.add(name)
+
+    for name, oklch_value in re.findall(
+        r'--([a-zA-Z0-9-]+)\s*:\s*oklch\(([^)]+)\)',
+        content,
+    ):
+        key = f"oklch-{name}"
+        colors[key] = f"oklch({oklch_value})"
+        declared_colors.add(key)
+
+
+def _merge_token_colors(path: Path, colors: dict[str, str], declared_colors: set[str]) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return
+    _extract_tokens_recursive(data, colors, prefix="", declared_colors=declared_colors)
+
+
 def find_color_config_sources(project_root: Path) -> list[Path]:
     """Return likely files that define project color tokens/configuration."""
-    sources: list[Path] = []
-
-    for config_name in ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs", "tailwind.config.cjs"]:
-        candidate = project_root / config_name
-        if candidate.exists():
-            sources.append(candidate)
-
-    for css_file in [
-        "globals.css", "index.css", "app.css", "styles.css",
-        "src/globals.css", "src/index.css", "src/app.css", "src/styles.css",
-        "src/styles/globals.css", "src/styles/index.css",
-        "app/globals.css", "app/layout.css",
-        "styles/globals.css", "styles/index.css",
-    ]:
-        candidate = project_root / css_file
-        if candidate.exists():
-            sources.append(candidate)
-
-    for token_file in ["tokens.json", "design-tokens.json", "src/tokens.json", "theme.json"]:
-        candidate = project_root / token_file
-        if candidate.exists():
-            sources.append(candidate)
-
-    return sources
+    candidates = TAILWIND_CONFIG_FILES + CSS_COLOR_FILES + TOKEN_COLOR_FILES
+    return [project_root / name for name in candidates if (project_root / name).exists()]
 
 
 def _extract_tokens_recursive(data: dict, colors: dict[str, str], prefix: str,
@@ -278,4 +280,3 @@ def contrast_ratio(hex1: str, hex2: str) -> float:
     l1 = luminance(hex1)
     l2 = luminance(hex2)
     return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
-

@@ -6876,20 +6876,21 @@ class TestSubagentCorruptedJsonResilience:
         assert sa.get_session("does_not_exist") is None
 
 
-class TestSubagentGitNexusPromptGuidance:
-    """Sub-agent prompts should prefer MCP GitNexus tools and document the pnpm refresh workaround."""
+class TestSubagentCodebaseMemoryPromptGuidance:
+    """Sub-agent prompts should prefer codebase-memory MCP tools."""
 
-    def test_observe_prompt_prefers_mcp_tools_and_pnpm_refresh(self):
+    def test_observe_prompt_prefers_codebase_memory_tools(self):
         import uidetox.subagent as sa
 
         prompt = sa._observe_prompt({}, [], "## Active Design Dials")
+        legacy_tool = "git" + "nexus"
 
-        assert 'gitnexus_query({query: "concept"})' in prompt
-        assert 'gitnexus_context({name: "symbolName"})' in prompt
-        assert 'pnpm --allow-build=@ladybugdb/core' in prompt
-        assert 'npx gitnexus analyze' in prompt
+        assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
+        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound")' in prompt
+        assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
+        assert legacy_tool not in prompt.lower()
 
-    def test_fix_prompt_requires_gitnexus_impact_before_refactors(self, monkeypatch):
+    def test_fix_prompt_requires_codebase_memory_impact_check(self, monkeypatch):
         import uidetox.subagent as sa
         import uidetox.commands.next as next_mod
 
@@ -6901,19 +6902,24 @@ class TestSubagentGitNexusPromptGuidance:
             [{"id": "SCAN-1", "tier": "T1", "file": "src/App.tsx", "issue": "Example issue"}],
             "## Active Design Dials",
         )
+        legacy_tool = "git" + "nexus"
 
-        assert 'gitnexus_impact({target: "symbolName", direction: "upstream"})' in prompt
-        assert 'gitnexus_context({name: "symbolName"})' in prompt
-        assert 'pnpm --allow-build=@ladybugdb/core' in prompt
+        assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
+        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)' in prompt
+        assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
+        assert legacy_tool not in prompt.lower()
 
 
-def test_agents_docs_include_gitnexus_pnpm_refresh_guidance():
+def test_agents_docs_use_only_codebase_memory():
     root_agents = Path("AGENTS.md").read_text(encoding="utf-8")
     bundled_agents = Path("uidetox/data/AGENTS.md").read_text(encoding="utf-8")
 
-    expected = 'pnpm --allow-build=@ladybugdb/core'
-    assert expected in root_agents
-    assert expected in bundled_agents
+    legacy_tool = "git" + "nexus"
+    for content in (root_agents, bundled_agents):
+        assert "codebase-memory-mcp" in content
+        assert "search_graph" in content
+        assert "trace_path" in content
+        assert legacy_tool not in content.lower()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

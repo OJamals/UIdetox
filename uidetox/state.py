@@ -254,15 +254,20 @@ def load_config() -> dict:
 
     return data
 
-def save_config(config: dict):
+def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
     d = ensure_uidetox_dir()
-    target = d / CONFIG_FILE
-    fd, tmp_path = tempfile.mkstemp(dir=d, prefix="config_", suffix=".tmp")
+    target = d / filename
+    fd, tmp_path = tempfile.mkstemp(dir=d, prefix=temp_prefix, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+        json.dump(data, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp_path, target)
+
+
+def save_config(config: dict):
+    _save_json(config, CONFIG_FILE, "config_")
+
 
 def load_state() -> dict:
     """
@@ -321,14 +326,7 @@ def _default_state() -> dict:
     }
 
 def save_state(state: dict):
-    d = ensure_uidetox_dir()
-    target = d / STATE_FILE
-    fd, tmp_path = tempfile.mkstemp(dir=d, prefix="state_", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, target)
+    _save_json(state, STATE_FILE, "state_")
 
 def get_issue(issue_id: str) -> dict | None:
     state = load_state()
