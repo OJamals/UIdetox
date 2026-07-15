@@ -3,6 +3,8 @@
 import argparse
 import sys
 from pathlib import Path
+
+from uidetox.prompt_safety import render_untrusted_data
 from uidetox.state import load_state, load_config
 
 
@@ -729,20 +731,25 @@ def run(args: argparse.Namespace):
     target_dir, batch, batch_files, component = _select_batch(issues)
 
     print("╔═════════════════════════════════════════════╗")
-    print(f"║ Next Component: {component} ({len(batch_files)} file(s))")
+    print(f"║ Next Component ({len(batch_files)} file(s))")
     print("╚═════════════════════════════════════════════╝")
-    print(f"  Directory: {target_dir}")
+    print("  Repository batch target:")
+    print(render_untrusted_data({"component": component, "directory": target_dir}))
     print(f"  Batching {len(batch)} issue(s) across {len(batch_files)} file(s):")
     print()
 
     for idx, iss in enumerate(batch):
-        print(f"  [{idx+1}] ID: {iss.get('id', 'UNKNOWN')} | Tier: {iss.get('tier', '?')}")
-        if iss.get("line"):
-            print(f"      Where  : {iss.get('file')}:{iss.get('line')}:{iss.get('column', 1)}")
-            if iss.get("snippet"):
-                print(f"      Snip   : {iss.get('snippet')}")
-        print(f"      Issue  : {iss['issue']}")
-        print(f"      Action : {iss.get('command', 'manual fix')}")
+        print(f"  Repository issue {idx + 1}:")
+        print(render_untrusted_data({
+            "id": iss.get("id", "UNKNOWN"),
+            "tier": iss.get("tier", "?"),
+            "file": iss.get("file"),
+            "line": iss.get("line"),
+            "column": iss.get("column", 1),
+            "snippet": iss.get("snippet"),
+            "issue": iss["issue"],
+            "command": iss.get("command", "manual fix"),
+        }))
         print()
 
     print("  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
@@ -798,12 +805,10 @@ def run(args: argparse.Namespace):
     print()
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
-    batch_ids = " ".join(iss["id"] for iss in batch)
 
     print("[AGENT INSTRUCTION]")
-    print(f"1. Read all files in {target_dir}/ that have issues:")
-    for f in batch_files:
-        print(f"     {f}")
+    print("1. Read all files listed in the repository data block below that have issues:")
+    print(render_untrusted_data({"files": batch_files}))
     if skill_path:
         print(f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
     step = 3 if skill_path else 2
@@ -815,7 +820,7 @@ def run(args: argparse.Namespace):
     print(f"     uidetox check --fix")
     step += 1
     print(f"{step}. Batch-resolve all issues with a single coherent commit:")
-    print(f'     uidetox batch-resolve {batch_ids} --note "describe what you changed"')
+    print('     uidetox batch-resolve <IDs from issue data> --note "describe what you changed"')
     if auto_commit:
         print("     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit.")
     step += 1
