@@ -47,6 +47,20 @@ uidetox loop
 
 ---
 
+## Contributing
+
+Use Python 3.11-3.13. From a clean checkout, install UIdetox and its test
+dependencies in an isolated environment, then run the canonical verification gate:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pytest -q
+```
+
+The test command should finish with an all-green result and no failures or errors.
+
+---
+
 ## Agent Bootstrap Prompt
 
 Paste this into your coding agent to kick off a full detox pass:
