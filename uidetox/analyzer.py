@@ -2240,14 +2240,14 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     return issues
 
 
-def _analyze_structure_custom_rule(
+def _analyze_document_structure_custom_rule(
     rule: dict,
     filepath: Path,
     content: str,
     ext: str,
     dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
-    """Run structural and interaction heuristics."""
+    """Run document-structure heuristics."""
     issues = []
     custom = rule.get("_custom_check")
     if custom == "div_soup":
@@ -2269,6 +2269,37 @@ def _analyze_structure_custom_rule(
         return issues
 
     # Custom check: missing_hover — buttons with className but no hover: class
+
+    if custom == "nested_ternary":
+        if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
+            return issues # Handled by AST
+        # Count nested ternaries: lines with ? ... ? ... : pattern
+        ternary_nests = len(re.findall(r'\?[^:?\n]{0,80}\?', content))
+        if ternary_nests >= 2:
+            issues.append({
+                "id": rule["id"],
+                "file": str(filepath.resolve()),
+                "tier": rule["tier"],
+                "issue": f"{rule['description']} ({ternary_nests} nested ternaries found)",
+                "command": rule["command"]
+            })
+        return issues
+
+    # Custom check: disabled_cursor — disabled elements missing cursor-not-allowed
+
+    return None
+
+
+def _analyze_interaction_custom_rule(
+    rule: dict,
+    filepath: Path,
+    content: str,
+    ext: str,
+    dynamic_colors: dict[str, str] | None,
+) -> list[dict] | None:
+    """Run interaction-state heuristics."""
+    issues = []
+    custom = rule.get("_custom_check")
     if custom == "missing_hover":
         for m in re.finditer(r'<button[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE):
             classes = m.group(1)
@@ -2329,22 +2360,7 @@ def _analyze_structure_custom_rule(
         return issues
 
     # Custom check: nested_ternary — only flag in JSX return blocks (rough heuristic)
-    if custom == "nested_ternary":
-        if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
-            return issues # Handled by AST
-        # Count nested ternaries: lines with ? ... ? ... : pattern
-        ternary_nests = len(re.findall(r'\?[^:?\n]{0,80}\?', content))
-        if ternary_nests >= 2:
-            issues.append({
-                "id": rule["id"],
-                "file": str(filepath.resolve()),
-                "tier": rule["tier"],
-                "issue": f"{rule['description']} ({ternary_nests} nested ternaries found)",
-                "command": rule["command"]
-            })
-        return issues
 
-    # Custom check: disabled_cursor — disabled elements missing cursor-not-allowed
     if custom == "disabled_cursor":
         # Find elements with disabled prop/attr
         disabled_elements = re.findall(
@@ -2366,17 +2382,16 @@ def _analyze_structure_custom_rule(
     return None
 
 
-def _analyze_source_quality_custom_rule(
+def _analyze_commented_code_custom_rule(
     rule: dict,
     filepath: Path,
     content: str,
     ext: str,
     dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
-    """Run source-quality heuristics."""
+    """Detect blocks of commented-out source."""
     issues = []
     custom = rule.get("_custom_check")
-    # Custom check: commented_code — blocks of commented-out source code (not doc comments)
     if custom == "commented_code":
         lines = content.splitlines()
         commented_code_lines = 0
@@ -2406,50 +2421,88 @@ def _analyze_source_quality_custom_rule(
         return issues
 
     # Custom check: unused_import — imports whose identifiers appear nowhere else in the file
-    if custom == "unused_import":
-        import_pattern = re.compile(
-            r'^import\s+'
-            r'(?:'
-            r'(?:type\s+)?(\w+)(?:\s*,\s*\{([^}]+)\})?'  # default + named
-            r'|\{([^}]+)\}'                                 # named only
-            r'|\*\s+as\s+(\w+)'                             # namespace
-            r')'
-            r'\s+from\s+["\'][^"\']+["\'];?\s*$',
-            re.MULTILINE,
-        )
-        unused_names: list[str] = []
-        for m in import_pattern.finditer(content):
-            names: list[str] = []
-            if m.group(1):
-                names.append(m.group(1))
-            for g in (m.group(2), m.group(3)):
-                if g:
-                    for part in g.split(","):
-                        part = part.strip()
-                        if " as " in part:
-                            part = part.split(" as ")[-1].strip()
-                        if part and part != "type":
-                            names.append(part)
-            if m.group(4):
-                names.append(m.group(4))
-            for name in names:
-                # Count occurrences beyond the import line itself
-                occurrences = len(re.findall(r'\b' + re.escape(name) + r'\b', content))
-                if occurrences <= 1:
-                    unused_names.append(name)
-        if unused_names:
-            sample = ", ".join(unused_names[:5])
-            suffix = f" (+{len(unused_names) - 5} more)" if len(unused_names) > 5 else ""
-            issues.append({
-                "id": rule["id"],
-                "file": str(filepath.resolve()),
-                "tier": rule["tier"],
-                "issue": f"{rule['description']} Likely unused: {sample}{suffix}",
-                "command": rule["command"]
-            })
-        return issues
 
-    # Custom check: unused_state — useState where the state var is never read
+    return None
+
+
+_IMPORT_PATTERN = re.compile(
+    r'^import\s+'
+    r'(?:'
+    r'(?:type\s+)?(\w+)(?:\s*,\s*\{([^}]+)\})?'  # default + named
+    r'|\{([^}]+)\}'                                 # named only
+    r'|\*\s+as\s+(\w+)'                             # namespace
+    r')'
+    r'\s+from\s+["\'][^"\']+["\'];?\s*$',
+    re.MULTILINE,
+)
+
+
+def _extract_import_names(match: re.Match) -> list[str]:
+    """Return local identifiers declared by one import statement."""
+    names: list[str] = []
+    if match.group(1):
+        names.append(match.group(1))
+    for group in (match.group(2), match.group(3)):
+        if not group:
+            continue
+        for part in group.split(","):
+            part = part.strip()
+            if " as " in part:
+                part = part.split(" as ")[-1].strip()
+            if part and part != "type":
+                names.append(part)
+    if match.group(4):
+        names.append(match.group(4))
+    return names
+
+
+def _find_unused_import_names(content: str) -> list[str]:
+    """Return imports referenced only by their declaration."""
+    unused_names: list[str] = []
+    for match in _IMPORT_PATTERN.finditer(content):
+        for name in _extract_import_names(match):
+            occurrences = len(re.findall(r'\b' + re.escape(name) + r'\b', content))
+            if occurrences <= 1:
+                unused_names.append(name)
+    return unused_names
+
+
+def _analyze_unused_import_custom_rule(
+    rule: dict,
+    filepath: Path,
+    content: str,
+    ext: str,
+    dynamic_colors: dict[str, str] | None,
+) -> list[dict] | None:
+    """Detect imported names unused outside import declarations."""
+    if rule.get("_custom_check") != "unused_import":
+        return None
+
+    issues = []
+    unused_names = _find_unused_import_names(content)
+    if unused_names:
+        sample = ", ".join(unused_names[:5])
+        suffix = f" (+{len(unused_names) - 5} more)" if len(unused_names) > 5 else ""
+        issues.append({
+            "id": rule["id"],
+            "file": str(filepath.resolve()),
+            "tier": rule["tier"],
+            "issue": f"{rule['description']} Likely unused: {sample}{suffix}",
+            "command": rule["command"]
+        })
+    return issues
+
+
+def _analyze_unused_state_custom_rule(
+    rule: dict,
+    filepath: Path,
+    content: str,
+    ext: str,
+    dynamic_colors: dict[str, str] | None,
+) -> list[dict] | None:
+    """Detect useState values never read."""
+    issues = []
+    custom = rule.get("_custom_check")
     if custom == "unused_state":
         for m in re.finditer(r'const\s+\[(\w+),\s*set(\w+)\]\s*=\s*useState', content):
             state_var = m.group(1)
@@ -3042,17 +3095,17 @@ def _analyze_design_pattern_custom_rule(
 
 
 _CUSTOM_CHECK_HANDLERS = {
-    "div_soup": _analyze_structure_custom_rule,
-    "missing_hover": _analyze_structure_custom_rule,
-    "missing_focus": _analyze_structure_custom_rule,
-    "missing_transition": _analyze_structure_custom_rule,
-    "ugly_scrollbar": _analyze_structure_custom_rule,
-    "nested_ternary": _analyze_structure_custom_rule,
-    "disabled_cursor": _analyze_structure_custom_rule,
-    "commented_code": _analyze_source_quality_custom_rule,
+    "div_soup": _analyze_document_structure_custom_rule,
+    "missing_hover": _analyze_interaction_custom_rule,
+    "missing_focus": _analyze_interaction_custom_rule,
+    "missing_transition": _analyze_interaction_custom_rule,
+    "ugly_scrollbar": _analyze_interaction_custom_rule,
+    "nested_ternary": _analyze_document_structure_custom_rule,
+    "disabled_cursor": _analyze_interaction_custom_rule,
+    "commented_code": _analyze_commented_code_custom_rule,
     "contrast_ratio": _analyze_contrast_custom_rule,
-    "unused_import": _analyze_source_quality_custom_rule,
-    "unused_state": _analyze_source_quality_custom_rule,
+    "unused_import": _analyze_unused_import_custom_rule,
+    "unused_state": _analyze_unused_state_custom_rule,
     "video_no_captions": _analyze_accessibility_custom_rule,
     "focus_outline_removed": _analyze_accessibility_custom_rule,
     "focus_visible_missing": _analyze_accessibility_custom_rule,
