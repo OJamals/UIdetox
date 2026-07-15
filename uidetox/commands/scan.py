@@ -14,7 +14,7 @@ import uuid
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import (
-    add_issue, ensure_uidetox_dir, get_project_root, load_config, load_state,
+    add_issues, ensure_uidetox_dir, get_project_root, load_config, load_state,
     save_config, increment_scans,
 )
 from uidetox.tooling import detect_all
@@ -193,7 +193,7 @@ def run(args: argparse.Namespace):
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
 
-    queued_count = 0
+    pending_issues = []
     triggered_rules: set[str] = set()
     for issue in slop_issues:
         if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
@@ -208,10 +208,11 @@ def run(args: argparse.Namespace):
             for key in ("line", "column", "snippet"):
                 if key in issue:
                     new_issue[key] = issue[key]
-            if add_issue(new_issue):
-                queued_count += 1
+            pending_issues.append(new_issue)
             if rule_id := issue.get("id"):
                 triggered_rules.add(rule_id)
+
+    queued_count = add_issues(pending_issues)
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")

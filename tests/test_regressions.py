@@ -66,6 +66,69 @@ def test_scan_deduplicates_existing_issue_queue(tmp_path, monkeypatch):
     assert state["stats"]["total_found"] == 1
 
 
+def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
+    import uidetox.state as state_module
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4, "tooling": {}})
+    findings = [
+        {
+            "id": f"RULE-{index}",
+            "file": f"src/Component{index}.tsx",
+            "tier": "T2",
+            "issue": f"Issue {index}",
+            "command": f"Fix {index}",
+        }
+        for index in range(3)
+    ]
+    duplicate_finding = dict(findings[0], id="RULE-DUPLICATE")
+    findings.append(duplicate_finding)
+    load_calls = 0
+    save_calls = 0
+    captured_triggered_rules = set()
+    original_load_state = state_module.load_state
+    original_save_state = state_module.save_state
+
+    def counted_load_state():
+        nonlocal load_calls
+        load_calls += 1
+        return original_load_state()
+
+    def counted_save_state(state):
+        nonlocal save_calls
+        save_calls += 1
+        return original_save_state(state)
+
+    def capture_scan_memory(slop_issues, queued_count, triggered_rules, scan_path):
+        captured_triggered_rules.update(triggered_rules)
+
+    monkeypatch.setattr(state_module, "load_state", counted_load_state)
+    monkeypatch.setattr(state_module, "save_state", counted_save_state)
+    monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(scan, "increment_scans", lambda: None)
+    monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "_save_scan_to_memory", capture_scan_memory)
+    monkeypatch.setattr(scan, "save_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "load_state", lambda: {"issues": [], "resolved": [], "stats": {}})
+
+    scan.run(argparse.Namespace(path="."))
+
+    assert load_calls == 1
+    assert save_calls == 1
+    persisted = original_load_state()["issues"]
+    assert [issue["file"] for issue in persisted] == [
+        issue["file"] for issue in findings[:3]
+    ]
+    assert captured_triggered_rules == {
+        "RULE-0",
+        "RULE-1",
+        "RULE-2",
+        "RULE-DUPLICATE",
+    }
+
+
 def test_check_auto_commit_stages_only_changed_files(monkeypatch):
     calls = []
 
@@ -5689,7 +5752,7 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     monkeypatch.setattr("uidetox.commands.scan.load_config", lambda: {})
     monkeypatch.setattr("uidetox.commands.scan.save_config", lambda c: None)
     monkeypatch.setattr("uidetox.commands.scan.detect_all", lambda path=".": type("P", (), {"to_dict": lambda s: {}})())
-    monkeypatch.setattr("uidetox.commands.scan.add_issue", lambda i: True)
+    monkeypatch.setattr("uidetox.commands.scan.add_issues", lambda issues: len(issues))
     monkeypatch.setattr("uidetox.commands.scan.increment_scans", lambda: None)
     monkeypatch.setattr("uidetox.commands.scan.save_run_snapshot", lambda **kw: None)
     monkeypatch.setattr("uidetox.commands.scan.save_scan_summary", lambda **kw: None)
@@ -6508,6 +6571,97 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatc
     rescan_cmd.run(argparse.Namespace(path="."))
 
     assert analyzed_path == root.resolve()
+
+
+def test_rescan_batches_queue_and_preserves_recurrence_semantics(tmp_path, monkeypatch, capsys):
+    import uidetox.state as state_module
+    from uidetox.commands import rescan as rescan_cmd
+
+    monkeypatch.chdir(tmp_path)
+    recurring = {
+        "file": "src/Recurring.tsx",
+        "tier": "T2",
+        "issue": "Recurring issue",
+        "command": "Fix recurring",
+    }
+    resolved_only = {
+        "file": "src/Resolved.tsx",
+        "tier": "T2",
+        "issue": "Resolved issue",
+        "command": "Fix resolved",
+    }
+    initial_state = {
+        "issues": [recurring],
+        "resolved": [recurring.copy(), recurring.copy(), resolved_only],
+    }
+    findings = [
+        recurring,
+        resolved_only,
+        {
+            "file": "src/Suppressed.tsx",
+            "tier": "T2",
+            "issue": "Suppressed issue",
+            "command": "Fix suppressed",
+        },
+        {
+            "file": "src/First.tsx",
+            "tier": "T1",
+            "issue": "First issue",
+            "command": "Fix first",
+        },
+        {
+            "file": "src/Second.tsx",
+            "tier": "T3",
+            "issue": "Second issue",
+            "command": "Fix second",
+        },
+    ]
+    load_calls = 0
+    save_calls = 0
+    original_load_state = state_module.load_state
+    original_save_state = state_module.save_state
+
+    def counted_load_state():
+        nonlocal load_calls
+        load_calls += 1
+        return original_load_state()
+
+    def counted_save_state(state):
+        nonlocal save_calls
+        save_calls += 1
+        return original_save_state(state)
+
+    monkeypatch.setattr(state_module, "load_state", counted_load_state)
+    monkeypatch.setattr(state_module, "save_state", counted_save_state)
+    monkeypatch.setattr(rescan_cmd, "load_state", lambda: initial_state)
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {"ignore_patterns": ["suppressed"]})
+    monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(
+        rescan_cmd,
+        "_is_suppressed",
+        lambda file, issue, patterns: issue == "Suppressed issue",
+    )
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert load_calls == 1
+    assert save_calls == 1
+    persisted = original_load_state()["issues"]
+    assert [issue["file"] for issue in persisted] == [
+        "src/Recurring.tsx",
+        "src/First.tsx",
+        "src/Second.tsx",
+    ]
+    assert persisted[0]["tier"] == "T3"
+    output = capsys.readouterr().out
+    assert "Queued 3 mechanical anti-pattern issues" in output
+    assert "Skipped 1 already-resolved issue" in output
+    assert "Escalated 1 recurring issue" in output
 
 
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
