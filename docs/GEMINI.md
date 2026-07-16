@@ -43,6 +43,13 @@ Progress auto-saves to memory. Re-running `uidetox loop` resumes from the last c
 
 Use `uidetox capture` to validate UI changes visually. **Start your dev server first** — UIdetox does not launch it.
 
+Install capture support and Chromium once before first use:
+
+```bash
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+```
+
 ```bash
 pnpm dev
 uidetox capture --stage before

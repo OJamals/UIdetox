@@ -4,6 +4,7 @@ import json
 import math
 import os
 import tempfile
+import sys
 from pathlib import Path
 
 import hashlib
@@ -12,7 +13,7 @@ from uidetox.state import get_uidetox_dir, ensure_uidetox_dir
 from uidetox.utils import now_iso
 
 
-def _get_collection(name: str) -> Any:
+def _get_collection(name: str, *, show_install_hint: bool = False) -> Any:
     """Get a ChromaDB collection for semantic memory search."""
     try:
         import chromadb
@@ -23,6 +24,12 @@ def _get_collection(name: str) -> Any:
         client = chromadb.PersistentClient(path=str(db_path), settings=Settings(anonymized_telemetry=False))
         return client.get_or_create_collection(name=name)
     except ImportError:
+        if show_install_hint:
+            print(
+                "Semantic memory search requires ChromaDB. "
+                "Install it with: pip install 'uidetox[memory]'",
+                file=sys.stderr,
+            )
         return None
 
 
@@ -295,8 +302,8 @@ def get_patterns(query: str | None = None, limit: int = 15) -> list[dict]:
     mem = load_memory()
     patterns = mem.get("patterns", [])
 
-    if query and patterns:
-        collection = _get_collection("patterns")
+    if query:
+        collection = _get_collection("patterns", show_install_hint=True)
         if collection:
             cnt = collection.count() # type: ignore
             if cnt > 0:
@@ -345,8 +352,8 @@ def get_notes(query: str | None = None, limit: int = 10) -> list[dict]:
     mem = load_memory()
     notes = mem.get("notes", [])
 
-    if query and notes:
-        collection = _get_collection("notes")
+    if query:
+        collection = _get_collection("notes", show_install_hint=True)
         if collection:
             cnt = collection.count() # type: ignore
             if cnt > 0:
