@@ -73,6 +73,10 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 |---------|---------|
 | `uidetox setup` | Initialize project config and design dials (`--design-variance`, `--motion-intensity`, `--visual-density`, `--dev-server`, `--auto-commit`, `--no-auto-commit`) |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → design review |
+| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with source structure plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
+| `uidetox redesign [target]` | Generate 1–5 topology-first redesign plans with pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
+| `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
+| `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
 | `uidetox detect` | Auto-discover linters, formatters, tsc, backend, database, API |
 | `uidetox check` | Run tsc → lint → format in sequence, queue errors as T1 (use `--fix` to auto-solve) |
 | `uidetox tsc` | Run TypeScript compiler, parse and queue errors |
@@ -181,10 +185,14 @@ UIdetox/
 ├── SKILL.md                      # Combined design skill (all source repos)
 ├── README.md                     # User documentation + quick-start prompt
 ├── uidetox/                      # Python CLI package
-│   ├── cli.py                    # Argparse router (36 commands, dynamic slash-command loading)
+│   ├── cli.py                    # Argparse router (40 commands, dynamic slash-command loading)
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
 │   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
+│   ├── frontend_map.py            # Semantic frontend graph + artifact persistence
+│   ├── redesign.py                # Divergent topology-first redesign planning
+│   ├── runtime_observer.py         # Playwright DOM/a11y/layout evidence adapter
+│   ├── prototype.py                # Disposable agent-ready prototype brief generation
 │   ├── history.py                # Run snapshot storage and progression tracking
 │   ├── memory.py                 # Persistent agent memory (reviewed files, patterns, notes)
 │   ├── subagent.py               # Sub-agent session infrastructure (5-stage pipeline)
@@ -194,7 +202,8 @@ UIdetox/
 │   │   ├── reference/*.md         # 10 deep-dive design reference files
 │   │   └── docs/*.md              # 6 provider integration guides
 │   └── commands/                 # Command implementations
-│       ├── scan.py, next.py, resolve.py, plan.py
+│       ├── scan.py, map.py, redesign.py, compare.py, prototype.py
+│       ├── next.py, resolve.py, plan.py
 │       ├── setup.py, review.py, update_skill.py
 │       ├── status.py, show.py, autofix.py, loop.py, finish.py
 │       ├── exclude.py, rescan.py, add_issue.py

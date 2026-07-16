@@ -41,6 +41,12 @@ uidetox update-skill [agent]    # supports: claude, cursor, gemini, windsurf, co
 # Initialize project dials + optional auto-commit / preview URL
 uidetox setup --auto-commit --dev-server http://localhost:5173
 
+# Map frontend structure and generate three topology-level redesigns
+uidetox map src
+uidetox redesign src --variants 3
+uidetox compare
+uidetox prototype REDESIGN-01-task-flow
+
 # Start autonomous protocol
 uidetox loop
 ```
@@ -98,6 +104,20 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 
 ---
 
+## Structural Redesign
+
+`uidetox map [target]` builds `.uidetox/frontend-map.json`: a semantic graph of files, components, render relationships, routes, regions, actions, state, data dependencies, and design tokens. It separates observed contracts from redesignable choices and records runtime evidence gaps explicitly.
+
+Add `--runtime --url http://localhost:5173` to observe the rendered DOM at mobile, tablet, and desktop widths. Runtime evidence includes visible regions, accessible roles/names, interaction states, bounding boxes, computed layout/type/color styles, responsive topology, and optional full-page screenshots via `--screenshots`. Start the dev server first. Browser observation requires `playwright install chromium`.
+
+`uidetox redesign [target] --variants 3` consumes that map and writes `.uidetox/redesigns.json`. Proposals change page topology, navigation, component ownership, action placement, interaction model, responsive composition, and density before suggesting source edits. Pairwise structural distance prevents three cosmetic variants of the same layout.
+
+`uidetox compare` presents every proposal across the same seven structural dimensions and shows pairwise distance. `uidetox prototype <proposal-id>` writes an isolated, agent-ready brief under `.uidetox/prototypes/`; mapped source evidence is explicitly quarantined as untrusted data.
+
+Use `--refresh-map` after source changes, `--map-file` or `--file` to consume a specific artifact, `--output` to choose an artifact path, and `--json` for automation.
+
+---
+
 ## Commands
 
 | Command | Purpose |
@@ -105,6 +125,10 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 | `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
 | `uidetox setup` | Persist design dials, `dev_server`, and auto-commit behavior (`--design-variance`, `--motion-intensity`, `--visual-density`, `--dev-server`, `--auto-commit`, `--no-auto-commit`). |
 | `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
+| `uidetox map [target]` | Build a persistent semantic frontend graph; optionally merge rendered DOM evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`). |
+| `uidetox redesign [target]` | Generate 1–5 structurally divergent, contract-preserving redesign plans (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`). |
+| `uidetox compare` | Compare redesign proposals across topology, navigation, ownership, action placement, interaction, responsive model, density, and pairwise distance (`--file`, `--json`). |
+| `uidetox prototype <proposal-id>` | Create a disposable implementation brief with contracts, migration steps, acceptance checks, and untrusted-evidence isolation (`--file`, `--output`, `--stdout`). |
 | `uidetox next` | Get the highest-priority issue batch with SKILL.md context. |
 | `uidetox batch-resolve` | Resolve issues atomically with verification + auto-commit. |
 | `uidetox status` | Show blended Design Score, velocity, and queue health. |

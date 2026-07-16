@@ -83,6 +83,37 @@ def parse_args(args_list=None):
     scan_parser.add_argument("--since", default=None, metavar="SHA", help="Only scan files changed since this git SHA (incremental mode)")
     scan_parser.add_argument("--output", default="table", choices=["table", "json", "github"], help="Output format (default: table)")
 
+    # Command: map
+    map_parser = subparsers.add_parser("map", help="Map frontend structure, behavior, contracts, and design evidence")
+    map_parser.add_argument("target", nargs="?", default=".", help="Frontend file or directory to map")
+    map_parser.add_argument("--runtime", action="store_true", help="Observe rendered DOM evidence at mobile, tablet, and desktop viewports")
+    map_parser.add_argument("--url", dest="urls", action="append", help="Runtime URL to observe; repeat for multiple routes (default: configured dev_server)")
+    map_parser.add_argument("--screenshots", action="store_true", help="Save full-page runtime screenshots (requires --runtime)")
+    map_parser.add_argument("--timeout", type=int, default=15000, help="Runtime navigation timeout in milliseconds (default: 15000)")
+    map_parser.add_argument("--output", help="Artifact path (default: .uidetox/frontend-map.json)")
+    map_parser.add_argument("--json", action="store_true", help="Print the full frontend map as JSON")
+
+    # Command: redesign
+    redesign_parser = subparsers.add_parser("redesign", help="Generate structurally divergent frontend redesign plans")
+    redesign_parser.add_argument("target", nargs="?", default=".", help="Frontend file or directory to redesign")
+    redesign_parser.add_argument("--variants", type=int, choices=range(1, 6), default=3, help="Number of divergent proposals (1-5, default: 3)")
+    redesign_parser.add_argument("--map-file", help="Existing frontend map artifact to consume")
+    redesign_parser.add_argument("--refresh-map", action="store_true", help="Rebuild the frontend map before planning")
+    redesign_parser.add_argument("--output", help="Artifact path (default: .uidetox/redesigns.json)")
+    redesign_parser.add_argument("--json", action="store_true", help="Print redesign proposals as JSON")
+
+    # Command: compare
+    compare_parser = subparsers.add_parser("compare", help="Compare redesign proposals across structural dimensions")
+    compare_parser.add_argument("--file", dest="redesign_file", help="Redesign artifact (default: .uidetox/redesigns.json)")
+    compare_parser.add_argument("--json", action="store_true", help="Print comparison as JSON")
+
+    # Command: prototype
+    prototype_parser = subparsers.add_parser("prototype", help="Create a disposable implementation brief for one redesign proposal")
+    prototype_parser.add_argument("proposal_id", help="Proposal ID from `uidetox redesign` or `uidetox compare`")
+    prototype_parser.add_argument("--file", dest="redesign_file", help="Redesign artifact (default: .uidetox/redesigns.json)")
+    prototype_parser.add_argument("--output", help="Prototype brief path (default: .uidetox/prototypes/<proposal-id>.md)")
+    prototype_parser.add_argument("--stdout", action="store_true", help="Print the prototype brief after saving it")
+
     # Command: add-issue (For agent use during scan)
     add_parser = subparsers.add_parser("add-issue", help="Add an issue to the state queue (Agent use)")
     add_parser.add_argument("--file", required=True, help="File path with the issue")
