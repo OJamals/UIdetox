@@ -1,4 +1,7 @@
 import argparse
+import hashlib
+import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -9049,3 +9052,173 @@ def test_diff_since_passes_only_canonical_frontend_files(monkeypatch, tmp_path):
     diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
 
     assert captured_targets == {str(accepted.resolve())}
+
+
+def _analyzer_catalog_fingerprint(rules):
+    def normalize(value):
+        if isinstance(value, re.Pattern):
+            return {"pattern": value.pattern, "flags": value.flags}
+        if isinstance(value, dict):
+            return {key: normalize(value[key]) for key in sorted(value)}
+        if isinstance(value, set):
+            return sorted(normalize(item) for item in value)
+        if isinstance(value, (list, tuple)):
+            return [normalize(item) for item in value]
+        return value
+
+    payload = json.dumps(
+        normalize(rules), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
+    from uidetox.analyzer import RULES
+
+    rule_ids = [rule["id"] for rule in RULES]
+    assert len(rule_ids) == 218
+    assert len(set(rule_ids)) == 218
+    assert rule_ids[:5] == [
+        "TYPOGRAPHY_SLOP",
+        "COLOR_GRADIENT_SLOP",
+        "COLOR_BLACK_SLOP",
+        "ICONOGRAPHY_SLOP",
+        "MATERIALITY_RADIUS_SLOP",
+    ]
+    assert rule_ids[-5:] == [
+        "ACCORDION_FAQ_SLOP",
+        "DARK_MODE_TOGGLE_SLOP",
+        "CENTERED_PARAGRAPH_SLOP",
+        "MODAL_NO_ARIA_SLOP",
+        "FLEXBOX_PERCENTAGE_MATH_SLOP",
+    ]
+    assert _analyzer_catalog_fingerprint(RULES) == (
+        "b89da46d1ba63776055bf7d911a51e0d6d206318d955d8bf7575728b583994ee"
+    )
+
+
+def test_analyzer_public_import_contract():
+    from uidetox.analyzer import RULES, analyze_directory, analyze_file
+
+    assert len(RULES) == 218
+    assert callable(analyze_file)
+    assert callable(analyze_directory)
+
+
+def test_analyzer_regex_issue_shape_and_order(tmp_path):
+    source = tmp_path / "copy.md"
+    source.write_text("Unlock the power", encoding="utf-8")
+
+    assert analyze_file(source) == [
+        {
+            "id": "GENERIC_COPY_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Generic AI startup marketing copy detected.",
+            "command": (
+                "Rewrite copy to be specific, concrete, and human. Describe what the "
+                "product does, not what it 'unlocks'."
+            ),
+            "line": 1,
+            "column": 1,
+            "snippet": "Unlock the power",
+        }
+    ]
+
+
+def test_analyzer_custom_issue_shape_and_order(tmp_path):
+    source = tmp_path / "button.tsx"
+    source.write_text('<button className="px-4">Save</button>', encoding="utf-8")
+
+    assert analyze_file(source) == [
+        {
+            "id": "MISSING_HOVER_STATES",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Button element without hover: state detected.",
+            "command": "Add hover:, focus:, and active: states to all interactive elements.",
+        },
+        {
+            "id": "MISSING_FOCUS_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Interactive element without focus: state — accessibility gap.",
+            "command": "Add focus:ring or focus:outline states for keyboard accessibility.",
+        },
+        {
+            "id": "BUTTON_TYPE_MISSING_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T1",
+            "issue": "<button> without type= attribute defaults to submit inside forms.",
+            "command": "Add type='button' to buttons that don't submit forms.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
+        },
+    ]
+
+
+def test_analyzer_ast_issue_shape_and_missing_parser_fallback(tmp_path):
+    from uidetox.analyzer import HAS_AST, _analyze_ast, _get_parser
+
+    source = tmp_path / "state.tsx"
+    content = (
+        "import { useState } from 'react';\n"
+        "const [isAnimating, setIsAnimating] = useState(false);\n"
+    )
+    source.write_text(content, encoding="utf-8")
+
+    if HAS_AST:
+        assert _analyze_ast(source, content, ".tsx") == [
+            {
+                "id": "ANIMATE_STATE_SLOP",
+                "file": str(source.resolve()),
+                "tier": "T2",
+                "issue": (
+                    "React useState used for animation values — causes re-renders on every frame."
+                ),
+                "command": (
+                    "Use CSS transitions/animations, Framer Motion, or useRef for animation "
+                    "state. Never drive 60fps animations through React state."
+                ),
+            }
+        ]
+    assert _get_parser(".txt") is None
+    assert _analyze_ast(source, content, ".txt") == []
+
+
+def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+    from uidetox.fileset import ProjectFileSet
+
+    accepted = tmp_path / "src" / "Accepted.tsx"
+    excluded = tmp_path / "generated" / "Excluded.tsx"
+    unsupported = tmp_path / "src" / "notes.txt"
+    for source in (accepted, excluded, unsupported):
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("content", encoding="utf-8")
+
+    discovered = ProjectFileSet(
+        tmp_path,
+        excludes=("generated",),
+        explicit_targets=(accepted, excluded, unsupported),
+        scope_root=tmp_path,
+    ).discover()
+    analyzed = []
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze_file",
+        lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
+    )
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    assert analyzer_module.analyze_directory(
+        str(tmp_path),
+        exclude_paths=["generated"],
+        target_files=[accepted, excluded, unsupported],
+    ) == []
+    assert discovered == [accepted.resolve()]
+    assert analyzed == discovered
+    assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []
