@@ -5,6 +5,7 @@ from pathlib import Path
 
 from uidetox.analyzer_ast import HAS_AST
 
+
 def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[dict]:
     """Component-level heuristic analysis for layout-level slop detection.
 
