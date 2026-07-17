@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0016.implement.codex.md)"
+  ],
+  "created_at": "2026-07-17T05:16:48+00:00",
+  "id": "lf-0016",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0016.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0016-source-aware-redesign.md",
+  "spec_sha256": "22e86575c3a2b4afa8c4fa9abc2a2e0311cea76b83b57cd06d3b246b94e9f6b4",
+  "status": "planned",
+  "title": "Deepen redesign into source-aware feasibility planning"
+}

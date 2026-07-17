@@ -16,3 +16,17 @@ If the project is not indexed, run `index_repository` before exploration. Before
 
 Fall back to grep or glob for string literals, error messages, config values, and non-code files when graph tools are insufficient.
 <!-- codebase-memory-mcp:end -->
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live in GitHub Issues. External PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use single-context domain documentation. See `docs/agents/domain.md`.

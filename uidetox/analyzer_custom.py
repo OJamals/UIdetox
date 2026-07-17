@@ -6,6 +6,87 @@ from pathlib import Path
 from uidetox.analyzer_ast import has_ast_for
 
 
+_REDUCED_MOTION_MEDIA = re.compile(
+    r"@media\s*\([^)]*prefers-reduced-motion\s*:\s*reduce[^)]*\)\s*\{",
+    re.IGNORECASE,
+)
+_REDUCED_MOTION_OVERRIDE_PROPERTIES = {
+    "animation",
+    "animation-delay",
+    "animation-duration",
+    "animation-iteration-count",
+    "scroll-behavior",
+    "transition",
+    "transition-delay",
+    "transition-duration",
+}
+
+
+def _issue_for_match(
+    rule: dict,
+    filepath: Path,
+    content: str,
+    match: re.Match[str],
+) -> dict:
+    line = content.count("\n", 0, match.start()) + 1
+    column = match.start() - content.rfind("\n", 0, match.start())
+    lines = content.splitlines()
+    return {
+        "id": rule["id"],
+        "file": str(filepath.resolve()),
+        "tier": rule["tier"],
+        "issue": rule["description"],
+        "command": rule["command"],
+        "line": line,
+        "column": column,
+        "snippet": lines[line - 1].strip() if line <= len(lines) else "",
+    }
+
+
+def _reduced_motion_ranges(content: str) -> tuple[tuple[int, int], ...]:
+    ranges: list[tuple[int, int]] = []
+    for media in _REDUCED_MOTION_MEDIA.finditer(content):
+        opening = content.find("{", media.start(), media.end())
+        if opening < 0:
+            continue
+        depth = 0
+        for index in range(opening, len(content)):
+            if content[index] == "{":
+                depth += 1
+            elif content[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    ranges.append((opening, index))
+                    break
+    return tuple(ranges)
+
+
+def _inside_ranges(offset: int, ranges: tuple[tuple[int, int], ...]) -> bool:
+    return any(start <= offset <= end for start, end in ranges)
+
+
+def _important_property(content: str, offset: int) -> str | None:
+    declaration_start = max(
+        content.rfind(";", 0, offset),
+        content.rfind("{", 0, offset),
+    )
+    declaration = content[declaration_start + 1 : offset]
+    match = re.search(r"([-\w]+)\s*:\s*[^;{}]*$", declaration)
+    return match.group(1).lower() if match else None
+
+
+def _is_visible_markup_text(content: str, start: int, end: int) -> bool:
+    last_open = content.rfind("<", 0, start)
+    last_close = content.rfind(">", 0, start)
+    if last_close < 0 or last_open > last_close or content.find("<", end) < 0:
+        return False
+    prefix = content[:start].lower()
+    for tag in ("script", "style"):
+        if prefix.rfind(f"<{tag}") > prefix.rfind(f"</{tag}"):
+            return False
+    return True
+
+
 def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[dict]:
     """Component-level heuristic analysis for layout-level slop detection.
 
@@ -534,6 +615,24 @@ def _analyze_css_custom_rule(
     """Run CSS foundation heuristics."""
     issues = []
     custom = rule.get("_custom_check")
+    if custom in {"important_abuse", "important_animation"}:
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, re.Pattern):
+            return issues
+        reduced_motion = _reduced_motion_ranges(content)
+        for match in pattern.finditer(content):
+            if _inside_ranges(match.start(), reduced_motion):
+                if custom == "important_animation":
+                    continue
+                if (
+                    _important_property(content, match.start())
+                    in _REDUCED_MOTION_OVERRIDE_PROPERTIES
+                ):
+                    continue
+            issues.append(_issue_for_match(rule, filepath, content, match))
+            break
+        return issues
+
     if custom == "css_scroll_behavior":
         if re.search(r'scroll-behavior:\s*smooth', content, re.IGNORECASE) and not re.search(r'prefers-reduced-motion', content, re.IGNORECASE):
             issues.append({"id": rule["id"], "file": str(filepath.resolve()), "tier": rule["tier"],
@@ -654,6 +753,29 @@ def _analyze_html_custom_rule(
     """Run HTML element and attribute heuristics."""
     issues = []
     custom = rule.get("_custom_check")
+    if custom == "orphaned_label":
+        for match in re.finditer(r"<label\b[^>]*>", content, re.IGNORECASE):
+            tag = match.group(0)
+            has_association = (
+                re.search(r"\bhtmlFor\s*=", tag) is not None
+                if ext in {".jsx", ".tsx"}
+                else re.search(r"\bfor\s*=", tag, re.IGNORECASE) is not None
+            )
+            if not has_association:
+                issues.append(_issue_for_match(rule, filepath, content, match))
+                break
+        return issues
+
+    if custom == "round_number_metric":
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, re.Pattern):
+            return issues
+        for match in pattern.finditer(content):
+            if _is_visible_markup_text(content, match.start(), match.end()):
+                issues.append(_issue_for_match(rule, filepath, content, match))
+                break
+        return issues
+
     if custom == "img_missing_dimensions":
         for m_img in re.finditer(r'<img\b[^>]*>', content, re.IGNORECASE):
             img_tag = m_img.group(0)
@@ -989,6 +1111,8 @@ _CUSTOM_CHECK_HANDLERS = {
     "video_no_captions": _analyze_accessibility_custom_rule,
     "focus_outline_removed": _analyze_accessibility_custom_rule,
     "focus_visible_missing": _analyze_accessibility_custom_rule,
+    "important_abuse": _analyze_css_custom_rule,
+    "important_animation": _analyze_css_custom_rule,
     "css_scroll_behavior": _analyze_css_custom_rule,
     "sticky_without_top": _analyze_css_custom_rule,
     "scroll_snap_without_behavior": _analyze_css_custom_rule,
@@ -1007,10 +1131,12 @@ _CUSTOM_CHECK_HANDLERS = {
     "skip_to_content_missing": _analyze_accessibility_custom_rule,
     "missing_favicon": _analyze_accessibility_custom_rule,
     "img_missing_dimensions": _analyze_html_custom_rule,
+    "orphaned_label": _analyze_html_custom_rule,
     "missing_tabular_nums": _analyze_html_custom_rule,
     "placeholder_only_input": _analyze_html_custom_rule,
     "srcset_missing": _analyze_html_custom_rule,
     "anchor_target_blank": _analyze_html_custom_rule,
+    "round_number_metric": _analyze_html_custom_rule,
     "dangerous_html": _analyze_browser_security_custom_rule,
     "duplicate_import": _analyze_react_custom_rule,
     "document_cookie_ssr": _analyze_browser_security_custom_rule,

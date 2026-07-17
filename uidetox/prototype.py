@@ -26,6 +26,37 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
         if sibling_distances
         else None
     )
+    parity_counts = dict(redesign_set.parity.get("counts", {}))
+    parity_findings = list(redesign_set.parity.get("findings", []))
+    source_evidence = [
+        (
+            f"- {item.get('file', 'unknown')}: "
+            + "; ".join(str(reason) for reason in item.get("reasons", []))
+        )
+        for item in proposal.source_evidence
+    ]
+    migration_evidence = [
+        (
+            f"{item.get('order', '?')}. [{item.get('kind', 'step')}] "
+            f"{item.get('instruction', '')}"
+        )
+        for item in proposal.migration_plan
+    ]
+    trusted_migration_steps = [
+        str(item.get("instruction", ""))
+        for item in proposal.migration_plan
+        if item.get("kind") == "strategy"
+    ]
+    contract_evidence = [
+        (
+            f"- {item.get('contract', 'unknown')}: "
+            f"source={', '.join(item.get('source_modules', [])) or 'unknown'}; "
+            f"runtime={item.get('runtime_status', 'unknown')}"
+        )
+        for item in proposal.preserved_contract_evidence
+    ]
+    source_freshness = proposal.evidence_freshness.get("source", {})
+    runtime_freshness = proposal.evidence_freshness.get("runtime", {})
 
     lines = [
         f"# UIdetox Prototype Brief: {proposal.name}",
@@ -78,7 +109,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             "",
             "## Migration sequence",
             "",
-            *_numbered(proposal.migration_steps),
+            *_numbered(trusted_migration_steps),
             "",
             "## Prototype operating rules",
             "",
@@ -98,15 +129,55 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             f"Target: {redesign_set.target}",
             "Source targets:",
             *_bullets(proposal.source_targets),
+            "Affected source modules with evidence:",
+            *(source_evidence or ["- None mapped."]),
+            "Dependency-aware migration plan:",
+            *(migration_evidence or ["- None mapped."]),
             "Contracts to preserve:",
             *_bullets(proposal.preserved_contracts),
+            "Preserved contract evidence:",
+            *(contract_evidence or ["- None mapped."]),
+            "Evidence freshness:",
+            f"- Source: {source_freshness.get('status', 'unknown')}",
+            f"- Runtime: {runtime_freshness.get('status', 'unknown')}",
+            (
+                "- Runtime stale reason: "
+                + str(runtime_freshness.get("stale_reason"))
+                if runtime_freshness.get("stale_reason")
+                else "- Runtime stale reason: none"
+            ),
+            "Feasibility blockers and unknowns:",
+            *_bullets(proposal.feasibility_blockers),
             "Runtime unknowns:",
             *_bullets(redesign_set.unknowns),
+            "Cross-stack parity counts:",
+            *(
+                [
+                    f"- {kind}: {count}"
+                    for kind, count in sorted(parity_counts.items())
+                ]
+                or ["- None recorded."]
+            ),
+            "Cross-stack parity findings:",
+            *(
+                [
+                    "- "
+                    + str(item.get("kind", "unresolved"))
+                    + ": "
+                    + str(item.get("normalized_path") or "unknown path")
+                    + " — "
+                    + str(item.get("detail", ""))
+                    for item in parity_findings
+                ]
+                or ["- None recorded."]
+            ),
+            "Observable acceptance checks:",
+            *_bullets(proposal.observable_checks),
             "END_UIDETOX_EVIDENCE",
             "",
             "## Acceptance checks",
             "",
-            *_bullets(proposal.acceptance_checks),
+            "- Apply only the observable checks recorded inside the isolated evidence block above.",
             "",
             "## Required handoff",
             "",

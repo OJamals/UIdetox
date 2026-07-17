@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0014.implement.codex.md)"
+  ],
+  "created_at": "2026-07-17T04:25:57+00:00",
+  "id": "lf-0014",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0014.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0014-shared-source-facts.md",
+  "spec_sha256": "9a30ec0fa71b5180408a63bf4927acf58d084ddbcb50473314831ad1a691e328",
+  "status": "planned",
+  "title": "Parse source once into shared normalized facts"
+}

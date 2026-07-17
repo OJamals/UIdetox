@@ -5,8 +5,10 @@ from pathlib import Path
 
 from uidetox.analyzer_ast import _analyze_ast, has_ast_for
 from uidetox.analyzer_custom import _CUSTOM_CHECK_HANDLERS, _analyze_component_layout
+from uidetox.analyzer_project import reconcile_project_issues
 from uidetox.fileset import ProjectFileSet, find_project_root
 from uidetox.rule_registry import ANALYZER_RULES as RULES
+from uidetox.source_facts import SourceFacts
 
 
 def _analyze_rule(
@@ -53,7 +55,13 @@ def _analyze_rule(
     return issues
 
 
-def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[str, str] | None = None) -> list[dict]:
+def analyze_file(
+    filepath: Path,
+    design_variance: int = 8,
+    dynamic_colors: dict[str, str] | None = None,
+    *,
+    facts: SourceFacts | None = None,
+) -> list[dict]:
     """Scan a single file against all slop rules.
 
     Args:
@@ -83,7 +91,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
         return issues  # Skip binary or unreadable files
 
     if has_ast_for(ext):
-        ast_issues = _analyze_ast(filepath, content, ext)
+        ast_issues = _analyze_ast(filepath, content, ext, facts=facts)
         issues.extend(ast_issues)
 
     # Component-level layout heuristics (runs regardless of AST)
@@ -148,6 +156,8 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
 
         for future in futures:
             all_issues.extend(future.result())
+
+    all_issues = reconcile_project_issues(all_issues, root)
 
     # Project-level dynamic color audit based on actual Tailwind/theme tokens.
     # Cap output to keep the queue actionable rather than overwhelming.

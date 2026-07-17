@@ -33,8 +33,13 @@ def run(args: argparse.Namespace):
     if getattr(args, "visual_density", None) is not None:
         config["VISUAL_DENSITY"] = args.visual_density
 
-    existing_intent = config.get("design_intent", {})
-    intent = dict(existing_intent) if isinstance(existing_intent, dict) else {}
+    existing_settings = DesignSettings.from_config(config)
+    intent = {
+        field_name: getattr(existing_settings.intent, field_name)
+        for field_name, source in existing_settings.intent.provenance.items()
+        if source == "explicit"
+    }
+    provenance = {field_name: "explicit" for field_name in intent}
     intent_fields = {
         "audience": "audience",
         "primary_job": "primary_job",
@@ -47,17 +52,37 @@ def run(args: argparse.Namespace):
         value = getattr(args, argument, None)
         if isinstance(value, str) and value.strip():
             intent[key] = value.strip()
+            provenance[key] = "explicit"
     for argument, key in (("preserve", "preserve"), ("constraint", "constraints")):
         values = getattr(args, argument, None)
         if values is not None:
-            intent[key] = [str(value).strip() for value in values if str(value).strip()]
+            cleaned = [str(value).strip() for value in values if str(value).strip()]
+            if cleaned:
+                intent[key] = cleaned
+                provenance[key] = "explicit"
     if intent:
         intent["source"] = "configured"
+        intent["provenance"] = provenance
         config["design_intent"] = intent
+    else:
+        config.pop("design_intent", None)
 
     settings = DesignSettings.from_config(config)
     config.update(settings.dials.to_config())
-    config["design_intent"] = settings.intent.to_dict()
+    serialized_intent = settings.intent.to_dict()
+    explicit_intent = {
+        field_name: serialized_intent[field_name]
+        for field_name, source in settings.intent.provenance.items()
+        if source == "explicit"
+    }
+    if explicit_intent:
+        explicit_intent["source"] = "configured"
+        explicit_intent["provenance"] = {
+            field_name: "explicit" for field_name in explicit_intent
+        }
+        config["design_intent"] = explicit_intent
+    else:
+        config.pop("design_intent", None)
 
     dev_server = getattr(args, "dev_server", None)
     if isinstance(dev_server, str) and dev_server.strip():

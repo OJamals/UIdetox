@@ -18,7 +18,7 @@ The goal is frontend code that makes someone ask "how was this made?" — not "w
 
 ## 2. The Autonomous Loop
 
-Run `uidetox loop` to bootstrap the full 5-phase protocol. The loop automatically orchestrates the following flow, guiding the agent step-by-step:
+Run `uidetox loop` to preview the full 5-phase protocol. Add `--execute` to run its deterministic phases in process with resumable state; the workflow pauses when agent work, proposal selection, subjective review, or fresh verification evidence is required:
 
 ### Phase 0: Mechanical Checks
 The loop triggers `uidetox check --fix` to execute tsc → lint → format in sequence. Errors are automatically queued as T1 issues and auto-fixed where possible.
@@ -75,9 +75,9 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | Command | Purpose |
 |---------|---------|
 | `uidetox setup` | Initialize typed design dials and intent (`--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`) plus preview/commit settings |
-| `uidetox scan` | Full audit: auto-detect tooling → static analyzer → design review |
-| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with AST-aware source semantics, extraction provenance/confidence, source hashes, plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
-| `uidetox redesign [target]` | Generate 1–5 topology-first redesign plans with pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
+| `uidetox scan` | Full audit: auto-detect tooling → static analyzer → frontend/backend operation parity → design review |
+| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, backend/API operation parity, provenance/confidence, source hashes, plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
+| `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
 | `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
 | `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
 | `uidetox detect` | Auto-discover linters, formatters, tsc, backend, database, API |
@@ -90,7 +90,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox next` | Batch issues for top-priority component/directory with SKILL.md context injection |
 | `uidetox resolve <id> --note "..."` | Mark a single issue as fixed (note is mandatory) |
 | `uidetox batch-resolve ID1 ID2 ... --note "..."` | Resolve multiple issues with a single coherent commit |
-| `uidetox loop` | Enter autonomous self-propagation fix loop with LLM-dynamic analysis |
+| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution (`--proposal-id`, `--review-score`) |
 | `uidetox loop --orchestrator` | Sub-agent mode with auto-parallel (1-5) and memory injection |
 | `uidetox subagent` | Manage sub-agent sessions and generate stage prompts |
 | `uidetox memory` | Read/write persistent agent memory (patterns, notes, reviewed files) |
@@ -194,10 +194,13 @@ UIdetox/
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
 │   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
-│   ├── frontend_map.py            # Semantic frontend graph + artifact persistence
-│   ├── redesign.py                # Divergent topology-first redesign planning
-│   ├── runtime_observer.py         # Playwright DOM/a11y/layout evidence adapter
-│   ├── prototype.py                # Disposable agent-ready prototype brief generation
+│   ├── source_facts.py           # Shared AST parse lifecycle + immutable source facts
+│   ├── frontend_map.py           # Semantic frontend graph + artifact persistence
+│   ├── project_map.py            # Backend/API discovery + operation parity
+│   ├── redesign.py              # Source-aware divergent redesign planning
+│   ├── runtime_observer.py      # Playwright DOM/a11y/layout evidence adapter
+│   ├── prototype.py             # Disposable agent-ready prototype brief generation
+│   ├── workflow.py              # Durable executable loop state machine
 │   ├── history.py                # Run snapshot storage and progression tracking
 │   ├── memory.py                 # Persistent agent memory (reviewed files, patterns, notes)
 │   ├── subagent.py               # Sub-agent session infrastructure (5-stage pipeline)
