@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+from uidetox.design_context import DesignSettings
 from uidetox.state import save_config, ensure_uidetox_dir, load_config
 
 
@@ -13,11 +14,12 @@ DEFAULT_CONFIG = {
     "auto_commit": False,
 }
 
+
 def run(args: argparse.Namespace):
     print("==============================")
     print(" UIdetox Setup")
     print("==============================")
-    
+
     ensure_uidetox_dir()
     config = load_config()
 
@@ -30,6 +32,32 @@ def run(args: argparse.Namespace):
         config["MOTION_INTENSITY"] = args.motion_intensity
     if getattr(args, "visual_density", None) is not None:
         config["VISUAL_DENSITY"] = args.visual_density
+
+    existing_intent = config.get("design_intent", {})
+    intent = dict(existing_intent) if isinstance(existing_intent, dict) else {}
+    intent_fields = {
+        "audience": "audience",
+        "primary_job": "primary_job",
+        "tone": "tone",
+        "genre": "genre",
+        "page_kind": "page_kind",
+        "brand": "brand",
+    }
+    for argument, key in intent_fields.items():
+        value = getattr(args, argument, None)
+        if isinstance(value, str) and value.strip():
+            intent[key] = value.strip()
+    for argument, key in (("preserve", "preserve"), ("constraint", "constraints")):
+        values = getattr(args, argument, None)
+        if values is not None:
+            intent[key] = [str(value).strip() for value in values if str(value).strip()]
+    if intent:
+        intent["source"] = "configured"
+        config["design_intent"] = intent
+
+    settings = DesignSettings.from_config(config)
+    config.update(settings.dials.to_config())
+    config["design_intent"] = settings.intent.to_dict()
 
     dev_server = getattr(args, "dev_server", None)
     if isinstance(dev_server, str) and dev_server.strip():
@@ -47,15 +75,23 @@ def run(args: argparse.Namespace):
         is_interactive = bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
         if is_interactive:
             try:
-                ans = input("Enable automated git commits for each resolved issue? (y/n): ").strip().lower()
+                ans = (
+                    input(
+                        "Enable automated git commits for each resolved issue? (y/n): "
+                    )
+                    .strip()
+                    .lower()
+                )
             except EOFError:
                 ans = ""
-            if ans == 'y':
-                config['auto_commit'] = True
-            elif ans == 'n':
-                config['auto_commit'] = False
+            if ans == "y":
+                config["auto_commit"] = True
+            elif ans == "n":
+                config["auto_commit"] = False
         else:
-            print("Non-interactive mode detected — keeping existing auto_commit setting.")
+            print(
+                "Non-interactive mode detected — keeping existing auto_commit setting."
+            )
 
     print("\nCurrent configuration:")
     print(f"  DESIGN_VARIANCE:  {config.get('DESIGN_VARIANCE', 8)}")
@@ -64,11 +100,19 @@ def run(args: argparse.Namespace):
     print(f"  AUTO_COMMIT:      {config.get('auto_commit', False)}")
     if config.get("dev_server"):
         print(f"  DEV_SERVER:       {config['dev_server']}")
-    
+    print(f"  AUDIENCE:         {settings.intent.audience}")
+    print(f"  PRIMARY_JOB:      {settings.intent.primary_job}")
+    print(f"  TONE / GENRE:     {settings.intent.tone} / {settings.intent.genre}")
+    print(f"  PAGE_KIND:        {settings.intent.page_kind}")
+
     print("\n[AGENT INSTRUCTION]")
-    print("Use `uidetox setup --design-variance ... --motion-intensity ... --visual-density ...` to persist dials explicitly.")
-    print("Set `--dev-server http://localhost:5173` when your preview is not on port 3000.")
+    print(
+        "Use `uidetox setup --design-variance ... --motion-intensity ... --visual-density ...` to persist dials explicitly."
+    )
+    print(
+        "Set `--dev-server http://localhost:5173` when your preview is not on port 3000."
+    )
     print("Proceed to run `uidetox scan` to begin detoxifying the frontend.")
-    
+
     # Ensures config exists if it didn't
     save_config(config)

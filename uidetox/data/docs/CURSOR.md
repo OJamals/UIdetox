@@ -7,7 +7,7 @@ Cursor natively supports custom rules and subagents. UIdetox leverages Cursor's 
 ```bash
 uidetox update-skill cursor
 ```
-This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root and auto-generates `.cursor/rules/uidetox.mdc`.
+This merges the bundle into `.cursor/skills/uidetox/` and generates `.cursor/rules/uidetox.mdc`. Existing root files and unrelated skill files are preserved.
 
 If you are on Cursor Nightly, ensure Agent Skills is enabled in Settings → Beta → Agent Skills.
 

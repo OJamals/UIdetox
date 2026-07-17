@@ -5,6 +5,8 @@ An agent harness that eliminates "AI slop" from frontend code and enforces quali
 UIdetox is created as an effective agent harness for UI/frontend work by serving as an amalgamation of four pioneering projects:
 - **desloppify** — The original inspiration for systematic AI-slop removal and workflow automation
 - **impeccable** — Frontend design commands, references, and quality guidelines
+- **taste-skill** — Context-first design engineering, dials, and anti-slop guidance
+- **hallmark** — Preflight intent, scope discipline, design DNA, and macrostructure diversification
 
 ## 1. Philosophy
 
@@ -61,6 +63,7 @@ The combined SKILL.md contains the full design knowledge base. It is structured 
 | Motion Engine | taste-skill | Perpetual micro-interaction framework |
 | Output Enforcement | taste-skill | Anti-laziness rules for complete code generation |
 | Redesign Protocol | taste-skill | Audit-first upgrade workflow |
+| Design Preflight | taste-skill + impeccable + hallmark | Audience, primary job, tone, genre, brand, scope, preserve/constraint contract |
 | Color Palettes | Uncodixfy | Curated dark/light color schemes |
 
 Reference files in `reference/` provide deep-dive guidance for each design domain.
@@ -71,9 +74,9 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 
 | Command | Purpose |
 |---------|---------|
-| `uidetox setup` | Initialize project config and design dials (`--design-variance`, `--motion-intensity`, `--visual-density`, `--dev-server`, `--auto-commit`, `--no-auto-commit`) |
+| `uidetox setup` | Initialize typed design dials and intent (`--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`) plus preview/commit settings |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → design review |
-| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with source structure plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
+| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with AST-aware source semantics, extraction provenance/confidence, source hashes, plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
 | `uidetox redesign [target]` | Generate 1–5 topology-first redesign plans with pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
 | `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
 | `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
@@ -157,6 +160,8 @@ The harness supports three design dials that control output aesthetic:
 
 Default baseline: `(8, 6, 4)`. Override via `uidetox setup --design-variance N --motion-intensity N --visual-density N --dev-server URL` or direct instruction.
 
+Persist design preflight with `uidetox setup --audience "..." --primary-job "..." --tone "..." --genre "..." --page-kind page --brand "..."`. Rules are contextual: infer missing intent from the semantic map, preserve existing contracts, and label unresolved assumptions. Dials must alter proposal composition, information architecture, and motion models—not merely wording.
+
 ## 6. Prerequisite & Provider Installation
 
 ```bash
@@ -167,11 +172,11 @@ Then install the design skill for your agent. `update-skill` physically copies a
 
 ```bash
 uidetox update-skill claude     # → .claude/skills/uidetox/
-uidetox update-skill cursor     # → project root + .cursor/rules/uidetox.mdc
-uidetox update-skill gemini     # → project root + GEMINI.md with @./SKILL.md
+uidetox update-skill cursor     # → .cursor/skills/uidetox/ + .cursor/rules/uidetox.mdc
+uidetox update-skill gemini     # → .gemini/skills/uidetox/
 uidetox update-skill codex      # → ~/.codex/skills/uidetox/ + ~/.codex/prompts/
-uidetox update-skill windsurf   # → project root + .windsurfrules
-uidetox update-skill copilot    # → project root (SKILL.md + AGENTS.md)
+uidetox update-skill windsurf   # → .windsurf/skills/uidetox/
+uidetox update-skill copilot    # → .github/skills/uidetox/
 ```
 
 Each agent also receives a tailored integration guide from the `docs/` catalog with platform-specific autonomous loop prompts and orchestrator instructions.

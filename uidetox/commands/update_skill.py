@@ -1,7 +1,6 @@
 """Update Skill command — installs UIdetox rules into the target agent's configuration."""
 
 import argparse
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -25,17 +24,6 @@ def _copy_file(src: Path, dst: Path, label: str | None = None) -> None:
     print(f"  ✓ {display} → {dst}")
 
 
-def _copy_dir(src: Path, dst: Path, label: str | None = None) -> None:
-    """Recursively copy a directory, creating it if needed."""
-    if not src.exists():
-        return
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
-    display = label or src.name
-    print(f"  ✓ {display}/ → {dst}/")
-
-
 def _merge_dir(src: Path, dst: Path, label: str | None = None) -> None:
     """Copy a directory into an existing destination without deleting unrelated files."""
     if not src.exists():
@@ -51,23 +39,29 @@ def _merge_dir(src: Path, dst: Path, label: str | None = None) -> None:
     print(f"  ✓ {display}/ → {dst}/")
 
 
+def _install_project_skill(data: Path, dest: Path) -> None:
+    """Install UIdetox inside its own namespace without deleting sibling files."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for filename in ("SKILL.md", "AGENTS.md"):
+        source = data / filename
+        if source.exists():
+            _copy_file(source, dest / filename)
+    _merge_dir(data / "reference", dest / "reference")
+    _merge_dir(data / "commands", dest / "commands")
+
+
 def _install_claude(data: Path, cwd: Path) -> None:
     """Claude Code: .claude/skills/uidetox/"""
     dest = cwd / ".claude" / "skills" / "uidetox"
-    dest.mkdir(parents=True, exist_ok=True)
-    _copy_file(data / "SKILL.md", dest / "SKILL.md")
-    _copy_dir(data / "reference", dest / "reference")
-    _copy_dir(data / "commands", dest / "commands")
+    _install_project_skill(data, dest)
     print("\n  Claude Code will auto-detect the skill from .claude/skills/.")
     print("  Paste the agent prompt from the README to start the loop.")
 
 
 def _install_cursor(data: Path, cwd: Path) -> None:
-    """Cursor: copy SKILL.md + AGENTS.md to root, create .cursor/rules/uidetox.mdc"""
-    _copy_file(data / "SKILL.md", cwd / "SKILL.md")
-    _copy_file(data / "AGENTS.md", cwd / "AGENTS.md")
-    _copy_dir(data / "reference", cwd / "reference")
-    _copy_dir(data / "commands", cwd / "commands")
+    """Cursor: .cursor/skills/uidetox/ plus namespaced activation rule."""
+    dest = cwd / ".cursor" / "skills" / "uidetox"
+    _install_project_skill(data, dest)
 
     # Auto-generate the .cursor/rules MDC file
     rules_dir = cwd / ".cursor" / "rules"
@@ -77,10 +71,9 @@ def _install_cursor(data: Path, cwd: Path) -> None:
 description: UIdetox Anti-Slop Guidelines
 globs: "*.tsx, *.jsx, *.ts, *.js, *.css, *.html, *.vue, *.svelte"
 ---
-Before generating or reviewing frontend code, ALWAYS cross-reference the anti-patterns
-and design rules in `SKILL.md` at the project root. Follow `AGENTS.md` for the full
-scan→fix loop workflow. DO NOT output purple-blue gradients, generic Inter typography,
-glassmorphism cards, or bounce animations.
+Before generating or reviewing frontend code, use the UIdetox skill at
+`.cursor/skills/uidetox/SKILL.md`. Follow its bundled `AGENTS.md` workflow. Preserve
+project-owned root instructions and never replace unrelated skills or commands.
 """
     mdc_path.write_text(mdc_content, encoding="utf-8")
     print(f"  ✓ uidetox.mdc → {mdc_path}")
@@ -89,37 +82,16 @@ glassmorphism cards, or bounce animations.
 
 
 def _install_gemini(data: Path, cwd: Path) -> None:
-    """Gemini CLI: copy SKILL.md to root, create/append GEMINI.md"""
-    _copy_file(data / "SKILL.md", cwd / "SKILL.md")
-    _copy_file(data / "AGENTS.md", cwd / "AGENTS.md")
-    _copy_dir(data / "reference", cwd / "reference")
-    _copy_dir(data / "commands", cwd / "commands")
-
-    gemini_md = cwd / "GEMINI.md"
-    ref_line = "@./SKILL.md"
-    if gemini_md.exists():
-        content = gemini_md.read_text(encoding="utf-8")
-        if ref_line not in content:
-            with open(gemini_md, "a", encoding="utf-8") as f:
-                f.write(f"\n{ref_line}\n")
-            print(f"  ✓ Appended '{ref_line}' to GEMINI.md")
-        else:
-            print(f"  ✓ GEMINI.md already references SKILL.md")
-    else:
-        gemini_md.write_text(
-            f"{ref_line}\n\n# UI Directives\nEnforce the Anti-Slop catalog defined in SKILL.md.\n",
-            encoding="utf-8",
-        )
-        print(f"  ✓ Created GEMINI.md with SKILL.md reference")
+    """Gemini CLI: .gemini/skills/uidetox/."""
+    dest = cwd / ".gemini" / "skills" / "uidetox"
+    _install_project_skill(data, dest)
+    print("\n  Gemini will discover UIdetox from .gemini/skills/.")
 
 
 def _install_codex(data: Path, cwd: Path) -> None:
     """Codex CLI: ~/.codex/skills/uidetox/"""
     dest = Path.home() / ".codex" / "skills" / "uidetox"
-    dest.mkdir(parents=True, exist_ok=True)
-    _copy_file(data / "SKILL.md", dest / "SKILL.md")
-    _copy_dir(data / "reference", dest / "reference")
-    _copy_dir(data / "commands", dest / "commands")
+    _install_project_skill(data, dest)
 
     # Also copy commands as prompts
     prompts_dir = Path.home() / ".codex" / "prompts" / "uidetox"
@@ -127,42 +99,17 @@ def _install_codex(data: Path, cwd: Path) -> None:
 
 
 def _install_windsurf(data: Path, cwd: Path) -> None:
-    """Windsurf: copy SKILL.md to root, create/update .windsurfrules"""
-    _copy_file(data / "SKILL.md", cwd / "SKILL.md")
-    _copy_file(data / "AGENTS.md", cwd / "AGENTS.md")
-    _copy_dir(data / "reference", cwd / "reference")
-    _copy_dir(data / "commands", cwd / "commands")
-
-    rules_path = cwd / ".windsurfrules"
-    rules_content = """# UIdetox Anti-Slop Directives
-Before writing any frontend code (React, Vue, Svelte, HTML/CSS), you MUST refer to
-`SKILL.md` to avoid generic AI aesthetics. Follow `AGENTS.md` for the scan→fix loop.
-
-DO NOT use purple/blue default gradients, Inter fonts, glassmorphism, or bouncy animations.
-Adhere to the DESIGN_VARIANCE, MOTION_INTENSITY, and VISUAL_DENSITY scores defined in
-`.uidetox/config.json`.
-"""
-    if rules_path.exists():
-        existing = rules_path.read_text(encoding="utf-8")
-        if "UIdetox" not in existing:
-            with open(rules_path, "a", encoding="utf-8") as f:
-                f.write(f"\n{rules_content}")
-            print(f"  ✓ Appended UIdetox rules to .windsurfrules")
-        else:
-            print(f"  ✓ .windsurfrules already contains UIdetox rules")
-    else:
-        rules_path.write_text(rules_content, encoding="utf-8")
-        print(f"  ✓ Created .windsurfrules")
+    """Windsurf: .windsurf/skills/uidetox/."""
+    dest = cwd / ".windsurf" / "skills" / "uidetox"
+    _install_project_skill(data, dest)
+    print("\n  Windsurf will discover UIdetox from .windsurf/skills/.")
 
 
 def _install_copilot(data: Path, cwd: Path) -> None:
-    """GitHub Copilot: copy SKILL.md + AGENTS.md to project root."""
-    _copy_file(data / "SKILL.md", cwd / "SKILL.md")
-    _copy_file(data / "AGENTS.md", cwd / "AGENTS.md")
-    _copy_dir(data / "reference", cwd / "reference")
-    _copy_dir(data / "commands", cwd / "commands")
-    print("\n  Copilot will pick up SKILL.md and AGENTS.md from the project root.")
-    print("  Reference them in your Copilot Workspace spec or IDE prompt.")
+    """GitHub Copilot: .github/skills/uidetox/."""
+    dest = cwd / ".github" / "skills" / "uidetox"
+    _install_project_skill(data, dest)
+    print("\n  Copilot will discover UIdetox from .github/skills/.")
 
 
 _INSTALLERS = {
@@ -177,9 +124,9 @@ _INSTALLERS = {
 
 def run(args: argparse.Namespace) -> None:
     agent = args.agent
-    print(f"==============================")
+    print("==============================")
     print(f" UIdetox → {agent.capitalize()}")
-    print(f"==============================\n")
+    print("==============================\n")
 
     data = _get_data_dir()
     cwd = Path.cwd()
@@ -188,7 +135,10 @@ def run(args: argparse.Namespace) -> None:
     skill_src = data / "SKILL.md"
     if not skill_src.exists():
         print(f"Error: Bundled SKILL.md not found at {skill_src}", file=sys.stderr)
-        print("If you installed via pip, try reinstalling: pip install --force-reinstall uidetox", file=sys.stderr)
+        print(
+            "If you installed via pip, try reinstalling: pip install --force-reinstall uidetox",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print(f"Installing UIdetox skill files for {agent.capitalize()}...\n")
@@ -196,7 +146,9 @@ def run(args: argparse.Namespace) -> None:
     installer = _INSTALLERS.get(agent)
     if not installer:
         valid = ", ".join(sorted(_INSTALLERS.keys()))
-        print(f"Error: Unknown agent '{agent}'. Valid options: {valid}", file=sys.stderr)
+        print(
+            f"Error: Unknown agent '{agent}'. Valid options: {valid}", file=sys.stderr
+        )
         sys.exit(1)
     installer(data, cwd)
 
@@ -208,4 +160,4 @@ def run(args: argparse.Namespace) -> None:
         print(f"{'─' * 40}\n")
         print(doc_path.read_text(encoding="utf-8"))
 
-    print(f"\n✓ Done. Run `uidetox setup` then `uidetox scan` to begin.")
+    print("\n✓ Done. Run `uidetox setup` then `uidetox scan` to begin.")

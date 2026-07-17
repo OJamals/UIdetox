@@ -8,7 +8,7 @@ UIdetox works with GitHub Copilot in VS Code and other Copilot surfaces that can
 uidetox update-skill copilot
 ```
 
-This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root. Copilot can then pick up the UIdetox workflow from `SKILL.md` and `AGENTS.md`.
+This merges the bundle into `.github/skills/uidetox/`. Existing project-root files and unrelated `.github` content are preserved.
 
 ### 2. Prompt Constraint
 
@@ -18,7 +18,7 @@ When defining your Copilot task or workspace prompt, explicitly include UIdetox 
 # Implementation Requirements
 
 This project adheres to the UIdetox anti-slop guidelines. 
-1. Read `SKILL.md` before generating any UI components.
+1. Read `.github/skills/uidetox/SKILL.md` before generating any UI components.
 2. Avoid generic, AI-generated aesthetics (e.g., system-ui fonts, flat borders, excessive glassmorphism, purple gradients).
 3. The resulting PR must successfully pass `uidetox check` and `uidetox scan` without generating any T2, T3, or T4 issues.
 4. **CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.

@@ -72,9 +72,17 @@ def parse_args(args_list=None):
     auto_commit_group = setup_parser.add_mutually_exclusive_group()
     auto_commit_group.add_argument("--auto-commit", dest="auto_commit", action="store_true", help="Enable automated git commits for resolved issues")
     auto_commit_group.add_argument("--no-auto-commit", dest="auto_commit", action="store_false", help="Disable automated git commits for resolved issues")
-    setup_parser.add_argument("--design-variance", type=int, choices=range(0, 11), help="Persist DESIGN_VARIANCE (0-10)")
-    setup_parser.add_argument("--motion-intensity", type=int, choices=range(0, 11), help="Persist MOTION_INTENSITY (0-10)")
-    setup_parser.add_argument("--visual-density", type=int, choices=range(0, 11), help="Persist VISUAL_DENSITY (0-10)")
+    setup_parser.add_argument("--design-variance", type=int, choices=range(1, 11), help="Persist DESIGN_VARIANCE (1-10)")
+    setup_parser.add_argument("--motion-intensity", type=int, choices=range(1, 11), help="Persist MOTION_INTENSITY (1-10)")
+    setup_parser.add_argument("--visual-density", type=int, choices=range(1, 11), help="Persist VISUAL_DENSITY (1-10)")
+    setup_parser.add_argument("--audience", help="Who the redesigned interface serves")
+    setup_parser.add_argument("--primary-job", help="Primary job the interface must make easy")
+    setup_parser.add_argument("--tone", help="Desired expressive tone")
+    setup_parser.add_argument("--genre", help="Product/interface genre")
+    setup_parser.add_argument("--page-kind", choices=("page", "component", "flow", "application"))
+    setup_parser.add_argument("--brand", help="Brand signals to preserve or introduce")
+    setup_parser.add_argument("--preserve", action="append", default=None, help="Contract to preserve; repeatable")
+    setup_parser.add_argument("--constraint", action="append", default=None, help="Design constraint; repeatable")
     setup_parser.add_argument("--dev-server", type=str, help="Persist the default preview URL used by capture (e.g. http://localhost:5173)")
 
     # Command: scan
@@ -122,7 +130,7 @@ def parse_args(args_list=None):
     add_parser.add_argument("--fix-command", required=True, help="Suggested command to fix")
 
     # Command: next
-    next_parser = subparsers.add_parser("next", help="Picks the next highest-priority issue from the scan queue")
+    subparsers.add_parser("next", help="Picks the next highest-priority issue from the scan queue")
 
     # Command: resolve
     resolve_parser = subparsers.add_parser("resolve", help="Mark a specific issue as resolved")
@@ -136,7 +144,7 @@ def parse_args(args_list=None):
     batch_resolve_parser.add_argument("--skip-verify", action="store_true", help="Skip pre-commit verification gate")
 
     # Command: plan
-    plan_parser = subparsers.add_parser("plan", help="Reorder priorities or cluster related issues in the queue")
+    subparsers.add_parser("plan", help="Reorder priorities or cluster related issues in the queue")
 
     # Command: review
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
@@ -185,7 +193,7 @@ def parse_args(args_list=None):
     loop_parser.add_argument("--orchestrator", action="store_true", help="Use sub-agent orchestrator mode (one agent per stage)")
 
     # Command: finish
-    finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
+    subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
 
     # Command: subagent
     sub_parser = subparsers.add_parser("subagent", help="Manage sub-agent sessions and generate stage prompts")

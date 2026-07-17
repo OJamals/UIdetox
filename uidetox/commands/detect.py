@@ -1,7 +1,8 @@
 """Detect command: discover project tooling and print results."""
 
 import argparse
-import json
+
+from uidetox.analyzer_ast import ast_capabilities
 from uidetox.tooling import detect_all
 from uidetox.state import get_project_root, load_config, save_config
 
@@ -13,6 +14,8 @@ def run(args: argparse.Namespace):
     # Store detected tooling in config
     config = load_config()
     config["tooling"] = profile.to_dict()
+    capabilities = ast_capabilities()
+    config["ast_capabilities"] = capabilities
     save_config(config)
     
     print("==============================")
@@ -59,5 +62,12 @@ def run(args: argparse.Namespace):
     if profile.api:
         for api in profile.api:
             print(f"  API Layer       : {api.name} ({api.config_file})")
+
+    print("  AST grammars    :")
+    for name, capability in capabilities.items():
+        status = "available" if capability["available"] else "unavailable"
+        extensions = ", ".join(capability["extensions"])
+        detail = f" — {capability['error']}" if capability["error"] else ""
+        print(f"    {name:<10} : {status} ({extensions}){detail}")
     
     print("\nTooling config saved to .uidetox/config.json")

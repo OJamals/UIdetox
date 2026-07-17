@@ -11,7 +11,7 @@
    ```bash
    uidetox update-skill codex
    ```
-   This installs `SKILL.md`, `commands/`, and `reference/` into `~/.codex/skills/uidetox/` and mirrors the command library into `~/.codex/prompts/uidetox/`.
+   This merges `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into `~/.codex/skills/uidetox/` and mirrors the command library into `~/.codex/prompts/uidetox/`. Unrelated files are preserved.
 
 3. Initialize UIdetox in your project:
    ```bash

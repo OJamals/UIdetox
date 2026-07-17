@@ -15,6 +15,22 @@ description: Eliminates AI slop from frontend code. Combines design taste enforc
 
 ---
 
+## 1.5 DESIGN PREFLIGHT — READ THE ROOM
+
+Before selecting rules, aesthetics, or topology, establish the design contract:
+
+1. Read `DESIGN.md`/`design.md` and `PRODUCT.md` when present; project-authored direction wins.
+2. Classify scope: full application, page, flow, or isolated component. Component work preserves surrounding architecture and does not invent page-level navigation.
+3. Record audience, primary job, tone, interface genre, brand assets/signals, contracts to preserve, and technical/content constraints.
+4. Infer missing fields from mapped routes, actions, state, data, runtime evidence, and existing design tokens. Label inferences and unresolved assumptions.
+5. Apply rules contextually. Anti-pattern guidance is a bias correction, not permission to erase a deliberate brand choice or functional convention.
+
+The three dials are structural inputs. `DESIGN_VARIANCE` changes composition and topology; `MOTION_INTENSITY` changes the interaction/motion model; `VISUAL_DENSITY` changes information architecture and disclosure. Never satisfy a dial by changing prose alone.
+
+This preflight combines taste-skill's brief inference, Impeccable's product/design context, and Hallmark's scope, design-DNA, and macrostructure discipline.
+
+---
+
 ## 2. DESIGN DIRECTION
 
 Commit to a BOLD aesthetic direction before writing a single line of code:
@@ -552,4 +568,3 @@ Before outputting code, evaluate against this matrix:
 - [ ] Are API errors handled with proper UI states?
 - [ ] Do form validations reflect database constraints?
 - [ ] Are environment variables used for all config?
-

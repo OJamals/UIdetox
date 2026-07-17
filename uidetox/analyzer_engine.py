@@ -3,10 +3,10 @@
 import re
 from pathlib import Path
 
-from uidetox.analyzer_ast import HAS_AST, _analyze_ast
+from uidetox.analyzer_ast import _analyze_ast, has_ast_for
 from uidetox.analyzer_custom import _CUSTOM_CHECK_HANDLERS, _analyze_component_layout
-from uidetox.analyzer_rules import RULES
 from uidetox.fileset import ProjectFileSet, find_project_root
+from uidetox.rule_registry import ANALYZER_RULES as RULES
 
 
 def _analyze_rule(
@@ -82,7 +82,7 @@ def analyze_file(filepath: Path, design_variance: int = 8, dynamic_colors: dict[
     except (UnicodeDecodeError, OSError):
         return issues  # Skip binary or unreadable files
 
-    if HAS_AST:
+    if has_ast_for(ext):
         ast_issues = _analyze_ast(filepath, content, ext)
         issues.extend(ast_issues)
 

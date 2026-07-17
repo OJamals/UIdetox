@@ -9,17 +9,7 @@ Run:
 uidetox update-skill windsurf
 ```
 
-This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root and creates or updates `.windsurfrules` with the UIdetox directives.
-
-If you maintain your own `.windsurfrules`, keep the inserted UIdetox block alongside your existing rules:
-
-```markdown
-# UI Directives (Anti-Slop)
-Before writing any frontend code (React, Vue, HTML/CSS), you MUST refer to `SKILL.md` to avoid generic AI aesthetics.
-Specifically: DO NOT use purple/blue default gradients, Inter fonts, or bouncy excessive animations. Adhere to the Design Variance, Motion Intensity, and Visual Density scores defined in `.uidetox/config.json`.
-
-**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
-```
+This merges the bundle into `.windsurf/skills/uidetox/`. It preserves project-root files, `.windsurfrules`, and unrelated installed skills.
 
 ### 2. Autonomous Loop
 

@@ -2,13 +2,17 @@
 
 import pytest
 
-from uidetox.analyzer import HAS_AST
+from uidetox.analyzer import ast_capabilities
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Reject contributor environments without the core AST dependencies."""
-    if not HAS_AST:
+    unavailable = [
+        name for name, capability in ast_capabilities().items()
+        if not capability["available"]
+    ]
+    if unavailable:
         raise pytest.UsageError(
-            "Core AST support is unavailable. Run "
+            f"AST support is unavailable for {', '.join(unavailable)}. Run "
             "python -m pip install -e '.[dev]' before running tests."
         )

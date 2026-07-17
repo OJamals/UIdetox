@@ -19,12 +19,15 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
+from uidetox.analyzer_ast import ast_capabilities
+from uidetox.frontend_semantics import ScriptSemantics, extract_script_semantics
 from uidetox.runtime_observer import RuntimeObservation
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
 
 SCHEMA_VERSION = 1
+EXTRACTOR_VERSION = 2
 FRONTEND_MAP_FILE = "frontend-map.json"
 MAX_SOURCE_BYTES = 1_000_000
 
@@ -63,7 +66,9 @@ SCRIPT_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".astro"}
 STYLE_EXTENSIONS = {".css", ".less", ".sass", ".scss"}
 
 _COMPONENT_PATTERNS = (
-    re.compile(r"(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*\("),
+    re.compile(
+        r"(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*\("
+    ),
     re.compile(
         r"(?:export\s+(?:default\s+)?)?const\s+([A-Z][A-Za-z0-9_]*)"
         r"(?:\s*:[^=]+)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>"
@@ -91,7 +96,9 @@ _AXIOS_PATTERN = re.compile(
     r"\baxios\.(?:get|post|put|patch|delete)\s*\(\s*[\"'`]([^\"'`]+)[\"'`]",
     re.IGNORECASE,
 )
-_ROUTE_PATTERN = re.compile(r"<Route\b[^>]*\bpath\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+_ROUTE_PATTERN = re.compile(
+    r"<Route\b[^>]*\bpath\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE
+)
 _CONFIG_ROUTE_PATTERN = re.compile(r"\bpath\s*:\s*[\"']([^\"']+)[\"']")
 _CSS_TOKEN_PATTERN = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
 
@@ -184,8 +191,12 @@ class FrontendMap:
             generated_at=str(value.get("generated_at", "")),
             root=str(value["root"]),
             target=str(value.get("target", ".")),
-            nodes=tuple(FrontendNode.from_dict(item) for item in value.get("nodes", [])),
-            edges=tuple(FrontendEdge.from_dict(item) for item in value.get("edges", [])),
+            nodes=tuple(
+                FrontendNode.from_dict(item) for item in value.get("nodes", [])
+            ),
+            edges=tuple(
+                FrontendEdge.from_dict(item) for item in value.get("edges", [])
+            ),
             contracts=ExperienceContract.from_dict(dict(value.get("contracts", {}))),
             fingerprint=dict(value.get("fingerprint", {})),
             evidence=dict(value.get("evidence", {})),
@@ -201,6 +212,9 @@ class _SourceRecord:
     component_ids: list[str] = field(default_factory=list)
     rendered_tags: list[str] = field(default_factory=list)
     imports: list[str] = field(default_factory=list)
+    semantics: ScriptSemantics | None = None
+    extractor: str = "regex-fallback"
+    confidence: float = 0.55
 
 
 def map_frontend(
@@ -227,7 +241,10 @@ def map_frontend(
     unreadable_files: list[str] = []
     frameworks: set[str] = set()
     signal_counts: Counter[str] = Counter()
+    extractor_counts: Counter[str] = Counter()
     component_name_ids: defaultdict[str, list[str]] = defaultdict(list)
+    source_hashes: dict[str, str] = {}
+    parse_error_files: list[str] = []
 
     for path in files:
         relative_path = path.relative_to(root_path).as_posix()
@@ -240,6 +257,15 @@ def map_frontend(
             unreadable_files.append(relative_path)
             continue
 
+        source_hashes[relative_path] = hashlib.sha256(
+            content.encode("utf-8")
+        ).hexdigest()
+        semantics = extract_script_semantics(path, content)
+        extractor = semantics.extractor if semantics is not None else "regex-fallback"
+        confidence = semantics.confidence if semantics is not None else 0.55
+        extractor_counts[extractor] += 1
+        if semantics is not None and semantics.parse_errors:
+            parse_error_files.append(relative_path)
         framework = _detect_framework(path, relative_path, content)
         frameworks.add(framework)
         file_node_id = _node_id("file", relative_path, relative_path)
@@ -250,7 +276,12 @@ def map_frontend(
                 name=path.name,
                 file=relative_path,
                 line=1,
-                metadata={"extension": path.suffix.lower(), "framework": framework},
+                metadata={
+                    "extension": path.suffix.lower(),
+                    "framework": framework,
+                    "extractor": extractor,
+                    "confidence": confidence,
+                },
             )
         )
         record = _SourceRecord(
@@ -258,10 +289,17 @@ def map_frontend(
             relative_path=relative_path,
             content=content,
             file_node_id=file_node_id,
+            semantics=semantics,
+            extractor=extractor,
+            confidence=confidence,
         )
         records.append(record)
 
-        components = _extract_components(path, relative_path, content)
+        components = (
+            [(item.name, item.line) for item in semantics.components]
+            if semantics is not None
+            else _extract_components(path, relative_path, content)
+        )
         for name, line in components:
             component_id = _node_id("component", relative_path, name)
             record.component_ids.append(component_id)
@@ -273,17 +311,43 @@ def map_frontend(
                     name=name,
                     file=relative_path,
                     line=line,
-                    metadata={"framework": framework},
+                    metadata={
+                        "framework": framework,
+                        "extractor": extractor,
+                        "confidence": confidence,
+                    },
                 )
             )
-            edges.append(FrontendEdge(file_node_id, component_id, "defines"))
+            edges.append(
+                FrontendEdge(
+                    file_node_id,
+                    component_id,
+                    "defines",
+                    {"extractor": extractor, "confidence": confidence},
+                )
+            )
 
         owner_id = _primary_owner(record, nodes)
-        record.rendered_tags = _unique(match.group(1) for match in _JSX_TAG_PATTERN.finditer(content))
-        record.imports = _unique(match.group(1) for match in _IMPORT_PATTERN.finditer(content))
+        record.rendered_tags = (
+            list(semantics.rendered_tags)
+            if semantics is not None
+            else _unique(match.group(1) for match in _JSX_TAG_PATTERN.finditer(content))
+        )
+        record.imports = (
+            list(semantics.imports)
+            if semantics is not None
+            else _unique(match.group(1) for match in _IMPORT_PATTERN.finditer(content))
+        )
 
-        for index, match in enumerate(_REGION_PATTERN.finditer(content)):
-            name = match.group(1).lower()
+        regions = (
+            [(item.name, item.line) for item in semantics.regions]
+            if semantics is not None
+            else [
+                (match.group(1).lower(), _line_number(content, match.start()))
+                for match in _REGION_PATTERN.finditer(content)
+            ]
+        )
+        for index, (name, line) in enumerate(regions):
             region_id = _node_id("region", relative_path, name, index)
             nodes.append(
                 FrontendNode(
@@ -291,31 +355,58 @@ def map_frontend(
                     kind="region",
                     name=name,
                     file=relative_path,
-                    line=_line_number(content, match.start()),
-                    metadata={"order": index},
+                    line=line,
+                    metadata={
+                        "order": index,
+                        "extractor": extractor,
+                        "confidence": confidence,
+                    },
                 )
             )
-            edges.append(FrontendEdge(owner_id, region_id, "contains", {"order": index}))
+            edges.append(
+                FrontendEdge(owner_id, region_id, "contains", {"order": index})
+            )
             signal_counts[name] += 1
 
-        actions = Counter(match.group(1) for match in _ACTION_PATTERN.finditer(content))
+        action_occurrences = (
+            [(item.name, item.line) for item in semantics.actions]
+            if semantics is not None
+            else [
+                (match.group(1), _line_number(content, match.start()))
+                for match in _ACTION_PATTERN.finditer(content)
+            ]
+        )
+        actions = Counter(name for name, _line in action_occurrences)
         for name, count in sorted(actions.items()):
             action_id = _node_id("action", relative_path, name)
-            first_match = re.search(rf"\bon{re.escape(name)}\s*=", content)
+            first_line = next(
+                line for action_name, line in action_occurrences if action_name == name
+            )
             nodes.append(
                 FrontendNode(
                     id=action_id,
                     kind="action",
                     name=f"on{name}",
                     file=relative_path,
-                    line=_line_number(content, first_match.start()) if first_match else 1,
-                    metadata={"occurrences": count},
+                    line=first_line,
+                    metadata={
+                        "occurrences": count,
+                        "extractor": extractor,
+                        "confidence": confidence,
+                    },
                 )
             )
             edges.append(FrontendEdge(owner_id, action_id, "exposes"))
 
-        for match in _STATE_PATTERN.finditer(content):
-            name = match.group(1)
+        states = (
+            [(item.name, item.line) for item in semantics.states]
+            if semantics is not None
+            else [
+                (match.group(1), _line_number(content, match.start()))
+                for match in _STATE_PATTERN.finditer(content)
+            ]
+        )
+        for name, line in states:
             state_id = _node_id("state", relative_path, name)
             nodes.append(
                 FrontendNode(
@@ -323,16 +414,28 @@ def map_frontend(
                     kind="state",
                     name=name,
                     file=relative_path,
-                    line=_line_number(content, match.start()),
+                    line=line,
+                    metadata={"extractor": extractor, "confidence": confidence},
                 )
             )
             edges.append(FrontendEdge(owner_id, state_id, "owns"))
 
-        endpoints = _unique(
-            [match.group(1) for match in _FETCH_PATTERN.finditer(content)]
-            + [match.group(1) for match in _AXIOS_PATTERN.finditer(content)]
+        endpoint_occurrences = (
+            [(item.name, item.line) for item in semantics.endpoints]
+            if semantics is not None
+            else [
+                *(
+                    (match.group(1), _line_number(content, match.start()))
+                    for match in _FETCH_PATTERN.finditer(content)
+                ),
+                *(
+                    (match.group(1), _line_number(content, match.start()))
+                    for match in _AXIOS_PATTERN.finditer(content)
+                ),
+            ]
         )
-        for endpoint in endpoints:
+        endpoints = dict(endpoint_occurrences)
+        for endpoint, line in endpoints.items():
             data_id = _node_id("data", relative_path, endpoint)
             nodes.append(
                 FrontendNode(
@@ -340,13 +443,22 @@ def map_frontend(
                     kind="data",
                     name=endpoint,
                     file=relative_path,
-                    line=_first_endpoint_line(content, endpoint),
-                    metadata={"transport": "http"},
+                    line=line,
+                    metadata={
+                        "transport": "http",
+                        "extractor": extractor,
+                        "confidence": confidence,
+                    },
                 )
             )
             edges.append(FrontendEdge(owner_id, data_id, "reads"))
 
-        routes = _extract_routes(path, relative_path, content)
+        routes = _extract_routes(
+            path,
+            relative_path,
+            content,
+            [item.name for item in semantics.routes] if semantics is not None else None,
+        )
         for route in routes:
             route_id = _node_id("route", relative_path, route)
             nodes.append(
@@ -355,7 +467,19 @@ def map_frontend(
                     kind="route",
                     name=route,
                     file=relative_path,
-                    line=_first_endpoint_line(content, route),
+                    line=(
+                        next(
+                            (
+                                item.line
+                                for item in semantics.routes
+                                if item.name == route
+                            ),
+                            1,
+                        )
+                        if semantics is not None
+                        else _first_endpoint_line(content, route)
+                    ),
+                    metadata={"extractor": extractor, "confidence": confidence},
                 )
             )
             edges.append(FrontendEdge(route_id, owner_id, "renders"))
@@ -377,7 +501,16 @@ def map_frontend(
                 edges.append(FrontendEdge(file_node_id, token_id, "defines"))
 
         lowered = content.lower()
-        for signal in ("card", "chart", "drawer", "grid", "hero", "modal", "sidebar", "table"):
+        for signal in (
+            "card",
+            "chart",
+            "drawer",
+            "grid",
+            "hero",
+            "modal",
+            "sidebar",
+            "table",
+        ):
             signal_counts[signal] += lowered.count(signal)
         signal_counts["responsive"] += len(
             re.findall(r"(?:@media\b|\b(?:sm|md|lg|xl|2xl):)", content)
@@ -395,7 +528,9 @@ def map_frontend(
                 _append_edge_once(
                     edges,
                     edge_keys,
-                    FrontendEdge(record.file_node_id, file_node_ids[resolved], "imports"),
+                    FrontendEdge(
+                        record.file_node_id, file_node_ids[resolved], "imports"
+                    ),
                 )
 
         for tag in record.rendered_tags:
@@ -429,7 +564,9 @@ def map_frontend(
     edges.sort(key=lambda edge: (edge.source, edge.kind, edge.target))
     contracts = _build_contract(nodes)
     fingerprint = _build_fingerprint(nodes, signal_counts, len(records))
-    target_label = "." if scope == root_path else scope.relative_to(root_path).as_posix()
+    target_label = (
+        "." if scope == root_path else scope.relative_to(root_path).as_posix()
+    )
     runtime_pages = tuple(runtime.pages) if runtime is not None else ()
     runtime_viewports = sorted({page.viewport.name for page in runtime_pages})
     runtime_urls = list(dict.fromkeys(page.url for page in runtime_pages))
@@ -451,8 +588,18 @@ def map_frontend(
             "frameworks": sorted(frameworks),
             "files_mapped": len(records),
             "files_skipped": unreadable_files,
+            "extractor_version": EXTRACTOR_VERSION,
+            "extractors": dict(sorted(extractor_counts.items())),
+            "parse_error_files": parse_error_files,
+            "ast_capabilities": ast_capabilities(),
+            "source_manifest": {
+                "target": target_label,
+                "files": dict(sorted(source_hashes.items())),
+            },
             "runtime_observed": bool(runtime_pages),
-            "runtime_generated_at": runtime.generated_at if runtime is not None else None,
+            "runtime_generated_at": runtime.generated_at
+            if runtime is not None
+            else None,
             "runtime_pages": len(runtime_pages),
             "runtime_urls": runtime_urls,
             "runtime_viewports": runtime_viewports,
@@ -462,7 +609,9 @@ def map_frontend(
     )
 
 
-def save_frontend_map(frontend_map: FrontendMap, path: str | Path | None = None) -> Path:
+def save_frontend_map(
+    frontend_map: FrontendMap, path: str | Path | None = None
+) -> Path:
     """Atomically persist ``frontend_map`` and return its path."""
 
     if path is None:
@@ -491,6 +640,32 @@ def load_frontend_map(path: str | Path | None = None) -> FrontendMap:
     if not isinstance(value, dict):
         raise ValueError(f"Frontend map must contain a JSON object: {input_path}")
     return FrontendMap.from_dict(value)
+
+
+def frontend_map_is_fresh(
+    frontend_map: FrontendMap,
+    root: str | Path | None = None,
+    target: str | Path | None = None,
+) -> bool:
+    """Check extractor version and content hashes for every mapped source file."""
+    if frontend_map.evidence.get("extractor_version") != EXTRACTOR_VERSION:
+        return False
+    expected = frontend_map.evidence.get("source_manifest")
+    if not isinstance(expected, dict) or not isinstance(expected.get("files"), dict):
+        return False
+
+    root_path = Path(root or frontend_map.root).expanduser().resolve()
+    requested_target = frontend_map.target if target is None else target
+    try:
+        scope = _resolve_scope(root_path, requested_target)
+    except ValueError:
+        return False
+    target_label = (
+        "." if scope == root_path else scope.relative_to(root_path).as_posix()
+    )
+    if expected.get("target") != target_label:
+        return False
+    return expected["files"] == _build_source_manifest(root_path, scope)
 
 
 def _resolve_scope(root: Path, target: str | Path | None) -> Path:
@@ -525,15 +700,44 @@ def _discover_source_files(scope: Path) -> list[Path]:
     return files
 
 
-def _extract_components(path: Path, relative_path: str, content: str) -> list[tuple[str, int]]:
+def _build_source_manifest(root: Path, scope: Path) -> dict[str, str]:
+    manifest: dict[str, str] = {}
+    for path in _discover_source_files(scope):
+        try:
+            if path.stat().st_size > MAX_SOURCE_BYTES:
+                continue
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        manifest[path.relative_to(root).as_posix()] = hashlib.sha256(
+            content.encode("utf-8")
+        ).hexdigest()
+    return dict(sorted(manifest.items()))
+
+
+def _extract_components(
+    path: Path, relative_path: str, content: str
+) -> list[tuple[str, int]]:
     matches: list[tuple[int, str]] = []
     if path.suffix.lower() in SCRIPT_EXTENSIONS:
         for pattern in _COMPONENT_PATTERNS:
-            matches.extend((match.start(), match.group(1)) for match in pattern.finditer(content))
+            matches.extend(
+                (match.start(), match.group(1)) for match in pattern.finditer(content)
+            )
 
-    if not matches and path.suffix.lower() in {".vue", ".svelte", ".astro", ".html", ".htm"}:
+    if not matches and path.suffix.lower() in {
+        ".vue",
+        ".svelte",
+        ".astro",
+        ".html",
+        ".htm",
+    }:
         matches.append((0, _component_name_from_path(path, relative_path)))
-    elif not matches and path.suffix.lower() in {".jsx", ".tsx"} and _JSX_TAG_PATTERN.search(content):
+    elif (
+        not matches
+        and path.suffix.lower() in {".jsx", ".tsx"}
+        and _JSX_TAG_PATTERN.search(content)
+    ):
         matches.append((0, _component_name_from_path(path, relative_path)))
 
     components: list[tuple[str, int]] = []
@@ -567,17 +771,40 @@ def _detect_framework(path: Path, relative_path: str, content: str) -> str:
     if suffix in STYLE_EXTENSIONS:
         return "styles"
     normalized = f"/{relative_path.lower()}"
-    if re.search(r"/(?:app|pages)/", normalized) and path.stem in {"page", "layout", "index"}:
+    if re.search(r"/(?:app|pages)/", normalized) and path.stem in {
+        "page",
+        "layout",
+        "index",
+    }:
         return "next"
-    if "from 'react'" in content or 'from "react"' in content or suffix in {".jsx", ".tsx"}:
+    if (
+        "from 'react'" in content
+        or 'from "react"' in content
+        or suffix in {".jsx", ".tsx"}
+    ):
         return "react"
     return "javascript"
 
 
-def _extract_routes(path: Path, relative_path: str, content: str) -> list[str]:
-    routes = [match.group(1) for match in _ROUTE_PATTERN.finditer(content)]
-    if re.search(r"\b(?:createBrowserRouter|routes?|router)\b", content, re.IGNORECASE):
-        routes.extend(match.group(1) for match in _CONFIG_ROUTE_PATTERN.finditer(content))
+def _extract_routes(
+    path: Path,
+    relative_path: str,
+    content: str,
+    syntax_routes: Iterable[str] | None = None,
+) -> list[str]:
+    routes = (
+        list(syntax_routes)
+        if syntax_routes is not None
+        else [match.group(1) for match in _ROUTE_PATTERN.finditer(content)]
+    )
+    if syntax_routes is None and re.search(
+        r"\b(?:createBrowserRouter|routes?|router)\b",
+        content,
+        re.IGNORECASE,
+    ):
+        routes.extend(
+            match.group(1) for match in _CONFIG_ROUTE_PATTERN.finditer(content)
+        )
 
     parts = Path(relative_path).parts
     suffix = path.suffix.lower()
@@ -604,7 +831,7 @@ def _extract_routes(path: Path, relative_path: str, content: str) -> list[str]:
 
 
 def _normalize_route_segment(segment: str) -> str:
-    if segment.startswith("[[...") and segment.endswith("]]" ):
+    if segment.startswith("[[...") and segment.endswith("]]"):
         return f":{segment[5:-2]}*"
     if segment.startswith("[...") and segment.endswith("]"):
         return f":{segment[4:-1]}*"
@@ -613,14 +840,20 @@ def _normalize_route_segment(segment: str) -> str:
     return segment
 
 
-def _resolve_local_import(source_file: Path, import_path: str, root: Path) -> str | None:
+def _resolve_local_import(
+    source_file: Path, import_path: str, root: Path
+) -> str | None:
     if not import_path.startswith("."):
         return None
     base = (source_file.parent / import_path).resolve()
     candidates = [base]
     if not base.suffix:
-        candidates.extend(base.with_suffix(extension) for extension in sorted(SOURCE_EXTENSIONS))
-        candidates.extend(base / f"index{extension}" for extension in sorted(SOURCE_EXTENSIONS))
+        candidates.extend(
+            base.with_suffix(extension) for extension in sorted(SOURCE_EXTENSIONS)
+        )
+        candidates.extend(
+            base / f"index{extension}" for extension in sorted(SOURCE_EXTENSIONS)
+        )
     for candidate in candidates:
         if candidate.is_file():
             try:
@@ -634,7 +867,9 @@ def _primary_owner(record: _SourceRecord, nodes: Iterable[FrontendNode]) -> str:
     if not record.component_ids:
         return record.file_node_id
     expected = _component_name_from_path(record.path, record.relative_path).lower()
-    node_names = {node.id: node.name.lower() for node in nodes if node.id in record.component_ids}
+    node_names = {
+        node.id: node.name.lower() for node in nodes if node.id in record.component_ids
+    }
     for component_id in record.component_ids:
         if node_names.get(component_id) == expected:
             return component_id
@@ -673,7 +908,9 @@ def _merge_runtime_evidence(
             )
         )
         for element in page.elements:
-            node_kind = "runtime_action" if element.kind == "action" else "runtime_region"
+            node_kind = (
+                "runtime_action" if element.kind == "action" else "runtime_region"
+            )
             element_key = element.selector or f"{element.tag}:{element.order}"
             element_id = _node_id(
                 node_kind,
@@ -728,12 +965,7 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
     data_sources = sorted({node.name for node in nodes if node.kind == "data"})
     actions = sorted({node.name for node in nodes if node.kind == "action"})
     runtime_pages = [node for node in nodes if node.kind == "runtime_page"]
-    runtime_routes = sorted(
-        {
-            _runtime_route(node.name)
-            for node in runtime_pages
-        }
-    )
+    runtime_routes = sorted({_runtime_route(node.name) for node in runtime_pages})
     runtime_actions = sorted(
         {
             (
@@ -749,7 +981,11 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
             node.name
             for node in nodes
             if node.kind == "state"
-            and re.search(r"loading|error|empty|open|selected|success|pending", node.name, re.IGNORECASE)
+            and re.search(
+                r"loading|error|empty|open|selected|success|pending",
+                node.name,
+                re.IGNORECASE,
+            )
         }
     )
     regions = {node.name for node in nodes if node.kind == "region"}
@@ -763,15 +999,23 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
     must_preserve.extend(
         f"Observed runtime route remains reachable: {route}" for route in runtime_routes
     )
-    must_preserve.extend(f"Data contract remains functional: {source}" for source in data_sources)
-    must_preserve.extend(f"Interaction capability remains available: {action}" for action in actions)
     must_preserve.extend(
-        f"Accessible runtime action remains available: {role} \"{name}\""
+        f"Data contract remains functional: {source}" for source in data_sources
+    )
+    must_preserve.extend(
+        f"Interaction capability remains available: {action}" for action in actions
+    )
+    must_preserve.extend(
+        f'Accessible runtime action remains available: {role} "{name}"'
         for role, name in runtime_actions[:40]
     )
-    must_preserve.extend(f"User-visible state remains represented: {state}" for state in states)
+    must_preserve.extend(
+        f"User-visible state remains represented: {state}" for state in states
+    )
     if "form" in regions or "form" in runtime_region_tags:
-        must_preserve.append("Form semantics, validation, and submission behavior remain functional.")
+        must_preserve.append(
+            "Form semantics, validation, and submission behavior remain functional."
+        )
 
     if runtime_pages:
         unknown = [
@@ -786,11 +1030,17 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
         ]
     if not routes:
         if runtime_routes:
-            unknown.append("Runtime routes were observed, but their static route declarations were not resolved.")
+            unknown.append(
+                "Runtime routes were observed, but their static route declarations were not resolved."
+            )
         else:
-            unknown.append("No explicit route declarations were resolved from static source.")
+            unknown.append(
+                "No explicit route declarations were resolved from static source."
+            )
     if not data_sources:
-        unknown.append("Dynamic or abstracted data dependencies may exist outside mapped call sites.")
+        unknown.append(
+            "Dynamic or abstracted data dependencies may exist outside mapped call sites."
+        )
 
     return ExperienceContract(
         must_preserve=tuple(_unique(must_preserve)),
@@ -811,8 +1061,12 @@ def _build_fingerprint(
     kinds = Counter(node.kind for node in nodes)
     regions = [node.name for node in nodes if node.kind == "region"]
     runtime_regions = [node for node in nodes if node.kind == "runtime_region"]
-    observed_region_tags = [str(node.metadata.get("tag", "")) for node in runtime_regions]
-    observed_region_roles = [str(node.metadata.get("role", "")) for node in runtime_regions]
+    observed_region_tags = [
+        str(node.metadata.get("tag", "")) for node in runtime_regions
+    ]
+    observed_region_roles = [
+        str(node.metadata.get("role", "")) for node in runtime_regions
+    ]
     component_count = kinds["component"]
     runtime_action_keys = {
         (
@@ -824,7 +1078,11 @@ def _build_fingerprint(
     }
     action_count = max(kinds["action"], len(runtime_action_keys))
 
-    if signal_counts["sidebar"] or "aside" in regions or "complementary" in observed_region_roles:
+    if (
+        signal_counts["sidebar"]
+        or "aside" in regions
+        or "complementary" in observed_region_roles
+    ):
         navigation = "sidebar"
     elif "nav" in regions or "navigation" in observed_region_roles:
         navigation = "top-nav"
@@ -834,7 +1092,9 @@ def _build_fingerprint(
     if "form" in regions or "form" in observed_region_tags:
         archetype = "form-flow"
         interaction = "form-driven"
-    elif "table" in regions or "table" in observed_region_tags or signal_counts["chart"]:
+    elif (
+        "table" in regions or "table" in observed_region_tags or signal_counts["chart"]
+    ):
         archetype = "data-workspace"
         interaction = "data-exploration"
     elif signal_counts["hero"] or regions.count("section") >= 3:
@@ -868,10 +1128,15 @@ def _build_fingerprint(
         if runtime_pages
         else len(nodes) / max(1, file_count)
     )
-    density = "dense" if density_ratio >= 12 else "balanced" if density_ratio >= 6 else "sparse"
+    density = (
+        "dense"
+        if density_ratio >= 12
+        else "balanced"
+        if density_ratio >= 6
+        else "sparse"
+    )
     runtime_viewports = {
-        str(node.metadata.get("viewport", {}).get("name", ""))
-        for node in runtime_pages
+        str(node.metadata.get("viewport", {}).get("name", "")) for node in runtime_pages
     }
     runtime_layouts: defaultdict[str, list[str]] = defaultdict(list)
     for node in runtime_regions:
@@ -937,7 +1202,9 @@ def _append_edge_once(
 
 def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_path = tempfile.mkstemp(dir=path.parent, prefix=f"{path.stem}_", suffix=".tmp")
+    fd, temporary_path = tempfile.mkstemp(
+        dir=path.parent, prefix=f"{path.stem}_", suffix=".tmp"
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2, sort_keys=True)

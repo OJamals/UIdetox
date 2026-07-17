@@ -9,17 +9,7 @@ Run:
 uidetox update-skill gemini
 ```
 
-This copies `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into the project root and creates or updates `GEMINI.md` with an `@./SKILL.md` reference.
-
-If you maintain a custom `GEMINI.md`, keep that line present:
-```markdown
-@./SKILL.md
-
-# UI Directives
-You are enforcing the Anti-Slop catalog defined in SKILL.md. Do not generate generic startup UI.
-
-**CRITICAL REQUISITE:** Ensure all generated output is strictly type-safe. You MUST conform exactly to pre-existing backend architectures, API contracts, database schemas, and DTOs. Do NOT hallucinate new endpoints or alter data structures when fixing UI slop.
-```
+This merges the bundle into `.gemini/skills/uidetox/`. It does not rewrite project-root `SKILL.md`, `AGENTS.md`, `GEMINI.md`, `commands/`, or `reference/` content.
 
 ### 2. Autonomous Loop
 

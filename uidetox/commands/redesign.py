@@ -4,7 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
-from uidetox.frontend_map import FRONTEND_MAP_FILE, load_frontend_map, map_frontend, save_frontend_map
+from uidetox.design_context import DesignSettings
+from uidetox.frontend_map import (
+    FRONTEND_MAP_FILE,
+    frontend_map_is_fresh,
+    load_frontend_map,
+    map_frontend,
+    save_frontend_map,
+)
 from uidetox.redesign import RedesignBrief, propose_redesigns, save_redesign_set
 from uidetox.state import get_project_root, get_uidetox_dir, load_config
 
@@ -13,7 +20,11 @@ def run(args: argparse.Namespace) -> None:
     root = get_project_root()
     target = getattr(args, "target", ".")
     map_arg = getattr(args, "map_file", None)
-    map_path = Path(map_arg).expanduser().resolve() if map_arg else get_uidetox_dir() / FRONTEND_MAP_FILE
+    map_path = (
+        Path(map_arg).expanduser().resolve()
+        if map_arg
+        else get_uidetox_dir() / FRONTEND_MAP_FILE
+    )
     refresh = getattr(args, "refresh_map", False)
 
     if refresh or not map_path.exists():
@@ -22,17 +33,23 @@ def run(args: argparse.Namespace) -> None:
     else:
         frontend_map = load_frontend_map(map_path)
         requested_target = _target_label(root, target)
-        if frontend_map.root != str(root.resolve()) or frontend_map.target != requested_target:
+        if (
+            frontend_map.root != str(root.resolve())
+            or frontend_map.target != requested_target
+            or not frontend_map_is_fresh(frontend_map, root, target)
+        ):
             frontend_map = map_frontend(root, target)
             save_frontend_map(frontend_map, map_path)
 
     config = load_config()
+    settings = DesignSettings.from_config(config, frontend_map, frontend_map.target)
     brief = RedesignBrief(
         target=frontend_map.target,
         variants=getattr(args, "variants", 3),
-        design_variance=int(config.get("DESIGN_VARIANCE", 8)),
-        motion_intensity=int(config.get("MOTION_INTENSITY", 6)),
-        visual_density=int(config.get("VISUAL_DENSITY", 4)),
+        design_variance=settings.dials.design_variance,
+        motion_intensity=settings.dials.motion_intensity,
+        visual_density=settings.dials.visual_density,
+        intent=settings.intent,
     )
     redesign_set = propose_redesigns(frontend_map, brief)
     output_arg = getattr(args, "output", None)
@@ -58,7 +75,9 @@ def run(args: argparse.Namespace) -> None:
         print(f"\n  Minimum pairwise distance: {minimum_distance}/100")
     print(f"  Artifact: {output_path}")
     if redesign_set.unknowns:
-        print(f"  Gate    : {len(redesign_set.unknowns)} runtime unknown(s) require verification")
+        print(
+            f"  Gate    : {len(redesign_set.unknowns)} runtime unknown(s) require verification"
+        )
 
 
 def _target_label(root: Path, target: str | Path) -> str:

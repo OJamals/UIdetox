@@ -8,7 +8,7 @@ Install the UIdetox skill specifically for Claude:
 ```bash
 uidetox update-skill claude
 ```
-This command copies `SKILL.md`, `commands/`, and `reference/` into `.claude/skills/uidetox/`. Claude Code automatically detects and loads skills from `.claude/skills/`.
+This command merges `SKILL.md`, `AGENTS.md`, `commands/`, and `reference/` into `.claude/skills/uidetox/`. Existing unrelated files are preserved.
 
 ### 2. Autonomous Loop (Single Agent)
 

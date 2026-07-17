@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from uidetox.design_context import DesignDials, DesignIntent
 from uidetox.frontend_map import FrontendMap
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
@@ -36,6 +37,17 @@ class RedesignBrief:
     motion_intensity: int = 6
     visual_density: int = 4
     preserve: tuple[str, ...] = ()
+    intent: DesignIntent = field(default_factory=DesignIntent)
+
+    def __post_init__(self) -> None:
+        dials = DesignDials(
+            self.design_variance,
+            self.motion_intensity,
+            self.visual_density,
+        )
+        object.__setattr__(self, "design_variance", dials.design_variance)
+        object.__setattr__(self, "motion_intensity", dials.motion_intensity)
+        object.__setattr__(self, "visual_density", dials.visual_density)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RedesignBrief":
@@ -46,6 +58,7 @@ class RedesignBrief:
             motion_intensity=int(value.get("motion_intensity", 6)),
             visual_density=int(value.get("visual_density", 4)),
             preserve=tuple(str(item) for item in value.get("preserve", [])),
+            intent=DesignIntent.from_dict(value.get("intent")),
         )
 
 
@@ -94,9 +107,7 @@ class RedesignProposal:
             acceptance_checks=tuple(
                 str(item) for item in value.get("acceptance_checks", [])
             ),
-            source_targets=tuple(
-                str(item) for item in value.get("source_targets", [])
-            ),
+            source_targets=tuple(str(item) for item in value.get("source_targets", [])),
             fingerprint={
                 str(key): str(item)
                 for key, item in dict(value.get("fingerprint", {})).items()
@@ -151,9 +162,7 @@ class RedesignSet:
         return cls(
             schema_version=version,
             generated_at=str(value.get("generated_at", "")),
-            frontend_map_generated_at=str(
-                value.get("frontend_map_generated_at", "")
-            ),
+            frontend_map_generated_at=str(value.get("frontend_map_generated_at", "")),
             target=str(value.get("target", ".")),
             baseline_fingerprint=dict(value.get("baseline_fingerprint", {})),
             brief=RedesignBrief.from_dict(dict(value.get("brief", {}))),
@@ -195,7 +204,12 @@ _STRATEGIES = (
             "responsive": "stacked-stages",
             "density": "focused",
         },
-        layout_tree=("ProgressRail", "CurrentTask", "ContextPanel", "PersistentActionBar"),
+        layout_tree=(
+            "ProgressRail",
+            "CurrentTask",
+            "ContextPanel",
+            "PersistentActionBar",
+        ),
         component_architecture=(
             "TaskShell owns progression and cross-step state.",
             "Step modules expose one user outcome each.",
@@ -226,7 +240,12 @@ _STRATEGIES = (
             "responsive": "drill-in",
             "density": "dense",
         },
-        layout_tree=("ObjectIndex", "PrimaryWorkspace", "InspectorPanel", "ContextToolbar"),
+        layout_tree=(
+            "ObjectIndex",
+            "PrimaryWorkspace",
+            "InspectorPanel",
+            "ContextToolbar",
+        ),
         component_architecture=(
             "WorkspaceShell owns selection, filtering, and navigation state.",
             "Domain panels render object-specific capabilities.",
@@ -257,7 +276,12 @@ _STRATEGIES = (
             "responsive": "reading-flow",
             "density": "spacious",
         },
-        layout_tree=("OpeningThesis", "EvidenceChapters", "InlineDecisions", "ClosingAction"),
+        layout_tree=(
+            "OpeningThesis",
+            "EvidenceChapters",
+            "InlineDecisions",
+            "ClosingAction",
+        ),
         component_architecture=(
             "NarrativeShell controls rhythm, anchors, and reading progress.",
             "Story sections combine content, evidence, and one local action.",
@@ -319,7 +343,12 @@ _STRATEGIES = (
             "responsive": "priority-collapse",
             "density": "compact",
         },
-        layout_tree=("CommandSurface", "RecentContext", "ResultWorkspace", "ActivityLedger"),
+        layout_tree=(
+            "CommandSurface",
+            "RecentContext",
+            "ResultWorkspace",
+            "ActivityLedger",
+        ),
         component_architecture=(
             "CommandRegistry owns discoverable capabilities and permissions.",
             "Capability modules declare inputs, results, and reversible actions.",
@@ -389,7 +418,9 @@ def propose_redesigns(
     )
 
 
-def save_redesign_set(redesign_set: RedesignSet, path: str | Path | None = None) -> Path:
+def save_redesign_set(
+    redesign_set: RedesignSet, path: str | Path | None = None
+) -> Path:
     """Atomically persist a redesign set and return its path."""
 
     if path is None:
@@ -444,7 +475,8 @@ def _build_proposal(
     strategy: _Strategy,
     index: int,
 ) -> RedesignProposal:
-    novelty, _ = _fingerprint_distance(frontend_map.fingerprint, strategy.fingerprint)
+    fingerprint = _proposal_fingerprint(strategy, brief)
+    novelty, _ = _fingerprint_distance(frontend_map.fingerprint, fingerprint)
     counts = frontend_map.fingerprint.get("node_counts", {})
     component_count = int(counts.get("component", 0))
     route_count = int(counts.get("route", 0))
@@ -459,16 +491,36 @@ def _build_proposal(
         )
     )[:12]
     preserved = tuple(
-        dict.fromkeys(frontend_map.contracts.must_preserve + brief.preserve)
+        dict.fromkeys(
+            frontend_map.contracts.must_preserve
+            + brief.preserve
+            + brief.intent.preserve
+        )
     )
-    acceptance_checks = preserved + (
-        "All mapped actions remain keyboard reachable and visibly focused.",
-        "Loading, empty, error, and success states retain capability parity.",
-        "Responsive layouts preserve reading and focus order.",
-        "No proposal ships until runtime unknowns are observed or explicitly accepted.",
+    acceptance_checks = (
+        preserved
+        + (
+            "All mapped actions remain keyboard reachable and visibly focused.",
+            "Loading, empty, error, and success states retain capability parity.",
+            "Responsive layouts preserve reading and focus order.",
+            f"Audience check: {brief.intent.audience} can {brief.intent.primary_job}.",
+            f"Expression check: {brief.intent.tone}; {brief.intent.brand}.",
+            "No proposal ships until runtime unknowns are observed or explicitly accepted.",
+        )
+        + brief.intent.constraints
     )
     density_instruction = _density_instruction(brief.visual_density)
     motion_instruction = _motion_instruction(brief.motion_intensity)
+    layout_tree = _dialed_layout_tree(strategy.layout_tree, brief)
+    component_architecture = strategy.component_architecture + (
+        f"DesignIntentBoundary owns the {brief.intent.genre} contract for {brief.intent.audience}.",
+    )
+    responsive_rules = strategy.responsive_rules + (
+        _responsive_density_rule(brief.visual_density),
+    )
+    interaction_model = (
+        f"{strategy.interaction_model} {_motion_model(brief.motion_intensity)}"
+    )
 
     return RedesignProposal(
         id=f"REDESIGN-{index:02d}-{strategy.id}",
@@ -477,12 +529,14 @@ def _build_proposal(
         rationale=(
             f"Replace baseline {baseline} topology with {strategy.fingerprint['topology']}. "
             f"Map contains {component_count} components, {route_count} routes, "
-            f"{action_count} actions, and {data_count} data sources."
+            f"{action_count} actions, and {data_count} data sources. "
+            f"Preflight: {brief.intent.page_kind} for {brief.intent.audience}; "
+            f"primary job is to {brief.intent.primary_job}."
         ),
-        layout_tree=strategy.layout_tree,
-        component_architecture=strategy.component_architecture,
-        interaction_model=strategy.interaction_model,
-        responsive_rules=strategy.responsive_rules,
+        layout_tree=layout_tree,
+        component_architecture=component_architecture,
+        interaction_model=interaction_model,
+        responsive_rules=responsive_rules,
         changes=(
             f"Recompose {component_count} mapped components around {strategy.fingerprint['component_partition']} ownership.",
             f"Replace {frontend_map.fingerprint.get('navigation', 'unknown')} navigation with {strategy.fingerprint['navigation']}.",
@@ -494,7 +548,7 @@ def _build_proposal(
         migration_steps=strategy.migration_steps,
         acceptance_checks=acceptance_checks,
         source_targets=source_targets,
-        fingerprint=dict(strategy.fingerprint),
+        fingerprint=fingerprint,
         novelty_score=novelty,
     )
 
@@ -518,6 +572,29 @@ def _strategy_relevance(
     if strategy.id == "command-console":
         action_count = frontend_map.fingerprint.get("node_counts", {}).get("action", 0)
         score += min(5, int(action_count))
+    intent_text = " ".join(
+        (
+            brief.intent.primary_job,
+            brief.intent.genre,
+            brief.intent.audience,
+        )
+    ).lower()
+    if strategy.id == "task-flow" and any(
+        token in intent_text for token in ("complete", "submit", "workflow", "task")
+    ):
+        score += 4
+    if strategy.id == "editorial-narrative" and any(
+        token in intent_text for token in ("editorial", "story", "read", "narrative")
+    ):
+        score += 4
+    if strategy.id == "object-workspace" and any(
+        token in intent_text for token in ("inspect", "compare", "manage", "workspace")
+    ):
+        score += 4
+    if strategy.id == "command-console" and any(
+        token in intent_text for token in ("expert", "operator", "power user")
+    ):
+        score += 4
     return score
 
 
@@ -528,11 +605,86 @@ def _fingerprint_distance(
     return round(len(changed) / len(_DISTANCE_KEYS) * 100), changed
 
 
+def _proposal_fingerprint(strategy: _Strategy, brief: RedesignBrief) -> dict[str, str]:
+    fingerprint = dict(strategy.fingerprint)
+    fingerprint.update(
+        {
+            "composition": (
+                "aligned-grid"
+                if brief.design_variance <= 3
+                else "asymmetric-zones"
+                if brief.design_variance >= 8
+                else "offset-grid"
+            ),
+            "motion_model": (
+                "state-only"
+                if brief.motion_intensity <= 3
+                else "spatial-choreography"
+                if brief.motion_intensity >= 8
+                else "transition-choreography"
+            ),
+            "density_model": (
+                "progressive-disclosure"
+                if brief.visual_density <= 3
+                else "simultaneous-overview"
+                if brief.visual_density >= 8
+                else "layered-overview"
+            ),
+            "intent_genre": _dimension(brief.intent.genre),
+            "page_kind": _dimension(brief.intent.page_kind),
+        }
+    )
+    return fingerprint
+
+
+def _dialed_layout_tree(
+    layout_tree: tuple[str, ...], brief: RedesignBrief
+) -> tuple[str, ...]:
+    if brief.design_variance <= 3:
+        composition = ("AlignedFrame",)
+    elif brief.design_variance >= 8:
+        composition = ("AsymmetricField", "ContextSatellite")
+    else:
+        composition = ("OffsetFrame",)
+    if brief.visual_density <= 3:
+        density = ("ProgressiveDisclosure",)
+    elif brief.visual_density >= 8:
+        density = ("PersistentUtilityRail", "CompactContextLayer")
+    else:
+        density = ("ContextLayer",)
+    return composition[:1] + layout_tree + composition[1:] + density
+
+
+def _motion_model(value: int) -> str:
+    if value <= 3:
+        return "Structure is static; motion only confirms direct state change."
+    if value >= 8:
+        return "Spatial transitions explain hierarchy changes and preserve object continuity."
+    return "Short transitions preserve context between meaningful states."
+
+
+def _responsive_density_rule(value: int) -> str:
+    if value <= 3:
+        return "Keep progressive disclosures in document order; never hide the primary job."
+    if value >= 8:
+        return "Collapse utility rails into ordered drawers while preserving dense desktop context."
+    return (
+        "Reflow context layers below the primary region without duplicating controls."
+    )
+
+
+def _dimension(value: str) -> str:
+    normalized = "-".join(value.lower().split())
+    return normalized or "unspecified"
+
+
 def _density_instruction(value: int) -> str:
     if value <= 3:
         return "Use gallery-like spacing with one dominant idea per viewport."
     if value >= 8:
-        return "Use compact spacing and persistent context without card-grid repetition."
+        return (
+            "Use compact spacing and persistent context without card-grid repetition."
+        )
     return "Use moderate density with clear hierarchy and intentional compression."
 
 

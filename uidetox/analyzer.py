@@ -1,14 +1,18 @@
 """Static Slop Analyzer: Detects AI anti-patterns via regex/AST rules."""
+# ruff: noqa: F401 — compatibility facade intentionally re-exports analyzer seams.
 
 from pathlib import Path
 
 from uidetox.analyzer_ast import (
+    AST_CAPABILITIES,
     HAS_AST,
     _analyze_ast,
     _extract_usestate_binding,
     _get_parser,
     _identifier_tokens,
     _is_animation_state_identifier,
+    ast_capabilities,
+    has_ast_for,
 )
 from uidetox.analyzer_custom import (
     _CUSTOM_CHECK_HANDLERS,
@@ -34,8 +38,9 @@ from uidetox.analyzer_custom import (
 )
 from uidetox import analyzer_engine as _engine
 from uidetox.analyzer_engine import _analyze_rule, analyze_file
-from uidetox.analyzer_rules import RULES, _ALL_FE_EXTS, _FE_EXTS, _JSX_EXTS
+from uidetox.analyzer_rules import _ALL_FE_EXTS, _FE_EXTS, _JSX_EXTS
 from uidetox.fileset import IGNORED_DIRECTORY_NAMES
+from uidetox.rule_registry import ANALYZER_RULES as RULES
 
 # Compatibility alias retained for callers that imported traversal exclusions.
 IGNORE_DIRS = IGNORED_DIRECTORY_NAMES

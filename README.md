@@ -142,15 +142,15 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 
 ## Structural Redesign
 
-`uidetox map [target]` builds `.uidetox/frontend-map.json`: a semantic graph of files, components, render relationships, routes, regions, actions, state, data dependencies, and design tokens. It separates observed contracts from redesignable choices and records runtime evidence gaps explicitly.
+`uidetox map [target]` builds `.uidetox/frontend-map.json`: a semantic graph of files, components, render relationships, routes, regions, actions, state, data dependencies, and design tokens. Tree-sitter provides syntax-aware extraction where a language grammar is available; every node records extraction provenance/confidence and unsupported languages fall back to regex. The artifact includes source hashes and an extractor version.
 
 Add `--runtime --url http://localhost:5173` to observe the rendered DOM at mobile, tablet, and desktop widths. Runtime evidence includes visible regions, accessible roles/names, interaction states, bounding boxes, computed layout/type/color styles, responsive topology, and optional full-page screenshots via `--screenshots`. Start the dev server first. Browser observation requires `playwright install chromium`.
 
-`uidetox redesign [target] --variants 3` consumes that map and writes `.uidetox/redesigns.json`. Proposals change page topology, navigation, component ownership, action placement, interaction model, responsive composition, and density before suggesting source edits. Pairwise structural distance prevents three cosmetic variants of the same layout.
+`uidetox redesign [target] --variants 3` consumes that map and writes `.uidetox/redesigns.json`. Stale maps are refreshed automatically when mapped source files are added, changed, deleted, or the extractor changes. Proposals change page topology, navigation, component ownership, action placement, interaction model, responsive composition, and density before suggesting source edits. Pairwise structural distance prevents three cosmetic variants of the same layout.
 
 `uidetox compare` presents every proposal across the same seven structural dimensions and shows pairwise distance. `uidetox prototype <proposal-id>` writes an isolated, agent-ready brief under `.uidetox/prototypes/`; mapped source evidence is explicitly quarantined as untrusted data.
 
-Use `--refresh-map` after source changes, `--map-file` or `--file` to consume a specific artifact, `--output` to choose an artifact path, and `--json` for automation.
+Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a specific artifact, `--output` to choose an artifact path, and `--json` for automation.
 
 ---
 
@@ -159,7 +159,7 @@ Use `--refresh-map` after source changes, `--map-file` or `--file` to consume a 
 | Command | Purpose |
 | :--- | :--- |
 | `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
-| `uidetox setup` | Persist design dials, `dev_server`, and auto-commit behavior (`--design-variance`, `--motion-intensity`, `--visual-density`, `--dev-server`, `--auto-commit`, `--no-auto-commit`). |
+| `uidetox setup` | Persist typed design dials, design intent, `dev_server`, and auto-commit behavior. Intent flags include `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`, and repeatable `--constraint`. |
 | `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox map [target]` | Build a persistent semantic frontend graph; optionally merge rendered DOM evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`). |
 | `uidetox redesign [target]` | Generate 1–5 structurally divergent, contract-preserving redesign plans (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`). |
@@ -188,7 +188,7 @@ Targeted refinement — use when a component needs deeper attention:
 
 ## Design Dials
 
-Set during `uidetox setup` and used throughout scan/fix prompts:
+Set during `uidetox setup` and used throughout scan/fix prompts and redesign structure:
 
 - **DESIGN_VARIANCE (1–10)**
   - 1–3: clean, centered, conventional
@@ -212,11 +212,15 @@ Set during `uidetox setup` and used throughout scan/fix prompts:
 
 Default baseline: **(8, 6, 4)**.
 
+### Design preflight
+
+UIdetox records audience, primary job, tone, genre, page/component scope, brand signals, preserved contracts, and constraints under `design_intent` in `.uidetox/config.json`. Missing context is inferred conservatively from the frontend map and labeled as inferred. Redesign strategy ranking, component ownership, layout trees, interaction models, and proposal fingerprints consume this intent and the three dials.
+
 ---
 
 ## Anti-Pattern Coverage
 
-The analyzer includes **218+ deterministic rules** organized across these categories:
+The analyzer includes **218 deterministic rules** in a canonical registry. Every rule has a stable ID, applicability extensions, category, upstream provenance, and exact prompt-routing keys. `uidetox next` routes by rule ID first; manual findings use token-boundary fallback matching.
 
 | Category | Examples |
 | :--- | :--- |
@@ -247,5 +251,7 @@ Each rule is classified into **tiers** with estimated effort:
 Inspired by and built on ideas from:
 - [desloppify](https://github.com/peteromallet/desloppify)
 - [impeccable](https://github.com/pbakaus/impeccable)
+- [taste-skill](https://github.com/Leonxlnx/taste-skill)
+- [hallmark](https://github.com/nutlope/hallmark)
 
 MIT © [OJamals](https://github.com/OJamals)

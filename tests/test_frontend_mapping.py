@@ -7,7 +7,12 @@ from uidetox.commands import compare as compare_command
 from uidetox.commands import map as map_command
 from uidetox.commands import prototype as prototype_command
 from uidetox.commands import redesign as redesign_command
-from uidetox.frontend_map import load_frontend_map, map_frontend, save_frontend_map
+from uidetox.frontend_map import (
+    frontend_map_is_fresh,
+    load_frontend_map,
+    map_frontend,
+    save_frontend_map,
+)
 from uidetox.prototype import build_prototype_brief, save_prototype_brief
 from uidetox.redesign import (
     RedesignBrief,
@@ -126,7 +131,10 @@ def test_map_frontend_builds_semantic_graph_and_contracts(tmp_path):
 
     assert frontend_map.evidence["mode"] == "static"
     assert frontend_map.evidence["frameworks"] == ["react", "styles"]
-    assert {node.name for node in nodes if node.kind == "component"} == {"App", "Dashboard"}
+    assert {node.name for node in nodes if node.kind == "component"} == {
+        "App",
+        "Dashboard",
+    }
     assert {node.name for node in nodes if node.kind == "route"} == {"/dashboard"}
     assert {node.name for node in nodes if node.kind == "data"} == {"/api/items"}
     assert {node.name for node in nodes if node.kind == "state"} == {"loading"}
@@ -138,11 +146,16 @@ def test_map_frontend_builds_semantic_graph_and_contracts(tmp_path):
     render_pairs = {
         (node_by_id[edge.source].name, node_by_id[edge.target].name)
         for edge in frontend_map.edges
-        if edge.kind == "renders" and edge.source in node_by_id and edge.target in node_by_id
+        if edge.kind == "renders"
+        and edge.source in node_by_id
+        and edge.target in node_by_id
     }
     assert ("App", "Dashboard") in render_pairs
     assert "Route remains reachable: /dashboard" in frontend_map.contracts.must_preserve
-    assert "Data contract remains functional: /api/items" in frontend_map.contracts.must_preserve
+    assert (
+        "Data contract remains functional: /api/items"
+        in frontend_map.contracts.must_preserve
+    )
     assert frontend_map.fingerprint["topology"] == "form-flow"
     assert frontend_map.fingerprint["navigation"] == "top-nav"
 
@@ -151,7 +164,9 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
     _write_frontend(tmp_path)
 
     frontend_map = map_frontend(tmp_path, runtime=_runtime_observation())
-    runtime_nodes = [node for node in frontend_map.nodes if node.kind.startswith("runtime_")]
+    runtime_nodes = [
+        node for node in frontend_map.nodes if node.kind.startswith("runtime_")
+    ]
 
     assert frontend_map.evidence["mode"] == "static+runtime"
     assert frontend_map.evidence["runtime_observed"] is True
@@ -199,7 +214,74 @@ def test_frontend_map_round_trips_through_persisted_artifact(tmp_path):
 
     assert loaded == frontend_map
     assert loaded.target == "src"
-    assert [node.id for node in loaded.nodes] == [node.id for node in frontend_map.nodes]
+    assert [node.id for node in loaded.nodes] == [
+        node.id for node in frontend_map.nodes
+    ]
+
+
+def test_ast_semantics_ignore_comments_and_resolve_aliases(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "Dashboard.tsx").write_text(
+        "export function Dashboard() { return <section>Real</section>; }",
+        encoding="utf-8",
+    )
+    (src / "Shell.tsx").write_text(
+        """
+import { useState as useLocalState } from "react";
+import { Dashboard as Dash } from "./Dashboard";
+// function FakeCard() { return <Route path="/fake" />; }
+const fakeSource = "fetch('/fake-api') <Ghost />";
+export const Shell = () => {
+  const [ready, setReady] = useLocalState(false);
+  return <main onClick={() => setReady(true)}><Dash /></main>;
+};
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    nodes = {node.id: node for node in frontend_map.nodes}
+
+    assert {node.name for node in nodes.values() if node.kind == "component"} == {
+        "Dashboard",
+        "Shell",
+    }
+    assert {node.name for node in nodes.values() if node.kind == "state"} == {"ready"}
+    assert not {"/fake", "/fake-api"} & {
+        node.name for node in nodes.values() if node.kind in {"route", "data"}
+    }
+    assert any(
+        edge.kind == "renders"
+        and nodes.get(edge.source) is not None
+        and nodes.get(edge.target) is not None
+        and nodes[edge.source].name == "Shell"
+        and nodes[edge.target].name == "Dashboard"
+        for edge in frontend_map.edges
+    )
+    assert frontend_map.evidence["extractors"]["tree-sitter"] == 2
+    assert all(
+        node.metadata.get("extractor") == "tree-sitter"
+        for node in nodes.values()
+        if node.kind == "component"
+    )
+
+
+def test_frontend_map_freshness_tracks_add_change_and_delete(tmp_path):
+    _write_frontend(tmp_path)
+    frontend_map = map_frontend(tmp_path, "src")
+
+    assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is True
+    app = tmp_path / "src" / "App.tsx"
+    app.write_text(
+        app.read_text(encoding="utf-8") + "\nexport const Added = () => <aside />;\n"
+    )
+    assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is False
+
+    refreshed = map_frontend(tmp_path, "src")
+    assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
+    (tmp_path / "src" / "Dashboard.tsx").unlink()
+    assert frontend_map_is_fresh(refreshed, tmp_path, "src") is False
 
 
 def test_redesigns_are_structurally_divergent_and_preserve_contracts(tmp_path):
@@ -212,7 +294,9 @@ def test_redesigns_are_structurally_divergent_and_preserve_contracts(tmp_path):
     )
 
     assert len(redesigns.proposals) == 3
-    assert len({proposal.fingerprint["topology"] for proposal in redesigns.proposals}) == 3
+    assert (
+        len({proposal.fingerprint["topology"] for proposal in redesigns.proposals}) == 3
+    )
     assert min(distance.score for distance in redesigns.pairwise_distances) >= 85
     assert all(proposal.novelty_score >= 85 for proposal in redesigns.proposals)
     assert all(
@@ -322,9 +406,7 @@ def test_map_and_redesign_commands_persist_artifacts(tmp_path, monkeypatch, caps
     map_artifact = tmp_path / ".uidetox" / "frontend-map.json"
     redesign_artifact = tmp_path / ".uidetox" / "redesigns.json"
 
-    map_command.run(
-        Namespace(target="src", output=str(map_artifact), json=False)
-    )
+    map_command.run(Namespace(target="src", output=str(map_artifact), json=False))
     redesign_command.run(
         Namespace(
             target="src",
@@ -344,6 +426,39 @@ def test_map_and_redesign_commands_persist_artifacts(tmp_path, monkeypatch, caps
     output = capsys.readouterr().out
     assert "Frontend map created." in output
     assert "Generated 3 divergent redesign proposal(s)." in output
+
+
+def test_redesign_command_refreshes_stale_map_automatically(tmp_path, monkeypatch):
+    _write_frontend(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    map_artifact = tmp_path / ".uidetox" / "frontend-map.json"
+    redesign_artifact = tmp_path / ".uidetox" / "redesigns.json"
+    save_frontend_map(map_frontend(tmp_path, "src"), map_artifact)
+    app = tmp_path / "src" / "App.tsx"
+    app.write_text(
+        app.read_text(encoding="utf-8").replace(
+            "</main>",
+            '<Route path="/settings" element={<Dashboard />} /></main>',
+        ),
+        encoding="utf-8",
+    )
+
+    redesign_command.run(
+        Namespace(
+            target="src",
+            variants=1,
+            map_file=str(map_artifact),
+            refresh_map=False,
+            output=str(redesign_artifact),
+            json=False,
+        )
+    )
+
+    refreshed = load_frontend_map(map_artifact)
+    assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
+    assert "/settings" in {
+        node.name for node in refreshed.nodes if node.kind == "route"
+    }
 
 
 def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys):

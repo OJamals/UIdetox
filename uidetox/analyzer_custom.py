@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from uidetox.analyzer_ast import HAS_AST
+from uidetox.analyzer_ast import has_ast_for
 
 
 def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[dict]:
@@ -131,7 +131,7 @@ def _analyze_document_structure_custom_rule(
     issues = []
     custom = rule.get("_custom_check")
     if custom == "div_soup":
-        if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
+        if has_ast_for(ext):
             return issues # Handled by AST
         div_count = len(re.findall(r'<div[\s>]', content, re.IGNORECASE))
         semantic_count = len(re.findall(
@@ -151,7 +151,7 @@ def _analyze_document_structure_custom_rule(
     # Custom check: missing_hover — buttons with className but no hover: class
 
     if custom == "nested_ternary":
-        if HAS_AST and ext in {".tsx", ".jsx", ".js", ".ts"}:
+        if has_ast_for(ext):
             return issues # Handled by AST
         # Count nested ternaries: lines with ? ... ? ... : pattern
         ternary_nests = len(re.findall(r'\?[^:?\n]{0,80}\?', content))
