@@ -316,11 +316,12 @@ RULES = [
     },
     {
         "id": "ORPHANED_LABEL_SLOP",
-        "pattern": re.compile(r'<label\b(?![^>]*htmlFor=)[^>]*>', re.IGNORECASE),
+        "pattern": re.compile(r"<label\b", re.IGNORECASE),
         "tier": "T1",
         "exts": _JSX_EXTS,
-        "description": "Accessible forms require 'htmlFor' on <label>.",
-        "command": "Add htmlFor attribute to <label> pointing to the input ID."
+        "description": "Accessible forms require for/htmlFor on <label>.",
+        "command": "Add for (HTML) or htmlFor (JSX) pointing to the input ID.",
+        "_custom_check": "orphaned_label",
     },
     {
         "id": "LAZY_FLEX_CENTER_SLOP",
@@ -347,7 +348,8 @@ RULES = [
         "tier": "T2",
         "exts": {".css", ".scss", ".less"},
         "description": "!important override detected — indicates specificity war.",
-        "command": "Refactor CSS specificity. Use lower-specificity selectors or CSS layers instead of !important."
+        "command": "Refactor CSS specificity. Use lower-specificity selectors or CSS layers instead of !important.",
+        "_custom_check": "important_abuse",
     },
     {
         "id": "INLINE_STYLE_SLOP",
@@ -1021,6 +1023,7 @@ RULES = [
         "exts": {".css", ".scss", ".less"},
         "description": "!important on transition/animation — cannot be overridden by prefers-reduced-motion.",
         "command": "Remove !important from animation properties to allow accessibility overrides.",
+        "_custom_check": "important_animation",
     },
     {
         "id": "CSS_EMPTY_RULE_SLOP",
@@ -1397,9 +1400,10 @@ RULES = [
         "id": "ROUND_NUMBER_SLOP",
         "pattern": re.compile(r'(?<!\d)99%(?!\d)|(?<!\d)100%(?!\.\d)|(?<!\d)\d+\.0+%'),
         "tier": "T2",
-        "exts": _ALL_FE_EXTS,
+        "exts": _JSX_EXTS,
         "description": "Suspiciously round metric percentage (99%, 100%, N.00%) — fake precision.",
         "command": "Use real measurements or remove. Round numbers signal fabricated metrics.",
+        "_custom_check": "round_number_metric",
     },
     {
         "id": "STYLE_TAG_IN_JSX_SLOP",

@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     from uidetox.frontend_map import FrontendMap
+
+
+_INTENT_DEFAULTS: dict[str, Any] = {
+    "scope": ".",
+    "audience": "product users",
+    "primary_job": "complete the mapped product task",
+    "tone": "purposeful and brand-specific",
+    "genre": "product interface",
+    "page_kind": "page",
+    "brand": "preserve existing brand signals",
+    "preserve": (),
+    "constraints": (),
+}
+_INTENT_FIELDS = tuple(_INTENT_DEFAULTS)
+_MAPPED_INTENT_FIELDS = (
+    "scope",
+    "primary_job",
+    "genre",
+    "page_kind",
+    "preserve",
+    "constraints",
+)
+_PROVENANCE_VALUES = frozenset({"explicit", "mapped", "fallback"})
 
 
 def _dial(name: str, value: Any, default: int) -> int:
@@ -66,6 +89,7 @@ class DesignIntent:
     preserve: tuple[str, ...] = ()
     constraints: tuple[str, ...] = ()
     source: str = "inferred"
+    provenance: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any] | None) -> "DesignIntent":
@@ -83,6 +107,7 @@ class DesignIntent:
             preserve=_strings(data.get("preserve")),
             constraints=_strings(data.get("constraints")),
             source=_text(data.get("source"), "configured"),
+            provenance=_provenance(data.get("provenance")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,11 +131,24 @@ class DesignSettings:
         if not isinstance(configured, Mapping) or not configured:
             intent = inferred
         else:
-            merged = {
-                **inferred.to_dict(),
-                **configured,
-                "source": "configured+inferred",
-            }
+            explicit_fields = _explicit_fields(configured)
+            configured_intent = DesignIntent.from_dict(configured)
+            merged = inferred.to_dict()
+            provenance = dict(inferred.provenance)
+            for field_name in explicit_fields:
+                merged[field_name] = getattr(configured_intent, field_name)
+                provenance[field_name] = "explicit"
+            has_mapped_fields = any(
+                value == "mapped" for value in provenance.values()
+            )
+            merged["source"] = (
+                "configured+inferred"
+                if explicit_fields and has_mapped_fields
+                else "configured"
+                if explicit_fields
+                else inferred.source
+            )
+            merged["provenance"] = provenance
             intent = DesignIntent.from_dict(merged)
         return cls(dials=DesignDials.from_config(config), intent=intent)
 
@@ -121,7 +159,10 @@ def infer_design_intent(
 ) -> DesignIntent:
     """Infer a conservative preflight brief when PRODUCT/DESIGN context is absent."""
     if frontend_map is None:
-        return DesignIntent(scope=target)
+        return DesignIntent(
+            scope=target,
+            provenance={field_name: "fallback" for field_name in _INTENT_FIELDS},
+        )
     fingerprint = frontend_map.fingerprint
     topology = str(fingerprint.get("topology", "generic-page"))
     counts = fingerprint.get("node_counts", {})
@@ -144,6 +185,12 @@ def infer_design_intent(
         page_kind=page_kind,
         preserve=frontend_map.contracts.must_preserve,
         constraints=frontend_map.contracts.unknown,
+        provenance={
+            field_name: (
+                "mapped" if field_name in _MAPPED_INTENT_FIELDS else "fallback"
+            )
+            for field_name in _INTENT_FIELDS
+        },
     )
 
 
@@ -159,3 +206,52 @@ def _strings(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _provenance(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        field_name: source
+        for field_name, source in value.items()
+        if field_name in _INTENT_FIELDS
+        and isinstance(source, str)
+        and source in _PROVENANCE_VALUES
+    }
+
+
+def _explicit_fields(configured: Mapping[str, Any]) -> tuple[str, ...]:
+    provenance_value = configured.get("provenance")
+    if isinstance(provenance_value, Mapping):
+        provenance = _provenance(provenance_value)
+        return tuple(
+            field_name
+            for field_name in _INTENT_FIELDS
+            if provenance.get(field_name) == "explicit"
+            and _has_configured_value(field_name, configured.get(field_name))
+        )
+
+    explicit_fields = []
+    for field_name, default in _INTENT_DEFAULTS.items():
+        if field_name not in configured:
+            continue
+        value = _normalized_intent_value(field_name, configured.get(field_name))
+        if (
+            _has_configured_value(field_name, configured.get(field_name))
+            and value != default
+        ):
+            explicit_fields.append(field_name)
+    return tuple(explicit_fields)
+
+
+def _normalized_intent_value(field_name: str, value: Any) -> Any:
+    default = _INTENT_DEFAULTS[field_name]
+    if field_name in {"preserve", "constraints"}:
+        return _strings(value)
+    return _text(value, default)
+
+
+def _has_configured_value(field_name: str, value: Any) -> bool:
+    if field_name in {"preserve", "constraints"}:
+        return bool(_strings(value))
+    return isinstance(value, str) and bool(value.strip())

@@ -1,6 +1,9 @@
 """Per-language AST capability behavior."""
 
+from pathlib import Path
+
 import uidetox.analyzer_ast as analyzer_ast
+import uidetox.frontend_semantics as frontend_semantics
 
 
 def test_ast_capabilities_are_visible_and_extension_specific():
@@ -49,3 +52,14 @@ def test_missing_grammar_records_error_without_disabling_others(monkeypatch):
         analyzer_ast._AST_LANGUAGES.update(original_languages)
         analyzer_ast.AST_CAPABILITIES.clear()
         analyzer_ast.AST_CAPABILITIES.update(original_capabilities)
+
+
+def test_ast_parser_monkeypatch_compatibility_seams_remain_callable(monkeypatch):
+    source = Path("Component.tsx")
+    content = "export const Component = () => <main />;"
+
+    monkeypatch.setattr(analyzer_ast, "_get_parser", lambda _extension: None)
+    monkeypatch.setattr(frontend_semantics, "_get_parser", lambda _extension: None)
+
+    assert analyzer_ast._analyze_ast(source, content, ".tsx") == []
+    assert frontend_semantics.extract_script_semantics(source, content) is None

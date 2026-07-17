@@ -117,7 +117,15 @@ RULES:
 
 ## The Autonomous Protocol
 
-`uidetox loop` drives a fully autonomous **scan → fix → verify** cycle. The loop continues until the Design Score meets the target (default 95) and the issue queue is empty.
+`uidetox loop` remains a safe preview: it prints the **scan → fix → verify** protocol for an agent to follow. Add `--execute` to run the deterministic phases in process and persist resumable state at `.uidetox/workflow-state.json`:
+
+```bash
+uidetox loop --execute
+uidetox loop --execute --proposal-id REDESIGN-01-task-flow
+uidetox loop --execute --proposal-id REDESIGN-01-task-flow --review-score 97
+```
+
+Execution never invokes an external agent CLI and never chooses a redesign proposal automatically. It stops explicitly when source fixes need an agent, proposal selection is missing, subjective scoring needs human/LLM input, or verification evidence is stale/blocked. Completed fresh phases are skipped on resume; source or input changes invalidate only dependent downstream phases. Failures are recorded once and retried only on a later invocation. Passing the score, queue, and freshness gates marks `uidetox finish` as eligible—it does not run finalization automatically.
 
 ### The Intelligence Layer
 UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
@@ -158,7 +166,7 @@ Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a sp
 
 | Command | Purpose |
 | :--- | :--- |
-| `uidetox loop` | Start the autonomous workflow (scan → fix → verify cycle). |
+| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution. |
 | `uidetox setup` | Persist typed design dials, design intent, `dev_server`, and auto-commit behavior. Intent flags include `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`, and repeatable `--constraint`. |
 | `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox map [target]` | Build a persistent semantic frontend graph; optionally merge rendered DOM evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`). |

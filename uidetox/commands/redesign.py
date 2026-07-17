@@ -10,6 +10,7 @@ from uidetox.frontend_map import (
     frontend_map_is_fresh,
     load_frontend_map,
     map_frontend,
+    retain_runtime_evidence,
     save_frontend_map,
 )
 from uidetox.redesign import RedesignBrief, propose_redesigns, save_redesign_set
@@ -27,18 +28,22 @@ def run(args: argparse.Namespace) -> None:
     )
     refresh = getattr(args, "refresh_map", False)
 
-    if refresh or not map_path.exists():
+    previous_map = load_frontend_map(map_path) if map_path.exists() else None
+    if refresh or previous_map is None:
         frontend_map = map_frontend(root, target)
+        if previous_map is not None:
+            frontend_map = retain_runtime_evidence(previous_map, frontend_map)
         save_frontend_map(frontend_map, map_path)
     else:
-        frontend_map = load_frontend_map(map_path)
+        frontend_map = previous_map
         requested_target = _target_label(root, target)
         if (
             frontend_map.root != str(root.resolve())
             or frontend_map.target != requested_target
             or not frontend_map_is_fresh(frontend_map, root, target)
         ):
-            frontend_map = map_frontend(root, target)
+            refreshed_map = map_frontend(root, target)
+            frontend_map = retain_runtime_evidence(frontend_map, refreshed_map)
             save_frontend_map(frontend_map, map_path)
 
     config = load_config()

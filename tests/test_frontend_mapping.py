@@ -137,6 +137,7 @@ def test_map_frontend_builds_semantic_graph_and_contracts(tmp_path):
     }
     assert {node.name for node in nodes if node.kind == "route"} == {"/dashboard"}
     assert {node.name for node in nodes if node.kind == "data"} == {"/api/items"}
+    assert next(node for node in nodes if node.kind == "data").metadata["method"] == "GET"
     assert {node.name for node in nodes if node.kind == "state"} == {"loading"}
     assert {node.name for node in nodes if node.kind == "token"} == {
         "--color-accent",
@@ -282,6 +283,42 @@ def test_frontend_map_freshness_tracks_add_change_and_delete(tmp_path):
     assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
     (tmp_path / "src" / "Dashboard.tsx").unlink()
     assert frontend_map_is_fresh(refreshed, tmp_path, "src") is False
+
+
+def test_frontend_map_freshness_tracks_backend_contract_edits(tmp_path):
+    _write_frontend(tmp_path)
+    api = tmp_path / "api.py"
+    api.write_text(
+        """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/api/items")
+def items():
+    return []
+""".strip(),
+        encoding="utf-8",
+    )
+    frontend_map = map_frontend(tmp_path, "src")
+
+    assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is True
+    assert {
+        operation["method"]
+        for operation in frontend_map.project_map["backend_operations"]
+    } == {"GET"}
+
+    api.write_text(
+        api.read_text(encoding="utf-8").replace("@app.get", "@app.post"),
+        encoding="utf-8",
+    )
+    assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is False
+
+    refreshed = map_frontend(tmp_path, "src")
+    assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
+    assert {
+        operation["method"]
+        for operation in refreshed.project_map["backend_operations"]
+    } == {"POST"}
 
 
 def test_redesigns_are_structurally_divergent_and_preserve_contracts(tmp_path):

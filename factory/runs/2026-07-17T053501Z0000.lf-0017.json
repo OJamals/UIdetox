@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0017.implement.codex.md)"
+  ],
+  "created_at": "2026-07-17T05:35:01+00:00",
+  "id": "lf-0017",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0017.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0017-executable-workflow.md",
+  "spec_sha256": "a6416caebb050de14561f505b5d64b70c675867ba57b6ce66e63f4579a041d7a",
+  "status": "planned",
+  "title": "Add an opt-in executable and resumable workflow engine"
+}

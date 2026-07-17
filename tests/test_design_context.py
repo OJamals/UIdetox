@@ -52,6 +52,8 @@ def test_design_settings_merge_configured_preflight_with_map_inference(tmp_path)
     assert settings.intent.primary_job == "complete and submit the mapped workflow"
     assert settings.intent.genre == "task workflow"
     assert settings.intent.source == "configured+inferred"
+    assert settings.intent.provenance["audience"] == "explicit"
+    assert settings.intent.provenance["primary_job"] == "mapped"
 
 
 def test_dials_change_proposal_structure_and_fingerprint(tmp_path):
@@ -130,3 +132,86 @@ def test_setup_persists_typed_design_intent(monkeypatch):
     assert saved["design_intent"]["primary_job"] == "repair an asset"
     assert saved["design_intent"]["preserve"] == ("offline operation",)
     assert saved["design_intent"]["constraints"] == ("glove-friendly targets",)
+    assert saved["design_intent"]["provenance"]["primary_job"] == "explicit"
+
+
+def test_default_setup_preserves_mapped_intent_through_redesign(
+    monkeypatch, tmp_path
+):
+    saved = {}
+    monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
+    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(
+        setup_command, "save_config", lambda config: saved.update(config)
+    )
+
+    setup_command.run(parse_args(["setup", "--no-auto-commit"]))
+
+    assert "design_intent" not in saved
+
+    _write_frontend(tmp_path)
+    frontend_map = map_frontend(tmp_path)
+    settings = DesignSettings.from_config(saved, frontend_map)
+    redesign_set = propose_redesigns(
+        frontend_map,
+        RedesignBrief(variants=1, intent=settings.intent),
+    )
+
+    assert settings.intent.primary_job == "complete and submit the mapped workflow"
+    assert settings.intent.genre == "task workflow"
+    assert settings.intent.preserve == frontend_map.contracts.must_preserve
+    assert settings.intent.constraints == frontend_map.contracts.unknown
+    assert settings.intent.provenance["primary_job"] == "mapped"
+    assert redesign_set.brief.intent == settings.intent
+
+
+def test_legacy_defaults_do_not_mask_mapping_but_non_defaults_remain_explicit(
+    tmp_path,
+):
+    _write_frontend(tmp_path)
+    frontend_map = map_frontend(tmp_path)
+    settings = DesignSettings.from_config(
+        {
+            "design_intent": {
+                "audience": "warehouse operators",
+                "primary_job": "complete the mapped product task",
+                "genre": "product interface",
+                "preserve": [],
+                "constraints": [],
+                "source": "configured",
+            }
+        },
+        frontend_map,
+    )
+
+    assert settings.intent.audience == "warehouse operators"
+    assert settings.intent.primary_job == "complete and submit the mapped workflow"
+    assert settings.intent.genre == "task workflow"
+    assert settings.intent.preserve == frontend_map.contracts.must_preserve
+    assert settings.intent.constraints == frontend_map.contracts.unknown
+    assert settings.intent.provenance["audience"] == "explicit"
+    assert settings.intent.provenance["genre"] == "mapped"
+
+
+def test_empty_explicit_values_and_metadata_cannot_mask_mapping(tmp_path):
+    _write_frontend(tmp_path)
+    frontend_map = map_frontend(tmp_path)
+    settings = DesignSettings.from_config(
+        {
+            "design_intent": {
+                "primary_job": " ",
+                "preserve": [],
+                "source": "explicit",
+                "provenance": {
+                    "primary_job": "explicit",
+                    "preserve": "explicit",
+                    "source": "explicit",
+                },
+            }
+        },
+        frontend_map,
+    )
+
+    assert settings.intent.primary_job == "complete and submit the mapped workflow"
+    assert settings.intent.preserve == frontend_map.contracts.must_preserve
+    assert settings.intent.provenance["primary_job"] == "mapped"

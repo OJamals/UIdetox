@@ -23,12 +23,33 @@ from ..fileset import ProjectFileSet
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
 from ..utils import compute_design_score
+from ..workflow import run_executable_workflow
 
 
 def run(args: argparse.Namespace):
     target = getattr(args, "target", 95)
     ensure_uidetox_dir()
     project_root = get_project_root()
+    if getattr(args, "execute", False):
+        config = load_config()
+        config["target_score"] = target
+        save_config(config)
+        if config.get("auto_commit"):
+            _ensure_session_branch()
+        result = run_executable_workflow(
+            project_root,
+            target_score=target,
+            proposal_id=getattr(args, "proposal_id", None),
+            subjective_score=getattr(args, "review_score", None),
+        )
+        print("UIdetox executable workflow")
+        print(f"  Status: {result.status}")
+        print(f"  Phase : {result.phase or 'none'}")
+        if result.waiting:
+            print(f"  Wait  : {result.waiting}")
+        print(f"  State : {result.state_path}")
+        print(f"  Next  : {result.message}")
+        return
 
     # ---- Auto-detect tooling ----
     config = load_config()

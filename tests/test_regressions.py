@@ -9093,7 +9093,7 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
         "FLEXBOX_PERCENTAGE_MATH_SLOP",
     ]
     assert _analyzer_catalog_fingerprint(RULES) == (
-        "b89da46d1ba63776055bf7d911a51e0d6d206318d955d8bf7575728b583994ee"
+        "358f1b39fedf087825647e6044fec2a61ddc377d13d473f23a7793da6307a697"
     )
 
 
@@ -9156,6 +9156,43 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
             "snippet": '<button className="px-4">Save</button>',
         },
     ]
+
+
+def test_analyzer_css_and_unsupported_issue_output_contract(tmp_path):
+    css = tmp_path / "representative.css"
+    css.write_text(".thing { transition: all 300ms ease; }\n", encoding="utf-8")
+    unsupported = tmp_path / "representative.txt"
+    unsupported.write_text("transition: all\n", encoding="utf-8")
+
+    assert analyze_file(css) == [
+        {
+            "id": "TRANSITION_ALL_SLOP",
+            "file": str(css.resolve()),
+            "tier": "T1",
+            "issue": "transition: all — animates everything including layout properties.",
+            "command": (
+                "Specify only compositor-safe properties: transition: transform, "
+                "opacity, filter."
+            ),
+            "line": 1,
+            "column": 10,
+            "snippet": ".thing { transition: all 300ms ease; }",
+        },
+        {
+            "id": "EASE_DEFAULT_SLOP",
+            "file": str(css.resolve()),
+            "tier": "T2",
+            "issue": "CSS 'ease' easing — generic browser default, use intentional curves.",
+            "command": (
+                "Use cubic-bezier(0.16, 1, 0.3, 1) (expo-out) or linear() for "
+                "spring-like motion."
+            ),
+            "line": 1,
+            "column": 32,
+            "snippet": ".thing { transition: all 300ms ease; }",
+        },
+    ]
+    assert analyze_file(unsupported) == []
 
 
 def test_analyzer_ast_issue_shape_and_missing_parser_fallback(tmp_path):

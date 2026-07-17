@@ -191,6 +191,9 @@ def parse_args(args_list=None):
     loop_parser = subparsers.add_parser("loop", help="Instruct the AI agent to enter an autonomous fix loop")
     loop_parser.add_argument("--target", type=int, default=95, help="Target design score to reach (default 95)")
     loop_parser.add_argument("--orchestrator", action="store_true", help="Use sub-agent orchestrator mode (one agent per stage)")
+    loop_parser.add_argument("--execute", action="store_true", help="Execute resumable phases in process (preview remains the default)")
+    loop_parser.add_argument("--proposal-id", help="Explicit redesign proposal selected for prototype generation")
+    loop_parser.add_argument("--review-score", type=int, choices=range(0, 101), help="Human/LLM subjective review score used to resume the review gate")
 
     # Command: finish
     subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")

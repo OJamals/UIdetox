@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0015.implement.codex.md)"
+  ],
+  "created_at": "2026-07-17T04:45:37+00:00",
+  "id": "lf-0015",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0015.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0015-cross-stack-semantic-map.md",
+  "spec_sha256": "381ce3d4b27461ef0b824fe956779f0773df0c9644ce593a4fdf8a00fb290cff",
+  "status": "planned",
+  "title": "Add cross-stack semantic mapping and deterministic parity"
+}

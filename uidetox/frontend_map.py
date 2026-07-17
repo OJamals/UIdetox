@@ -14,14 +14,16 @@ import os
 import re
 import tempfile
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
 from uidetox.frontend_semantics import ScriptSemantics, extract_script_semantics
+from uidetox.project_map import build_project_map, project_source_manifest
 from uidetox.runtime_observer import RuntimeObservation
+from uidetox.source_facts import extract_source_facts
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
@@ -175,6 +177,7 @@ class FrontendMap:
     contracts: ExperienceContract
     fingerprint: dict[str, Any]
     evidence: dict[str, Any]
+    project_map: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -200,6 +203,7 @@ class FrontendMap:
             contracts=ExperienceContract.from_dict(dict(value.get("contracts", {}))),
             fingerprint=dict(value.get("fingerprint", {})),
             evidence=dict(value.get("evidence", {})),
+            project_map=dict(value.get("project_map", {})),
         )
 
 
@@ -260,7 +264,8 @@ def map_frontend(
         source_hashes[relative_path] = hashlib.sha256(
             content.encode("utf-8")
         ).hexdigest()
-        semantics = extract_script_semantics(path, content)
+        source_facts = extract_source_facts(path, content)
+        semantics = extract_script_semantics(path, content, facts=source_facts)
         extractor = semantics.extractor if semantics is not None else "regex-fallback"
         confidence = semantics.confidence if semantics is not None else 0.55
         extractor_counts[extractor] += 1
@@ -333,11 +338,14 @@ def map_frontend(
             if semantics is not None
             else _unique(match.group(1) for match in _JSX_TAG_PATTERN.finditer(content))
         )
-        record.imports = (
+        source_imports = (
             list(semantics.imports)
             if semantics is not None
             else _unique(match.group(1) for match in _IMPORT_PATTERN.finditer(content))
         )
+        if path.suffix.lower() in {".htm", ".html"}:
+            source_imports.extend(_extract_html_asset_imports(content))
+        record.imports = _unique(source_imports)
 
         regions = (
             [(item.name, item.line) for item in semantics.regions]
@@ -421,22 +429,38 @@ def map_frontend(
             edges.append(FrontendEdge(owner_id, state_id, "owns"))
 
         endpoint_occurrences = (
-            [(item.name, item.line) for item in semantics.endpoints]
+            [(item.name, item.line, item.method) for item in semantics.endpoints]
             if semantics is not None
             else [
                 *(
-                    (match.group(1), _line_number(content, match.start()))
+                    (match.group(1), _line_number(content, match.start()), "GET")
                     for match in _FETCH_PATTERN.finditer(content)
                 ),
                 *(
-                    (match.group(1), _line_number(content, match.start()))
+                    (match.group(1), _line_number(content, match.start()), None)
                     for match in _AXIOS_PATTERN.finditer(content)
                 ),
             ]
         )
-        endpoints = dict(endpoint_occurrences)
-        for endpoint, line in endpoints.items():
-            data_id = _node_id("data", relative_path, endpoint)
+        endpoints = {
+            (endpoint, method): line
+            for endpoint, line, method in endpoint_occurrences
+        }
+        endpoint_path_counts = Counter(endpoint for endpoint, _method in endpoints)
+        for (endpoint, method), line in endpoints.items():
+            identity = (
+                endpoint
+                if endpoint_path_counts[endpoint] == 1
+                else f"{method or '?'}:{endpoint}"
+            )
+            data_id = _node_id("data", relative_path, identity)
+            metadata = {
+                "transport": "http",
+                "extractor": extractor,
+                "confidence": confidence,
+            }
+            if method is not None:
+                metadata["method"] = method
             nodes.append(
                 FrontendNode(
                     id=data_id,
@@ -444,11 +468,7 @@ def map_frontend(
                     name=endpoint,
                     file=relative_path,
                     line=line,
-                    metadata={
-                        "transport": "http",
-                        "extractor": extractor,
-                        "confidence": confidence,
-                    },
+                    metadata=metadata,
                 )
             )
             edges.append(FrontendEdge(owner_id, data_id, "reads"))
@@ -523,7 +543,12 @@ def map_frontend(
     for record in records:
         owner_id = _primary_owner(record, nodes)
         for source in record.imports:
-            resolved = _resolve_local_import(record.path, source, root_path)
+            resolved = _resolve_local_import(
+                record.path,
+                source,
+                root_path,
+                scope,
+            )
             if resolved and resolved in file_node_ids:
                 _append_edge_once(
                     edges,
@@ -573,6 +598,7 @@ def map_frontend(
     runtime_screenshots = [
         page.screenshot for page in runtime_pages if page.screenshot is not None
     ]
+    project_map = build_project_map(root_path, nodes)
 
     return FrontendMap(
         schema_version=SCHEMA_VERSION,
@@ -595,8 +621,11 @@ def map_frontend(
             "source_manifest": {
                 "target": target_label,
                 "files": dict(sorted(source_hashes.items())),
+                "project_files": project_map.evidence.get("source_manifest", {}),
             },
+            "source_status": "current",
             "runtime_observed": bool(runtime_pages),
+            "runtime_status": "current" if runtime_pages else "absent",
             "runtime_generated_at": runtime.generated_at
             if runtime is not None
             else None,
@@ -606,6 +635,7 @@ def map_frontend(
             "runtime_screenshots": runtime_screenshots,
             "runtime_errors": list(runtime.errors) if runtime is not None else [],
         },
+        project_map=project_map.to_dict(),
     )
 
 
@@ -642,6 +672,41 @@ def load_frontend_map(path: str | Path | None = None) -> FrontendMap:
     return FrontendMap.from_dict(value)
 
 
+def retain_runtime_evidence(
+    previous: FrontendMap,
+    refreshed: FrontendMap,
+) -> FrontendMap:
+    """Retain prior runtime provenance and label it stale after source changes."""
+
+    if (
+        previous.root != refreshed.root
+        or previous.target != refreshed.target
+        or not previous.evidence.get("runtime_observed")
+    ):
+        return refreshed
+    previous_manifest = previous.evidence.get("source_manifest", {})
+    refreshed_manifest = refreshed.evidence.get("source_manifest", {})
+    previous_status = str(previous.evidence.get("runtime_status", "current"))
+    same_source = previous_manifest == refreshed_manifest
+    runtime_status = (
+        "current"
+        if same_source and previous_status == "current"
+        else "stale"
+    )
+    evidence = dict(refreshed.evidence)
+    for key, value in previous.evidence.items():
+        if key.startswith("runtime_"):
+            evidence[key] = value
+    evidence["runtime_status"] = runtime_status
+    evidence["runtime_observed"] = True
+    evidence["runtime_stale_reason"] = (
+        None
+        if runtime_status == "current"
+        else "Source manifest changed after the recorded runtime observation."
+    )
+    return replace(refreshed, evidence=evidence)
+
+
 def frontend_map_is_fresh(
     frontend_map: FrontendMap,
     root: str | Path | None = None,
@@ -651,7 +716,11 @@ def frontend_map_is_fresh(
     if frontend_map.evidence.get("extractor_version") != EXTRACTOR_VERSION:
         return False
     expected = frontend_map.evidence.get("source_manifest")
-    if not isinstance(expected, dict) or not isinstance(expected.get("files"), dict):
+    if (
+        not isinstance(expected, dict)
+        or not isinstance(expected.get("files"), dict)
+        or not isinstance(expected.get("project_files"), dict)
+    ):
         return False
 
     root_path = Path(root or frontend_map.root).expanduser().resolve()
@@ -665,7 +734,10 @@ def frontend_map_is_fresh(
     )
     if expected.get("target") != target_label:
         return False
-    return expected["files"] == _build_source_manifest(root_path, scope)
+    return (
+        expected["files"] == _build_source_manifest(root_path, scope)
+        and expected["project_files"] == project_source_manifest(root_path)
+    )
 
 
 def _resolve_scope(root: Path, target: str | Path | None) -> Path:
@@ -841,19 +913,32 @@ def _normalize_route_segment(segment: str) -> str:
 
 
 def _resolve_local_import(
-    source_file: Path, import_path: str, root: Path
+    source_file: Path,
+    import_path: str,
+    root: Path,
+    scope: Path,
 ) -> str | None:
-    if not import_path.startswith("."):
+    if import_path.startswith("/"):
+        bases = [
+            (scope / import_path.lstrip("/")).resolve(),
+            (source_file.parent / import_path.lstrip("/")).resolve(),
+        ]
+    elif import_path.startswith("."):
+        bases = [(source_file.parent / import_path).resolve()]
+    else:
         return None
-    base = (source_file.parent / import_path).resolve()
-    candidates = [base]
-    if not base.suffix:
-        candidates.extend(
-            base.with_suffix(extension) for extension in sorted(SOURCE_EXTENSIONS)
-        )
-        candidates.extend(
-            base / f"index{extension}" for extension in sorted(SOURCE_EXTENSIONS)
-        )
+    candidates: list[Path] = []
+    for base in dict.fromkeys(bases):
+        candidates.append(base)
+        if not base.suffix:
+            candidates.extend(
+                base.with_suffix(extension)
+                for extension in sorted(SOURCE_EXTENSIONS)
+            )
+            candidates.extend(
+                base / f"index{extension}"
+                for extension in sorted(SOURCE_EXTENSIONS)
+            )
     for candidate in candidates:
         if candidate.is_file():
             try:
@@ -861,6 +946,45 @@ def _resolve_local_import(
             except ValueError:
                 return None
     return None
+
+
+def _extract_html_asset_imports(content: str) -> list[str]:
+    imports: list[str] = []
+    for match in re.finditer(r"<(script|link)\b[^>]*>", content, re.IGNORECASE):
+        tag_name = match.group(1).lower()
+        tag = match.group(0)
+        if tag_name == "script":
+            attribute = re.search(
+                r"\bsrc\s*=\s*([\"'])([^\"']+)\1",
+                tag,
+                re.IGNORECASE,
+            )
+        else:
+            relation = re.search(
+                r"\brel\s*=\s*([\"'])([^\"']+)\1",
+                tag,
+                re.IGNORECASE,
+            )
+            if relation is None or not {
+                "stylesheet",
+                "modulepreload",
+                "preload",
+            }.intersection(relation.group(2).lower().split()):
+                continue
+            attribute = re.search(
+                r"\bhref\s*=\s*([\"'])([^\"']+)\1",
+                tag,
+                re.IGNORECASE,
+            )
+        if attribute is None:
+            continue
+        source = attribute.group(2).split("?", 1)[0].split("#", 1)[0]
+        if not source or source.startswith(("data:", "http://", "https://", "//")):
+            continue
+        if not source.startswith((".", "/")):
+            source = f"./{source}"
+        imports.append(source)
+    return _unique(imports)
 
 
 def _primary_owner(record: _SourceRecord, nodes: Iterable[FrontendNode]) -> str:

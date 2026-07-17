@@ -14,6 +14,8 @@ import sys
 import uuid
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
+from uidetox.frontend_map import map_frontend
+from uidetox.project_map import ProjectMap
 from uidetox.state import (
     add_issues, ensure_uidetox_dir, get_project_root, load_config, load_state,
     save_config, increment_scans,
@@ -110,7 +112,7 @@ def run(args: argparse.Namespace):
 
     # Auto-detect tooling if not already configured
     if not config.get("tooling"):
-        profile = detect_all(scan_path)
+        profile = detect_all(project_root)
         config["tooling"] = profile.to_dict()
         save_config(config)
 
@@ -299,7 +301,24 @@ def run(args: argparse.Namespace):
     has_fullstack = bool(backends or databases or apis)
     if has_fullstack:
         print()
-        print("  Full-stack: check DTO alignment, type safety, error surfacing across layers.")
+        try:
+            parity = ProjectMap.from_dict(
+                map_frontend(project_root, Path(scan_path).resolve()).project_map
+            )
+            counts = parity.counts
+            print(
+                "  Full-stack operation parity: "
+                f"frontend-only={counts['frontend_only']}, "
+                f"backend-only={counts['backend_only']}, "
+                f"method-mismatch={counts['method_mismatch']}, "
+                f"unresolved={counts['unresolved']}."
+            )
+            print(
+                "  Evidence scope: static HTTP routes and schema references only; "
+                "auth, UI error states, and business equivalence remain unverified."
+            )
+        except (OSError, TypeError, ValueError) as error:
+            print(f"  Full-stack operation parity unavailable: {error}")
 
     # ===========================================================
     # PART 2: SUBJECTIVE ANALYSIS (LLM-driven design review)
