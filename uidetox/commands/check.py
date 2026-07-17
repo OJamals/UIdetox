@@ -1,7 +1,9 @@
 """Check command: runs tsc → lint → format in sequence."""
 
 import argparse
+import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from uidetox.tooling import detect_all
 from uidetox.state import get_project_root, load_config, save_config
@@ -11,17 +13,70 @@ from uidetox.commands import lint as lint_cmd
 from uidetox.commands import format_cmd
 
 
-def _auto_commit_changed_files(files: set[str], message: str) -> None:
+@dataclass(frozen=True)
+class AutoCommitResult:
+    staged_paths: tuple[str, ...]
+
+
+class AutoCommitError(RuntimeError):
+    """A mechanical git auto-commit command failed."""
+
+
+def _safe_git_error_summary(output: str) -> str:
+    """Return concise git output with common secret assignments redacted."""
+    summary = " ".join(output.split()) or "no error output"
+    summary = re.sub(
+        r"(?i)\b(password|passwd|secret|token|api[_-]?key|authorization)\b(\s*[:=]\s*|\s+)([^\s,;]+)",
+        r"\1\2[REDACTED]",
+        summary,
+    )
+    summary = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [REDACTED]", summary)
+    return summary if len(summary) <= 240 else f"{summary[:237]}..."
+
+
+def _auto_commit_changed_files(files: set[str], message: str) -> AutoCommitResult:
     """Stage specific changed files and commit them."""
     project_root = get_project_root()
+    paths = []
 
-    for f in sorted(files):
+    for f in files:
         path = Path(f)
         if not path.is_absolute():
-            path = (project_root / path).resolve()
-        subprocess.run(["git", "add", str(path)], check=False, cwd=project_root)
+            path = project_root / path
+        paths.append(str(path.resolve()))
 
-    subprocess.run(["git", "commit", "-m", message, "--no-verify"], check=False, cwd=project_root)
+    sorted_paths = tuple(sorted(paths))
+    add_cmd = ["git", "add", "--", *sorted_paths]
+    try:
+        add_result = subprocess.run(
+            add_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+        )
+    except FileNotFoundError as exc:
+        raise AutoCommitError("git add failed: git executable not found") from exc
+    if add_result.returncode != 0:
+        detail = _safe_git_error_summary(add_result.stderr or add_result.stdout)
+        raise AutoCommitError(f"git add failed (exit {add_result.returncode}): {detail}")
+
+    commit_cmd = ["git", "commit", "-m", message, "--no-verify"]
+    try:
+        commit_result = subprocess.run(
+            commit_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+        )
+    except FileNotFoundError as exc:
+        raise AutoCommitError("git commit failed: git executable not found") from exc
+    if commit_result.returncode != 0:
+        detail = _safe_git_error_summary(commit_result.stderr or commit_result.stdout)
+        raise AutoCommitError(f"git commit failed (exit {commit_result.returncode}): {detail}")
+
+    return AutoCommitResult(staged_paths=sorted_paths)
 
 
 def _tracked_changed_files() -> set[str]:

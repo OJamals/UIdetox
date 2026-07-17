@@ -53,6 +53,42 @@ uidetox loop
 
 ---
 
+## Optional Capabilities
+
+Base install includes scanning, checks, issue queues, and remediation workflows.
+Install only capabilities needed by your workflow:
+
+```bash
+# Semantic memory backed by ChromaDB
+pip install 'uidetox[memory]'
+
+# Screenshot capture and visual diffs
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+
+# Both optional capabilities
+pip install 'uidetox[all]'
+```
+
+Playwright's Python package does not include Chromium; run browser install command
+after installing `capture` or `all` before first `uidetox capture`.
+
+---
+
+## Contributing
+
+Use Python 3.11-3.13. From a clean checkout, install UIdetox and its test
+dependencies in an isolated environment, then run the canonical verification gate:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pytest -q
+```
+
+The test command should finish with an all-green result and no failures or errors.
+
+---
+
 ## Agent Bootstrap Prompt
 
 Paste this into your coding agent to kick off a full detox pass:

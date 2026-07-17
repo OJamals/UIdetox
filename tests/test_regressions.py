@@ -1,4 +1,7 @@
 import argparse
+import hashlib
+import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -66,21 +69,438 @@ def test_scan_deduplicates_existing_issue_queue(tmp_path, monkeypatch):
     assert state["stats"]["total_found"] == 1
 
 
+def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
+    import uidetox.state as state_module
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4, "tooling": {}})
+    findings = [
+        {
+            "id": f"RULE-{index}",
+            "file": f"src/Component{index}.tsx",
+            "tier": "T2",
+            "issue": f"Issue {index}",
+            "command": f"Fix {index}",
+        }
+        for index in range(3)
+    ]
+    duplicate_finding = dict(findings[0], id="RULE-DUPLICATE")
+    findings.append(duplicate_finding)
+    load_calls = 0
+    save_calls = 0
+    captured_triggered_rules = set()
+    original_load_state = state_module.load_state
+    original_save_state = state_module.save_state
+
+    def counted_load_state():
+        nonlocal load_calls
+        load_calls += 1
+        return original_load_state()
+
+    def counted_save_state(state):
+        nonlocal save_calls
+        save_calls += 1
+        return original_save_state(state)
+
+    def capture_scan_memory(slop_issues, queued_count, triggered_rules, scan_path):
+        captured_triggered_rules.update(triggered_rules)
+
+    monkeypatch.setattr(state_module, "load_state", counted_load_state)
+    monkeypatch.setattr(state_module, "save_state", counted_save_state)
+    monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(scan, "increment_scans", lambda: None)
+    monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "_save_scan_to_memory", capture_scan_memory)
+    monkeypatch.setattr(scan, "save_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "load_state", lambda: {"issues": [], "resolved": [], "stats": {}})
+
+    scan.run(argparse.Namespace(path="."))
+
+    assert load_calls == 1
+    assert save_calls == 1
+    persisted = original_load_state()["issues"]
+    assert [issue["file"] for issue in persisted] == [
+        issue["file"] for issue in findings[:3]
+    ]
+    assert captured_triggered_rules == {
+        "RULE-0",
+        "RULE-1",
+        "RULE-2",
+        "RULE-DUPLICATE",
+    }
+
+
+def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
+    tooling = {
+        "package_manager": "npm",
+        "typescript": None,
+        "linter": None,
+        "formatter": None,
+        "frontend": [],
+        "backend": [],
+        "database": [],
+        "api": [],
+    }
+    monkeypatch.setattr(scan, "ensure_uidetox_dir", lambda: None)
+    monkeypatch.setattr(scan, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(scan, "load_config", lambda: {"tooling": tooling})
+    monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(scan, "add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(scan, "increment_scans", lambda: None)
+    monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "_save_scan_to_memory", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "save_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scan, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        scan,
+        "load_state",
+        lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
+    )
+    monkeypatch.setattr(scan, "compute_design_score", lambda state: {"blended_score": 100})
+
+
+def test_scan_json_output_is_standalone_for_empty_results(monkeypatch, tmp_path, capsys):
+    import json
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    scan.run(argparse.Namespace(path=".", output="json", since=None))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.out == "[]\n"
+    assert captured.err == ""
+    assert "SCAN CODEBASE" not in captured.out
+
+
+def test_scan_json_output_preserves_issue_schema(monkeypatch, tmp_path, capsys):
+    import json
+
+    issue = {
+        "id": "COLOR_GRADIENT_SLOP",
+        "file": "src/Hero.tsx",
+        "tier": "T2",
+        "issue": "Purple-blue gradient detected.",
+        "command": "Replace gradient.",
+        "line": 12,
+        "column": 7,
+        "snippet": "bg-gradient-to-r",
+    }
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [issue])
+
+    scan.run(argparse.Namespace(path=".", output="json", since=None))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == [issue]
+    assert captured.err == ""
+    assert captured.out.lstrip().startswith("[")
+    assert captured.out.rstrip().endswith("]")
+
+
+def test_scan_github_output_contains_annotations_only(monkeypatch, tmp_path, capsys):
+    findings = [
+        {
+            "file": f"src/Tier{tier[-1]}.tsx",
+            "tier": tier,
+            "issue": f"{tier} finding",
+            "command": "fix",
+            "line": index + 2,
+            "column": index + 3,
+        }
+        for index, tier in enumerate(("T1", "T2", "T3", "T4"))
+    ]
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, findings)
+
+    scan.run(argparse.Namespace(path=".", output="github", since=None))
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+
+    assert lines == [
+        "::warning file=src/Tier1.tsx,line=2,col=3::T1 finding",
+        "::warning file=src/Tier2.tsx,line=3,col=4::T2 finding",
+        "::error file=src/Tier3.tsx,line=4,col=5::T3 finding",
+        "::error file=src/Tier4.tsx,line=5,col=6::T4 finding",
+    ]
+    assert captured.err == ""
+    assert all(line.startswith("::") for line in lines)
+    assert "SCAN CODEBASE" not in captured.out
+
+
+def test_scan_table_output_preserves_human_banner(monkeypatch, tmp_path, capsys):
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    scan.run(argparse.Namespace(path=".", output="table", since=None))
+    captured = capsys.readouterr()
+
+    assert "SCAN CODEBASE -- Static Analysis + Subjective Review" in captured.out
+    assert "PART 1: MECHANICAL ISSUES" in captured.out
+    assert "PART 2: SUBJECTIVE ANALYSIS" in captured.out
+    assert "Running" in captured.out
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("failure", ["invalid_sha", "missing_git"])
+def test_scan_json_output_routes_since_fallback_diagnostics_to_stderr(
+    failure, monkeypatch, tmp_path, capsys
+):
+    import json
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+
+    def fake_run(cmd, **kwargs):
+        if failure == "missing_git":
+            raise FileNotFoundError("git")
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{tmp_path}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd,
+            128,
+            stdout="",
+            stderr="fatal: bad revision 'missing-sha'",
+        )
+
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=".", output="json", since="missing-sha"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert "Warning: could not run git diff for --since=missing-sha" in captured.err
+    assert "Warning:" not in captured.out
+    assert "SCAN CODEBASE" not in captured.out
+
+
+def test_scan_since_passes_only_changed_files_under_requested_subdirectory(
+    monkeypatch, tmp_path, capsys
+):
+    import json
+
+    root = tmp_path / "repo"
+    scan_root = root / "frontend"
+    changed = scan_root / "src" / "Changed.tsx"
+    unchanged = scan_root / "src" / "Unchanged.tsx"
+    outside = root / "api" / "handler.ts"
+    changed.parent.mkdir(parents=True)
+    outside.parent.mkdir(parents=True)
+    for file_path in (changed, unchanged, outside):
+        file_path.write_text("export default null", encoding="utf-8")
+
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+    captured_targets = None
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal captured_targets
+        assert Path(path).resolve() == scan_root.resolve()
+        captured_targets = kwargs["target_files"]
+        return []
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root}\n", stderr="")
+        assert cmd[:3] == ["git", "diff", "--name-only"]
+        assert Path(kwargs["cwd"]).resolve() == root.resolve()
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="frontend/src/Changed.tsx\napi/handler.ts\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(scan, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=str(scan_root), output="json", since="base"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.err == ""
+    assert captured_targets == [str(changed.resolve())]
+    assert str(unchanged.resolve()) not in captured_targets
+    assert str(outside.resolve()) not in captured_targets
+
+
+@pytest.mark.parametrize("changed_output", ["", "api/handler.ts\n"])
+def test_scan_since_empty_or_out_of_scope_diff_never_falls_back_to_full_scan(
+    changed_output, monkeypatch, tmp_path, capsys
+):
+    import json
+
+    root = tmp_path / "repo"
+    scan_root = root / "frontend"
+    scan_root.mkdir(parents=True)
+    _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
+    captured_targets = None
+
+    def fake_analyze_directory(path, **kwargs):
+        nonlocal captured_targets
+        captured_targets = kwargs["target_files"]
+        return []
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root}\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=changed_output, stderr="")
+
+    monkeypatch.setattr(scan, "analyze_directory", fake_analyze_directory)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    scan.run(argparse.Namespace(path=str(scan_root), output="json", since="base"))
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == []
+    assert captured.err == ""
+    assert captured_targets == []
+
+
 def test_check_auto_commit_stages_only_changed_files(monkeypatch):
     calls = []
 
     def fake_run(cmd, **kwargs):
-        calls.append(cmd)
+        calls.append((cmd, kwargs))
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(check.subprocess, "run", fake_run)
 
-    check._auto_commit_changed_files({"src/App.tsx"}, "[UIdetox] Mechanical auto-fix")
+    result = check._auto_commit_changed_files(
+        {"src/Zed.tsx", "src/App.tsx"},
+        "[UIdetox] Mechanical auto-fix",
+    )
 
-    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
-    assert expected_add in calls
-    assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
-    assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"] in calls
+    expected_paths = tuple(
+        sorted(
+            [
+                str((Path.cwd() / "src/App.tsx").resolve()),
+                str((Path.cwd() / "src/Zed.tsx").resolve()),
+            ]
+        )
+    )
+    expected_add = ["git", "add", "--", *expected_paths]
+    expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"]
+
+    assert [cmd for cmd, _ in calls] == [expected_add, expected_commit]
+    assert result.staged_paths == expected_paths
+    for _, kwargs in calls:
+        assert kwargs["check"] is False
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["cwd"] == Path.cwd()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_detail"),
+    [
+        ("add", "git add failed (exit 17): add rejected TOKEN=[REDACTED]"),
+        ("commit", "git commit failed (exit 23): hook rejected SECRET=[REDACTED]"),
+        ("missing", "git add failed: git executable not found"),
+    ],
+)
+def test_check_auto_commit_failure_reports_and_omits_success(
+    monkeypatch,
+    capsys,
+    failure,
+    expected_detail,
+):
+    fmt_runs = 0
+    status_runs = 0
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        nonlocal fmt_runs, status_runs
+        calls.append(cmd)
+
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            status_runs += 1
+            stdout = "" if status_runs == 1 else " M src/App.tsx\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd == ["fmt"]:
+            fmt_runs += 1
+            stdout = "formatted 1 file" if fmt_runs == 1 else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        if cmd[:3] == ["git", "add", "--"]:
+            if failure == "missing":
+                raise FileNotFoundError("git")
+            if failure == "add":
+                return subprocess.CompletedProcess(cmd, 17, stdout="", stderr="add rejected TOKEN=top-secret")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        if cmd[:2] == ["git", "commit"]:
+            if failure == "commit":
+                return subprocess.CompletedProcess(cmd, 23, stdout="", stderr="hook rejected SECRET=top-secret")
+            raise AssertionError("git commit should not run after add failure")
+
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: None)
+    monkeypatch.setattr(
+        check,
+        "load_config",
+        lambda: {
+            "auto_commit": True,
+            "tooling": {
+                "typescript": None,
+                "linter": None,
+                "formatter": {"fix_cmd": "fmt"},
+            },
+        },
+    )
+    monkeypatch.setattr(check, "save_config", lambda cfg: None)
+
+    check.run(argparse.Namespace(fix=True))
+    output = capsys.readouterr().out
+
+    assert expected_detail in output
+    assert "top-secret" not in output
+    assert "Auto-committed mechanical fixes" not in output
+    if failure != "commit":
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in calls)
+
+
+def test_check_auto_commit_real_git_repo_stages_exact_paths(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init")
+    git("config", "user.name", "UIdetox Tests")
+    git("config", "user.email", "uidetox@example.invalid")
+    (repo / "nested").mkdir()
+    for relative_path in ("a.txt", "nested/b.txt", "unrelated.txt"):
+        (repo / relative_path).write_text("initial\n", encoding="utf-8")
+    git("add", "--", "a.txt", "nested/b.txt", "unrelated.txt")
+    git("commit", "-m", "initial")
+
+    (repo / "a.txt").write_text("selected a\n", encoding="utf-8")
+    (repo / "nested/b.txt").write_text("selected b\n", encoding="utf-8")
+    (repo / "unrelated.txt").write_text("leave dirty\n", encoding="utf-8")
+    (repo / "untracked.txt").write_text("leave untracked\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = check._auto_commit_changed_files(
+        {"nested/b.txt", "a.txt"},
+        "[UIdetox] Mechanical auto-fix",
+    )
+
+    committed = git("show", "--pretty=format:", "--name-only", "HEAD").stdout.splitlines()
+    status = git("status", "--porcelain").stdout.splitlines()
+    expected_paths = tuple(sorted([str((repo / "a.txt").resolve()), str((repo / "nested/b.txt").resolve())]))
+
+    assert committed == ["a.txt", "nested/b.txt"]
+    assert result.staged_paths == expected_paths
+    assert " M unrelated.txt" in status
+    assert "?? untracked.txt" in status
 
 
 def test_check_run_skips_auto_commit_when_workspace_already_dirty(monkeypatch, capsys):
@@ -162,7 +582,7 @@ def test_check_run_auto_commits_only_new_mechanical_changes(monkeypatch):
 
     check.run(argparse.Namespace(fix=True))
 
-    expected_add = ["git", "add", str((Path.cwd() / "src/App.tsx").resolve())]
+    expected_add = ["git", "add", "--", str((Path.cwd() / "src/App.tsx").resolve())]
     assert expected_add in calls
     assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"] in calls
     assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
@@ -215,10 +635,10 @@ def test_check_run_auto_commits_from_subdirectory(monkeypatch, tmp_path, capsys)
     check.run(argparse.Namespace(fix=True))
     output = capsys.readouterr().out
 
-    expected_add = ["git", "add", str((root / "src/App.tsx").resolve())]
+    expected_add = ["git", "add", "--", str((root / "src/App.tsx").resolve())]
     expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"]
 
-    assert "Auto-committed mechanical fixes" in output
+    assert output.count("Auto-committed mechanical fixes") == 1
     assert any(cmd == expected_add and kwargs.get("cwd") == root for cmd, kwargs in calls)
     assert any(cmd == expected_commit and kwargs.get("cwd") == root for cmd, kwargs in calls)
 
@@ -418,6 +838,7 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
     monkeypatch.chdir(nested_dir)
 
     analyzed_path = None
+    analyzed_targets = None
     git_call_cwds = []
 
     issue = {
@@ -437,8 +858,9 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
         raise AssertionError(f"Unexpected command: {cmd}")
 
     def fake_analyze_directory(path, **kwargs):
-        nonlocal analyzed_path
+        nonlocal analyzed_path, analyzed_targets
         analyzed_path = Path(path).resolve()
+        analyzed_targets = kwargs["target_files"]
         return [issue]
 
     monkeypatch.setattr(scan_cmd.subprocess, "run", fake_run)
@@ -449,6 +871,7 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
     output = capsys.readouterr().out
 
     assert analyzed_path == root.resolve()
+    assert analyzed_targets == [str((root / "frontend" / "src" / "Button.tsx").resolve())]
     assert git_call_cwds == [root.resolve(), root.resolve()]
     assert "frontend/src/Button.tsx" in output
 
@@ -4200,6 +4623,106 @@ def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_p
     )
 
 
+def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    files = [tmp_path / "src" / f"Component{index}.tsx" for index in range(4)]
+    files[0].parent.mkdir()
+    for file_path in files:
+        file_path.write_text("export default null", encoding="utf-8")
+
+    analyzed = []
+
+    def fake_analyze_file(file_path, **kwargs):
+        analyzed.append(Path(file_path).resolve())
+        return []
+
+    monkeypatch.setattr(analyzer_module, "analyze_file", fake_analyze_file)
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    issues = analyzer_module.analyze_directory(
+        str(tmp_path),
+        target_files=[files[2], files[0], files[1]],
+    )
+
+    assert issues == []
+    assert len(analyzed) == 3
+    assert set(analyzed) == {file_path.resolve() for file_path in files[:3]}
+    assert files[3].resolve() not in analyzed
+
+
+def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    accepted = tmp_path / "src" / "Accepted.tsx"
+    excluded = tmp_path / "excluded" / "Excluded.tsx"
+    zoned = tmp_path / "src" / "Generated.tsx"
+    unsupported = tmp_path / "src" / "notes.txt"
+    outside = tmp_path.parent / "Outside.tsx"
+    for file_path in (accepted, excluded, zoned, unsupported, outside):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("content", encoding="utf-8")
+    missing = tmp_path / "src" / "Deleted.tsx"
+
+    analyzed = []
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze_file",
+        lambda file_path, **kwargs: analyzed.append(Path(file_path).resolve()) or [],
+    )
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    issues = analyzer_module.analyze_directory(
+        str(tmp_path),
+        exclude_paths=["excluded"],
+        zone_overrides={str(zoned): "generated"},
+        target_files=[accepted, excluded, zoned, unsupported, outside, missing],
+    )
+
+    assert issues == []
+    assert analyzed == [accepted.resolve()]
+
+    analyzed.clear()
+    assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []
+    assert analyzed == []
+
+
+def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
+    tmp_path, monkeypatch
+):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+
+    component = tmp_path / "src" / "Component.tsx"
+    component.parent.mkdir()
+    component.write_text("export default null", encoding="utf-8")
+    color_source = tmp_path / "tailwind.config.js"
+    color_source.write_text("module.exports = { theme: { colors: {} } }", encoding="utf-8")
+
+    audit_calls = []
+    monkeypatch.setattr(analyzer_module, "analyze_file", lambda *args, **kwargs: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+    monkeypatch.setattr(
+        color_utils,
+        "audit_project_colors",
+        lambda root: audit_calls.append(Path(root).resolve()) or [],
+    )
+
+    analyzer_module.analyze_directory(str(tmp_path), target_files=[component])
+    assert audit_calls == []
+
+    analyzer_module.analyze_directory(str(tmp_path), target_files=[color_source])
+    assert audit_calls == [tmp_path.resolve()]
+
+
 def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(tmp_path):
     from uidetox.color_utils import audit_project_colors
 
@@ -5370,23 +5893,113 @@ export default function Root() {
         os.unlink(tmp)
 
 
-def test_analyze_ast_animate_state_has_id():
-    """useState for animation detected via AST should have id='ANIMATE_STATE_SLOP'."""
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ("const [opacity, setOpacity] = useState(0);", "opacity"),
+        ("const [translateX, setTranslateX] = React.useState(0);", "translateX"),
+        ("let [x, setX] = useState<number>(0);", "x"),
+        ("const [query, setQuery] = useState('');", "query"),
+        ("const opacity = useState(0);", None),
+        ("const [opacity, setOpacity] = useReducer(reducer, 0);", None),
+    ],
+)
+def test_animate_state_extracts_declared_binding(declaration, expected):
+    from uidetox.analyzer import _extract_usestate_binding
+
+    assert _extract_usestate_binding(declaration) == expected
+
+
+@pytest.mark.parametrize(
+    ("identifier", "expected"),
+    [
+        ("translateX", ("translate", "x")),
+        ("AnimationProgress", ("animation", "progress")),
+        ("animation_progress2D", ("animation", "progress", "2", "d")),
+        ("user-profile", ("user", "profile")),
+    ],
+)
+def test_animate_state_tokenizes_identifier_semantics(identifier, expected):
+    from uidetox.analyzer import _identifier_tokens
+
+    assert _identifier_tokens(identifier) == expected
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["opacity", "scale", "translateX", "x", "y", "animationProgress"],
+)
+def test_animate_state_identifier_positive(identifier):
+    from uidetox.analyzer import _is_animation_state_identifier
+
+    assert _is_animation_state_identifier(identifier)
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["query", "story", "text", "country", "ready", "userProfile", "display"],
+)
+def test_animate_state_identifier_negative(identifier):
+    from uidetox.analyzer import _is_animation_state_identifier
+
+    assert not _is_animation_state_identifier(identifier)
+
+
+def _analyze_animate_state_code(code):
+    import os
+    import tempfile
+
     from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile, os
-    code = "const [opacity, setOpacity] = useState(0);"
+
     with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
         f.write(code)
         tmp = f.name
     try:
         issues = _analyze_ast(Path(tmp), code, ".tsx")
-        for issue in issues:
-            assert "id" in issue, f"AST issue missing 'id' key: {issue}"
-        animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
-        assert len(animate_issues) == 1
+        return issues, str(Path(tmp).resolve())
     finally:
         os.unlink(tmp)
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["opacity", "scale", "translateX", "x", "y", "animationProgress"],
+)
+def test_analyze_ast_animate_state_positive_identifiers(identifier):
+    code = f"const [{identifier}, setValue] = useState(0);"
+    issues, filepath = _analyze_animate_state_code(code)
+    animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
+
+    assert animate_issues == [{
+        "id": "ANIMATE_STATE_SLOP",
+        "file": filepath,
+        "tier": "T2",
+        "issue": "React useState used for animation values — causes re-renders on every frame.",
+        "command": "Use CSS transitions/animations, Framer Motion, or useRef for animation state. Never drive 60fps animations through React state.",
+    }]
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["query", "story", "text", "country", "ready", "userProfile", "display"],
+)
+def test_analyze_ast_animate_state_negative_identifiers(identifier):
+    code = f"const [{identifier}, setValue] = useState(0);"
+    issues, _ = _analyze_animate_state_code(code)
+
+    assert not any(i.get("id") == "ANIMATE_STATE_SLOP" for i in issues)
+
+
+def test_analyze_ast_animate_state_multiple_declarations_emit_one_issue():
+    code = """
+const [query, setQuery] = useState('');
+const [opacity, setOpacity] = useState(0);
+const [story, setStory] = useState(null);
+"""
+    issues, _ = _analyze_animate_state_code(code)
+    animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
+
+    assert len(animate_issues) == 1
 
 
 def test_analyze_ast_identical_siblings_has_id():
@@ -5689,7 +6302,7 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     monkeypatch.setattr("uidetox.commands.scan.load_config", lambda: {})
     monkeypatch.setattr("uidetox.commands.scan.save_config", lambda c: None)
     monkeypatch.setattr("uidetox.commands.scan.detect_all", lambda path=".": type("P", (), {"to_dict": lambda s: {}})())
-    monkeypatch.setattr("uidetox.commands.scan.add_issue", lambda i: True)
+    monkeypatch.setattr("uidetox.commands.scan.add_issues", lambda issues: len(issues))
     monkeypatch.setattr("uidetox.commands.scan.increment_scans", lambda: None)
     monkeypatch.setattr("uidetox.commands.scan.save_run_snapshot", lambda **kw: None)
     monkeypatch.setattr("uidetox.commands.scan.save_scan_summary", lambda **kw: None)
@@ -5874,6 +6487,9 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
         "issue": "existing repo issue",
         "command": "fix",
     }
+    issue_file = root / "src" / "App.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
     monkeypatch.chdir(nested_dir)
 
@@ -5883,7 +6499,7 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
         return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
 
-    def fake_analyze_target(path, config):
+    def fake_analyze_target(path, config, target_files=None):
         if Path(path).resolve() == root.resolve():
             return [issue]
         return []
@@ -5907,6 +6523,110 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 1}
 
 
+def test_diff_run_since_file_scope_ignores_changed_sibling(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    src = root / "src"
+    src.mkdir(parents=True)
+    (root / ".git").mkdir()
+    app = src / "App.tsx"
+    other = src / "Other.tsx"
+    app.write_text("export const App = () => null;", encoding="utf-8")
+    other.write_text("export const Other = () => null;", encoding="utf-8")
+    baseline_issue = {
+        "id": "SCAN-ABC123",
+        "file": str(app),
+        "tier": "T2",
+        "issue": "existing app issue",
+        "command": "fix",
+    }
+    emitted = {}
+
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(
+        diff_cmd,
+        "load_state",
+        lambda: {"issues": [], "diff_baseline": [baseline_issue]},
+    )
+    git_cwds = []
+
+    def fake_git_run(cmd, **kwargs):
+        git_cwds.append(Path(kwargs["cwd"]).resolve())
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="src/Other.tsx\n", stderr=""
+            )
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
+
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(
+        diff_cmd,
+        "_analyze_target",
+        lambda *args, **kwargs: pytest.fail("out-of-scope sibling must not trigger analysis"),
+    )
+
+    def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
+        emitted["issues"] = (new_issues, fixed_issues, unchanged_issues)
+
+    monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
+
+    diff_cmd.run(
+        argparse.Namespace(path=str(app), since="abc123", output="json", save=False)
+    )
+
+    assert emitted["issues"] == ([], [], [])
+    assert git_cwds == [src.resolve(), src.resolve()]
+
+
+def test_diff_run_since_file_scope_accepts_only_requested_file(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    src = root / "src"
+    src.mkdir(parents=True)
+    (root / ".git").mkdir()
+    app = src / "App.tsx"
+    other = src / "Other.tsx"
+    app.write_text("export const App = () => null;", encoding="utf-8")
+    other.write_text("export const Other = () => null;", encoding="utf-8")
+    analyzed_targets = []
+
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []})
+    git_cwds = []
+
+    def fake_git_run(cmd, **kwargs):
+        git_cwds.append(Path(kwargs["cwd"]).resolve())
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="src/App.tsx\nsrc/Other.tsx\n", stderr=""
+            )
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
+
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+
+    def fake_analyze_target(path, config, target_files=None):
+        analyzed_targets.append((Path(path).resolve(), set(target_files or [])))
+        return []
+
+    monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(
+        argparse.Namespace(path=str(app), since="abc123", output="json", save=False)
+    )
+
+    assert analyzed_targets == [(app.resolve(), {str(app.resolve())})]
+    assert git_cwds == [src.resolve(), src.resolve()]
+
+
 def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(monkeypatch, tmp_path):
     from uidetox.commands import diff as diff_cmd
 
@@ -5922,6 +6642,9 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(m
         "issue": "existing repo issue",
         "command": "fix",
     }
+    issue_file = root / "src" / "App.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
     monkeypatch.chdir(nested_dir)
 
@@ -5931,7 +6654,7 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(m
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
         return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
 
-    def fake_analyze_target(path, config):
+    def fake_analyze_target(path, config, target_files=None):
         if Path(path).resolve() == root.resolve():
             return [issue]
         return []
@@ -5973,6 +6696,9 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
         "issue": "existing repo issue",
         "command": "fix",
     }
+    issue_file = root / "src" / "App.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
     monkeypatch.chdir(nested_dir)
 
@@ -5993,7 +6719,11 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
     monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [baseline_issue]})
     monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [fresh_issue])
+    monkeypatch.setattr(
+        diff_cmd,
+        "_analyze_target",
+        lambda path, config, target_files=None: [fresh_issue],
+    )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
     diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
@@ -6023,6 +6753,9 @@ def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseli
         "issue": "existing repo issue",
         "command": "fix",
     }
+    issue_file = root / "src" / "App.tsx"
+    issue_file.parent.mkdir(parents=True)
+    issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
     monkeypatch.chdir(nested_dir)
 
@@ -6037,7 +6770,11 @@ def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseli
     monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
     monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [fresh_issue])
+    monkeypatch.setattr(
+        diff_cmd,
+        "_analyze_target",
+        lambda path, config, target_files=None: [fresh_issue],
+    )
     monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
 
     diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=True))
@@ -6508,6 +7245,97 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatc
     rescan_cmd.run(argparse.Namespace(path="."))
 
     assert analyzed_path == root.resolve()
+
+
+def test_rescan_batches_queue_and_preserves_recurrence_semantics(tmp_path, monkeypatch, capsys):
+    import uidetox.state as state_module
+    from uidetox.commands import rescan as rescan_cmd
+
+    monkeypatch.chdir(tmp_path)
+    recurring = {
+        "file": "src/Recurring.tsx",
+        "tier": "T2",
+        "issue": "Recurring issue",
+        "command": "Fix recurring",
+    }
+    resolved_only = {
+        "file": "src/Resolved.tsx",
+        "tier": "T2",
+        "issue": "Resolved issue",
+        "command": "Fix resolved",
+    }
+    initial_state = {
+        "issues": [recurring],
+        "resolved": [recurring.copy(), recurring.copy(), resolved_only],
+    }
+    findings = [
+        recurring,
+        resolved_only,
+        {
+            "file": "src/Suppressed.tsx",
+            "tier": "T2",
+            "issue": "Suppressed issue",
+            "command": "Fix suppressed",
+        },
+        {
+            "file": "src/First.tsx",
+            "tier": "T1",
+            "issue": "First issue",
+            "command": "Fix first",
+        },
+        {
+            "file": "src/Second.tsx",
+            "tier": "T3",
+            "issue": "Second issue",
+            "command": "Fix second",
+        },
+    ]
+    load_calls = 0
+    save_calls = 0
+    original_load_state = state_module.load_state
+    original_save_state = state_module.save_state
+
+    def counted_load_state():
+        nonlocal load_calls
+        load_calls += 1
+        return original_load_state()
+
+    def counted_save_state(state):
+        nonlocal save_calls
+        save_calls += 1
+        return original_save_state(state)
+
+    monkeypatch.setattr(state_module, "load_state", counted_load_state)
+    monkeypatch.setattr(state_module, "save_state", counted_save_state)
+    monkeypatch.setattr(rescan_cmd, "load_state", lambda: initial_state)
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {"ignore_patterns": ["suppressed"]})
+    monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(
+        rescan_cmd,
+        "_is_suppressed",
+        lambda file, issue, patterns: issue == "Suppressed issue",
+    )
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert load_calls == 1
+    assert save_calls == 1
+    persisted = original_load_state()["issues"]
+    assert [issue["file"] for issue in persisted] == [
+        "src/Recurring.tsx",
+        "src/First.tsx",
+        "src/Second.tsx",
+    ]
+    assert persisted[0]["tier"] == "T3"
+    output = capsys.readouterr().out
+    assert "Queued 3 mechanical anti-pattern issues" in output
+    assert "Skipped 1 already-resolved issue" in output
+    assert "Escalated 1 recurring issue" in output
 
 
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
@@ -8041,3 +8869,356 @@ def test_detect_all_survives_wrong_top_level_package_json(tmp_path):
     assert profile.package_manager == "npm"
     assert profile.linter is None
     assert profile.formatter is None
+
+
+def test_frontend_fileset_path_specific_and_basename_excludes(tmp_path):
+    from uidetox.fileset import ProjectFileSet
+
+    left = tmp_path / "left" / "generated" / "Left.tsx"
+    right = tmp_path / "right" / "generated" / "Right.tsx"
+    for path in (left, right):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("export default null", encoding="utf-8")
+
+    path_specific = ProjectFileSet(tmp_path, excludes=[r"left\generated"])
+    assert path_specific.relative_paths() == ["right/generated/Right.tsx"]
+
+    basename = ProjectFileSet(tmp_path, excludes=["generated"])
+    assert basename.relative_paths() == []
+
+
+def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):
+    from uidetox.fileset import FRONTEND_EXTENSIONS, ProjectFileSet
+
+    expected_extensions = {
+        ".css", ".html", ".js", ".jsx", ".less", ".md", ".sass",
+        ".scss", ".svelte", ".ts", ".tsx", ".vue",
+    }
+    assert FRONTEND_EXTENSIONS == frozenset(expected_extensions)
+
+    accepted = [tmp_path / "src" / f"file{extension}" for extension in expected_extensions]
+    zoned_file = tmp_path / "src" / "Zoned.tsx"
+    zoned_dir_file = tmp_path / "generated" / "Nested.tsx"
+    outside = tmp_path.parent / "Outside.tsx"
+    for path in (*accepted, zoned_file, zoned_dir_file, outside):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content", encoding="utf-8")
+    missing = tmp_path / "src" / "Missing.tsx"
+
+    escape = tmp_path / "src" / "Escape.tsx"
+    try:
+        escape.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+
+    file_set = ProjectFileSet(
+        tmp_path,
+        zone_overrides={"generated": "generated", str(zoned_file): "vendor"},
+        explicit_targets=[*accepted, zoned_file, zoned_dir_file, outside, missing, escape],
+    )
+    assert file_set.discover() == sorted((path.resolve() for path in accepted), key=lambda path: path.as_posix())
+
+
+def test_get_frontend_files_nested_cwd_uses_project_root_config(monkeypatch, tmp_path):
+    from uidetox import subagent
+
+    root = tmp_path / "repo"
+    nested = root / "src" / "nested"
+    nested.mkdir(parents=True)
+    (root / ".git").mkdir()
+    keep = root / "src" / "Keep.sass"
+    skip = root / "packages" / "generated" / "Skip.sass"
+    keep.write_text("body {}", encoding="utf-8")
+    skip.parent.mkdir(parents=True)
+    skip.write_text("body {}", encoding="utf-8")
+
+    monkeypatch.chdir(nested)
+    monkeypatch.setattr(subagent, "load_config", lambda: {"exclude": ["packages/generated"]})
+
+    assert subagent.get_frontend_files() == ["src/Keep.sass"]
+
+
+def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+    from uidetox.commands import diff as diff_cmd
+    from uidetox.commands.watch import _snapshot
+    from uidetox.fileset import ProjectFileSet
+    from uidetox.subagent import get_frontend_files
+
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    paths = {
+        "src/App.tsx",
+        "src/theme.sass",
+        "src/styles.less",
+        "docs/readme.md",
+        "packages/b/generated/Keep.tsx",
+        "packages/a/generated/Skip.tsx",
+        "src/generated/Nested.tsx",
+        "src/Zoned.tsx",
+    }
+    for relative in paths:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content", encoding="utf-8")
+
+    config = {
+        "exclude": ["packages/a/generated"],
+        "zone_overrides": {
+            "src/generated": "generated",
+            str(root / "src" / "Zoned.tsx"): "vendor",
+        },
+    }
+    expected = {
+        "docs/readme.md",
+        "packages/b/generated/Keep.tsx",
+        "src/App.tsx",
+        "src/styles.less",
+        "src/theme.sass",
+    }
+    file_set = ProjectFileSet(
+        root,
+        excludes=config["exclude"],
+        zone_overrides=config["zone_overrides"],
+    )
+    assert set(file_set.relative_paths()) == expected
+    assert set(get_frontend_files(root, config)) == expected
+    assert {
+        Path(path).relative_to(root).as_posix()
+        for path in _snapshot(root, file_set)
+    } == expected
+
+    analyzed: list[Path] = []
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze_file",
+        lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
+    )
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root_path: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root_path: {})
+    analyzer_module.analyze_directory(
+        str(root),
+        exclude_paths=config["exclude"],
+        zone_overrides=config["zone_overrides"],
+    )
+    assert {path.relative_to(root).as_posix() for path in analyzed} == expected
+
+    analyzed.clear()
+    diff_cmd._analyze_target(str(root), config)
+    assert {path.relative_to(root).as_posix() for path in analyzed} == expected
+
+
+def test_diff_since_passes_only_canonical_frontend_files(monkeypatch, tmp_path):
+    from uidetox.commands import diff as diff_cmd
+
+    root = tmp_path / "repo"
+    nested = root / "src" / "nested"
+    nested.mkdir(parents=True)
+    (root / ".git").mkdir()
+    accepted = root / "src" / "App.tsx"
+    excluded = root / "packages" / "generated" / "Skip.tsx"
+    zoned = root / "src" / "Zoned.tsx"
+    for path in (accepted, excluded, zoned):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content", encoding="utf-8")
+
+    config = {
+        "exclude": [r"packages\generated"],
+        "zone_overrides": {"src/Zoned.tsx": "generated"},
+    }
+    captured_targets = None
+
+    def fake_git_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root}\n", stderr="")
+
+    def fake_analyze_target(path, active_config, target_files=None):
+        nonlocal captured_targets
+        captured_targets = set(target_files or [])
+        return []
+
+    monkeypatch.chdir(nested)
+    monkeypatch.setattr(diff_cmd, "load_config", lambda: config)
+    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"diff_baseline": []})
+    monkeypatch.setattr(
+        diff_cmd,
+        "_get_changed_files",
+        lambda since_sha, cwd: ["src/App.tsx", "packages/generated/Skip.tsx", "src/Zoned.tsx"],
+    )
+    monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
+    monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
+    monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
+
+    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+
+    assert captured_targets == {str(accepted.resolve())}
+
+
+def _analyzer_catalog_fingerprint(rules):
+    def normalize(value):
+        if isinstance(value, re.Pattern):
+            return {"pattern": value.pattern, "flags": value.flags}
+        if isinstance(value, dict):
+            return {key: normalize(value[key]) for key in sorted(value)}
+        if isinstance(value, set):
+            return sorted(normalize(item) for item in value)
+        if isinstance(value, (list, tuple)):
+            return [normalize(item) for item in value]
+        return value
+
+    payload = json.dumps(
+        normalize(rules), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
+    from uidetox.analyzer import RULES
+
+    rule_ids = [rule["id"] for rule in RULES]
+    assert len(rule_ids) == 218
+    assert len(set(rule_ids)) == 218
+    assert rule_ids[:5] == [
+        "TYPOGRAPHY_SLOP",
+        "COLOR_GRADIENT_SLOP",
+        "COLOR_BLACK_SLOP",
+        "ICONOGRAPHY_SLOP",
+        "MATERIALITY_RADIUS_SLOP",
+    ]
+    assert rule_ids[-5:] == [
+        "ACCORDION_FAQ_SLOP",
+        "DARK_MODE_TOGGLE_SLOP",
+        "CENTERED_PARAGRAPH_SLOP",
+        "MODAL_NO_ARIA_SLOP",
+        "FLEXBOX_PERCENTAGE_MATH_SLOP",
+    ]
+    assert _analyzer_catalog_fingerprint(RULES) == (
+        "b89da46d1ba63776055bf7d911a51e0d6d206318d955d8bf7575728b583994ee"
+    )
+
+
+def test_analyzer_public_import_contract():
+    from uidetox.analyzer import RULES, analyze_directory, analyze_file
+
+    assert len(RULES) == 218
+    assert callable(analyze_file)
+    assert callable(analyze_directory)
+
+
+def test_analyzer_regex_issue_shape_and_order(tmp_path):
+    source = tmp_path / "copy.md"
+    source.write_text("Unlock the power", encoding="utf-8")
+
+    assert analyze_file(source) == [
+        {
+            "id": "GENERIC_COPY_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Generic AI startup marketing copy detected.",
+            "command": (
+                "Rewrite copy to be specific, concrete, and human. Describe what the "
+                "product does, not what it 'unlocks'."
+            ),
+            "line": 1,
+            "column": 1,
+            "snippet": "Unlock the power",
+        }
+    ]
+
+
+def test_analyzer_custom_issue_shape_and_order(tmp_path):
+    source = tmp_path / "button.tsx"
+    source.write_text('<button className="px-4">Save</button>', encoding="utf-8")
+
+    assert analyze_file(source) == [
+        {
+            "id": "MISSING_HOVER_STATES",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Button element without hover: state detected.",
+            "command": "Add hover:, focus:, and active: states to all interactive elements.",
+        },
+        {
+            "id": "MISSING_FOCUS_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T2",
+            "issue": "Interactive element without focus: state — accessibility gap.",
+            "command": "Add focus:ring or focus:outline states for keyboard accessibility.",
+        },
+        {
+            "id": "BUTTON_TYPE_MISSING_SLOP",
+            "file": str(source.resolve()),
+            "tier": "T1",
+            "issue": "<button> without type= attribute defaults to submit inside forms.",
+            "command": "Add type='button' to buttons that don't submit forms.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
+        },
+    ]
+
+
+def test_analyzer_ast_issue_shape_and_missing_parser_fallback(tmp_path):
+    from uidetox.analyzer import HAS_AST, _analyze_ast, _get_parser
+
+    source = tmp_path / "state.tsx"
+    content = (
+        "import { useState } from 'react';\n"
+        "const [isAnimating, setIsAnimating] = useState(false);\n"
+    )
+    source.write_text(content, encoding="utf-8")
+
+    if HAS_AST:
+        assert _analyze_ast(source, content, ".tsx") == [
+            {
+                "id": "ANIMATE_STATE_SLOP",
+                "file": str(source.resolve()),
+                "tier": "T2",
+                "issue": (
+                    "React useState used for animation values — causes re-renders on every frame."
+                ),
+                "command": (
+                    "Use CSS transitions/animations, Framer Motion, or useRef for animation "
+                    "state. Never drive 60fps animations through React state."
+                ),
+            }
+        ]
+    assert _get_parser(".txt") is None
+    assert _analyze_ast(source, content, ".txt") == []
+
+
+def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
+    import uidetox.analyzer as analyzer_module
+    import uidetox.color_utils as color_utils
+    from uidetox.fileset import ProjectFileSet
+
+    accepted = tmp_path / "src" / "Accepted.tsx"
+    excluded = tmp_path / "generated" / "Excluded.tsx"
+    unsupported = tmp_path / "src" / "notes.txt"
+    for source in (accepted, excluded, unsupported):
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("content", encoding="utf-8")
+
+    discovered = ProjectFileSet(
+        tmp_path,
+        excludes=("generated",),
+        explicit_targets=(accepted, excluded, unsupported),
+        scope_root=tmp_path,
+    ).discover()
+    analyzed = []
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze_file",
+        lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
+    )
+    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
+    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
+
+    assert analyzer_module.analyze_directory(
+        str(tmp_path),
+        exclude_paths=["generated"],
+        target_files=[accepted, excluded, unsupported],
+    ) == []
+    assert discovered == [accepted.resolve()]
+    assert analyzed == discovered
+    assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []

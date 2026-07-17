@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from uidetox.utils import now_iso
@@ -363,19 +364,36 @@ def issue_dedup_key(issue: dict) -> str:
     )
 
 
-def add_issue(issue: dict):
+def add_issues(issues: Iterable[dict]) -> int:
+    """Add unique pending issues in one locked persistence transaction."""
     with _state_lock():
         state = load_state()
-        issues = state.setdefault("issues", [])
-        new_key = issue_dedup_key(issue)
-        if any(issue_dedup_key(existing) == new_key for existing in issues):
-            return False
-        issue["created_at"] = _now_iso()
-        issues.append(issue)
+        pending = state.setdefault("issues", [])
+        dedup_keys = {issue_dedup_key(existing) for existing in pending}
+        accepted_count = 0
+
+        for issue in issues:
+            new_key = issue_dedup_key(issue)
+            if new_key in dedup_keys:
+                continue
+            issue["created_at"] = _now_iso()
+            pending.append(issue)
+            dedup_keys.add(new_key)
+            accepted_count += 1
+
+        if accepted_count == 0:
+            return 0
+
         state.setdefault("stats", {})
-        state["stats"]["total_found"] = state["stats"].get("total_found", 0) + 1
+        state["stats"]["total_found"] = (
+            state["stats"].get("total_found", 0) + accepted_count
+        )
         save_state(state)
-        return True
+        return accepted_count
+
+
+def add_issue(issue: dict) -> bool:
+    return add_issues((issue,)) == 1
 
 def increment_scans():
     """Track number of scans run."""

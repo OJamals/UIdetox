@@ -40,6 +40,13 @@ Or guide Copilot manually:
 
 Use `uidetox capture` during PR validation or before final handoff. **Start your dev server first** — UIdetox does not launch it.
 
+Install capture support and Chromium once before first use:
+
+```bash
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+```
+
 ```bash
 # Start your app
 pnpm dev      # or npm run dev / yarn dev

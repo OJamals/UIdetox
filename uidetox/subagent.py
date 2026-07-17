@@ -1,13 +1,13 @@
 """Sub-agent session management: create, track, and record sub-agent work."""
 
 import json
-import os
 import re
 import uuid
 from pathlib import Path
 
-from uidetox.analyzer import IGNORE_DIRS # type: ignore
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
+from uidetox.fileset import ProjectFileSet
+from uidetox.prompt_safety import render_untrusted_data
+from uidetox.state import get_project_root, get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
 from uidetox.utils import now_iso # type: ignore
 
 
@@ -249,18 +249,17 @@ def get_session(session_id: str) -> dict | None:
     return result
 
 
-def get_frontend_files() -> list[str]:
-    frontend_exts = {".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte", ".ts", ".js"}
-    files = []
-
-    for dirpath, dirnames, filenames in os.walk("."):
-        new_dir = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.')]
-        dirnames.clear()
-        dirnames.extend(new_dir)
-        for filename in filenames:
-            if Path(filename).suffix.lower() in frontend_exts:
-                files.append(os.path.join(dirpath, filename))
-    return sorted(files)
+def get_frontend_files(
+    project_root: str | Path | None = None,
+    config: dict | None = None,
+) -> list[str]:
+    root = Path(project_root).resolve() if project_root is not None else get_project_root()
+    active_config = load_config() if config is None else config
+    return ProjectFileSet(
+        root,
+        excludes=active_config.get("exclude", []),
+        zone_overrides=active_config.get("zone_overrides", {}),
+    ).relative_paths()
 
 
 def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:
@@ -277,60 +276,53 @@ def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:
     except ImportError:
         return ""
 
-    sections: list[str] = []
+    memory_data: dict[str, object] = {}
 
     patterns = get_patterns(query=query)
     if patterns:
-        lines = ["## Learned Patterns (from prior sessions — MUST follow)"]
-        for p in patterns[-15:]:  # Last 15 to keep prompt size manageable
-            lines.append(f"- [{p.get('category', 'general')}] {p['pattern']}")
-        sections.append("\n".join(lines))
+        memory_data["learned_patterns"] = [
+            {"category": p.get("category", "general"), "pattern": p["pattern"]}
+            for p in patterns[-15:]
+        ]
 
     notes = get_notes(query=query)
     if notes:
-        lines = ["## Agent Notes (persistent context)"]
-        for n in notes[-10:]:
-            lines.append(f"- {n['note']}")
-        sections.append("\n".join(lines))
+        memory_data["agent_notes"] = [n["note"] for n in notes[-10:]]
 
     session = get_mem_session()
     if session:
-        lines = ["## Session Continuity"]
-        lines.append(f"- Last Phase: {session.get('phase', 'unknown')}")
-        lines.append(f"- Last Command: {session.get('last_command', 'none')}")
+        session_data = {
+            "last_phase": session.get("phase", "unknown"),
+            "last_command": session.get("last_command", "none"),
+            "issues_fixed_this_session": session.get("issues_fixed_this_session", 0),
+        }
         if session.get("last_component"):
-            lines.append(f"- Last Component: {session['last_component']}")
-        lines.append(f"- Issues Fixed This Session: {session.get('issues_fixed_this_session', 0)}")
+            session_data["last_component"] = session["last_component"]
         if session.get("context"):
-            lines.append(f"- Context: {session['context']}")
-        sections.append("\n".join(lines))
+            session_data["context"] = session["context"]
+        memory_data["session_continuity"] = session_data
 
     last_scan = get_last_scan()
     if last_scan:
-        lines = ["## Last Scan Summary"]
-        lines.append(f"- Total Found: {last_scan.get('total_found', 0)}")
-        by_tier = last_scan.get("by_tier", {})
-        if by_tier:
-            tier_str = ", ".join(f"{k}: {v}" for k, v in sorted(by_tier.items()))
-            lines.append(f"- By Tier: {tier_str}")
-        top = last_scan.get("top_files", [])
-        if top:
-            lines.append(f"- Hottest Files: {', '.join(top[:5])}")
-        sections.append("\n".join(lines))
+        memory_data["last_scan_summary"] = {
+            "total_found": last_scan.get("total_found", 0),
+            "by_tier": last_scan.get("by_tier", {}),
+            "top_files": last_scan.get("top_files", [])[:5],
+        }
 
     # ── Embedding-based targeted context (only if files provided) ──
     if files:
         try:
             targeted = build_targeted_context(files, issue_text=query)
             if targeted:
-                sections.append(targeted)
+                memory_data["targeted_context"] = targeted
         except Exception:
             pass  # ChromaDB optional — gracefully degrade
 
-    if not sections:
+    if not memory_data:
         return ""
 
-    return "\n\n".join(["# Memory Bank Injection"] + sections) + "\n"
+    return "# Memory Bank\n" + render_untrusted_data({"memory": memory_data}) + "\n"
 
 
 def _build_deconfliction_block(shard_index: int, total_shards: int, shard_files: list[str]) -> str:
@@ -343,11 +335,10 @@ def _build_deconfliction_block(shard_index: int, total_shards: int, shard_files:
 
     return f"""## Shard Deconfliction (CRITICAL — violating this causes merge conflicts)
 - You are shard {shard_index + 1} of {total_shards}.
-- You may ONLY read and modify files in YOUR shard assignment below.
+- You may ONLY read and modify files listed in the shard assignment data block below.
 - Do NOT touch ANY file outside your shard, even if you see issues in it.
 - If you discover issues in files outside your shard, note them but DO NOT fix.
-- Your assigned files:
-{chr(10).join(f'  - {f}' for f in shard_files)}
+{render_untrusted_data({"shard_files": shard_files})}
 """
 
 
@@ -446,8 +437,10 @@ def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
     target_directive = "Systematically scan the codebase and catalog everything you see."
     deconfliction = ""
     if files:
-        file_list = "\n".join(f"- {f}" for f in files)
-        target_directive = f"Systematically scan ONLY the following files in your shard:\n{file_list}"
+        target_directive = (
+            "Systematically scan ONLY the files in the repository data block below:\n"
+            + render_untrusted_data({"files": files})
+        )
         deconfliction = _build_deconfliction_block(shard_index, total_shards, files)
 
     return f"""# UIdetox Sub-Agent: OBSERVE Stage
@@ -500,9 +493,16 @@ CONTENT: <quality of placeholder data and copy>
 
 
 def _diagnose_prompt(issues: list, dials_block: str) -> str:
-    existing = "\n".join(
-        f"- [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues[:20] # type: ignore
-    ) if issues else "None yet."
+    existing = render_untrusted_data({
+        "issues": [
+            {
+                "tier": issue.get("tier"),
+                "file": issue.get("file"),
+                "issue": issue.get("issue"),
+            }
+            for issue in issues[:20]
+        ]
+    }) if issues else "None yet."
 
     return f"""# UIdetox Sub-Agent: DIAGNOSE Stage
 
@@ -613,9 +613,17 @@ uidetox add-issue --file <path> --tier <tier> --issue "<description>" --fix-comm
 
 
 def _prioritize_prompt(issues: list) -> str:
-    issue_list = "\n".join(
-        f"- [{i.get('id')}] [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in issues
-    ) if issues else "No issues in queue."
+    issue_list = render_untrusted_data({
+        "issues": [
+            {
+                "id": issue.get("id"),
+                "tier": issue.get("tier"),
+                "file": issue.get("file"),
+                "issue": issue.get("issue"),
+            }
+            for issue in issues
+        ]
+    }) if issues else "No issues in queue."
 
     return f"""# UIdetox Sub-Agent: PRIORITIZE Stage
 
@@ -644,8 +652,20 @@ def _fix_prompt(batch: list, dials_block: str,
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
 
-    batch_text = "\n".join(
-        f"- [{i.get('id')}] [{i.get('tier')}] {i.get('file')}: {i.get('issue')}" for i in batch
+    batch_data = render_untrusted_data({
+        "issues": [
+            {
+                "id": issue.get("id"),
+                "tier": issue.get("tier"),
+                "file": issue.get("file"),
+                "issue": issue.get("issue"),
+                "command": issue.get("command", "manual fix"),
+            }
+            for issue in batch
+        ]
+    })
+    query_text = " ".join(
+        f"{issue.get('issue', '')} {issue.get('command', '')}" for issue in batch
     )
 
     # Build inline context for the fix batch (same pattern as next.py)
@@ -662,7 +682,7 @@ def _fix_prompt(batch: list, dials_block: str,
 
     # Build memory and deconfliction blocks with targeted embedding context
     batch_files = list(set(i.get("file", "") for i in batch))
-    memory_block = _build_memory_block(query=batch_text, files=batch_files)
+    memory_block = _build_memory_block(query=query_text, files=batch_files)
     deconfliction = _build_deconfliction_block(shard_index, total_shards, batch_files)
 
     return f"""# UIdetox Sub-Agent: FIX Stage
@@ -675,7 +695,7 @@ def _fix_prompt(batch: list, dials_block: str,
 Fix the following {len(batch)} issues. Apply changes directly to the codebase.
 
 ## Issues to Fix
-{batch_text}
+{batch_data}
 
 {context_block}
 
@@ -696,10 +716,21 @@ def _verify_prompt(issues: list, resolved: list) -> str:
     pending_reviews = get_pending_reviews()
     review_block = ""
     if pending_reviews:
-        lines = ["## Pending Review Requests (from prior low-confidence sessions)"]
-        for r in pending_reviews:
-            lines.append(f"- Session {r['session_id']} ({r['stage']}): confidence={r['confidence']}, action={r['action_required']}")
-        review_block = "\n".join(lines) + "\n"
+        review_block = (
+            "## Pending Review Requests (from prior low-confidence sessions)\n"
+            + render_untrusted_data({
+                "pending_reviews": [
+                    {
+                        "session_id": review.get("session_id"),
+                        "stage": review.get("stage"),
+                        "confidence": review.get("confidence"),
+                        "action_required": review.get("action_required"),
+                    }
+                    for review in pending_reviews
+                ]
+            })
+            + "\n"
+        )
 
     return f"""# UIdetox Sub-Agent: VERIFY Stage
 

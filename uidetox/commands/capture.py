@@ -9,6 +9,26 @@ from uidetox.utils import now_iso
 import sys
 
 
+_CAPTURE_INSTALL_GUIDANCE = (
+    "Install capture support with: pip install 'uidetox[capture]'\n"
+    "Install Chromium with: python -m playwright install chromium"
+)
+
+
+def _missing_browser_executable(error: Exception) -> bool:
+    """Return whether a Playwright launch error indicates a missing browser."""
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "executable doesn't exist",
+            "executable does not exist",
+            "playwright install",
+            "browser executable",
+        )
+    )
+
+
 def _server_is_reachable(url: str) -> bool:
     """Return True if the URL responds within 3 seconds."""
     try:
@@ -34,7 +54,8 @@ def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("❌ Playwright not installed. Run: pip install playwright && playwright install chromium", file=sys.stderr)
+        print("❌ Playwright Python package is not installed.", file=sys.stderr)
+        print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
         return False
 
     vp = viewport or {"width": 1280, "height": 800}
@@ -51,6 +72,8 @@ def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
         return True
     except Exception as e:
         print(f"❌ Failed to capture screenshot: {e}", file=sys.stderr)
+        if _missing_browser_executable(e):
+            print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
         return False
 
 
@@ -129,7 +152,10 @@ def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
         )
 
     except ImportError:
-        diff_info["note"] = "Pillow not installed — pixel diff unavailable. Compare screenshots manually."
+        diff_info["note"] = (
+            "Pillow not installed — pixel diff unavailable. Compare screenshots manually.\n"
+            f"{_CAPTURE_INSTALL_GUIDANCE}"
+        )
     except Exception as e:
         diff_info["error"] = str(e)
 

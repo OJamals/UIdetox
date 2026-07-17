@@ -15,7 +15,14 @@ import sys
 import uuid
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.state import get_project_root, load_state, load_config, clear_issues, add_issue, increment_scans
+from uidetox.state import (
+    add_issues,
+    clear_issues,
+    get_project_root,
+    increment_scans,
+    load_config,
+    load_state,
+)
 from uidetox.history import save_run_snapshot
 from uidetox.utils import compute_design_score
 from uidetox.memory import log_progress
@@ -82,7 +89,7 @@ def run(args: argparse.Namespace):
     zone_overrides = config.get("zone_overrides", {})
     slop_issues = analyze_directory(path, exclude_paths=exclude_paths, zone_overrides=zone_overrides, design_variance=variance)
 
-    queued_count = 0
+    pending_issues = []
     dedup_skipped = 0
     escalated_count = 0
 
@@ -117,8 +124,9 @@ def run(args: argparse.Namespace):
         for meta_key in ("line", "column", "snippet"):
             if meta_key in issue:
                 new_issue[meta_key] = issue[meta_key]
-        if add_issue(new_issue):
-            queued_count += 1
+        pending_issues.append(new_issue)
+
+    queued_count = add_issues(pending_issues)
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")

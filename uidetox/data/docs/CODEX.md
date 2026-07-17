@@ -51,6 +51,13 @@ See `uidetox --help` for the full command list.
 
 ## Visual Regression + Port Configuration
 
+Install capture support and Chromium once before first use:
+
+```bash
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+```
+
 ```bash
 pnpm dev
 uidetox capture --stage before

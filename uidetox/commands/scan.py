@@ -8,13 +8,14 @@ happen together, with mechanical informing subjective.
 import argparse
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import uuid
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.state import (
-    add_issue, ensure_uidetox_dir, get_project_root, load_config, load_state,
+    add_issues, ensure_uidetox_dir, get_project_root, load_config, load_state,
     save_config, increment_scans,
 )
 from uidetox.tooling import detect_all
@@ -53,7 +54,44 @@ _MANUAL_CATEGORIES = {
 }
 
 
+_OUTPUT_FORMATS = frozenset({"table", "json", "github"})
+
+
+def _get_output_format(args: argparse.Namespace) -> str:
+    """Return a validated output format before scan work emits anything."""
+    output_format = getattr(args, "output", "table")
+    if output_format not in _OUTPUT_FORMATS:
+        print(
+            f"Error: unsupported scan output format '{output_format}'.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return output_format
+
+
+def _is_table_output(output_format: str) -> bool:
+    return output_format == "table"
+
+
+def _is_json_output(output_format: str) -> bool:
+    return output_format == "json"
+
+
+def _is_github_output(output_format: str) -> bool:
+    return output_format == "github"
+
+
+def _print_fallback_warning(message: str, *, table_output: bool) -> None:
+    """Keep machine stdout parseable while preserving table diagnostics."""
+    print(message, file=sys.stdout if table_output else sys.stderr)
+
+
 def run(args: argparse.Namespace):
+    output_format = _get_output_format(args)
+    table_output = _is_table_output(output_format)
+    json_output = _is_json_output(output_format)
+    github_output = _is_github_output(output_format)
+
     ensure_uidetox_dir()
     project_root = get_project_root()
 
@@ -78,12 +116,13 @@ def run(args: argparse.Namespace):
 
     tooling = config.get("tooling", {})
 
-    print("+" + "=" * 58 + "+")
-    print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
-    print("+" + "=" * 58 + "+")
-    print(f"  Path  : {scan_path}")
-    print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
-    print()
+    if table_output:
+        print("+" + "=" * 58 + "+")
+        print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
+        print("+" + "=" * 58 + "+")
+        print(f"  Path  : {scan_path}")
+        print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
+        print()
 
     # --- Tooling Summary ---
     pm = tooling.get("package_manager")
@@ -95,48 +134,48 @@ def run(args: argparse.Namespace):
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
 
-    print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
-    if frontends:
-        print(f"           frontend={', '.join(f['name'] for f in frontends)}")
-    if backends or databases or apis:
-        layers = []
-        if backends:
-            layers.append(f"backend={', '.join(b['name'] for b in backends)}")
-        if databases:
-            layers.append(f"db={', '.join(d['name'] for d in databases)}")
-        if apis:
-            layers.append(f"api={', '.join(a['name'] for a in apis)}")
-        print(f"           {', '.join(layers)}")
-    print()
+    if table_output:
+        print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
+        if frontends:
+            print(f"           frontend={', '.join(f['name'] for f in frontends)}")
+        if backends or databases or apis:
+            layers = []
+            if backends:
+                layers.append(f"backend={', '.join(b['name'] for b in backends)}")
+            if databases:
+                layers.append(f"db={', '.join(d['name'] for d in databases)}")
+            if apis:
+                layers.append(f"api={', '.join(a['name'] for a in apis)}")
+            print(f"           {', '.join(layers)}")
+        print()
 
     # --- Suppressions & Zones ---
     ignore_patterns = config.get("ignore_patterns", [])
     overrides = config.get("zone_overrides", {})
-    if ignore_patterns:
+    if table_output and ignore_patterns:
         print(f"  Active suppressions: {len(ignore_patterns)} pattern(s)")
-    if overrides:
+    if table_output and overrides:
         print(f"  Active zone overrides: {len(overrides)}")
 
     # ===========================================================
     # PART 1: MECHANICAL ISSUES (deterministic static analysis)
     # ===========================================================
-    print()
-    print("=" * 58)
-    print(" PART 1: MECHANICAL ISSUES (static analyzer)")
-    print("=" * 58)
+    if table_output:
+        print()
+        print("=" * 58)
+        print(" PART 1: MECHANICAL ISSUES (static analyzer)")
+        print("=" * 58)
 
     # Run tsc/lint/format pre-pass if tooling is available
-    if ts or linter or fmt:
+    if table_output and (ts or linter or fmt):
         print("  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first.")
         print()
 
     # Run static slop analyzer
-    output_format = getattr(args, "output", "table")
     since_sha = getattr(args, "since", None)
 
     # Incremental mode: only scan files changed since a git SHA
-    since_files: list[str] | None = None
-    since_root: str = os.path.abspath(scan_path)  # fallback; overridden with git root below
+    since_targets: list[str] | None = None
     if since_sha:
         try:
             # git diff --name-only outputs paths relative to the repo root, not scan_path
@@ -144,24 +183,45 @@ def run(args: argparse.Namespace):
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True, text=True, cwd=scan_path, timeout=10,
             )
-            if root_result.returncode == 0:
-                since_root = root_result.stdout.strip()
-            result = subprocess.run(
-                ["git", "diff", "--name-only", since_sha],
-                capture_output=True, text=True, cwd=scan_path, timeout=10,
-            )
-            if result.returncode == 0:
-                since_files = [
-                    line.strip() for line in result.stdout.splitlines()
-                    if line.strip()
-                ]
-                if output_format == "table":
-                    print(f"  Incremental: scanning {len(since_files)} file(s) changed since {since_sha}")
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            if output_format == "table":
-                print(f"  Warning: could not run git diff for --since={since_sha}, scanning all files")
+            git_root_text = root_result.stdout.strip()
+            if root_result.returncode == 0 and git_root_text:
+                since_root = Path(git_root_text).resolve()
+                result = subprocess.run(
+                    ["git", "diff", "--name-only", since_sha],
+                    capture_output=True, text=True, cwd=str(since_root), timeout=10,
+                )
+            else:
+                result = None
 
-    print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
+            if result is not None and result.returncode == 0:
+                scan_root = Path(scan_path).resolve()
+                resolved_targets: set[str] = set()
+                for relative_path in result.stdout.splitlines():
+                    relative_path = relative_path.strip()
+                    if not relative_path:
+                        continue
+                    candidate = (since_root / relative_path).resolve()
+                    try:
+                        candidate.relative_to(scan_root)
+                    except ValueError:
+                        continue
+                    resolved_targets.add(str(candidate))
+                since_targets = sorted(resolved_targets)
+                if table_output:
+                    print(f"  Incremental: scanning {len(since_targets)} file(s) changed since {since_sha}")
+            else:
+                _print_fallback_warning(
+                    f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
+                    table_output=table_output,
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            _print_fallback_warning(
+                f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
+                table_output=table_output,
+            )
+
+    if table_output:
+        print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
     slop_issues = analyze_directory(
@@ -169,20 +229,16 @@ def run(args: argparse.Namespace):
         exclude_paths=exclude_paths,
         zone_overrides=zone_overrides,
         design_variance=variance,
+        target_files=since_targets,
     )
 
-    # Filter to only changed files in incremental mode
-    if since_files is not None:
-        since_abs = {os.path.abspath(os.path.join(since_root, f)) for f in since_files}
-        slop_issues = [i for i in slop_issues if os.path.abspath(i.get("file", "")) in since_abs]
-
     # JSON output: print all issues as JSON and exit early
-    if output_format == "json":
+    if json_output:
         print(json.dumps(slop_issues, indent=2))
         return
 
     # GitHub Actions annotation output
-    if output_format == "github":
+    if github_output:
         for issue in slop_issues:
             line = issue.get("line", 1)
             col = issue.get("column", 1)
@@ -193,7 +249,7 @@ def run(args: argparse.Namespace):
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
 
-    queued_count = 0
+    pending_issues = []
     triggered_rules: set[str] = set()
     for issue in slop_issues:
         if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
@@ -208,10 +264,11 @@ def run(args: argparse.Namespace):
             for key in ("line", "column", "snippet"):
                 if key in issue:
                     new_issue[key] = issue[key]
-            if add_issue(new_issue):
-                queued_count += 1
+            pending_issues.append(new_issue)
             if rule_id := issue.get("id"):
                 triggered_rules.add(rule_id)
+
+    queued_count = add_issues(pending_issues)
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")

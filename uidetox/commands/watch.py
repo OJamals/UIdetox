@@ -7,14 +7,8 @@ import time
 from pathlib import Path
 
 from uidetox.analyzer import analyze_file
-from uidetox.state import get_project_root
-
-# All extensions the analyzer cares about (mirrors _FE_EXTS + _JSX_EXTS + .ts/.js/.svelte etc.)
-_WATCH_EXTS = {
-    ".css", ".scss", ".less",
-    ".tsx", ".jsx", ".ts", ".js",
-    ".html", ".svelte", ".vue", ".svg",
-}
+from uidetox.fileset import ProjectFileSet, find_project_root
+from uidetox.state import get_project_root, load_config
 
 # Colour helpers (same palette used in show.py)
 _RESET = "\033[0m"
@@ -33,23 +27,22 @@ def _colour_tier(tier: int, text: str) -> str:
     return f"{_TIER_COLOUR.get(tier, '')}{text}{_RESET}"
 
 
-def _snapshot(root: Path) -> dict[str, float]:
+def _snapshot(root: Path, file_set: ProjectFileSet | None = None) -> dict[str, float]:
     """Return a mapping of {absolute_path: mtime} for all watched files under *root*."""
+    if file_set is None:
+        config = load_config()
+        file_set = ProjectFileSet(
+            find_project_root(root),
+            excludes=config.get("exclude", []),
+            zone_overrides=config.get("zone_overrides", {}),
+            scope_root=root,
+        )
     result: dict[str, float] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Skip hidden dirs and common noise dirs
-        dirnames[:] = [
-            d for d in dirnames
-            if not d.startswith(".")
-            and d not in {"node_modules", "__pycache__", ".git", "dist", "build", ".next", ".turbo"}
-        ]
-        for name in filenames:
-            p = Path(dirpath) / name
-            if p.suffix.lower() in _WATCH_EXTS:
-                try:
-                    result[str(p)] = p.stat().st_mtime
-                except OSError:
-                    pass
+    for path in file_set.discover():
+        try:
+            result[str(path)] = path.stat().st_mtime
+        except OSError:
+            pass
     return result
 
 

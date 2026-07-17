@@ -47,6 +47,13 @@ Open Cursor Chat, switch to the `uidetox` agent, and type "Start the loop." if y
 
 Use `uidetox capture` when validating a redesigned surface. **Start your dev server first** — UIdetox does not launch it.
 
+Install capture support and Chromium once before first use:
+
+```bash
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+```
+
 ```bash
 pnpm dev
 uidetox capture --stage before

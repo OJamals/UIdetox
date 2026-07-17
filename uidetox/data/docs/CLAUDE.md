@@ -42,6 +42,13 @@ This isolates concerns across five stages (Observe → Diagnose → Prioritize �
 
 Use `uidetox capture` to validate UI changes visually. **Start your dev server first** — UIdetox does not launch it.
 
+Install capture support and Chromium once before first use:
+
+```bash
+pip install 'uidetox[capture]'
+python -m playwright install chromium
+```
+
 ```bash
 # Step 1: start your dev server
 npm run dev          # or pnpm dev, yarn dev, etc.
