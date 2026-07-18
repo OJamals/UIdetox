@@ -74,7 +74,8 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 
 | Command | Purpose |
 |---------|---------|
-| `uidetox setup` | Initialize typed design dials and intent (`--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`) plus preview/commit settings |
+| `uidetox setup` | Interactively capture website/app intent and initialize typed design dials (`--product-goal`, `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`, `--no-intent-prompt`) plus preview/commit settings |
+| `uidetox intent` | Inspect effective field-level intent provenance, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`) |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → frontend/backend operation parity → design review |
 | `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, backend/API operation parity, provenance/confidence, source hashes, plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
 | `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
@@ -160,7 +161,7 @@ The harness supports three design dials that control output aesthetic:
 
 Default baseline: `(8, 6, 4)`. Override via `uidetox setup --design-variance N --motion-intensity N --visual-density N --dev-server URL` or direct instruction.
 
-Persist design preflight with `uidetox setup --audience "..." --primary-job "..." --tone "..." --genre "..." --page-kind page --brand "..."`. Rules are contextual: infer missing intent from the semantic map, preserve existing contracts, and label unresolved assumptions. Dials must alter proposal composition, information architecture, and motion models—not merely wording.
+Run interactive `uidetox setup` to ask why the website/app exists, who it serves, what users must accomplish, desired tone/brand, preserved contracts, and constraints. For automation, pass `--product-goal "..." --audience "..." --primary-job "..." --tone "..." --genre "..." --page-kind page --brand "..."` or use `--no-intent-prompt`. Missing intent is inferred from the semantic map. Every field retains source (`explicit`, `mapped`, or `fallback`), evidence, confidence, and confirmation state/time. Inspect with `uidetox intent`; gate automation with `uidetox intent --require-confirmed`. Dials must alter proposal composition, information architecture, and motion models—not merely wording.
 
 ## 6. Prerequisite & Provider Installation
 
@@ -190,7 +191,7 @@ UIdetox/
 ├── SKILL.md                      # Combined design skill (all source repos)
 ├── README.md                     # User documentation + quick-start prompt
 ├── uidetox/                      # Python CLI package
-│   ├── cli.py                    # Argparse router (40 commands, dynamic slash-command loading)
+│   ├── cli.py                    # Argparse router (52 commands, dynamic slash-command loading)
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
 │   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
@@ -212,7 +213,7 @@ UIdetox/
 │   └── commands/                 # Command implementations
 │       ├── scan.py, map.py, redesign.py, compare.py, prototype.py
 │       ├── next.py, resolve.py, plan.py
-│       ├── setup.py, review.py, update_skill.py
+│       ├── setup.py, intent.py, review.py, update_skill.py
 │       ├── status.py, show.py, autofix.py, loop.py, finish.py
 │       ├── exclude.py, rescan.py, add_issue.py
 │       ├── detect.py, check.py, tsc.py, lint.py, format_cmd.py

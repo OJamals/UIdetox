@@ -137,9 +137,15 @@ def test_memory_block_isolates_repository_backed_memory(monkeypatch):
     monkeypatch.setattr(
         memory,
         "get_patterns",
-        lambda query="": [{"category": "general", "pattern": "keep evidence"}],
+        lambda query="", **_kwargs: [
+            {"category": "general", "pattern": "keep evidence"}
+        ],
     )
-    monkeypatch.setattr(memory, "get_notes", lambda query="": [{"note": hostile_note}])
+    monkeypatch.setattr(
+        memory,
+        "get_notes",
+        lambda query="", **_kwargs: [{"note": hostile_note}],
+    )
     monkeypatch.setattr(memory, "get_session", lambda: {})
     monkeypatch.setattr(memory, "get_last_scan", lambda: {})
     monkeypatch.setattr(memory, "build_targeted_context", lambda files, issue_text="": "")

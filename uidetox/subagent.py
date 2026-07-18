@@ -262,7 +262,12 @@ def get_frontend_files(
     ).relative_paths()
 
 
-def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:
+def _build_memory_block(
+    query: str = "",
+    files: list[str] | None = None,
+    *,
+    show_install_hint: bool = True,
+) -> str:
     """Build a memory injection block from persistent agent memory.
 
     Injects learned patterns, notes, and session context so sub-agents
@@ -278,14 +283,17 @@ def _build_memory_block(query: str = "", files: list[str] | None = None) -> str:
 
     memory_data: dict[str, object] = {}
 
-    patterns = get_patterns(query=query)
+    patterns = get_patterns(
+        query=query,
+        show_install_hint=show_install_hint,
+    )
     if patterns:
         memory_data["learned_patterns"] = [
             {"category": p.get("category", "general"), "pattern": p["pattern"]}
             for p in patterns[-15:]
         ]
 
-    notes = get_notes(query=query)
+    notes = get_notes(query=query, show_install_hint=False)
     if notes:
         memory_data["agent_notes"] = [n["note"] for n in notes[-10:]]
 
@@ -423,7 +431,16 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
             buckets = [issues[:5]] # type: ignore
 
         total_buckets = len(buckets)
-        return [_fix_prompt(bucket, dials_block, idx, total_buckets) for idx, bucket in enumerate(buckets)]
+        return [
+            _fix_prompt(
+                bucket,
+                dials_block,
+                idx,
+                total_buckets,
+                show_install_hint=idx == 0,
+            )
+            for idx, bucket in enumerate(buckets)
+        ]
 
     elif stage == "verify":
         return [_verify_prompt(issues, resolved)]
@@ -647,8 +664,14 @@ Provide the recommended fix order as a numbered list with rationale for each gro
 """
 
 
-def _fix_prompt(batch: list, dials_block: str,
-                shard_index: int = 0, total_shards: int = 1) -> str:
+def _fix_prompt(
+    batch: list,
+    dials_block: str,
+    shard_index: int = 0,
+    total_shards: int = 1,
+    *,
+    show_install_hint: bool = True,
+) -> str:
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
 
@@ -682,7 +705,11 @@ def _fix_prompt(batch: list, dials_block: str,
 
     # Build memory and deconfliction blocks with targeted embedding context
     batch_files = list(set(i.get("file", "") for i in batch))
-    memory_block = _build_memory_block(query=query_text, files=batch_files)
+    memory_block = _build_memory_block(
+        query=query_text,
+        files=batch_files,
+        show_install_hint=show_install_hint,
+    )
     deconfliction = _build_deconfliction_block(shard_index, total_shards, batch_files)
 
     return f"""# UIdetox Sub-Agent: FIX Stage

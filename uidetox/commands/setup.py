@@ -2,8 +2,13 @@
 
 import argparse
 import sys
+from datetime import datetime, timezone
 
-from uidetox.design_context import DesignSettings
+from uidetox.design_context import (
+    DesignIntent,
+    DesignSettings,
+    merge_explicit_design_intent,
+)
 from uidetox.state import save_config, ensure_uidetox_dir, load_config
 
 
@@ -13,6 +18,99 @@ DEFAULT_CONFIG = {
     "VISUAL_DENSITY": 4,
     "auto_commit": False,
 }
+
+_INTENT_ARGUMENTS = {
+    "product_goal": "product_goal",
+    "audience": "audience",
+    "primary_job": "primary_job",
+    "tone": "tone",
+    "genre": "genre",
+    "page_kind": "page_kind",
+    "brand": "brand",
+}
+
+_INTENT_INTERVIEW = (
+    ("product_goal", "Website/app purpose (why it exists)"),
+    ("audience", "Primary audience"),
+    ("primary_job", "Primary user job"),
+    ("tone", "Desired tone"),
+    ("brand", "Brand signals to preserve"),
+)
+
+
+def _is_interactive() -> bool:
+    stdin = getattr(sys, "stdin", None)
+    return bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
+
+
+def _intent_updates_from_args(args: argparse.Namespace) -> dict[str, object]:
+    updates: dict[str, object] = {}
+    for argument, field_name in _INTENT_ARGUMENTS.items():
+        value = getattr(args, argument, None)
+        if isinstance(value, str) and value.strip():
+            updates[field_name] = value.strip()
+    for argument, field_name in (
+        ("preserve", "preserve"),
+        ("constraint", "constraints"),
+    ):
+        values = getattr(args, argument, None)
+        if values is not None:
+            cleaned = tuple(
+                str(value).strip() for value in values if str(value).strip()
+            )
+            if cleaned:
+                updates[field_name] = cleaned
+    return updates
+
+
+def _prompt(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        return ""
+
+
+def _interactive_intent_updates(
+    current: DesignIntent,
+    supplied_fields: set[str],
+) -> dict[str, object]:
+    print("\nIntent preflight (Enter = keep existing or defer to map inference):")
+    updates: dict[str, object] = {}
+    for field_name, label in _INTENT_INTERVIEW:
+        if field_name in supplied_fields:
+            continue
+        current_value = (
+            getattr(current, field_name)
+            if current.provenance.get(field_name) == "explicit"
+            else ""
+        )
+        suffix = f" [{current_value}]" if current_value else ""
+        answer = _prompt(f"  {label}{suffix}: ")
+        if answer:
+            updates[field_name] = answer
+
+    for field_name, label in (
+        ("preserve", "Must preserve (comma-separated)"),
+        ("constraints", "Constraints (comma-separated)"),
+    ):
+        if field_name in supplied_fields:
+            continue
+        current_values = (
+            getattr(current, field_name)
+            if current.provenance.get(field_name) == "explicit"
+            else ()
+        )
+        suffix = f" [{', '.join(current_values)}]" if current_values else ""
+        answer = _prompt(f"  {label}{suffix}: ")
+        if answer:
+            updates[field_name] = tuple(
+                item.strip() for item in answer.split(",") if item.strip()
+            )
+    return updates
+
+
+def _confirmed_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def run(args: argparse.Namespace):
@@ -33,56 +131,34 @@ def run(args: argparse.Namespace):
     if getattr(args, "visual_density", None) is not None:
         config["VISUAL_DENSITY"] = args.visual_density
 
-    existing_settings = DesignSettings.from_config(config)
-    intent = {
-        field_name: getattr(existing_settings.intent, field_name)
-        for field_name, source in existing_settings.intent.provenance.items()
-        if source == "explicit"
-    }
-    provenance = {field_name: "explicit" for field_name in intent}
-    intent_fields = {
-        "audience": "audience",
-        "primary_job": "primary_job",
-        "tone": "tone",
-        "genre": "genre",
-        "page_kind": "page_kind",
-        "brand": "brand",
-    }
-    for argument, key in intent_fields.items():
-        value = getattr(args, argument, None)
-        if isinstance(value, str) and value.strip():
-            intent[key] = value.strip()
-            provenance[key] = "explicit"
-    for argument, key in (("preserve", "preserve"), ("constraint", "constraints")):
-        values = getattr(args, argument, None)
-        if values is not None:
-            cleaned = [str(value).strip() for value in values if str(value).strip()]
-            if cleaned:
-                intent[key] = cleaned
-                provenance[key] = "explicit"
-    if intent:
-        intent["source"] = "configured"
-        intent["provenance"] = provenance
-        config["design_intent"] = intent
+    intent_updates = _intent_updates_from_args(args)
+    configured_intent = merge_explicit_design_intent(
+        config.get("design_intent"),
+        intent_updates,
+        evidence_source="user:cli-setup",
+        confirmed_at=_confirmed_now(),
+    )
+    if configured_intent:
+        config["design_intent"] = configured_intent
     else:
         config.pop("design_intent", None)
 
     settings = DesignSettings.from_config(config)
+    if _is_interactive() and not getattr(args, "no_intent_prompt", False):
+        interactive_updates = _interactive_intent_updates(
+            settings.intent,
+            set(intent_updates),
+        )
+        if interactive_updates:
+            config["design_intent"] = merge_explicit_design_intent(
+                config.get("design_intent"),
+                interactive_updates,
+                evidence_source="user:interactive-setup",
+                confirmed_at=_confirmed_now(),
+            )
+            settings = DesignSettings.from_config(config)
+
     config.update(settings.dials.to_config())
-    serialized_intent = settings.intent.to_dict()
-    explicit_intent = {
-        field_name: serialized_intent[field_name]
-        for field_name, source in settings.intent.provenance.items()
-        if source == "explicit"
-    }
-    if explicit_intent:
-        explicit_intent["source"] = "configured"
-        explicit_intent["provenance"] = {
-            field_name: "explicit" for field_name in explicit_intent
-        }
-        config["design_intent"] = explicit_intent
-    else:
-        config.pop("design_intent", None)
 
     dev_server = getattr(args, "dev_server", None)
     if isinstance(dev_server, str) and dev_server.strip():
@@ -96,9 +172,7 @@ def run(args: argparse.Namespace):
         status = "enabled" if auto_commit else "disabled"
         print(f"⚙️  Auto-commit {status} via flag.")
     else:
-        stdin = getattr(sys, "stdin", None)
-        is_interactive = bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
-        if is_interactive:
+        if _is_interactive():
             try:
                 ans = (
                     input(
@@ -125,10 +199,12 @@ def run(args: argparse.Namespace):
     print(f"  AUTO_COMMIT:      {config.get('auto_commit', False)}")
     if config.get("dev_server"):
         print(f"  DEV_SERVER:       {config['dev_server']}")
+    print(f"  PRODUCT_GOAL:     {settings.intent.product_goal}")
     print(f"  AUDIENCE:         {settings.intent.audience}")
     print(f"  PRIMARY_JOB:      {settings.intent.primary_job}")
     print(f"  TONE / GENRE:     {settings.intent.tone} / {settings.intent.genre}")
     print(f"  PAGE_KIND:        {settings.intent.page_kind}")
+    print(f"  INTENT_STATUS:    {settings.intent.confirmation_status}")
 
     print("\n[AGENT INSTRUCTION]")
     print(
@@ -137,6 +213,7 @@ def run(args: argparse.Namespace):
     print(
         "Set `--dev-server http://localhost:5173` when your preview is not on port 3000."
     )
+    print("Run `uidetox intent` to inspect field-level provenance and confidence.")
     print("Proceed to run `uidetox scan` to begin detoxifying the frontend.")
 
     # Ensures config exists if it didn't

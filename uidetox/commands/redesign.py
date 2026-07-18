@@ -69,6 +69,13 @@ def run(args: argparse.Namespace) -> None:
 
     print(f"Generated {len(redesign_set.proposals)} divergent redesign proposal(s).")
     print(f"  Baseline: {frontend_map.fingerprint.get('topology', 'unknown')}")
+    print(f"  Intent  : {settings.intent.confirmation_status}")
+    if settings.intent.unconfirmed_fields:
+        print(
+            "  Intent fields awaiting user confirmation: "
+            + ", ".join(settings.intent.unconfirmed_fields)
+        )
+        print("  Confirm with: uidetox setup")
     for proposal in redesign_set.proposals:
         topology = proposal.fingerprint["topology"]
         print(f"\n  {proposal.id}: {proposal.name}")

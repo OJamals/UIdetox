@@ -297,13 +297,21 @@ def add_pattern(pattern: str, *, category: str = "general"):
         )
 
 
-def get_patterns(query: str | None = None, limit: int = 15) -> list[dict]:
+def get_patterns(
+    query: str | None = None,
+    limit: int = 15,
+    *,
+    show_install_hint: bool = True,
+) -> list[dict]:
     """Return learned patterns. Performs semantic search if query is provided."""
     mem = load_memory()
     patterns = mem.get("patterns", [])
 
     if query:
-        collection = _get_collection("patterns", show_install_hint=True)
+        collection = _get_collection(
+            "patterns",
+            show_install_hint=show_install_hint,
+        )
         if collection:
             cnt = collection.count() # type: ignore
             if cnt > 0:
@@ -347,13 +355,21 @@ def add_note(note: str):
         )
 
 
-def get_notes(query: str | None = None, limit: int = 10) -> list[dict]:
+def get_notes(
+    query: str | None = None,
+    limit: int = 10,
+    *,
+    show_install_hint: bool = True,
+) -> list[dict]:
     """Return agent notes. Performs semantic search if query is provided."""
     mem = load_memory()
     notes = mem.get("notes", [])
 
     if query:
-        collection = _get_collection("notes", show_install_hint=True)
+        collection = _get_collection(
+            "notes",
+            show_install_hint=show_install_hint,
+        )
         if collection:
             cnt = collection.count() # type: ignore
             if cnt > 0:

@@ -167,7 +167,8 @@ Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a sp
 | Command | Purpose |
 | :--- | :--- |
 | `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution. |
-| `uidetox setup` | Persist typed design dials, design intent, `dev_server`, and auto-commit behavior. Intent flags include `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`, and repeatable `--constraint`. |
+| `uidetox setup` | Interactively capture website/app purpose, audience, primary job, tone, brand, preserved contracts, and constraints; persist typed design dials, `dev_server`, and auto-commit behavior. Use `--no-intent-prompt` for automation. |
+| `uidetox intent` | Inspect effective intent with per-field source, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`). |
 | `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
 | `uidetox map [target]` | Build a persistent semantic frontend graph; optionally merge rendered DOM evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`). |
 | `uidetox redesign [target]` | Generate 1–5 structurally divergent, contract-preserving redesign plans (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`). |
@@ -222,7 +223,9 @@ Default baseline: **(8, 6, 4)**.
 
 ### Design preflight
 
-UIdetox records audience, primary job, tone, genre, page/component scope, brand signals, preserved contracts, and constraints under `design_intent` in `.uidetox/config.json`. Missing context is inferred conservatively from the frontend map and labeled as inferred. Redesign strategy ranking, component ownership, layout trees, interaction models, and proposal fingerprints consume this intent and the three dials.
+Interactive `uidetox setup` asks why the website/app exists, who it serves, what users must accomplish, how it should feel, which brand signals matter, what must survive, and which constraints apply. Press Enter to defer any answer to semantic-map inference; use `--no-intent-prompt` in non-interactive workflows. Equivalent flags include `--product-goal`, `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`, and repeatable `--constraint`.
+
+Intent persists under `design_intent` in `.uidetox/config.json`. Every field carries `provenance` (`explicit`, `mapped`, or `fallback`), evidence references, confidence, and confirmation state/time. `uidetox intent` shows this data; `uidetox intent --require-confirmed` exits 2 until product goal, audience, and primary job are user-confirmed. Redesign artifacts preserve the same provenance and warn when proposals depend on inferred intent.
 
 ---
 

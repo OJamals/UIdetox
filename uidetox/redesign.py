@@ -575,6 +575,8 @@ def _build_proposal(
     interaction_model = (
         f"{strategy.interaction_model} {_motion_model(brief.motion_intensity)}"
     )
+    goal_source = brief.intent.provenance.get("product_goal", "fallback")
+    goal_confidence = brief.intent.confidence.get("product_goal", 0.0)
 
     return RedesignProposal(
         id=f"REDESIGN-{index:02d}-{strategy.id}",
@@ -584,6 +586,8 @@ def _build_proposal(
             f"Replace baseline {baseline} topology with {strategy.fingerprint['topology']}. "
             f"Map contains {component_count} components, {route_count} routes, "
             f"{action_count} actions, and {data_count} data sources. "
+            f"Product goal ({goal_source}, {goal_confidence:.2f} confidence): "
+            f"{brief.intent.product_goal}. "
             f"Preflight: {brief.intent.page_kind} for {brief.intent.audience}; "
             f"primary job is to {brief.intent.primary_job}."
         ),
@@ -897,6 +901,17 @@ def _observable_acceptance_checks(
         f"Constraint check in source or runtime evidence: {constraint}"
         for constraint in brief.intent.constraints
     )
+    goal_source = brief.intent.provenance.get("product_goal", "fallback")
+    if goal_source == "explicit":
+        checks.append(
+            "Intent check: validate the proposal against the user-confirmed "
+            f"product goal — {brief.intent.product_goal}"
+        )
+    else:
+        checks.append(
+            f"Intent gate: confirm the {goal_source} product goal before "
+            f"implementation — {brief.intent.product_goal}"
+        )
     return tuple(dict.fromkeys(checks))
 
 
@@ -919,30 +934,37 @@ def _strategy_relevance(
     if strategy.id == "command-console":
         action_count = frontend_map.fingerprint.get("node_counts", {}).get("action", 0)
         score += min(5, int(action_count))
-    intent_text = " ".join(
-        (
-            brief.intent.primary_job,
-            brief.intent.genre,
-            brief.intent.audience,
+    if strategy.id == "task-flow":
+        score += _intent_signal_score(
+            brief.intent, ("complete", "submit", "workflow", "task")
         )
-    ).lower()
-    if strategy.id == "task-flow" and any(
-        token in intent_text for token in ("complete", "submit", "workflow", "task")
-    ):
-        score += 4
-    if strategy.id == "editorial-narrative" and any(
-        token in intent_text for token in ("editorial", "story", "read", "narrative")
-    ):
-        score += 4
-    if strategy.id == "object-workspace" and any(
-        token in intent_text for token in ("inspect", "compare", "manage", "workspace")
-    ):
-        score += 4
-    if strategy.id == "command-console" and any(
-        token in intent_text for token in ("expert", "operator", "power user")
-    ):
-        score += 4
+    if strategy.id == "editorial-narrative":
+        score += _intent_signal_score(
+            brief.intent, ("editorial", "story", "read", "narrative")
+        )
+    if strategy.id == "object-workspace":
+        score += _intent_signal_score(
+            brief.intent, ("inspect", "compare", "manage", "workspace")
+        )
+    if strategy.id == "command-console":
+        score += _intent_signal_score(
+            brief.intent, ("expert", "operator", "power user")
+        )
     return score
+
+
+def _intent_signal_score(intent: DesignIntent, tokens: tuple[str, ...]) -> int:
+    """Weight topology signals by field-level provenance confidence."""
+
+    best_confidence = 0.0
+    for field_name in ("product_goal", "primary_job", "genre", "audience"):
+        value = str(getattr(intent, field_name, "")).lower()
+        if any(token in value for token in tokens):
+            best_confidence = max(
+                best_confidence,
+                intent.confidence.get(field_name, 0.0),
+            )
+    return round(4 * best_confidence)
 
 
 def _fingerprint_distance(

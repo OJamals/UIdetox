@@ -460,9 +460,13 @@ def test_map_and_redesign_commands_persist_artifacts(tmp_path, monkeypatch, caps
     payload = json.loads(redesign_artifact.read_text(encoding="utf-8"))
     assert len(payload["proposals"]) == 3
     assert payload["target"] == "src"
+    assert payload["brief"]["intent"]["confirmation_status"] == "inferred"
+    assert payload["brief"]["intent"]["provenance"]["primary_job"] == "mapped"
+    assert payload["brief"]["intent"]["evidence"]["primary_job"]
     output = capsys.readouterr().out
     assert "Frontend map created." in output
     assert "Generated 3 divergent redesign proposal(s)." in output
+    assert "uidetox setup" in output
 
 
 def test_redesign_command_refreshes_stale_map_automatically(tmp_path, monkeypatch):

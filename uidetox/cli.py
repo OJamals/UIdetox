@@ -75,6 +75,7 @@ def parse_args(args_list=None):
     setup_parser.add_argument("--design-variance", type=int, choices=range(1, 11), help="Persist DESIGN_VARIANCE (1-10)")
     setup_parser.add_argument("--motion-intensity", type=int, choices=range(1, 11), help="Persist MOTION_INTENSITY (1-10)")
     setup_parser.add_argument("--visual-density", type=int, choices=range(1, 11), help="Persist VISUAL_DENSITY (1-10)")
+    setup_parser.add_argument("--product-goal", help="Why the website/app exists and what outcome it should create")
     setup_parser.add_argument("--audience", help="Who the redesigned interface serves")
     setup_parser.add_argument("--primary-job", help="Primary job the interface must make easy")
     setup_parser.add_argument("--tone", help="Desired expressive tone")
@@ -84,6 +85,12 @@ def parse_args(args_list=None):
     setup_parser.add_argument("--preserve", action="append", default=None, help="Contract to preserve; repeatable")
     setup_parser.add_argument("--constraint", action="append", default=None, help="Design constraint; repeatable")
     setup_parser.add_argument("--dev-server", type=str, help="Persist the default preview URL used by capture (e.g. http://localhost:5173)")
+    setup_parser.add_argument("--no-intent-prompt", action="store_true", help="Skip the interactive website/app intent interview")
+
+    # Command: intent
+    intent_parser = subparsers.add_parser("intent", help="Inspect effective design intent, provenance, and confidence")
+    intent_parser.add_argument("--json", action="store_true", help="Output intent and provenance as JSON")
+    intent_parser.add_argument("--require-confirmed", action="store_true", help="Exit 2 unless product goal, audience, and primary job are user-confirmed")
 
     # Command: scan
     scan_parser = subparsers.add_parser("scan", help="Full diagnostic audit of frontend interface quality")

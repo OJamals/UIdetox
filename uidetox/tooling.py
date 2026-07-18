@@ -7,7 +7,9 @@ database ORMs, and API layers are present.
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field, asdict
@@ -74,6 +76,40 @@ _PYTHON_BACKEND_SKIP_DIRS = {
     "site-packages",
     "tests",
     "venv",
+}
+
+_PYTHON_DATABASE_DEP_TO_TOOL = {
+    "asyncpg": ("postgresql", "asyncpg"),
+    "django": ("django-orm", "django"),
+    "motor": ("mongodb", "motor"),
+    "mysqlclient": ("mysql", "MySQLdb"),
+    "peewee": ("peewee", "peewee"),
+    "psycopg": ("postgresql", "psycopg"),
+    "psycopg2": ("postgresql", "psycopg2"),
+    "pymongo": ("mongodb", "pymongo"),
+    "pymysql": ("mysql", "pymysql"),
+    "redis": ("redis", "redis"),
+    "sqlalchemy": ("sqlalchemy", "sqlalchemy"),
+    "sqlmodel": ("sqlmodel", "sqlmodel"),
+    "tortoise-orm": ("tortoise-orm", "tortoise"),
+}
+
+_PYTHON_DATABASE_IMPORT_TO_TOOL = {
+    "MySQLdb": ("mysql", "MySQLdb"),
+    "asyncpg": ("postgresql", "asyncpg"),
+    "django.db": ("django-orm", "django"),
+    "motor": ("mongodb", "motor"),
+    "mysql.connector": ("mysql", "mysql.connector"),
+    "peewee": ("peewee", "peewee"),
+    "psycopg": ("postgresql", "psycopg"),
+    "psycopg2": ("postgresql", "psycopg2"),
+    "pymongo": ("mongodb", "pymongo"),
+    "pymysql": ("mysql", "pymysql"),
+    "redis": ("redis", "redis"),
+    "sqlalchemy": ("sqlalchemy", "sqlalchemy"),
+    "sqlite3": ("sqlite", "sqlite3"),
+    "sqlmodel": ("sqlmodel", "sqlmodel"),
+    "tortoise": ("tortoise-orm", "tortoise"),
 }
 
 
@@ -251,18 +287,118 @@ def _iter_requirements_files(root: Path) -> list[Path]:
 
 
 def _requirements_file_has_backend_dep(req_path: Path) -> bool:
+    return bool(_read_requirements_dependency_names(req_path) & _PYTHON_BACKEND_DEPS)
+
+
+def _read_requirements_dependency_names(req_path: Path) -> set[str]:
+    dependencies: set[str] = set()
     try:
         for line in req_path.read_text(encoding="utf-8").splitlines():
             dep_name = _extract_requirement_name(line)
-            if dep_name in _PYTHON_BACKEND_DEPS:
-                return True
+            if dep_name:
+                dependencies.add(dep_name)
     except (OSError, UnicodeDecodeError):
-        return False
-    return False
+        return set()
+    return dependencies
 
 
 def _path_is_in_skipped_dir(path: Path) -> bool:
     return any(part in _PYTHON_BACKEND_SKIP_DIRS for part in path.parts)
+
+
+def _python_database_candidate_files(
+    root: Path,
+) -> tuple[list[Path], list[Path], list[Path]]:
+    pyprojects: list[Path] = []
+    requirements: list[Path] = []
+    sources: list[Path] = []
+
+    for directory, child_directories, file_names in os.walk(root):
+        child_directories[:] = sorted(
+            name
+            for name in child_directories
+            if name not in _PYTHON_BACKEND_SKIP_DIRS
+        )
+        current = Path(directory)
+        for file_name in sorted(file_names):
+            file_path = current / file_name
+            if file_name == "pyproject.toml":
+                pyprojects.append(file_path)
+            elif file_name.startswith("requirements") and file_name.endswith(".txt"):
+                requirements.append(file_path)
+            elif file_name.endswith(".py"):
+                sources.append(file_path)
+
+    return pyprojects, requirements, sources
+
+
+def _read_python_import_names(source_path: Path) -> set[str]:
+    try:
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return set()
+
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
+    return imports
+
+
+def _python_tool_check(import_name: str) -> str:
+    return (
+        "python -c \"import importlib.util; "
+        f"assert importlib.util.find_spec('{import_name}')\""
+    )
+
+
+def _detect_python_databases(root: Path) -> list[ToolInfo]:
+    pyprojects, requirements, sources = _python_database_candidate_files(root)
+    found: dict[str, ToolInfo] = {}
+
+    def add_dependency(dep_name: str, config_file: Path) -> None:
+        tool = _PYTHON_DATABASE_DEP_TO_TOOL.get(dep_name)
+        if not tool:
+            return
+        tool_name, import_name = tool
+        found.setdefault(
+            tool_name,
+            ToolInfo(
+                name=tool_name,
+                config_file=config_file.relative_to(root).as_posix(),
+                run_cmd=_python_tool_check(import_name),
+            ),
+        )
+
+    for pyproject in pyprojects:
+        for dep_name in _read_pyproject_dependency_names(pyproject.parent):
+            add_dependency(dep_name, pyproject)
+
+    for requirements_file in requirements:
+        for dep_name in _read_requirements_dependency_names(requirements_file):
+            add_dependency(dep_name, requirements_file)
+
+    for source_path in sources:
+        for imported_name in _read_python_import_names(source_path):
+            for import_prefix, tool in _PYTHON_DATABASE_IMPORT_TO_TOOL.items():
+                if (
+                    imported_name != import_prefix
+                    and not imported_name.startswith(f"{import_prefix}.")
+                ):
+                    continue
+                tool_name, import_name = tool
+                found.setdefault(
+                    tool_name,
+                    ToolInfo(
+                        name=tool_name,
+                        config_file=source_path.relative_to(root).as_posix(),
+                        run_cmd=_python_tool_check(import_name),
+                    ),
+                )
+
+    return list(found.values())
 
 
 def _find_python_backend_entrypoint(root: Path) -> str | None:
@@ -450,6 +586,7 @@ def detect_database(root: Path) -> list[ToolInfo]:
         found.append(ToolInfo(name="typeorm", config_file="ormconfig.json", run_cmd="npx typeorm query"))
     if _has_dep(root, "sequelize"):
         found.append(ToolInfo(name="sequelize", config_file=".sequelizerc", run_cmd="npx sequelize db:migrate:status"))
+    found.extend(_detect_python_databases(root))
     return found
 
 

@@ -704,7 +704,35 @@ def retain_runtime_evidence(
         if runtime_status == "current"
         else "Source manifest changed after the recorded runtime observation."
     )
-    return replace(refreshed, evidence=evidence)
+    runtime_nodes = tuple(
+        node for node in previous.nodes if node.kind.startswith("runtime_")
+    )
+    runtime_node_ids = {node.id for node in runtime_nodes}
+    refreshed_node_ids = {node.id for node in refreshed.nodes}
+    merged_nodes = refreshed.nodes + tuple(
+        node for node in runtime_nodes if node.id not in refreshed_node_ids
+    )
+
+    refreshed_edge_keys = {
+        (edge.source, edge.target, edge.kind) for edge in refreshed.edges
+    }
+    runtime_edges = tuple(
+        edge
+        for edge in previous.edges
+        if edge.source in runtime_node_ids or edge.target in runtime_node_ids
+    )
+    merged_edges = refreshed.edges + tuple(
+        edge
+        for edge in runtime_edges
+        if (edge.source, edge.target, edge.kind) not in refreshed_edge_keys
+    )
+
+    return replace(
+        refreshed,
+        nodes=merged_nodes,
+        edges=merged_edges,
+        evidence=evidence,
+    )
 
 
 def frontend_map_is_fresh(

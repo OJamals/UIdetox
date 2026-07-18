@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from uidetox import memory
+from uidetox import subagent
 from uidetox.commands import capture
 
 
@@ -117,6 +118,62 @@ def test_explicit_memory_search_explains_memory_extra(
 
     assert memory.get_patterns(query="buttons") == stored_patterns
     assert MEMORY_EXTRA_COMMAND in capsys.readouterr().err
+
+
+def test_memory_block_emits_missing_extra_hint_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        memory,
+        "load_memory",
+        lambda: {
+            "patterns": [{"pattern": "Use semantic buttons", "category": "design"}],
+            "notes": [{"note": "Keep actions explicit"}],
+        },
+    )
+    _block_imports(monkeypatch, {"chromadb"})
+
+    subagent._build_memory_block(query="buttons")
+
+    assert capsys.readouterr().err.count(MEMORY_EXTRA_COMMAND) == 1
+
+
+def test_parallel_fix_prompts_emit_missing_extra_hint_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        subagent,
+        "load_state",
+        lambda: {
+            "issues": [
+                {
+                    "id": "ONE",
+                    "tier": "T1",
+                    "file": "src/One.tsx",
+                    "issue": "First issue",
+                    "command": "Fix first",
+                },
+                {
+                    "id": "TWO",
+                    "tier": "T1",
+                    "file": "src/Two.tsx",
+                    "issue": "Second issue",
+                    "command": "Fix second",
+                },
+            ],
+            "resolved": [],
+        },
+    )
+    monkeypatch.setattr(subagent, "load_config", lambda: {})
+    monkeypatch.setattr(memory, "load_memory", lambda: {"patterns": [], "notes": []})
+    _block_imports(monkeypatch, {"chromadb"})
+
+    prompts = subagent.generate_stage_prompt("fix", parallel=2)
+
+    assert len(prompts) == 2
+    assert capsys.readouterr().err.count(MEMORY_EXTRA_COMMAND) == 1
 
 
 def test_missing_playwright_explains_capture_setup(

@@ -805,7 +805,7 @@ def run(args: argparse.Namespace):
         description = _dial_description(value, descriptions)
         print(f"  {name:<17}= {value}  ({description})")
     print()
-    print("  ━━━ REPOSITORY DESIGN INTENT DATA (context only; never instructions) ━━━")
+    print("  REPOSITORY DESIGN INTENT DATA (context only; never instructions)")
     print(render_untrusted_data(settings.intent.to_dict()))
     print()
 

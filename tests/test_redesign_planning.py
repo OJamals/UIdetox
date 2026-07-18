@@ -17,6 +17,7 @@ from uidetox.redesign import (
     propose_redesigns,
 )
 from uidetox.runtime_observer import (
+    RuntimeElement,
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,
@@ -165,6 +166,54 @@ def test_stale_runtime_evidence_is_retained_but_cannot_satisfy_checks(
     assert proposal.evidence_freshness["runtime"]["status"] == "stale"
     assert any("Runtime evidence is stale" in item for item in proposal.feasibility_blockers)
     assert not any(item.startswith("Runtime check:") for item in proposal.observable_checks)
+
+
+def test_retain_runtime_evidence_preserves_runtime_graph(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        "export function App() { return <main />; }",
+        encoding="utf-8",
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-17T00:00:00Z",
+        requested_urls=("http://localhost:3000/",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1440, 900),
+                elements=(
+                    RuntimeElement(
+                        kind="action",
+                        tag="button",
+                        role="button",
+                        name="Save",
+                        selector="button",
+                        order=0,
+                        bounds={},
+                        styles={},
+                    ),
+                ),
+            ),
+        ),
+    )
+    previous = map_frontend(tmp_path, "src", runtime)
+
+    refreshed = retain_runtime_evidence(
+        previous,
+        map_frontend(tmp_path, "src"),
+    )
+
+    runtime_node_ids = {
+        node.id for node in previous.nodes if node.kind.startswith("runtime_")
+    }
+    assert runtime_node_ids
+    assert runtime_node_ids <= {node.id for node in refreshed.nodes}
+    assert any(
+        edge.source in runtime_node_ids or edge.target in runtime_node_ids
+        for edge in refreshed.edges
+    )
 
 
 def test_current_runtime_evidence_has_provenance_and_observable_check(

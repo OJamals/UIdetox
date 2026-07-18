@@ -106,6 +106,8 @@ def test_setup_persists_typed_design_intent(monkeypatch):
     args = parse_args(
         [
             "setup",
+            "--product-goal",
+            "keep field equipment operational",
             "--audience",
             "field technicians",
             "--primary-job",
@@ -128,11 +130,149 @@ def test_setup_persists_typed_design_intent(monkeypatch):
 
     setup_command.run(args)
 
+    assert saved["design_intent"]["product_goal"] == (
+        "keep field equipment operational"
+    )
     assert saved["design_intent"]["audience"] == "field technicians"
     assert saved["design_intent"]["primary_job"] == "repair an asset"
     assert saved["design_intent"]["preserve"] == ("offline operation",)
     assert saved["design_intent"]["constraints"] == ("glove-friendly targets",)
     assert saved["design_intent"]["provenance"]["primary_job"] == "explicit"
+    assert saved["design_intent"]["evidence"]["product_goal"] == (
+        "user:cli-setup",
+    )
+    assert saved["design_intent"]["confirmation_status"] == "confirmed"
+
+
+def test_setup_interactively_captures_and_confirms_product_intent(monkeypatch):
+    saved = {}
+    prompts = []
+    answers = iter(
+        [
+            "help independent clinics reduce missed appointments",
+            "clinic coordinators",
+            "find and resolve scheduling conflicts",
+            "calm, precise, and humane",
+            "retain the existing green identity",
+            "appointment creation, patient privacy",
+            "WCAG AA, works on tablets",
+        ]
+    )
+
+    class _InteractiveStdin:
+        @staticmethod
+        def isatty():
+            return True
+
+    def _answer(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
+    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(
+        setup_command, "save_config", lambda config: saved.update(config)
+    )
+    monkeypatch.setattr(setup_command.sys, "stdin", _InteractiveStdin())
+    monkeypatch.setattr("builtins.input", _answer)
+
+    setup_command.run(parse_args(["setup", "--no-auto-commit"]))
+
+    intent = saved["design_intent"]
+    assert any("website/app" in prompt.lower() for prompt in prompts)
+    assert intent["product_goal"] == (
+        "help independent clinics reduce missed appointments"
+    )
+    assert intent["audience"] == "clinic coordinators"
+    assert intent["primary_job"] == "find and resolve scheduling conflicts"
+    assert intent["preserve"] == (
+        "appointment creation",
+        "patient privacy",
+    )
+    assert intent["constraints"] == ("WCAG AA", "works on tablets")
+    assert intent["provenance"]["product_goal"] == "explicit"
+    assert intent["evidence"]["product_goal"] == ("user:interactive-setup",)
+    assert intent["confidence"]["product_goal"] == 1.0
+    assert intent["confirmation_status"] == "confirmed"
+    assert intent["confirmed_at"]
+
+
+def test_setup_can_skip_interactive_intent_interview(monkeypatch):
+    saved = {}
+
+    class _InteractiveStdin:
+        @staticmethod
+        def isatty():
+            return True
+
+    monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
+    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(
+        setup_command, "save_config", lambda config: saved.update(config)
+    )
+    monkeypatch.setattr(setup_command.sys, "stdin", _InteractiveStdin())
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_args, **_kwargs: pytest.fail("intent prompt should be skipped"),
+    )
+
+    setup_command.run(
+        parse_args(["setup", "--no-intent-prompt", "--no-auto-commit"])
+    )
+
+    assert "design_intent" not in saved
+
+
+def test_intent_provenance_tracks_mapped_evidence_and_confidence(tmp_path):
+    _write_frontend(tmp_path)
+    frontend_map = map_frontend(tmp_path)
+
+    intent = DesignSettings.from_config({}, frontend_map).intent
+
+    assert intent.provenance["primary_job"] == "mapped"
+    assert intent.confidence["primary_job"] > intent.confidence["audience"]
+    assert "frontend-map:fingerprint.topology=form-flow" in intent.evidence[
+        "primary_job"
+    ]
+    assert intent.evidence["audience"] == ("fallback:audience",)
+    assert intent.confirmation_status == "inferred"
+    assert intent.confirmed_at == ""
+
+
+def test_redesign_ranking_weights_user_intent_above_fallback_text(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        "export function App() { return <main><h1>Records</h1></main>; }",
+        encoding="utf-8",
+    )
+    frontend_map = map_frontend(tmp_path)
+
+    fallback = propose_redesigns(
+        frontend_map,
+        RedesignBrief(variants=1, intent=DesignIntent()),
+    )
+    explicit = DesignIntent.from_dict(
+        {
+            "product_goal": "help staff inspect and compare records",
+            "provenance": {"product_goal": "explicit"},
+            "evidence": {"product_goal": ["user:interactive-setup"]},
+            "confidence": {"product_goal": 1.0},
+        }
+    )
+    source_aware = propose_redesigns(
+        frontend_map,
+        RedesignBrief(variants=1, intent=explicit),
+    )
+
+    assert fallback.proposals[0].strategy == "editorial-narrative"
+    assert source_aware.proposals[0].strategy == "object-workspace"
+    assert explicit.product_goal in source_aware.proposals[0].rationale
+    assert "explicit, 1.00 confidence" in source_aware.proposals[0].rationale
+    assert any(
+        "user-confirmed product goal" in check.lower()
+        for check in source_aware.proposals[0].acceptance_checks
+    )
 
 
 def test_default_setup_preserves_mapped_intent_through_redesign(
@@ -179,6 +319,7 @@ def test_legacy_defaults_do_not_mask_mapping_but_non_defaults_remain_explicit(
                 "preserve": [],
                 "constraints": [],
                 "source": "configured",
+                "provenance": {"audience": "explicit"},
             }
         },
         frontend_map,
@@ -190,6 +331,7 @@ def test_legacy_defaults_do_not_mask_mapping_but_non_defaults_remain_explicit(
     assert settings.intent.preserve == frontend_map.contracts.must_preserve
     assert settings.intent.constraints == frontend_map.contracts.unknown
     assert settings.intent.provenance["audience"] == "explicit"
+    assert settings.intent.evidence["audience"] == ("config:design_intent",)
     assert settings.intent.provenance["genre"] == "mapped"
 
 
