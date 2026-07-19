@@ -101,7 +101,7 @@ def test_visual_diff_rounds_percentage_to_two_decimals(tmp_path: Path) -> None:
     assert result["change_percentage"] == 0.33
 
 
-def test_visual_diff_resizes_mismatched_dimensions(tmp_path: Path) -> None:
+def test_visual_diff_rejects_mismatched_dimensions(tmp_path: Path) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
     Image.new("RGB", (2, 1), (0, 0, 0)).save(before)
@@ -109,16 +109,21 @@ def test_visual_diff_resizes_mismatched_dimensions(tmp_path: Path) -> None:
 
     result = capture._generate_visual_diff(before, after)
 
-    assert result["total_pixels"] == 4
-    assert result["pixels_changed"] == 0
-    with Image.open(result["diff_image"]) as diff:
-        assert diff.size == (2, 2)
+    assert result["error_code"] == "dimension_mismatch"
+    assert "2x1" in result["error"]
+    assert "1x2" in result["error"]
 
 
 class _FakePage:
-    def __init__(self, events: list[tuple], fail_navigation: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[tuple],
+        fail_navigation: bool = False,
+        fail_screenshot: bool = False,
+    ) -> None:
         self.events = events
         self.fail_navigation = fail_navigation
+        self.fail_screenshot = fail_screenshot
 
     def goto(self, url: str, **kwargs: object) -> None:
         self.events.append(("goto", url, kwargs))
@@ -130,12 +135,20 @@ class _FakePage:
 
     def screenshot(self, **kwargs: object) -> None:
         self.events.append(("screenshot", kwargs))
+        Path(str(kwargs["path"])).write_bytes(b"partial")
+        if self.fail_screenshot:
+            raise RuntimeError("screenshot failed")
 
 
 class _FakeBrowser:
-    def __init__(self, events: list[tuple], fail_navigation: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[tuple],
+        fail_navigation: bool = False,
+        fail_screenshot: bool = False,
+    ) -> None:
         self.events = events
-        self.page = _FakePage(events, fail_navigation)
+        self.page = _FakePage(events, fail_navigation, fail_screenshot)
 
     def new_page(self, **kwargs: object) -> _FakePage:
         self.events.append(("new_page", kwargs))
@@ -152,16 +165,22 @@ class _FakeChromium:
         *,
         launch_error: Exception | None = None,
         fail_navigation: bool = False,
+        fail_screenshot: bool = False,
     ) -> None:
         self.events = events
         self.launch_error = launch_error
         self.fail_navigation = fail_navigation
+        self.fail_screenshot = fail_screenshot
 
     def launch(self, **kwargs: object) -> _FakeBrowser:
         self.events.append(("launch", kwargs))
         if self.launch_error:
             raise self.launch_error
-        return _FakeBrowser(self.events, self.fail_navigation)
+        return _FakeBrowser(
+            self.events,
+            self.fail_navigation,
+            self.fail_screenshot,
+        )
 
 
 class _FakePlaywrightContext:
@@ -181,11 +200,13 @@ def _install_fake_playwright(
     *,
     launch_error: Exception | None = None,
     fail_navigation: bool = False,
+    fail_screenshot: bool = False,
 ) -> None:
     chromium = _FakeChromium(
         events,
         launch_error=launch_error,
         fail_navigation=fail_navigation,
+        fail_screenshot=fail_screenshot,
     )
     sync_api = types.ModuleType("playwright.sync_api")
     sync_api.sync_playwright = lambda: _FakePlaywrightContext(chromium)  # type: ignore[attr-defined]
@@ -260,6 +281,11 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
 ) -> None:
     events: list[tuple] = []
     _install_fake_playwright(monkeypatch, events)
+    monkeypatch.setattr(
+        capture,
+        "uuid4",
+        lambda: SimpleNamespace(hex="atomic"),
+    )
     out_path = tmp_path / "success.png"
     viewport = {"width": 375, "height": 812}
 
@@ -278,9 +304,41 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
             {"wait_until": "networkidle", "timeout": 15000},
         ),
         ("wait_for_timeout", 1000),
-        ("screenshot", {"path": str(out_path), "full_page": False}),
+        (
+            "screenshot",
+            {
+                "path": str(tmp_path / ".success.png.atomic.tmp"),
+                "full_page": False,
+                "type": "png",
+            },
+        ),
         ("close",),
     ]
+    assert out_path.read_bytes() == b"partial"
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_capture_screenshot_failure_preserves_existing_baseline_atomically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple] = []
+    _install_fake_playwright(monkeypatch, events, fail_screenshot=True)
+    monkeypatch.setattr(
+        capture,
+        "uuid4",
+        lambda: SimpleNamespace(hex="atomic"),
+    )
+    out_path = tmp_path / "before.png"
+    out_path.write_bytes(b"known-good")
+
+    assert capture._capture_screenshot(
+        "https://example.invalid",
+        out_path,
+    ) is False
+
+    assert out_path.read_bytes() == b"known-good"
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 def test_capture_multi_viewport_returns_only_successes(
@@ -368,24 +426,28 @@ def test_run_after_with_baseline_writes_metadata_and_latest(
         "diff_image": str(diff_path),
         "change_percentage": 5.0,
         "severity": "moderate",
+        "viewport": "desktop",
     }
-    diff_calls: list[tuple[Path, Path]] = []
+    diff_calls: list[tuple[list[tuple[str, Path, Path]], Path]] = []
 
     def fake_capture(_url: str, path: Path, **_kwargs: object) -> bool:
         path.write_bytes(b"after")
         return True
 
-    def fake_diff(before_path: Path, after_path: Path) -> dict:
-        diff_calls.append((before_path, after_path))
-        return diff_result
+    def fake_evidence(
+        comparisons: list[tuple[str, Path, Path]],
+        output_dir: Path,
+    ) -> list[dict]:
+        diff_calls.append((comparisons, output_dir))
+        return [diff_result]
 
     monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
-    monkeypatch.setattr(capture, "_generate_visual_diff", fake_diff)
+    monkeypatch.setattr(capture, "_build_capture_evidence", fake_evidence)
 
     capture.run(_args("after"))
 
     after = snapshots / "after.png"
-    assert diff_calls == [(before, after)]
+    assert diff_calls == [([("desktop", before, after)], snapshots)]
     assert json.loads((snapshots / "diff_meta.json").read_text()) == diff_result
     assert (snapshots / "latest.png").read_bytes() == b"after"
     assert after.read_bytes() == b"after"
@@ -402,11 +464,11 @@ def test_run_after_without_baseline_skips_diff_and_writes_latest(
         path.write_bytes(b"after")
         return True
 
-    def unexpected_diff(*_args: object) -> dict:
+    def unexpected_diff(*_args: object) -> list[dict]:
         pytest.fail("visual diff must not run without baseline")
 
     monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
-    monkeypatch.setattr(capture, "_generate_visual_diff", unexpected_diff)
+    monkeypatch.setattr(capture, "_build_capture_evidence", unexpected_diff)
 
     capture.run(_args("after"))
 
@@ -425,26 +487,48 @@ def test_run_responsive_after_accepts_partial_viewport_success(
     after_mobile = snapshots / "after_mobile.png"
     before_mobile.write_bytes(b"before")
     after_mobile.write_bytes(b"after")
+    (snapshots / "after_desktop.png").write_bytes(b"stale-desktop")
+    (snapshots / "latest.png").write_bytes(b"stale-latest")
     multi_calls: list[tuple[str, str]] = []
-    diff_calls: list[tuple[Path, Path]] = []
+    diff_calls: list[tuple[list[tuple[str, Path, Path]], Path]] = []
 
     def fake_multi(url: str, prefix: str) -> list[Path]:
         multi_calls.append((url, prefix))
         return [after_mobile]
 
-    def fake_diff(before_path: Path, after_path: Path) -> dict:
-        diff_calls.append((before_path, after_path))
-        return {"change_percentage": 1.0, "severity": "minor"}
+    def fake_evidence(
+        comparisons: list[tuple[str, Path, Path]],
+        output_dir: Path,
+    ) -> list[dict]:
+        diff_calls.append((comparisons, output_dir))
+        return [
+            {
+                "change_percentage": 1.0,
+                "severity": "minor",
+                "viewport": "mobile",
+            }
+        ]
 
     monkeypatch.setattr(capture, "_capture_multi_viewport", fake_multi)
-    monkeypatch.setattr(capture, "_generate_visual_diff", fake_diff)
+    monkeypatch.setattr(capture, "_build_capture_evidence", fake_evidence)
 
     capture.run(_args("after", responsive=True))
 
     assert multi_calls == [("https://example.invalid", "after")]
-    assert diff_calls == [(before_mobile, after_mobile)]
+    assert diff_calls == [
+        ([("mobile", before_mobile, after_mobile)], snapshots)
+    ]
     assert not (snapshots / "latest.png").exists()
-    assert not (snapshots / "diff_meta.json").exists()
+    assert json.loads((snapshots / "diff_meta.json").read_text()) == {
+        "schema_version": 1,
+        "comparisons": [
+            {
+                "change_percentage": 1.0,
+                "severity": "minor",
+                "viewport": "mobile",
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize(

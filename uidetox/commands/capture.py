@@ -1,17 +1,33 @@
 """Capture command: use Playwright to take before/after screenshots for visual regression."""
 
 import argparse
+import json
+import os
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
+from uuid import uuid4
+
 from uidetox.state import ensure_uidetox_dir, load_config
 from uidetox.utils import now_iso
-import sys
+from uidetox.visual_evidence import (
+    VisualEvidenceCase,
+    VisualEvidenceError,
+    VisualEvidenceRequest,
+    build_visual_evidence,
+)
 
 
 _CAPTURE_INSTALL_GUIDANCE = (
     "Install capture support with: pip install 'uidetox[capture]'\n"
     "Install Chromium with: python -m playwright install chromium"
+)
+_RESPONSIVE_VIEWPORTS = (
+    ("mobile", 375, 812),
+    ("tablet", 768, 1024),
+    ("desktop", 1280, 800),
+    ("wide", 1920, 1080),
 )
 
 
@@ -59,42 +75,45 @@ def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
         return False
 
     vp = viewport or {"width": 1280, "height": 800}
+    temporary = out_path.with_name(f".{out_path.name}.{uuid4().hex}.tmp")
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport=vp)
-            page.goto(url, wait_until="networkidle", timeout=15000)
-            # Wait for animations to settle
-            page.wait_for_timeout(1000)
-            page.screenshot(path=str(out_path), full_page=full_page)
-            browser.close()
+            try:
+                page = browser.new_page(viewport=vp)
+                page.goto(url, wait_until="networkidle", timeout=15000)
+                # Wait for animations to settle
+                page.wait_for_timeout(1000)
+                page.screenshot(
+                    path=str(temporary),
+                    full_page=full_page,
+                    type="png",
+                )
+                os.replace(temporary, out_path)
+            finally:
+                browser.close()
         return True
     except Exception as e:
         print(f"❌ Failed to capture screenshot: {e}", file=sys.stderr)
         if _missing_browser_executable(e):
             print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
         return False
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _capture_multi_viewport(url: str, prefix: str) -> list[Path]:
     """Capture screenshots at multiple viewport widths for responsive validation."""
-    viewports = [
-        {"name": "mobile", "width": 375, "height": 812},
-        {"name": "tablet", "width": 768, "height": 1024},
-        {"name": "desktop", "width": 1280, "height": 800},
-        {"name": "wide", "width": 1920, "height": 1080},
-    ]
-
     snapshots = _snapshots_dir()
     captured = []
 
-    for vp in viewports:
-        out_file = snapshots / f"{prefix}_{vp['name']}.png"
-        vp_config = {"width": vp["width"], "height": vp["height"]}
+    for name, width, height in _RESPONSIVE_VIEWPORTS:
+        out_file = snapshots / f"{prefix}_{name}.png"
+        vp_config = {"width": width, "height": height}
         if _capture_screenshot(url, out_file, viewport=vp_config):
             captured.append(out_file)
-            print(f"  ✓ {vp['name']} ({vp['width']}x{vp['height']})")
+            print(f"  ✓ {name} ({width}x{height})")
 
     return captured
 
@@ -102,7 +121,7 @@ def _capture_multi_viewport(url: str, prefix: str) -> list[Path]:
 def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
     """Generate a visual diff summary between before and after screenshots.
 
-    Returns metadata about the visual changes detected.
+    Compatibility adapter over the typed visual-evidence engine.
     """
     diff_info = {
         "before": str(before_path),
@@ -111,60 +130,110 @@ def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
     }
 
     try:
-        # Use Pillow for basic pixel-level diff if available
-        from PIL import Image, ImageChops
-
-        before_img = Image.open(before_path)
-        after_img = Image.open(after_path)
-
-        # Resize to common size if needed
-        if before_img.size != after_img.size:
-            target_size = (max(before_img.width, after_img.width),
-                          max(before_img.height, after_img.height))
-            before_img = before_img.resize(target_size, Image.Resampling.LANCZOS)
-            after_img = after_img.resize(target_size, Image.Resampling.LANCZOS)
-
-        diff_img = ImageChops.difference(before_img.convert("RGB"), after_img.convert("RGB"))
-
-        # Calculate change percentage
-        pixel_data = (
-            diff_img.get_flattened_data()
-            if hasattr(diff_img, "get_flattened_data")
-            else diff_img.getdata()
+        manifest = build_visual_evidence(
+            VisualEvidenceRequest(
+                comparisons=(
+                    VisualEvidenceCase(
+                        case_id=f"{before_path.stem}_{after_path.stem}",
+                        before_path=before_path,
+                        after_path=after_path,
+                    ),
+                ),
+                output_dir=before_path.parent,
+            )
         )
-        diff_pixels = sum(1 for px in pixel_data if sum(px) > 30)
-        total_pixels = diff_img.width * diff_img.height
-        change_pct = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0
-
-        # Amplify diff so subtle changes are visible (raw pixel deltas are too dark).
-        # 8x amplification: a 10-unit change becomes 80, clearly visible.
-        diff_visible = diff_img.point(lambda x: min(255, x * 8))
-
-        # Save the diff image
-        diff_path = before_path.parent / f"diff_{before_path.stem}_{after_path.stem}.png"
-        diff_visible.save(str(diff_path))
-
-        diff_info["diff_image"] = str(diff_path)
-        diff_info["change_percentage"] = round(change_pct, 2)
-        diff_info["pixels_changed"] = diff_pixels
-        diff_info["total_pixels"] = total_pixels
-        diff_info["severity"] = (
-            "none" if change_pct < 0.1 else
-            "minor" if change_pct < 5 else
-            "moderate" if change_pct < 20 else
-            "major" if change_pct < 50 else
-            "complete_redesign"
+        comparison = manifest.comparisons[0]
+        diff_info.update(
+            {
+                "diff_image": str(comparison.artifacts[0].path),
+                "change_percentage": comparison.metrics.change_percentage,
+                "pixels_changed": comparison.metrics.pixels_changed,
+                "total_pixels": comparison.metrics.total_pixels,
+                "severity": comparison.metrics.severity,
+            }
         )
-
-    except ImportError:
-        diff_info["note"] = (
-            "Pillow not installed — pixel diff unavailable. Compare screenshots manually.\n"
-            f"{_CAPTURE_INSTALL_GUIDANCE}"
-        )
+    except VisualEvidenceError as error:
+        if error.code == "missing_dependency":
+            diff_info["note"] = (
+                "Pillow not installed — pixel diff unavailable. Compare screenshots "
+                f"manually.\n{_CAPTURE_INSTALL_GUIDANCE}"
+            )
+        else:
+            diff_info["error_code"] = error.code
+            diff_info["error"] = str(error)
     except Exception as e:
         diff_info["error"] = str(e)
 
     return diff_info
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_copy(source: Path, destination: Path) -> None:
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    try:
+        shutil.copy2(source, temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _viewport_for_case(case_id: str) -> tuple[int, int] | None:
+    for name, width, height in _RESPONSIVE_VIEWPORTS:
+        if name == case_id:
+            return (width, height)
+    if case_id == "desktop":
+        return (1280, 800)
+    return None
+
+
+def _build_capture_evidence(
+    comparisons: list[tuple[str, Path, Path]],
+    snapshots: Path,
+) -> list[dict]:
+    """Build and persist typed evidence, returning legacy summaries for output."""
+
+    manifest = build_visual_evidence(
+        VisualEvidenceRequest(
+            comparisons=tuple(
+                VisualEvidenceCase(
+                    case_id=case_id,
+                    before_path=before_path,
+                    after_path=after_path,
+                    viewport=_viewport_for_case(case_id),
+                )
+                for case_id, before_path, after_path in comparisons
+            ),
+            output_dir=snapshots,
+            manifest_path=snapshots / "visual-evidence.json",
+        )
+    )
+    summaries: list[dict] = []
+    for comparison in manifest.comparisons:
+        summaries.append(
+            {
+                "before": str(comparison.before.path),
+                "after": str(comparison.after.path),
+                "timestamp": manifest.generated_at,
+                "diff_image": str(comparison.artifacts[0].path),
+                "change_percentage": comparison.metrics.change_percentage,
+                "pixels_changed": comparison.metrics.pixels_changed,
+                "total_pixels": comparison.metrics.total_pixels,
+                "severity": comparison.metrics.severity,
+                "viewport": comparison.case_id,
+            }
+        )
+    return summaries
 
 
 def run(args: argparse.Namespace):
@@ -181,7 +250,10 @@ def run(args: argparse.Namespace):
     if not _server_is_reachable(url):
         print(f"❌ Cannot reach {url}", file=sys.stderr)
         print("   ⚠️  uidetox does NOT start your dev server — you must start it first.", file=sys.stderr)
-        print(f"   Start your dev server (e.g. npm run dev / pnpm dev), then re-run capture.", file=sys.stderr)
+        print(
+            "   Start your dev server (e.g. npm run dev / pnpm dev), then re-run capture.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if stage == "before":
@@ -209,16 +281,35 @@ def run(args: argparse.Namespace):
             if captured:
                 print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")
 
-                # Generate diffs for each viewport
-                print("\n🔍 Generating visual diffs...")
+                pairs: list[tuple[str, Path, Path]] = []
                 for after_path in captured:
                     vp_name = after_path.stem.replace("after_", "")
                     before_path = snapshots / f"before_{vp_name}.png"
                     if before_path.exists():
-                        diff = _generate_visual_diff(before_path, after_path)
+                        pairs.append((vp_name, before_path, after_path))
+                if pairs:
+                    print("\n🔍 Generating visual diffs...")
+                    try:
+                        diffs = _build_capture_evidence(pairs, snapshots)
+                    except VisualEvidenceError as error:
+                        if error.code == "missing_dependency":
+                            print(f"  ⚠️  {error}")
+                            diffs = []
+                        else:
+                            print(f"❌ Visual evidence failed: {error}", file=sys.stderr)
+                            sys.exit(1)
+                    for diff in diffs:
+                        vp_name = str(diff["viewport"])
                         change_pct = diff.get("change_percentage", "?")
                         severity = diff.get("severity", "unknown")
                         print(f"  {vp_name}: {change_pct}% change ({severity})")
+                    _atomic_write_json(
+                        snapshots / "diff_meta.json",
+                        {
+                            "schema_version": 1,
+                            "comparisons": diffs,
+                        },
+                    )
             else:
                 sys.exit(1)
         else:
@@ -231,26 +322,40 @@ def run(args: argparse.Namespace):
             before_file = snapshots / "before.png"
             if before_file.exists():
                 print("\n🔍 Generating visual diff...")
-                diff = _generate_visual_diff(before_file, out_file)
+                try:
+                    diffs = _build_capture_evidence(
+                        [("desktop", before_file, out_file)],
+                        snapshots,
+                    )
+                except VisualEvidenceError as error:
+                    if error.code == "missing_dependency":
+                        print(f"   ⚠️  {error}")
+                        diffs = []
+                    else:
+                        print(f"❌ Visual evidence failed: {error}", file=sys.stderr)
+                        sys.exit(1)
+                diff = diffs[0] if diffs else {}
                 change_pct = diff.get("change_percentage", "?")
                 severity = diff.get("severity", "unknown")
                 print(f"   Change: {change_pct}% ({severity})")
                 if diff.get("diff_image"):
                     print(f"   Diff image: {diff['diff_image']}")
 
-                # Save diff metadata
-                import json
-                diff_meta = snapshots / "diff_meta.json"
-                with open(diff_meta, "w", encoding="utf-8") as f:
-                    json.dump(diff, f, indent=2)
+                if diff:
+                    _atomic_write_json(snapshots / "diff_meta.json", diff)
             else:
                 print("   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first.")
 
         # Copy to latest for review command
         latest = snapshots / "latest.png"
-        after_desktop = snapshots / "after.png"
-        if after_desktop.exists():
-            shutil.copy2(after_desktop, latest)
+        if responsive:
+            after_desktop = snapshots / "after_desktop.png"
+            if after_desktop in captured:
+                _atomic_copy(after_desktop, latest)
+            else:
+                latest.unlink(missing_ok=True)
+        else:
+            _atomic_copy(snapshots / "after.png", latest)
 
     else:
         # ── Default: single capture (legacy behavior) ──

@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0018.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T13:54:54+00:00",
+  "id": "lf-0018",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0018.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0018-visual-evidence-core.md",
+  "spec_sha256": "0aae79673b66fb0b6d44d96d3d10599f10cf325532170cb1c357791fb1d7182c",
+  "status": "planned",
+  "title": "Build a safe deterministic Pillow visual-evidence core"
+}
