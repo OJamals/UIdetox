@@ -692,6 +692,31 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             "Visual-evidence comparison case_ids must be unique.",
         )
     for case in request.comparisons:
+        if case.viewport is not None and (
+            len(case.viewport) != 2
+            or any(
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value <= 0
+                for value in case.viewport
+            )
+        ):
+            raise VisualEvidenceError(
+                "invalid_request",
+                "Visual-evidence viewports require positive integer dimensions.",
+            )
+        for source_path in (case.before_path, case.after_path):
+            normalized_path = str(source_path).strip().lower()
+            if normalized_path.startswith(
+                ("http:/", "https:/", "ftp:/", "data:")
+            ):
+                raise VisualEvidenceError(
+                    "invalid_request",
+                    (
+                        "Visual evidence accepts local files only; URL fetching "
+                        f"is unsupported: {source_path}"
+                    ),
+                )
         for region in (*case.semantic_regions, *case.ignore_regions):
             expected_kind = (
                 "semantic" if region in case.semantic_regions else "ignore"
@@ -743,6 +768,27 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             "invalid_request",
             "Visual-evidence context hashes require non-empty string keys and values.",
         )
+    try:
+        json.dumps(
+            request.context,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Visual-evidence context must be finite JSON data.",
+        ) from error
+
+
+def validate_visual_evidence_request(
+    request: VisualEvidenceRequest,
+) -> None:
+    """Validate a request without importing Pillow or decoding images."""
+
+    _validate_request(request)
 
 
 def _clip_region(
@@ -1291,6 +1337,14 @@ def _request_hash_from_payload(payload: dict[str, Any]) -> str:
         ],
     }
     return _canonical_sha256(request_payload)
+
+
+def visual_evidence_request_hash_from_payload(
+    payload: dict[str, Any],
+) -> str:
+    """Reconstruct the canonical input hash at a process trust boundary."""
+
+    return _request_hash_from_payload(payload)
 
 
 def _region_request_payload(region: dict[str, Any]) -> dict[str, Any]:

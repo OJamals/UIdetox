@@ -15,6 +15,66 @@ def _get_version() -> str:
         return "0.1.0"
 
 
+def _add_visual_worker_options(parser: argparse.ArgumentParser) -> None:
+    """Add bounded isolated-worker controls to a visual command."""
+
+    parser.add_argument(
+        "--isolated",
+        action="store_true",
+        help=(
+            "Run Pillow in a bounded subprocess. This is process isolation, "
+            "not a complete OS sandbox."
+        ),
+    )
+    parser.add_argument(
+        "--allowed-root",
+        action="append",
+        default=[],
+        help=(
+            "Filesystem root the isolated worker may read/write "
+            "(repeatable; defaults to the project root)"
+        ),
+    )
+    parser.add_argument(
+        "--worker-timeout",
+        type=float,
+        help="Worker wall timeout in seconds (0.1-300; default: 30)",
+    )
+    parser.add_argument(
+        "--worker-max-request-bytes",
+        type=int,
+        help="Maximum serialized worker request bytes",
+    )
+    parser.add_argument(
+        "--worker-max-output-bytes",
+        type=int,
+        help="Maximum worker stdout bytes",
+    )
+    parser.add_argument(
+        "--worker-max-stderr-bytes",
+        type=int,
+        help="Maximum worker stderr bytes",
+    )
+    parser.add_argument(
+        "--worker-max-memory-mb",
+        type=int,
+        help=(
+            "Worker address-space limit in MiB on supported platforms "
+            "(default: 1024)"
+        ),
+    )
+    parser.add_argument(
+        "--worker-max-file-bytes",
+        type=int,
+        help="Maximum bytes per input/output file",
+    )
+    parser.add_argument(
+        "--worker-cpu-seconds",
+        type=int,
+        help="Worker CPU-time limit in seconds (default: 30)",
+    )
+
+
 def _get_commands_dirs() -> list[Path]:
     """Return all known commands/ directories in runtime lookup order."""
     candidates: list[Path] = []
@@ -180,6 +240,51 @@ def parse_args(args_list=None):
     capture_parser.add_argument("--crop-padding", type=int, help="Padding around reviewer changed-area crops")
     capture_parser.add_argument("--png-compress-level", type=int, choices=range(0, 10), help="Lossless PNG compression level (0-9)")
     capture_parser.add_argument("--png-optimize", action="store_true", help="Use slower lossless PNG optimization for archival artifacts")
+    _add_visual_worker_options(capture_parser)
+
+    # Command: visual-evidence
+    visual_parser = subparsers.add_parser(
+        "visual-evidence",
+        help="Compare local PNGs and emit deterministic visual evidence",
+    )
+    visual_parser.add_argument("--before", required=True, help="Baseline PNG path")
+    visual_parser.add_argument("--after", required=True, help="Candidate PNG path")
+    visual_parser.add_argument(
+        "--output-dir",
+        help="Artifact directory (default: .uidetox/visual-evidence)",
+    )
+    visual_parser.add_argument(
+        "--manifest",
+        help="Manifest path (default: <output-dir>/manifest.json)",
+    )
+    visual_parser.add_argument("--case-id", default="comparison")
+    visual_parser.add_argument(
+        "--viewport",
+        help="Optional viewport as WIDTHxHEIGHT",
+    )
+    visual_parser.add_argument(
+        "--threshold",
+        type=int,
+        choices=range(0, 255),
+        default=30,
+    )
+    visual_parser.add_argument("--max-pixels", type=int, default=40_000_000)
+    visual_parser.add_argument(
+        "--color-policy",
+        choices=["native", "srgb"],
+        default="native",
+    )
+    visual_parser.add_argument("--reviewer-artifacts", action="store_true")
+    visual_parser.add_argument("--crop-padding", type=int, default=16)
+    visual_parser.add_argument(
+        "--png-compress-level",
+        type=int,
+        choices=range(0, 10),
+        default=6,
+    )
+    visual_parser.add_argument("--png-optimize", action="store_true")
+    visual_parser.add_argument("--json", action="store_true")
+    _add_visual_worker_options(visual_parser)
 
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
@@ -331,6 +436,7 @@ def main():
             "subagent": "subagent_cmd",
             "history": "history_cmd",
             "memory": "memory_cmd",
+            "visual_evidence": "visual_evidence_cmd",
             "tree": "viz" # route 'tree' to 'viz.py'
         }
         command_name = name_map.get(command_name, command_name)

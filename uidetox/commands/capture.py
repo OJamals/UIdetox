@@ -17,6 +17,7 @@ from uidetox.runtime_observer import (
 )
 from uidetox.state import (
     ensure_uidetox_dir,
+    get_project_root,
     get_uidetox_dir,
     load_config,
 )
@@ -27,6 +28,8 @@ from uidetox.visual_evidence import (
     VisualEvidenceRequest,
     build_visual_evidence,
 )
+from uidetox.visual_worker_client import build_visual_evidence_isolated
+from uidetox.visual_worker_protocol import VisualWorkerPolicy
 from uidetox.visual_semantics import (
     explicit_ignore_regions,
     load_project_visual_context,
@@ -312,6 +315,7 @@ def _build_capture_evidence(
     expected_viewports: tuple[str, ...] = (),
     png_compress_level: int = 6,
     png_optimize: bool = False,
+    worker_policy: VisualWorkerPolicy | None = None,
 ) -> list[dict]:
     """Build and persist typed evidence, returning legacy summaries for output."""
 
@@ -353,23 +357,26 @@ def _build_capture_evidence(
                 ignore_regions=ignore_regions,
             )
         )
-    manifest = build_visual_evidence(
-        VisualEvidenceRequest(
-            comparisons=tuple(cases),
-            output_dir=snapshots,
-            manifest_path=manifest_path or snapshots / "visual-evidence.json",
-            threshold=threshold,
-            max_pixels=max_pixels,
-            dimension_policy=dimension_policy,
-            color_policy=color_policy,
-            reviewer_artifacts=reviewer_artifacts,
-            crop_padding=crop_padding,
-            expected_viewports=expected_viewports,
-            png_compress_level=png_compress_level,
-            png_optimize=png_optimize,
-            context_sha256s=context_hashes,
-            context=context,
-        )
+    request = VisualEvidenceRequest(
+        comparisons=tuple(cases),
+        output_dir=snapshots,
+        manifest_path=manifest_path or snapshots / "visual-evidence.json",
+        threshold=threshold,
+        max_pixels=max_pixels,
+        dimension_policy=dimension_policy,
+        color_policy=color_policy,
+        reviewer_artifacts=reviewer_artifacts,
+        crop_padding=crop_padding,
+        expected_viewports=expected_viewports,
+        png_compress_level=png_compress_level,
+        png_optimize=png_optimize,
+        context_sha256s=context_hashes,
+        context=context,
+    )
+    manifest = (
+        build_visual_evidence_isolated(request, policy=worker_policy)
+        if worker_policy is not None
+        else build_visual_evidence(request)
     )
     summaries: list[dict] = []
     for comparison in manifest.comparisons:
@@ -405,6 +412,74 @@ def _visual_options(
         if evidence_file
         else snapshots / "visual-evidence.json"
     )
+    worker_config = configured.get("worker", {})
+    if not isinstance(worker_config, dict):
+        worker_config = {}
+    isolated = bool(getattr(args, "isolated", False)) or bool(
+        configured.get("isolated", False)
+    )
+    worker_policy = None
+    if isolated:
+        configured_roots = worker_config.get("allowed_roots", ())
+        if not isinstance(configured_roots, (list, tuple)):
+            configured_roots = ()
+        roots = getattr(args, "allowed_root", None) or configured_roots
+        allowed_roots = tuple(
+            Path(str(path)).expanduser().resolve()
+            for path in (roots or (get_project_root(),))
+        )
+        worker_policy = VisualWorkerPolicy(
+            allowed_roots=allowed_roots,
+            timeout_seconds=(
+                getattr(args, "worker_timeout", None)
+                if getattr(args, "worker_timeout", None) is not None
+                else float(worker_config.get("timeout_seconds", 30.0))
+            ),
+            max_request_bytes=(
+                getattr(args, "worker_max_request_bytes", None)
+                if getattr(args, "worker_max_request_bytes", None) is not None
+                else int(worker_config.get("max_request_bytes", 256 * 1024))
+            ),
+            max_output_bytes=(
+                getattr(args, "worker_max_output_bytes", None)
+                if getattr(args, "worker_max_output_bytes", None) is not None
+                else int(
+                    worker_config.get(
+                        "max_output_bytes",
+                        4 * 1024 * 1024,
+                    )
+                )
+            ),
+            max_stderr_bytes=(
+                getattr(args, "worker_max_stderr_bytes", None)
+                if getattr(args, "worker_max_stderr_bytes", None) is not None
+                else int(worker_config.get("max_stderr_bytes", 64 * 1024))
+            ),
+            max_memory_bytes=(
+                (
+                    getattr(args, "worker_max_memory_mb", None)
+                    if getattr(args, "worker_max_memory_mb", None) is not None
+                    else int(worker_config.get("max_memory_mb", 1024))
+                )
+                * 1024
+                * 1024
+            ),
+            max_file_bytes=(
+                getattr(args, "worker_max_file_bytes", None)
+                if getattr(args, "worker_max_file_bytes", None) is not None
+                else int(
+                    worker_config.get(
+                        "max_file_bytes",
+                        128 * 1024 * 1024,
+                    )
+                )
+            ),
+            cpu_seconds=(
+                getattr(args, "worker_cpu_seconds", None)
+                if getattr(args, "worker_cpu_seconds", None) is not None
+                else int(worker_config.get("cpu_seconds", 30))
+            ),
+        )
     return {
         "threshold": (
             getattr(args, "threshold", None)
@@ -443,6 +518,7 @@ def _visual_options(
             or bool(configured.get("png_optimize", False))
         ),
         "manifest_path": manifest_path,
+        "worker_policy": worker_policy,
     }
 
 

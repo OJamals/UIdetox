@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0021.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T15:16:18+00:00",
+  "id": "lf-0021",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0021.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0021-visual-evidence-hardening.md",
+  "spec_sha256": "dbc35e04f8ccee5534684afd05d25bfac485e0f01de9a9b1a0c8edfba80326e2",
+  "status": "planned",
+  "title": "Harden external visual evidence and close the Pillow scope"
+}

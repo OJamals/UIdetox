@@ -40,6 +40,9 @@ dev = [
 memory = [
     "chromadb>=0.4.24",
 ]
+visual = [
+    "Pillow>=12.3.0",
+]
 capture = [
     "Pillow>=12.3.0",
     "playwright>=1.42.0",

@@ -41,6 +41,22 @@ def _request(
     return VisualEvidenceRequest(**values)  # type: ignore[arg-type]
 
 
+def test_visual_evidence_rejects_url_sources_without_fetching(
+    tmp_path: Path,
+) -> None:
+    request = _request(
+        tmp_path,
+        Path("https://example.com/before.png"),
+        tmp_path / "after.png",
+    )
+
+    with pytest.raises(VisualEvidenceError) as captured:
+        build_visual_evidence(request)
+
+    assert captured.value.code == "invalid_request"
+    assert "local files only" in str(captured.value)
+
+
 def test_build_visual_evidence_emits_versioned_manifest_and_exact_metrics(
     tmp_path: Path,
 ) -> None:

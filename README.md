@@ -85,6 +85,9 @@ pip install 'uidetox[memory]'
 pip install 'uidetox[capture]'
 python -m playwright install chromium
 
+# Local PNG comparison without browser capture
+pip install 'uidetox[visual]'
+
 # Both optional capabilities
 pip install 'uidetox[all]'
 ```
@@ -162,6 +165,15 @@ Each iteration follows a strict quality gate. Issues are batched by component, s
 > [!TIP]
 > **Visual Regression Workflow**: Start your dev server first, then use `uidetox capture --stage before` and `uidetox capture --stage after` (optionally with `--responsive` or `--url http://localhost:5173`) to generate screenshot diffs that are surfaced inside `uidetox review`. For non-3000 ports, either pass `--url` or set `"dev_server"` in `.uidetox/config.json`.
 
+Compare existing local PNGs directly with `uidetox visual-evidence --before
+before.png --after after.png`. Add `--reviewer-artifacts` for a heat overlay,
+changed-area crop, blend, and contact sheet. Add `--isolated --allowed-root
+/path/to/project` when decoding external/local baselines in a bounded worker.
+Isolation uses a versioned JSON protocol, path and resource ceilings, and
+parent-side manifest verification; it is process isolation, not a complete OS
+sandbox. URLs and animated/multi-frame images are unsupported. See the
+[visual-evidence ADR](docs/decisions/visual-evidence-capability.md).
+
 
 **Design Score** = Objective × 0.6 + Subjective × 0.4 — the agent keeps looping until this hits the target.
 
@@ -198,6 +210,7 @@ Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a sp
 | `uidetox status` | Show blended Design Score, velocity, and queue health. |
 | `uidetox review` | Subjective quality scoring across 4 design dimensions. |
 | `uidetox capture` | Capture before/after screenshots and visual diffs (`--stage before/after`, `--url`, `--responsive`). **Start your dev server first** — uidetox does not launch it. Diff is amplified 8× for visibility. |
+| `uidetox visual-evidence` | Compare local PNGs with exact/masked metrics and optional reviewer artifacts. Add `--isolated` plus repeatable `--allowed-root` for bounded process isolation (not a complete OS sandbox). |
 | `uidetox diff` | Compare fresh static analysis against stored baseline — shows NEW / FIXED / UNCHANGED issues. Supports `--since <sha>`, `--output table/json/github`, `--save`. |
 | `uidetox watch` | Poll a directory for file changes and re-scan on each modification. Use `--interval` (default 1s) and `--no-clear`. |
 | `uidetox rescan` | Fresh re-analysis with dedup and auto-escalation. |

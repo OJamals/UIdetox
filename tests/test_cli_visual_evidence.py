@@ -1,3 +1,4 @@
+from uidetox import cli
 from uidetox.cli import parse_args
 from uidetox.commands import setup
 
@@ -22,6 +23,13 @@ def test_capture_cli_accepts_visual_evidence_controls() -> None:
             "--png-compress-level",
             "9",
             "--png-optimize",
+            "--isolated",
+            "--allowed-root",
+            "/tmp/project",
+            "--worker-timeout",
+            "12.5",
+            "--worker-max-memory-mb",
+            "512",
         ]
     )
 
@@ -34,6 +42,70 @@ def test_capture_cli_accepts_visual_evidence_controls() -> None:
     assert args.crop_padding == 24
     assert args.png_compress_level == 9
     assert args.png_optimize is True
+    assert args.isolated is True
+    assert args.allowed_root == ["/tmp/project"]
+    assert args.worker_timeout == 12.5
+    assert args.worker_max_memory_mb == 512
+
+
+def test_visual_evidence_command_accepts_local_comparison_controls() -> None:
+    args = parse_args(
+        [
+            "visual-evidence",
+            "--before",
+            "before.png",
+            "--after",
+            "after.png",
+            "--viewport",
+            "1280x800",
+            "--reviewer-artifacts",
+            "--isolated",
+            "--allowed-root",
+            ".",
+            "--json",
+        ]
+    )
+
+    assert args.command == "visual-evidence"
+    assert args.before == "before.png"
+    assert args.after == "after.png"
+    assert args.viewport == "1280x800"
+    assert args.reviewer_artifacts is True
+    assert args.isolated is True
+    assert args.allowed_root == ["."]
+    assert args.json is True
+
+
+def test_visual_evidence_command_dispatches_to_cmd_module(
+    monkeypatch,
+) -> None:
+    imported: list[str] = []
+
+    class Module:
+        @staticmethod
+        def run(_args) -> None:
+            return None
+
+    def fake_import(name: str):
+        imported.append(name)
+        return Module
+
+    monkeypatch.setattr(cli, "import_module", fake_import)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "uidetox",
+            "visual-evidence",
+            "--before",
+            "before.png",
+            "--after",
+            "after.png",
+        ],
+    )
+    cli.main()
+
+    assert imported[-1] == "uidetox.commands.visual_evidence_cmd"
 
 
 def test_visual_evidence_gate_flags_are_registered() -> None:

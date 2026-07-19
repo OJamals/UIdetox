@@ -100,6 +100,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox show [pattern]` | Filter/inspect issues by file, tier, or ID |
 | `uidetox autofix` | Batch all safe T1 fixes for the agent to apply (use `--dry-run` to preview only) |
 | `uidetox capture` | Capture before/after screenshots + visual diff via Playwright (`--stage before/after`, `--url`, `--responsive`). **Start your dev server first** — uidetox does not launch it. Diff is amplified 8× for visibility. |
+| `uidetox visual-evidence` | Compare local single-frame PNGs with exact/masked metrics and optional reviewer artifacts (`--before`, `--after`, `--isolated`, repeatable `--allowed-root`). Isolation is bounded process separation, not a complete OS sandbox. |
 | `uidetox diff` | Compare fresh static analysis against stored baseline (NEW / FIXED / UNCHANGED). Supports `--since <sha>`, `--output table/json/github`, `--save`. |
 | `uidetox watch` | Poll directory for file changes and re-scan on modification (`--path`, `--interval`, `--no-clear`). |
 | `uidetox rescan` | Clear queue, run 218-rule static analyzer, re-audit from scratch |

@@ -43,8 +43,9 @@ def test_optional_dependency_metadata_keeps_core_minimal() -> None:
     base = set(project["dependencies"])
     extras = {name: set(requirements) for name, requirements in project["optional-dependencies"].items()}
 
-    assert {"dev", "memory", "capture", "all"} <= extras.keys()
+    assert {"dev", "memory", "visual", "capture", "all"} <= extras.keys()
     assert extras["memory"] == {"chromadb>=0.4.24"}
+    assert extras["visual"] == {"Pillow>=12.3.0"}
     assert extras["capture"] == {"Pillow>=12.3.0", "playwright>=1.42.0"}
     assert extras["all"] == extras["memory"] | extras["capture"]
     assert extras["dev"] == {"pytest>=8.0,<9.0", "Pillow>=12.3.0"}
