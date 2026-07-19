@@ -20,9 +20,15 @@ def _issue_matches_pattern(issue: object, pattern: str) -> bool:
     # matching when the pattern has no glob chars, so the plain
     # fnmatch.fnmatch(path, pattern) check would only add value for
     # explicit glob patterns (e.g. "*.tsx") — cover both cleanly here.
-    matches_file = fnmatch.fnmatch(file_path, f"*{pattern}*") or fnmatch.fnmatch(file_path, pattern)
-    matches_desc = fnmatch.fnmatch(desc, f"*{pattern}*") or fnmatch.fnmatch(desc, pattern)
-    matches_exact = pattern.lower() in file_path.lower() or pattern.lower() in desc.lower()
+    matches_file = fnmatch.fnmatch(file_path, f"*{pattern}*") or fnmatch.fnmatch(
+        file_path, pattern
+    )
+    matches_desc = fnmatch.fnmatch(desc, f"*{pattern}*") or fnmatch.fnmatch(
+        desc, pattern
+    )
+    matches_exact = (
+        pattern.lower() in file_path.lower() or pattern.lower() in desc.lower()
+    )
 
     return matches_file or matches_desc or matches_exact
 
@@ -37,8 +43,12 @@ def _prune_matching_state_entries(pattern: str) -> tuple[int, int]:
     if not isinstance(diff_baseline, list):
         diff_baseline = []
 
-    kept_issues = [issue for issue in issues if not _issue_matches_pattern(issue, pattern)]
-    kept_baseline = [issue for issue in diff_baseline if not _issue_matches_pattern(issue, pattern)]
+    kept_issues = [
+        issue for issue in issues if not _issue_matches_pattern(issue, pattern)
+    ]
+    kept_baseline = [
+        issue for issue in diff_baseline if not _issue_matches_pattern(issue, pattern)
+    ]
 
     removed_issues = len(issues) - len(kept_issues)
     removed_baseline = len(diff_baseline) - len(kept_baseline)
@@ -50,6 +60,7 @@ def _prune_matching_state_entries(pattern: str) -> tuple[int, int]:
 
     return removed_issues, removed_baseline
 
+
 def run(args: argparse.Namespace):
     pattern = getattr(args, "pattern", None)
     is_remove = getattr(args, "remove", False)
@@ -58,31 +69,39 @@ def run(args: argparse.Namespace):
     # but only when NOT combined with --remove (which means removing a pattern
     # that literally matches the word "list").
     _LIST_ALIASES = {"list", "show", "ls"}
-    if not pattern or not pattern.strip() or (not is_remove and pattern.strip().lower() in _LIST_ALIASES):
+    if (
+        not pattern
+        or not pattern.strip()
+        or (not is_remove and pattern.strip().lower() in _LIST_ALIASES)
+    ):
         _list_suppressed()
         return
 
     if len(pattern) > _MAX_PATTERN_LEN:
-        print(f"Error: Pattern too long ({len(pattern)} chars, max {_MAX_PATTERN_LEN}).")
+        print(
+            f"Error: Pattern too long ({len(pattern)} chars, max {_MAX_PATTERN_LEN})."
+        )
         sys.exit(1)
-        
+
     if getattr(args, "remove", False):
         _remove_pattern(pattern)
     else:
         _add_pattern(pattern)
 
+
 def _list_suppressed():
     config = load_config()
     patterns = config.get("ignore_patterns", [])
-    
+
     print("\nSuppressed Patterns (issues matching these will be ignored):")
     if not patterns:
         print("  (None active)")
     for p in patterns:
         print(f"  - {p}")
-        
+
     print("\nTo add:    uidetox suppress <pattern>")
     print("To remove: uidetox suppress --remove <pattern>")
+
 
 def _add_pattern(pattern: str):
     config = load_config()
@@ -106,10 +125,11 @@ def _add_pattern(pattern: str):
     if removed_baseline > 0:
         print(f"  Removed {removed_baseline} matching issue(s) from the diff baseline.")
 
+
 def _remove_pattern(pattern: str):
     config = load_config()
     patterns = set(config.get("ignore_patterns", []))
-    
+
     if pattern in patterns:
         patterns.remove(pattern)
         config["ignore_patterns"] = sorted(list(patterns))

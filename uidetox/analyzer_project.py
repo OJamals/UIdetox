@@ -110,10 +110,7 @@ def _linked_scripts(
                 resolved.relative_to(scope_root)
             except ValueError:
                 continue
-            if (
-                resolved.is_file()
-                and resolved.suffix.lower() in _SCRIPT_EXTENSIONS
-            ):
+            if resolved.is_file() and resolved.suffix.lower() in _SCRIPT_EXTENSIONS:
                 linked.add(resolved)
                 break
     return linked
@@ -127,8 +124,7 @@ def _has_submit_binding(script: str, form_id: str) -> bool:
     )
     for selector in selectors:
         if re.search(
-            selector
-            + r"\s*\.\s*addEventListener\(\s*([\"'])submit\1",
+            selector + r"\s*\.\s*addEventListener\(\s*([\"'])submit\1",
             script,
             re.IGNORECASE,
         ):

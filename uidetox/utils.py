@@ -80,8 +80,16 @@ def _parse_tracked_status_line(line: str) -> tuple[str, str] | None:
     if " -> " in path and ("R" in status_code or "C" in status_code):
         if "->" in parsed_path:
             arrow_index = parsed_path.index("->")
-            old_path = parsed_path[arrow_index - 1] if arrow_index > 0 else path.split(" -> ", 1)[0]
-            new_path = parsed_path[arrow_index + 1] if arrow_index + 1 < len(parsed_path) else path.split(" -> ", 1)[1]
+            old_path = (
+                parsed_path[arrow_index - 1]
+                if arrow_index > 0
+                else path.split(" -> ", 1)[0]
+            )
+            new_path = (
+                parsed_path[arrow_index + 1]
+                if arrow_index + 1 < len(parsed_path)
+                else path.split(" -> ", 1)[1]
+            )
             return old_path, new_path
 
         old_path, new_path = path.split(" -> ", 1)

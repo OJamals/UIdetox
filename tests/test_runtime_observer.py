@@ -151,7 +151,10 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
         "after_mobile.png",
         "after_desktop.png",
     ]
-    assert all(Path(page.screenshot or "").read_bytes() == b"partial-png" for page in observation.pages)
+    assert all(
+        Path(page.screenshot or "").read_bytes() == b"partial-png"
+        for page in observation.pages
+    )
     assert not list(tmp_path.glob(".*.tmp"))
 
 

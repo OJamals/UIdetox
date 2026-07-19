@@ -30,7 +30,9 @@ def run(args: argparse.Namespace):
 
     if score is not None:
         if not (0 <= score <= 100):
-            print(f"Error: score must be between 0 and 100, got {score}.", file=sys.stderr)
+            print(
+                f"Error: score must be between 0 and 100, got {score}.", file=sys.stderr
+            )
             sys.exit(1)
         # Store the subjective score
         _store_subjective_score(score)
@@ -43,6 +45,7 @@ def run(args: argparse.Namespace):
 
     # Check for visual snapshot
     from uidetox.state import get_uidetox_dir
+
     snapshot = get_uidetox_dir() / "snapshots" / "latest.png"
     has_snapshot = snapshot.exists()
 
@@ -51,7 +54,9 @@ def run(args: argparse.Namespace):
     print("+" + "=" * 58 + "+")
     print()
     print("  Perform a deep, subjective quality review of this project.")
-    print("  Evaluate the OVERALL design — not individual issues, but the holistic feel.")
+    print(
+        "  Evaluate the OVERALL design — not individual issues, but the holistic feel."
+    )
     print()
 
     # ---- A. VISUAL DESIGN & AESTHETICS (40 pts) ----
@@ -81,7 +86,9 @@ def run(args: argparse.Namespace):
     print("    CONSISTENCY (0-15)")
     print("      -> Unified tokens, spacing scale, color palette, component patterns")
     print("      -> Does the same element look the same everywhere?")
-    print("      -> Would a new developer know the design system from reading the code?")
+    print(
+        "      -> Would a new developer know the design system from reading the code?"
+    )
     print()
     print("    IDENTITY (0-15)")
     print("      -> Does this feel designed, not generated?")
@@ -115,7 +122,9 @@ def run(args: argparse.Namespace):
     if has_fullstack:
         print("    -> DTO alignment: do frontend types match backend schemas?")
         print("    -> Error surfacing: do API errors appear as meaningful UI feedback?")
-        print("    -> Data flow: is fetching/caching/mutation coherent across the stack?")
+        print(
+            "    -> Data flow: is fetching/caching/mutation coherent across the stack?"
+        )
     print()
 
     # ---- Scoring Guide ----
@@ -171,10 +180,7 @@ def run(args: argparse.Namespace):
         if generated_artifacts:
             print("   Reviewer artifacts:")
             for artifact in generated_artifacts:
-                print(
-                    f"     - {artifact.get('kind')}: "
-                    f"{artifact.get('path')}"
-                )
+                print(f"     - {artifact.get('kind')}: {artifact.get('path')}")
         if visual_status.top_changed_regions:
             print("   Top changed semantic regions:")
             for region in visual_status.top_changed_regions[:5]:
@@ -199,17 +205,16 @@ def run(args: argparse.Namespace):
             print(f"   After:  {after_path}")
             change_pct = diff_meta.get("change_percentage", "?")
             coverage_band = diff_meta.get("coverage_band", "unclassified")
-            print(
-                f"   Changed-pixel coverage: {change_pct}% "
-                f"({coverage_band})"
-            )
+            print(f"   Changed-pixel coverage: {change_pct}% ({coverage_band})")
             if diff_meta.get("diff_image"):
                 print(f"   Diff image: {diff_meta['diff_image']}")
             print()
             print("   INSTRUCTIONS FOR VISUAL DIFF REVIEW:")
             print("   1. Open the BEFORE and AFTER screenshots side by side")
             print("   2. Assess: Did the fixes IMPROVE visual quality?")
-            print("   3. Check for regressions: layout shifts, missing elements, broken alignment")
+            print(
+                "   3. Check for regressions: layout shifts, missing elements, broken alignment"
+            )
             print("   4. Factor visual diff into your subjective score")
             print()
             print(
@@ -224,8 +229,7 @@ def run(args: argparse.Namespace):
     snapshots_dir = get_uidetox_dir() / "snapshots"
     responsive_viewports = ["mobile", "tablet", "desktop", "wide"]
     has_responsive = any(
-        (snapshots_dir / f"after_{vp}.png").exists()
-        for vp in responsive_viewports
+        (snapshots_dir / f"after_{vp}.png").exists() for vp in responsive_viewports
     )
 
     if has_responsive:
@@ -249,13 +253,27 @@ def run(args: argparse.Namespace):
         print("2. Review the visual snapshots above (before/after + responsive).")
         print("3. Factor visual quality into your scoring.")
     else:
-        print("2. Optional: Run `uidetox capture --stage before` (if dev server is up) for visual regression.")
-    print(f"{'3' if not (has_visual_diff or has_responsive) else '4'}. Score each of the 4 sections above (A, B, C, D) mentally.")
-    print(f"{'4' if not (has_visual_diff or has_responsive) else '5'}. Sum them for a total (0-100).")
-    print(f"{'5' if not (has_visual_diff or has_responsive) else '6'}. Store your score:  uidetox review --score <N>")
-    print(f"{'6' if not (has_visual_diff or has_responsive) else '7'}. For any issues found, queue them:")
-    print('   uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
-    print(f"{'7' if not (has_visual_diff or has_responsive) else '8'}. Then run: uidetox status")
+        print(
+            "2. Optional: Run `uidetox capture --stage before` (if dev server is up) for visual regression."
+        )
+    print(
+        f"{'3' if not (has_visual_diff or has_responsive) else '4'}. Score each of the 4 sections above (A, B, C, D) mentally."
+    )
+    print(
+        f"{'4' if not (has_visual_diff or has_responsive) else '5'}. Sum them for a total (0-100)."
+    )
+    print(
+        f"{'5' if not (has_visual_diff or has_responsive) else '6'}. Store your score:  uidetox review --score <N>"
+    )
+    print(
+        f"{'6' if not (has_visual_diff or has_responsive) else '7'}. For any issues found, queue them:"
+    )
+    print(
+        '   uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
+    )
+    print(
+        f"{'7' if not (has_visual_diff or has_responsive) else '8'}. Then run: uidetox status"
+    )
 
 
 def _store_subjective_score(score: int):
@@ -269,6 +287,7 @@ def _store_subjective_score(score: int):
     # Keep history of subjective scores for progression tracking
     history = state["subjective"].setdefault("history", [])
     from uidetox.utils import now_iso
+
     history.append({"score": score, "timestamp": now_iso()})
 
     save_state(state)
@@ -282,7 +301,9 @@ def _store_subjective_score(score: int):
     elif score >= 71:
         print("   Good — some areas need polish. Check issues queue.")
     elif score >= 51:
-        print("   Moderate — AI fingerprints still visible. Focus on identity and consistency.")
+        print(
+            "   Moderate — AI fingerprints still visible. Focus on identity and consistency."
+        )
     elif score >= 31:
         print("   Below average — significant slop remains. Deep work needed.")
     else:

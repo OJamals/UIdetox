@@ -23,8 +23,6 @@ def run(args: argparse.Namespace):
             return
         tsc_cmd = profile.typescript.run_cmd
 
-    fix = getattr(args, "fix", False)
-
     print("==============================")
     print(" UIdetox TypeScript Check")
     print("==============================")
@@ -34,11 +32,10 @@ def run(args: argparse.Namespace):
     try:
         argv, env = prepare_subprocess_cmd(tsc_cmd)
         result = subprocess.run(
-            argv,
-            capture_output=True, text=True, cwd=project_root, timeout=120, env=env
+            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
         )
     except FileNotFoundError:
-        print(f"Command not found. Install TypeScript: npm install -D typescript")
+        print("Command not found. Install TypeScript: npm install -D typescript")
         return
     except subprocess.TimeoutExpired:
         print("TypeScript check timed out after 120s.")
@@ -51,7 +48,9 @@ def run(args: argparse.Namespace):
         return
 
     # Parse tsc errors: file(line,col): error TSxxxx: message
-    error_pattern = re.compile(r"^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$", re.MULTILINE)
+    error_pattern = re.compile(
+        r"^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$", re.MULTILINE
+    )
     errors = error_pattern.findall(output)
 
     if not errors:
@@ -62,13 +61,15 @@ def run(args: argparse.Namespace):
     queued = 0
     for file_path, line, col, code, msg in errors:
         issue_id = f"TSC-{str(uuid.uuid4())[:6].upper()}"
-        add_issue({
-            "id": issue_id,
-            "file": file_path.strip(),
-            "tier": "T1",
-            "issue": f"[{code}] {msg.strip()} (line {line})",
-            "command": "tsc-fix",
-        })
+        add_issue(
+            {
+                "id": issue_id,
+                "file": file_path.strip(),
+                "tier": "T1",
+                "issue": f"[{code}] {msg.strip()} (line {line})",
+                "command": "tsc-fix",
+            }
+        )
         queued += 1
         if queued <= 10:
             print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")

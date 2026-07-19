@@ -89,7 +89,9 @@ def test_add_issues_discards_existing_and_intra_batch_duplicates(tmp_path, monke
     assert "created_at" not in batch_duplicate
 
 
-def test_add_issue_wrapper_preserves_return_and_timestamp_mutation(tmp_path, monkeypatch):
+def test_add_issue_wrapper_preserves_return_and_timestamp_mutation(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     issue = _issue("wrapper")
     duplicate = _issue("wrapper")

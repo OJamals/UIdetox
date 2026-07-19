@@ -59,7 +59,9 @@ def _auto_commit_changed_files(files: set[str], message: str) -> AutoCommitResul
         raise AutoCommitError("git add failed: git executable not found") from exc
     if add_result.returncode != 0:
         detail = _safe_git_error_summary(add_result.stderr or add_result.stdout)
-        raise AutoCommitError(f"git add failed (exit {add_result.returncode}): {detail}")
+        raise AutoCommitError(
+            f"git add failed (exit {add_result.returncode}): {detail}"
+        )
 
     commit_cmd = ["git", "commit", "-m", message, "--no-verify"]
     try:
@@ -74,7 +76,9 @@ def _auto_commit_changed_files(files: set[str], message: str) -> AutoCommitResul
         raise AutoCommitError("git commit failed: git executable not found") from exc
     if commit_result.returncode != 0:
         detail = _safe_git_error_summary(commit_result.stderr or commit_result.stdout)
-        raise AutoCommitError(f"git commit failed (exit {commit_result.returncode}): {detail}")
+        raise AutoCommitError(
+            f"git commit failed (exit {commit_result.returncode}): {detail}"
+        )
 
     return AutoCommitResult(staged_paths=sorted_paths)
 
@@ -113,14 +117,23 @@ def run(args: argparse.Namespace):
         for iteration in range(1, 4):
             print(f"Iteration {iteration}...")
             changed = False
-            
+
             if tooling.get("formatter"):
                 cmd = tooling["formatter"].get("fix_cmd")
                 if cmd:
                     try:
                         argv, env = prepare_subprocess_cmd(cmd)
-                        res = subprocess.run(argv, capture_output=True, text=True, cwd=project_root, env=env)
-                        if "fixed" in res.stdout.lower() or "formatted" in res.stdout.lower():
+                        res = subprocess.run(
+                            argv,
+                            capture_output=True,
+                            text=True,
+                            cwd=project_root,
+                            env=env,
+                        )
+                        if (
+                            "fixed" in res.stdout.lower()
+                            or "formatted" in res.stdout.lower()
+                        ):
                             changed = True
                     except FileNotFoundError:
                         print(f"Warning: Formatter command not found ({cmd})")
@@ -130,14 +143,23 @@ def run(args: argparse.Namespace):
                 if cmd:
                     try:
                         argv, env = prepare_subprocess_cmd(cmd)
-                        res = subprocess.run(argv, capture_output=True, text=True, cwd=project_root, env=env)
+                        res = subprocess.run(
+                            argv,
+                            capture_output=True,
+                            text=True,
+                            cwd=project_root,
+                            env=env,
+                        )
                         # If linter fixed files, it might still have exit code 1 if some remain
                         # We assume it changed things if the output mentions fixes, or just run max 3 times anyway
-                        if "fixed" in res.stdout.lower() or "fixed" in res.stderr.lower():
+                        if (
+                            "fixed" in res.stdout.lower()
+                            or "fixed" in res.stderr.lower()
+                        ):
                             changed = True
                     except FileNotFoundError:
                         print(f"Warning: Linter command not found ({cmd})")
-            
+
             if not changed:
                 print("Code is clean or no more auto-fixes available.\n")
                 break
@@ -147,14 +169,21 @@ def run(args: argparse.Namespace):
             try:
                 post_fix_changes = _tracked_changed_files()
                 if pre_existing_changes:
-                    print("  ⚠️  Skipped git auto-commit because tracked changes already existed before mechanical fixes.\n")
+                    print(
+                        "  ⚠️  Skipped git auto-commit because tracked changes already existed before mechanical fixes.\n"
+                    )
                 else:
                     new_changes = post_fix_changes - pre_existing_changes
                     if new_changes:
-                        _auto_commit_changed_files(new_changes, "[UIdetox] Mechanical auto-fix (formatting/linting)")
+                        _auto_commit_changed_files(
+                            new_changes,
+                            "[UIdetox] Mechanical auto-fix (formatting/linting)",
+                        )
                         print("  📦 Auto-committed mechanical fixes to git.\n")
             except Exception as e:
-                print(f"  ⚠️  Warning: Git auto-commit failed during mechanical check: {e}\n")
+                print(
+                    f"  ⚠️  Warning: Git auto-commit failed during mechanical check: {e}\n"
+                )
 
     print("━━━ Phase 2: Diagnostic Checks ━━━")
 

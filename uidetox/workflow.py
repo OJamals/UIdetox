@@ -27,7 +27,7 @@ from uidetox.redesign import (
     propose_redesigns,
     save_redesign_set,
 )
-from uidetox.state import get_uidetox_dir, load_config, load_state
+from uidetox.state import load_config, load_state
 from uidetox.utils import compute_design_score, now_iso
 from uidetox.visual_semantics import project_visual_evidence_status
 
@@ -174,7 +174,9 @@ class WorkflowAdapters:
         try:
             runner = self.runners[phase.adapter]
         except KeyError as exc:
-            raise KeyError(f"No workflow adapter registered for {phase.adapter}.") from exc
+            raise KeyError(
+                f"No workflow adapter registered for {phase.adapter}."
+            ) from exc
         result = runner(context)
         if not isinstance(result, AdapterResult):
             raise TypeError(
@@ -378,10 +380,7 @@ class WorkflowEngine:
             "signals": {},
             "created_at": now_iso(),
             "updated_at": now_iso(),
-            "phases": {
-                phase.id: _new_phase_state()
-                for phase in PHASES
-            },
+            "phases": {phase.id: _new_phase_state() for phase in PHASES},
         }
 
     def _save_state(self, state: dict[str, Any]) -> None:
@@ -413,14 +412,9 @@ class WorkflowEngine:
         return _stable_hash(
             {
                 "phase": phase.id,
-                "inputs": {
-                    key: inputs.value(key)
-                    for key in phase.input_keys
-                },
+                "inputs": {key: inputs.value(key) for key in phase.input_keys},
                 "dependencies": {
-                    dependency: state["phases"][dependency].get(
-                        "result_fingerprint"
-                    )
+                    dependency: state["phases"][dependency].get("result_fingerprint")
                     for dependency in phase.dependencies
                 },
             }
@@ -518,9 +512,10 @@ class WorkflowEngine:
         state: dict[str, Any],
         inputs: WorkflowInputs,
     ) -> tuple[str, str] | None:
-        if phase.id == "issue_planning" and int(
-            state["signals"].get("issues_pending", 0)
-        ) > 0:
+        if (
+            phase.id == "issue_planning"
+            and int(state["signals"].get("issues_pending", 0)) > 0
+        ):
             return (
                 WAITING_AGENT,
                 "Source fixes require an agent; resolve the queued plan, then rerun.",
@@ -715,9 +710,7 @@ def in_process_adapters() -> WorkflowAdapters:
         )
 
     def redesign(context: WorkflowContext) -> AdapterResult:
-        frontend_map = load_frontend_map(
-            context.root / ".uidetox" / FRONTEND_MAP_FILE
-        )
+        frontend_map = load_frontend_map(context.root / ".uidetox" / FRONTEND_MAP_FILE)
         settings = DesignSettings.from_config(
             load_config(),
             frontend_map,
@@ -764,16 +757,13 @@ def in_process_adapters() -> WorkflowAdapters:
         return AdapterResult(
             artifacts={"status": "inline:" + json.dumps(scores, sort_keys=True)},
             evidence=(
-                f"Blended score {scores['blended_score']}; "
-                f"{pending} pending issue(s)."
+                f"Blended score {scores['blended_score']}; {pending} pending issue(s)."
             ),
             signals={
                 "blended_score": scores["blended_score"],
                 "issues_pending": pending,
                 "visual_evidence_state": context.inputs.visual_evidence_state,
-                "visual_evidence_required": (
-                    context.inputs.visual_evidence_required
-                ),
+                "visual_evidence_required": (context.inputs.visual_evidence_required),
             },
         )
 

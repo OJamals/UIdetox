@@ -127,8 +127,7 @@ class RedesignProposal:
                 dict(item) for item in value.get("migration_plan", [])
             ),
             preserved_contract_evidence=tuple(
-                dict(item)
-                for item in value.get("preserved_contract_evidence", [])
+                dict(item) for item in value.get("preserved_contract_evidence", [])
             ),
             feasibility_blockers=tuple(
                 str(item) for item in value.get("feasibility_blockers", [])
@@ -603,9 +602,7 @@ def _build_proposal(
             motion_instruction,
         ),
         preserved_contracts=preserved,
-        migration_steps=tuple(
-            str(item["instruction"]) for item in migration_plan
-        ),
+        migration_steps=tuple(str(item["instruction"]) for item in migration_plan),
         acceptance_checks=acceptance_checks,
         source_targets=source_targets,
         fingerprint=fingerprint,

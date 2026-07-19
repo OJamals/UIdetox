@@ -40,7 +40,9 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/projects")
-def list_projects(status: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
+def list_projects(
+    status: str | None = None, search: str | None = None
+) -> list[dict[str, Any]]:
     sql = "SELECT * FROM projects WHERE 1 = 1"
     params: list[Any] = []
     if status:
@@ -121,7 +123,9 @@ def get_metrics() -> dict[str, Any]:
     total_budget = sum(project["budget"] for project in projects)
     return {
         "activeProjects": sum(project["status"] == "active" for project in projects),
-        "completedProjects": sum(project["status"] == "completed" for project in projects),
+        "completedProjects": sum(
+            project["status"] == "completed" for project in projects
+        ),
         "averageProgress": round(
             sum(project["progress"] for project in projects) / max(len(projects), 1)
         ),

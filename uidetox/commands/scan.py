@@ -17,8 +17,13 @@ from uidetox.commands.add_issue import _is_suppressed
 from uidetox.frontend_map import map_frontend
 from uidetox.project_map import ProjectMap
 from uidetox.state import (
-    add_issues, ensure_uidetox_dir, get_project_root, load_config, load_state,
-    save_config, increment_scans,
+    add_issues,
+    ensure_uidetox_dir,
+    get_project_root,
+    load_config,
+    load_state,
+    save_config,
+    increment_scans,
 )
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
@@ -28,21 +33,256 @@ from uidetox.utils import compute_design_score
 
 # Categories auto-covered by static analyzer, mapped to rule IDs
 _AUTO_CATEGORIES = {
-    "typography": {"TYPOGRAPHY_SLOP", "HARDCODED_PX_FONT_SLOP", "TIGHT_LINE_HEIGHT_SLOP", "ALL_CAPS_HEADER_SLOP", "FONT_WEIGHT_EXTREMES_SLOP", "TITLE_CASE_HEADER_SLOP", "GENERIC_FONT_FAMILY_SLOP", "TEXT_TRANSFORM_UPPERCASE_SLOP", "FONT_WEIGHT_TOO_LIGHT_SLOP", "FONT_SIZE_ZERO_SLOP"},
-    "color": {"COLOR_GRADIENT_SLOP", "COLOR_BLACK_SLOP", "CSS_GRADIENT_SLOP", "CSS_PURE_BLACK_SLOP", "RAW_COLOR_SLOP", "DUPLICATE_COLOR_LITERAL", "TAILWIND_V4_GRADIENT_SLOP", "GRADIENT_BORDER_SLOP", "GRAY_ON_COLOR_SLOP", "HSL_COLOR_TOKEN_SLOP", "PURE_GRAY_NEUTRAL_SLOP", "ALPHA_COLOR_ABUSE_SLOP", "PURE_WHITE_BACKGROUND_SLOP", "PURE_BLACK_TEXT_SLOP"},
-    "layout": {"LAYOUT_MATH_SLOP", "CENTER_BIAS_SLOP", "CARD_NESTING_SLOP", "OVERPADDED_LAYOUT_SLOP", "VIEWPORT_HEIGHT_SLOP", "LAZY_FLEX_CENTER_SLOP", "SPACING_REPETITION_SLOP", "HARDCODED_BREAKPOINT_SLOP", "CENTERED_PARAGRAPH_SLOP", "THREE_EQUAL_COLUMN_SLOP", "HEIGHT_100VH_SLOP", "ASPECT_RATIO_HACK_SLOP", "FLEXBOX_PERCENTAGE_MATH_SLOP", "CSS_OVERFLOW_HIDDEN_BODY_SLOP", "ABSOLUTE_FONT_SIZE_BODY_SLOP", "BACKGROUND_ATTACHMENT_FIXED_SLOP", "RESIZE_NONE_SLOP", "SVG_WITHOUT_VIEWBOX_SLOP", "STICKY_WITHOUT_TOP_SLOP"},
-    "motion": {"BOUNCE_ANIMATION_SLOP", "MISSING_TRANSITION_SLOP", "REDUCED_MOTION_MISSING_SLOP", "SCROLL_SMOOTH_NO_MOTION_SLOP", "CSS_SCROLL_BEHAVIOR_SLOP", "WILL_CHANGE_ABUSE_SLOP", "HEIGHT_ANIMATION_SLOP", "TRANSITION_ALL_SLOP", "EASE_DEFAULT_SLOP", "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP"},
-    "materiality": {"GLASSMORPHISM_SLOP", "SHADOW_SLOP", "MATERIALITY_RADIUS_SLOP", "NEON_GLOW_SLOP", "OPACITY_ABUSE_SLOP", "GRADIENT_TEXT_SLOP", "GRADIENT_TEXT_CSS_SLOP", "SOLID_DIVIDER_SLOP", "OVERSIZED_BORDER_RADIUS_SLOP", "OUTER_GLOW_SLOP"},
-    "states": {"MISSING_HOVER_STATES", "MISSING_FOCUS_SLOP", "MISSING_DARK_MODE", "DISABLED_NO_CURSOR_SLOP", "OUTLINE_NONE_SLOP", "FOCUS_OUTLINE_REMOVED_SLOP", "EMPTY_ARIA_LABEL_SLOP"},
-    "content": {"GENERIC_COPY_SLOP", "AI_COPY_CLICHE_SLOP", "LOREM_IPSUM_SLOP", "GENERIC_NAME_SLOP", "EMOJI_HEAVY_SLOP", "EXCLAMATION_UX_SLOP", "OOPS_ERROR_SLOP", "STAR_RATING_SLOP", "FAKE_METRIC_SLOP", "EMOJI_BULLET_LIST_SLOP", "TESTIMONIAL_GRID_SLOP", "PRICING_TABLE_SLOP", "ROUND_NUMBER_SLOP", "UNSPLASH_URL_SLOP", "BROKEN_IMAGE_SLOP", "SAME_DATE_REPEAT_SLOP", "HARDCODED_COPYRIGHT_YEAR_SLOP", "VAGUE_BUTTON_LABEL_SLOP", "GENERIC_LOADING_TEXT_SLOP"},
-    "code quality": {"DIV_SOUP_SLOP", "HARDCODED_ZINDEX_SLOP", "INLINE_STYLE_SLOP", "IMPORTANT_ABUSE_SLOP", "NESTED_TERNARY_SLOP", "MAGIC_NUMBER_SLOP", "ANY_TYPE_SLOP", "TS_IGNORE_SLOP", "DISABLED_LINT_RULE", "HARDCODED_COLOR_STYLE_SLOP", "TAILWIND_FONT_CONFLICT_SLOP", "TAILWIND_WEIGHT_CONFLICT_SLOP", "TAILWIND_DISPLAY_CONFLICT_SLOP", "NO_SELECT_CONTENT_SLOP", "UGLY_SCROLLBAR_SLOP", "ARBITRARY_PX_VALUE_SLOP", "VERBOSE_HANDLER_NAME_SLOP", "MISSING_TABULAR_NUMS_SLOP", "VALUE_NAMED_TOKEN_SLOP", "WINDOW_CONFIRM_SLOP", "DIALOG_ROLE_ON_DIV_SLOP", "SRCSET_MISSING_SLOP", "EMPTY_CATCH_SLOP", "TYPE_ASSERTION_ABUSE_SLOP", "ASYNC_USEEFFECT_SLOP", "HARDCODED_DEV_URL_SLOP", "REDUNDANT_BOOL_COMPARE_SLOP", "ALERT_USAGE_SLOP", "USE_INDEX_AS_KEY_SLOP", "STYLE_TAG_IN_JSX_SLOP", "FLOAT_LAYOUT_SLOP", "BUTTON_TYPE_MISSING_SLOP", "CATCH_CONSOLE_ONLY_SLOP", "HARDCODED_TIMEOUT_SLOP", "CSS_EMPTY_RULE_SLOP", "CSS_IMPORTANT_ANIMATION_SLOP", "PROP_SPREADING_SLOP", "CSS_UNIVERSAL_SELECTOR_SLOP", "TAILWIND_APPLY_OVERUSE_SLOP", "NON_NULL_ASSERTION_SLOP", "EVAL_USAGE_SLOP", "EMPTY_INTERFACE_SLOP", "FRAGMENT_SHORTHAND_SLOP", "CSS_OVERFLOW_SCROLL_SLOP", "CSS_VENDOR_PREFIX_SLOP", "BUTTON_TYPE_RESET_SLOP", "GRID_AUTO_FIT_MISSING_SLOP", "STAR_IMPORT_SLOP", "USER_AGENT_SNIFF_SLOP"},
-    "components": {"HERO_DASHBOARD_SLOP", "ICONOGRAPHY_SLOP", "PILL_BADGE_SLOP", "MISSING_LOADING_STATE_SLOP", "MISSING_ERROR_STATE_SLOP", "ACCORDION_FAQ_SLOP", "DARK_MODE_TOGGLE_SLOP", "FORM_NO_SUBMIT_SLOP"},
-    "accessibility": {"IMG_ALT_MISSING_SLOP", "ICON_ARIA_MISSING_SLOP", "ORPHANED_LABEL_SLOP", "LOW_CONTRAST_SLOP", "MODAL_NO_ARIA_SLOP", "TOUCH_TARGET_SLOP", "AUTOFOCUS_SLOP", "SVG_HARDCODED_FILL_SLOP", "MISSING_META_DESCRIPTION_SLOP", "SKIP_TO_CONTENT_MISSING_SLOP", "FONT_DISPLAY_MISSING_SLOP", "IMG_MISSING_DIMENSIONS_SLOP", "PLACEHOLDER_ONLY_INPUT_SLOP", "USER_SCALABLE_DISABLED_SLOP", "MISSING_FAVICON_SLOP", "INPUT_NO_TYPE_SLOP", "EMPTY_HREF_SLOP", "MISSING_LANG_SLOP", "INPUT_AUTOCOMPLETE_MISSING_SLOP", "ARIA_HIDDEN_INTERACTIVE_SLOP", "FOCUS_VISIBLE_MISSING_SLOP", "TABINDEX_POSITIVE_SLOP", "TABLE_HEADER_NO_SCOPE_SLOP", "MEDIA_AUTOPLAY_SLOP", "AUTOCOMPLETE_OFF_SLOP", "MISSING_ARIA_ROLE_SLOP", "VAGUE_ARIA_LABEL_SLOP", "SELECT_NO_LABEL_SLOP", "IFRAME_NO_TITLE_SLOP", "VIDEO_NO_CAPTIONS_SLOP", "TABINDEX_ZERO_DIV_SLOP", "ICON_ONLY_BUTTON_SLOP"},
-    "security": {"ANCHOR_TARGET_BLANK_SLOP", "DANGEROUS_HTML_SLOP", "HARDCODED_SECRET_SLOP", "DOCUMENT_WRITE_SLOP", "INNER_HTML_ASSIGN_SLOP", "LOCALSTORAGE_SENSITIVE_SLOP", "OPEN_REDIRECT_SLOP", "POSTMESSAGE_ORIGIN_MISSING_SLOP"},
-    "ssr": {"LOCALSTORAGE_SSR_SLOP", "WINDOW_OBJECT_SSR_SLOP", "USE_CLIENT_DIRECTIVE_SLOP", "NAVIGATOR_SSR_SLOP", "PROCESS_BROWSER_DEPRECATED_SLOP", "DOCUMENT_COOKIE_SSR_SLOP"},
-    "react": {"MISSING_KEY_PROP_SLOP", "USEEFFECT_EMPTY_DEPS_SLOP", "FRAMER_NO_REDUCED_MOTION_SLOP", "NEXT_IMAGE_RAW_SLOP", "ASYNC_USEEFFECT_SLOP", "DEPRECATED_FINDDOMNODE_SLOP", "DEPRECATED_CLASS_COMPONENT_SLOP", "LAZY_WITHOUT_SUSPENSE_SLOP", "NO_PASSIVE_SCROLL_LISTENER_SLOP", "CONTEXT_VALUE_INLINE_SLOP", "USE_STATE_INIT_SLOP"},
-    "duplication": {"DUPLICATE_TAILWIND_BLOCK", "DUPLICATE_COLOR_LITERAL", "COPY_PASTE_COMPONENT", "DUPLICATE_HANDLER", "REPEATED_MEDIA_QUERY", "DUPLICATE_IMPORT_SLOP"},
-    "dead code": {"COMMENTED_OUT_CODE", "UNUSED_IMPORT", "UNREACHABLE_CODE", "EMPTY_HANDLER", "DEAD_CSS_CLASS", "UNUSED_STATE", "DEPRECATED_LIFECYCLE", "CONSOLE_LOG_SLOP", "TODO_FIXME_SLOP", "DEBUGGER_STATEMENT_SLOP", "PROP_TYPES_IN_TS_SLOP"},
+    "typography": {
+        "TYPOGRAPHY_SLOP",
+        "HARDCODED_PX_FONT_SLOP",
+        "TIGHT_LINE_HEIGHT_SLOP",
+        "ALL_CAPS_HEADER_SLOP",
+        "FONT_WEIGHT_EXTREMES_SLOP",
+        "TITLE_CASE_HEADER_SLOP",
+        "GENERIC_FONT_FAMILY_SLOP",
+        "TEXT_TRANSFORM_UPPERCASE_SLOP",
+        "FONT_WEIGHT_TOO_LIGHT_SLOP",
+        "FONT_SIZE_ZERO_SLOP",
+    },
+    "color": {
+        "COLOR_GRADIENT_SLOP",
+        "COLOR_BLACK_SLOP",
+        "CSS_GRADIENT_SLOP",
+        "CSS_PURE_BLACK_SLOP",
+        "RAW_COLOR_SLOP",
+        "DUPLICATE_COLOR_LITERAL",
+        "TAILWIND_V4_GRADIENT_SLOP",
+        "GRADIENT_BORDER_SLOP",
+        "GRAY_ON_COLOR_SLOP",
+        "HSL_COLOR_TOKEN_SLOP",
+        "PURE_GRAY_NEUTRAL_SLOP",
+        "ALPHA_COLOR_ABUSE_SLOP",
+        "PURE_WHITE_BACKGROUND_SLOP",
+        "PURE_BLACK_TEXT_SLOP",
+    },
+    "layout": {
+        "LAYOUT_MATH_SLOP",
+        "CENTER_BIAS_SLOP",
+        "CARD_NESTING_SLOP",
+        "OVERPADDED_LAYOUT_SLOP",
+        "VIEWPORT_HEIGHT_SLOP",
+        "LAZY_FLEX_CENTER_SLOP",
+        "SPACING_REPETITION_SLOP",
+        "HARDCODED_BREAKPOINT_SLOP",
+        "CENTERED_PARAGRAPH_SLOP",
+        "THREE_EQUAL_COLUMN_SLOP",
+        "HEIGHT_100VH_SLOP",
+        "ASPECT_RATIO_HACK_SLOP",
+        "FLEXBOX_PERCENTAGE_MATH_SLOP",
+        "CSS_OVERFLOW_HIDDEN_BODY_SLOP",
+        "ABSOLUTE_FONT_SIZE_BODY_SLOP",
+        "BACKGROUND_ATTACHMENT_FIXED_SLOP",
+        "RESIZE_NONE_SLOP",
+        "SVG_WITHOUT_VIEWBOX_SLOP",
+        "STICKY_WITHOUT_TOP_SLOP",
+    },
+    "motion": {
+        "BOUNCE_ANIMATION_SLOP",
+        "MISSING_TRANSITION_SLOP",
+        "REDUCED_MOTION_MISSING_SLOP",
+        "SCROLL_SMOOTH_NO_MOTION_SLOP",
+        "CSS_SCROLL_BEHAVIOR_SLOP",
+        "WILL_CHANGE_ABUSE_SLOP",
+        "HEIGHT_ANIMATION_SLOP",
+        "TRANSITION_ALL_SLOP",
+        "EASE_DEFAULT_SLOP",
+        "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP",
+    },
+    "materiality": {
+        "GLASSMORPHISM_SLOP",
+        "SHADOW_SLOP",
+        "MATERIALITY_RADIUS_SLOP",
+        "NEON_GLOW_SLOP",
+        "OPACITY_ABUSE_SLOP",
+        "GRADIENT_TEXT_SLOP",
+        "GRADIENT_TEXT_CSS_SLOP",
+        "SOLID_DIVIDER_SLOP",
+        "OVERSIZED_BORDER_RADIUS_SLOP",
+        "OUTER_GLOW_SLOP",
+    },
+    "states": {
+        "MISSING_HOVER_STATES",
+        "MISSING_FOCUS_SLOP",
+        "MISSING_DARK_MODE",
+        "DISABLED_NO_CURSOR_SLOP",
+        "OUTLINE_NONE_SLOP",
+        "FOCUS_OUTLINE_REMOVED_SLOP",
+        "EMPTY_ARIA_LABEL_SLOP",
+    },
+    "content": {
+        "GENERIC_COPY_SLOP",
+        "AI_COPY_CLICHE_SLOP",
+        "LOREM_IPSUM_SLOP",
+        "GENERIC_NAME_SLOP",
+        "EMOJI_HEAVY_SLOP",
+        "EXCLAMATION_UX_SLOP",
+        "OOPS_ERROR_SLOP",
+        "STAR_RATING_SLOP",
+        "FAKE_METRIC_SLOP",
+        "EMOJI_BULLET_LIST_SLOP",
+        "TESTIMONIAL_GRID_SLOP",
+        "PRICING_TABLE_SLOP",
+        "ROUND_NUMBER_SLOP",
+        "UNSPLASH_URL_SLOP",
+        "BROKEN_IMAGE_SLOP",
+        "SAME_DATE_REPEAT_SLOP",
+        "HARDCODED_COPYRIGHT_YEAR_SLOP",
+        "VAGUE_BUTTON_LABEL_SLOP",
+        "GENERIC_LOADING_TEXT_SLOP",
+    },
+    "code quality": {
+        "DIV_SOUP_SLOP",
+        "HARDCODED_ZINDEX_SLOP",
+        "INLINE_STYLE_SLOP",
+        "IMPORTANT_ABUSE_SLOP",
+        "NESTED_TERNARY_SLOP",
+        "MAGIC_NUMBER_SLOP",
+        "ANY_TYPE_SLOP",
+        "TS_IGNORE_SLOP",
+        "DISABLED_LINT_RULE",
+        "HARDCODED_COLOR_STYLE_SLOP",
+        "TAILWIND_FONT_CONFLICT_SLOP",
+        "TAILWIND_WEIGHT_CONFLICT_SLOP",
+        "TAILWIND_DISPLAY_CONFLICT_SLOP",
+        "NO_SELECT_CONTENT_SLOP",
+        "UGLY_SCROLLBAR_SLOP",
+        "ARBITRARY_PX_VALUE_SLOP",
+        "VERBOSE_HANDLER_NAME_SLOP",
+        "MISSING_TABULAR_NUMS_SLOP",
+        "VALUE_NAMED_TOKEN_SLOP",
+        "WINDOW_CONFIRM_SLOP",
+        "DIALOG_ROLE_ON_DIV_SLOP",
+        "SRCSET_MISSING_SLOP",
+        "EMPTY_CATCH_SLOP",
+        "TYPE_ASSERTION_ABUSE_SLOP",
+        "ASYNC_USEEFFECT_SLOP",
+        "HARDCODED_DEV_URL_SLOP",
+        "REDUNDANT_BOOL_COMPARE_SLOP",
+        "ALERT_USAGE_SLOP",
+        "USE_INDEX_AS_KEY_SLOP",
+        "STYLE_TAG_IN_JSX_SLOP",
+        "FLOAT_LAYOUT_SLOP",
+        "BUTTON_TYPE_MISSING_SLOP",
+        "CATCH_CONSOLE_ONLY_SLOP",
+        "HARDCODED_TIMEOUT_SLOP",
+        "CSS_EMPTY_RULE_SLOP",
+        "CSS_IMPORTANT_ANIMATION_SLOP",
+        "PROP_SPREADING_SLOP",
+        "CSS_UNIVERSAL_SELECTOR_SLOP",
+        "TAILWIND_APPLY_OVERUSE_SLOP",
+        "NON_NULL_ASSERTION_SLOP",
+        "EVAL_USAGE_SLOP",
+        "EMPTY_INTERFACE_SLOP",
+        "FRAGMENT_SHORTHAND_SLOP",
+        "CSS_OVERFLOW_SCROLL_SLOP",
+        "CSS_VENDOR_PREFIX_SLOP",
+        "BUTTON_TYPE_RESET_SLOP",
+        "GRID_AUTO_FIT_MISSING_SLOP",
+        "STAR_IMPORT_SLOP",
+        "USER_AGENT_SNIFF_SLOP",
+    },
+    "components": {
+        "HERO_DASHBOARD_SLOP",
+        "ICONOGRAPHY_SLOP",
+        "PILL_BADGE_SLOP",
+        "MISSING_LOADING_STATE_SLOP",
+        "MISSING_ERROR_STATE_SLOP",
+        "ACCORDION_FAQ_SLOP",
+        "DARK_MODE_TOGGLE_SLOP",
+        "FORM_NO_SUBMIT_SLOP",
+    },
+    "accessibility": {
+        "IMG_ALT_MISSING_SLOP",
+        "ICON_ARIA_MISSING_SLOP",
+        "ORPHANED_LABEL_SLOP",
+        "LOW_CONTRAST_SLOP",
+        "MODAL_NO_ARIA_SLOP",
+        "TOUCH_TARGET_SLOP",
+        "AUTOFOCUS_SLOP",
+        "SVG_HARDCODED_FILL_SLOP",
+        "MISSING_META_DESCRIPTION_SLOP",
+        "SKIP_TO_CONTENT_MISSING_SLOP",
+        "FONT_DISPLAY_MISSING_SLOP",
+        "IMG_MISSING_DIMENSIONS_SLOP",
+        "PLACEHOLDER_ONLY_INPUT_SLOP",
+        "USER_SCALABLE_DISABLED_SLOP",
+        "MISSING_FAVICON_SLOP",
+        "INPUT_NO_TYPE_SLOP",
+        "EMPTY_HREF_SLOP",
+        "MISSING_LANG_SLOP",
+        "INPUT_AUTOCOMPLETE_MISSING_SLOP",
+        "ARIA_HIDDEN_INTERACTIVE_SLOP",
+        "FOCUS_VISIBLE_MISSING_SLOP",
+        "TABINDEX_POSITIVE_SLOP",
+        "TABLE_HEADER_NO_SCOPE_SLOP",
+        "MEDIA_AUTOPLAY_SLOP",
+        "AUTOCOMPLETE_OFF_SLOP",
+        "MISSING_ARIA_ROLE_SLOP",
+        "VAGUE_ARIA_LABEL_SLOP",
+        "SELECT_NO_LABEL_SLOP",
+        "IFRAME_NO_TITLE_SLOP",
+        "VIDEO_NO_CAPTIONS_SLOP",
+        "TABINDEX_ZERO_DIV_SLOP",
+        "ICON_ONLY_BUTTON_SLOP",
+    },
+    "security": {
+        "ANCHOR_TARGET_BLANK_SLOP",
+        "DANGEROUS_HTML_SLOP",
+        "HARDCODED_SECRET_SLOP",
+        "DOCUMENT_WRITE_SLOP",
+        "INNER_HTML_ASSIGN_SLOP",
+        "LOCALSTORAGE_SENSITIVE_SLOP",
+        "OPEN_REDIRECT_SLOP",
+        "POSTMESSAGE_ORIGIN_MISSING_SLOP",
+    },
+    "ssr": {
+        "LOCALSTORAGE_SSR_SLOP",
+        "WINDOW_OBJECT_SSR_SLOP",
+        "USE_CLIENT_DIRECTIVE_SLOP",
+        "NAVIGATOR_SSR_SLOP",
+        "PROCESS_BROWSER_DEPRECATED_SLOP",
+        "DOCUMENT_COOKIE_SSR_SLOP",
+    },
+    "react": {
+        "MISSING_KEY_PROP_SLOP",
+        "USEEFFECT_EMPTY_DEPS_SLOP",
+        "FRAMER_NO_REDUCED_MOTION_SLOP",
+        "NEXT_IMAGE_RAW_SLOP",
+        "ASYNC_USEEFFECT_SLOP",
+        "DEPRECATED_FINDDOMNODE_SLOP",
+        "DEPRECATED_CLASS_COMPONENT_SLOP",
+        "LAZY_WITHOUT_SUSPENSE_SLOP",
+        "NO_PASSIVE_SCROLL_LISTENER_SLOP",
+        "CONTEXT_VALUE_INLINE_SLOP",
+        "USE_STATE_INIT_SLOP",
+    },
+    "duplication": {
+        "DUPLICATE_TAILWIND_BLOCK",
+        "DUPLICATE_COLOR_LITERAL",
+        "COPY_PASTE_COMPONENT",
+        "DUPLICATE_HANDLER",
+        "REPEATED_MEDIA_QUERY",
+        "DUPLICATE_IMPORT_SLOP",
+    },
+    "dead code": {
+        "COMMENTED_OUT_CODE",
+        "UNUSED_IMPORT",
+        "UNREACHABLE_CODE",
+        "EMPTY_HANDLER",
+        "DEAD_CSS_CLASS",
+        "UNUSED_STATE",
+        "DEPRECATED_LIFECYCLE",
+        "CONSOLE_LOG_SLOP",
+        "TODO_FIXME_SLOP",
+        "DEBUGGER_STATEMENT_SLOP",
+        "PROP_TYPES_IN_TS_SLOP",
+    },
 }
 
 # Categories that ALWAYS need manual agent audit (not automatable via regex)
@@ -101,7 +341,10 @@ def run(args: argparse.Namespace):
     scan_path_arg = getattr(args, "path", ".")
     scan_path = str(project_root) if scan_path_arg in (None, "", ".") else scan_path_arg
     if not os.path.isdir(scan_path):
-        print(f"Error: scan path '{scan_path}' does not exist or is not a directory.", file=sys.stderr)
+        print(
+            f"Error: scan path '{scan_path}' does not exist or is not a directory.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     config = load_config()
@@ -137,7 +380,9 @@ def run(args: argparse.Namespace):
     apis = tooling.get("api", [])
 
     if table_output:
-        print(f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}")
+        print(
+            f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}"
+        )
         if frontends:
             print(f"           frontend={', '.join(f['name'] for f in frontends)}")
         if backends or databases or apis:
@@ -170,7 +415,9 @@ def run(args: argparse.Namespace):
 
     # Run tsc/lint/format pre-pass if tooling is available
     if table_output and (ts or linter or fmt):
-        print("  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first.")
+        print(
+            "  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first."
+        )
         print()
 
     # Run static slop analyzer
@@ -183,14 +430,20 @@ def run(args: argparse.Namespace):
             # git diff --name-only outputs paths relative to the repo root, not scan_path
             root_result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, cwd=scan_path, timeout=10,
+                capture_output=True,
+                text=True,
+                cwd=scan_path,
+                timeout=10,
             )
             git_root_text = root_result.stdout.strip()
             if root_result.returncode == 0 and git_root_text:
                 since_root = Path(git_root_text).resolve()
                 result = subprocess.run(
                     ["git", "diff", "--name-only", since_sha],
-                    capture_output=True, text=True, cwd=str(since_root), timeout=10,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(since_root),
+                    timeout=10,
                 )
             else:
                 result = None
@@ -210,7 +463,9 @@ def run(args: argparse.Namespace):
                     resolved_targets.add(str(candidate))
                 since_targets = sorted(resolved_targets)
                 if table_output:
-                    print(f"  Incremental: scanning {len(since_targets)} file(s) changed since {since_sha}")
+                    print(
+                        f"  Incremental: scanning {len(since_targets)} file(s) changed since {since_sha}"
+                    )
             else:
                 _print_fallback_warning(
                     f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
@@ -254,14 +509,14 @@ def run(args: argparse.Namespace):
     pending_issues = []
     triggered_rules: set[str] = set()
     for issue in slop_issues:
-        if not _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
+        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
             issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
             new_issue = {
                 "id": issue_id,
-                "file": issue['file'],
+                "file": issue["file"],
                 "tier": issue["tier"],
                 "issue": issue["issue"],
-                "command": issue["command"]
+                "command": issue["command"],
             }
             for key in ("line", "column", "snippet"):
                 if key in issue:
@@ -275,7 +530,7 @@ def run(args: argparse.Namespace):
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
-        print(f"  -> No mechanical anti-patterns detected.")
+        print("  -> No mechanical anti-patterns detected.")
 
     # Category coverage (compact)
     print()
@@ -362,7 +617,9 @@ def run(args: argparse.Namespace):
     print("    IDENTITY (0-15)")
     print("      Does this feel designed, not generated?")
     print("      Is there an intentional aesthetic point-of-view?")
-    print("      Would someone ask 'what tool made this?' (bad) or 'who designed this?' (good)")
+    print(
+        "      Would someone ask 'what tool made this?' (bad) or 'who designed this?' (good)"
+    )
     print()
 
     # ---- INTERACTION & CRAFT (20 pts) ----
@@ -394,17 +651,27 @@ def run(args: argparse.Namespace):
     # Dial-aware review guidance (compact)
     dial_notes = []
     if variance > 4:
-        dial_notes.append(f"VARIANCE={variance}: centered heroes BANNED, push asymmetric layouts")
+        dial_notes.append(
+            f"VARIANCE={variance}: centered heroes BANNED, push asymmetric layouts"
+        )
     if variance > 7:
-        dial_notes.append(f"VARIANCE={variance}: masonry, overlapping elements, offset margins")
+        dial_notes.append(
+            f"VARIANCE={variance}: masonry, overlapping elements, offset margins"
+        )
     if intensity > 5:
-        dial_notes.append(f"MOTION={intensity}: entrance animations, staggered lists required")
+        dial_notes.append(
+            f"MOTION={intensity}: entrance animations, staggered lists required"
+        )
     if intensity > 7:
-        dial_notes.append(f"MOTION={intensity}: scroll-triggered reveals, spring physics")
+        dial_notes.append(
+            f"MOTION={intensity}: scroll-triggered reveals, spring physics"
+        )
     if density < 5:
         dial_notes.append(f"DENSITY={density}: art gallery mode, generous whitespace")
     if density > 7:
-        dial_notes.append(f"DENSITY={density}: cockpit mode, dense data, compact spacing")
+        dial_notes.append(
+            f"DENSITY={density}: cockpit mode, dense data, compact spacing"
+        )
     if dial_notes:
         print("  Dial constraints for this review:")
         for note in dial_notes:
@@ -412,7 +679,9 @@ def run(args: argparse.Namespace):
         print()
 
     print("  For each new issue found, queue it:")
-    print('    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+    print(
+        '    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
+    )
     print()
     print("  When review is complete, record your subjective score:")
     print("    uidetox review --score <N>   (0-100, sum of A+B+C+D above)")
@@ -424,8 +693,11 @@ def run(args: argparse.Namespace):
     increment_scans()
     save_run_snapshot(trigger="scan")
     _save_scan_to_memory(slop_issues, queued_count, triggered_rules, scan_path)
-    save_session(phase="scan_complete", last_command="scan",
-                 context=f"Found {queued_count} issues in {scan_path}")
+    save_session(
+        phase="scan_complete",
+        last_command="scan",
+        context=f"Found {queued_count} issues in {scan_path}",
+    )
     log_progress("scan", f"Scanned {scan_path}: {queued_count} issues queued")
 
     # Compute current score and show target check
@@ -458,8 +730,9 @@ def run(args: argparse.Namespace):
     print()
 
 
-def _save_scan_to_memory(slop_issues: list, queued_count: int,
-                         triggered_rules: set, scan_path: str):
+def _save_scan_to_memory(
+    slop_issues: list, queued_count: int, triggered_rules: set, scan_path: str
+):
     """Auto-save scan results to memory for review without re-scanning."""
     by_tier: dict[str, int] = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
     by_category: dict[str, int] = {}
@@ -488,16 +761,95 @@ def _save_scan_to_memory(slop_issues: list, queued_count: int,
 def _infer_category(desc: str) -> str:
     """Infer issue category from description text."""
     category_keywords = {
-        "typography": ["font", "typography", "inter", "type scale", "line-height", "kerning", "letter-spacing", "px font"],
-        "color": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "black", "hex color"],
-        "layout": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "flex center", "viewport"],
+        "typography": [
+            "font",
+            "typography",
+            "inter",
+            "type scale",
+            "line-height",
+            "kerning",
+            "letter-spacing",
+            "px font",
+        ],
+        "color": [
+            "color",
+            "gradient",
+            "palette",
+            "contrast",
+            "dark mode",
+            "purple",
+            "black",
+            "hex color",
+        ],
+        "layout": [
+            "layout",
+            "grid",
+            "spacing",
+            "padding",
+            "margin",
+            "dashboard",
+            "card",
+            "center",
+            "flex center",
+            "viewport",
+        ],
         "motion": ["animation", "bounce", "pulse", "spin", "transition", "motion"],
-        "materiality": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow", "opacity"],
-        "states": ["loading", "error", "empty", "skeleton", "disabled", "hover", "focus"],
-        "content": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme", "emoji", "oops", "exclamation"],
-        "code quality": ["div soup", "semantic", "z-index", "inline style", "!important", "ternary", "magic number", "any type", "ts-ignore", "eslint-disable"],
+        "materiality": [
+            "shadow",
+            "glassmorphism",
+            "radius",
+            "border",
+            "backdrop",
+            "blur",
+            "glow",
+            "opacity",
+        ],
+        "states": [
+            "loading",
+            "error",
+            "empty",
+            "skeleton",
+            "disabled",
+            "hover",
+            "focus",
+        ],
+        "content": [
+            "copy",
+            "lorem",
+            "generic",
+            "placeholder",
+            "cliche",
+            "john doe",
+            "acme",
+            "emoji",
+            "oops",
+            "exclamation",
+        ],
+        "code quality": [
+            "div soup",
+            "semantic",
+            "z-index",
+            "inline style",
+            "!important",
+            "ternary",
+            "magic number",
+            "any type",
+            "ts-ignore",
+            "eslint-disable",
+        ],
         "duplication": ["duplicate", "repeated", "copy-paste", "identical", "same hex"],
-        "dead code": ["commented-out", "unused import", "unreachable", "empty handler", "empty css", "unused state", "deprecated", "console", "todo", "fixme"],
+        "dead code": [
+            "commented-out",
+            "unused import",
+            "unreachable",
+            "empty handler",
+            "empty css",
+            "unused state",
+            "deprecated",
+            "console",
+            "todo",
+            "fixme",
+        ],
     }
     for cat, keywords in category_keywords.items():
         if any(kw in desc for kw in keywords):

@@ -25,9 +25,7 @@ def run(args: argparse.Namespace) -> None:
             config.get("dev_server", "http://localhost:3000")
         ]
         screenshot_dir = (
-            get_uidetox_dir() / "runtime-screenshots"
-            if screenshots_requested
-            else None
+            get_uidetox_dir() / "runtime-screenshots" if screenshots_requested else None
         )
         runtime_observation = observe_frontend(
             urls,
@@ -35,7 +33,11 @@ def run(args: argparse.Namespace) -> None:
             timeout_ms=getattr(args, "timeout", 15_000),
         )
         if not runtime_observation.pages:
-            detail = runtime_observation.errors[0] if runtime_observation.errors else "no pages observed"
+            detail = (
+                runtime_observation.errors[0]
+                if runtime_observation.errors
+                else "no pages observed"
+            )
             raise RuntimeError(f"Runtime observation failed: {detail}")
 
     frontend_map = map_frontend(root, target, runtime_observation)
@@ -62,9 +64,13 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Artifact    : {output_path}")
     if frontend_map.evidence.get("runtime_observed"):
         viewports = ", ".join(frontend_map.evidence.get("runtime_viewports", []))
-        print(f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} page/view(s) ({viewports})")
+        print(
+            f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} page/view(s) ({viewports})"
+        )
         runtime_errors = frontend_map.evidence.get("runtime_errors", [])
         if runtime_errors:
-            print(f"  Warnings    : {len(runtime_errors)} runtime observation failure(s)")
+            print(
+                f"  Warnings    : {len(runtime_errors)} runtime observation failure(s)"
+            )
     else:
         print("  Runtime     : not observed; unknowns recorded in artifact")

@@ -31,7 +31,9 @@ def run(args: argparse.Namespace):
         if use_json:
             print(json.dumps({"runs": [], "total": 0}))
         else:
-            print("No run history found. Run 'uidetox scan' to create your first snapshot.")
+            print(
+                "No run history found. Run 'uidetox scan' to create your first snapshot."
+            )
         return
 
     if use_json:
@@ -40,7 +42,11 @@ def run(args: argparse.Namespace):
             "total": len(runs),
             "first_score": summary_runs[0].get("score", 0) if summary_runs else 0,
             "latest_score": summary_runs[-1].get("score", 0) if summary_runs else 0,
-            "delta": (summary_runs[-1].get("score", 0) - summary_runs[0].get("score", 0)) if len(summary_runs) >= 2 else 0,
+            "delta": (
+                summary_runs[-1].get("score", 0) - summary_runs[0].get("score", 0)
+            )
+            if len(summary_runs) >= 2
+            else 0,
         }
         print(json.dumps(payload, indent=2))
         return
@@ -49,8 +55,10 @@ def run(args: argparse.Namespace):
     print("║       UIdetox Run History            ║")
     print("╚══════════════════════════════════════╝")
     print()
-    print(f"  {'#':>3s}  {'Trigger':>8s}  {'Score':>6s}  {'Pending':>8s}  {'Resolved':>9s}  Timestamp")
-    print(f"  {'─'*3}  {'─'*8}  {'─'*6}  {'─'*8}  {'─'*9}  {'─'*20}")
+    print(
+        f"  {'#':>3s}  {'Trigger':>8s}  {'Score':>6s}  {'Pending':>8s}  {'Resolved':>9s}  Timestamp"
+    )
+    print(f"  {'─' * 3}  {'─' * 8}  {'─' * 6}  {'─' * 8}  {'─' * 9}  {'─' * 20}")
 
     for i, r in enumerate(summary_runs, 1):
         ts = r.get("timestamp", "")[:19]
@@ -69,7 +77,9 @@ def run(args: argparse.Namespace):
         else:
             trend = " "
 
-        print(f"  {i:3d}  {trigger:>8s}  {score:4d}{trend:2s}  {r.get('pending', 0):8d}  {r.get('resolved', 0):9d}  {ts}")
+        print(
+            f"  {i:3d}  {trigger:>8s}  {score:4d}{trend:2s}  {r.get('pending', 0):8d}  {r.get('resolved', 0):9d}  {ts}"
+        )
 
     print(f"\n  Total runs: {len(summary_runs)}")
 
@@ -79,7 +89,9 @@ def run(args: argparse.Namespace):
         last = summary_runs[-1].get("score", 0)
         delta = last - first
         direction = "📈" if delta > 0 else "📉" if delta < 0 else "➡️"
-        print(f"  Progression: {first} → {last} ({'+' if delta >= 0 else ''}{delta}) {direction}")
+        print(
+            f"  Progression: {first} → {last} ({'+' if delta >= 0 else ''}{delta}) {direction}"
+        )
 
     if show_full:
         print("\n  ─── Full Run Details ───")
@@ -91,7 +103,12 @@ def run(args: argparse.Namespace):
             print(f"      Objective      : {_safe_int(run.get('objective_score'))}")
 
             subjective_score = run.get("subjective_score")
-            subjective_text = str(_safe_int(subjective_score)) if isinstance(subjective_score, (int, float)) and not isinstance(subjective_score, bool) else "n/a"
+            subjective_text = (
+                str(_safe_int(subjective_score))
+                if isinstance(subjective_score, (int, float))
+                and not isinstance(subjective_score, bool)
+                else "n/a"
+            )
             print(f"      Subjective     : {subjective_text}")
             print(f"      Pending issues : {_safe_int(run.get('pending_issues'))}")
             print(f"      Resolved       : {_safe_int(run.get('resolved_issues'))}")

@@ -31,9 +31,7 @@ def run(args: argparse.Namespace):
     config = load_config()
     visual_status = project_visual_evidence_status(
         config,
-        required=(
-            True if getattr(args, "require_visual_evidence", False) else None
-        ),
+        required=(True if getattr(args, "require_visual_evidence", False) else None),
         manifest_path=getattr(args, "visual_evidence_file", None),
     )
     issues = state.get("issues", [])
@@ -50,17 +48,167 @@ def run(args: argparse.Namespace):
 
     # Category breakdown (infer from issue descriptions)
     categories: dict[str, dict] = {
-        "typography": {"keywords": ["font", "typography", "inter", "roboto", "type scale", "line-height", "px font"], "pending": 0, "resolved": 0},
-        "color": {"keywords": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "blue", "black", "hex color"], "pending": 0, "resolved": 0},
-        "layout": {"keywords": ["layout", "grid", "spacing", "padding", "margin", "dashboard", "card", "center", "viewport", "h-screen", "flex center"], "pending": 0, "resolved": 0},
-        "motion": {"keywords": ["animation", "bounce", "pulse", "spin", "transition", "motion", "hover"], "pending": 0, "resolved": 0},
-        "states": {"keywords": ["loading", "error", "empty", "skeleton", "disabled", "hover state", "focus"], "pending": 0, "resolved": 0},
-        "a11y": {"keywords": ["accessibility", "a11y", "aria", "alt text", "focus", "contrast ratio", "skip-to-content", "htmlFor"], "pending": 0, "resolved": 0},
-        "materiality": {"keywords": ["shadow", "glassmorphism", "radius", "border", "backdrop", "blur", "glow", "opacity"], "pending": 0, "resolved": 0},
-        "content": {"keywords": ["copy", "lorem", "generic", "placeholder", "cliche", "john doe", "acme", "emoji", "oops", "exclamation"], "pending": 0, "resolved": 0},
-        "code quality": {"keywords": ["div soup", "semantic", "z-index", "inline style", "import", "console", "todo", "fixme", "!important", "ternary", "any type", "ts-ignore", "eslint-disable"], "pending": 0, "resolved": 0},
-        "duplication": {"keywords": ["duplicate", "repeated", "copy-paste", "identical", "same hex", "same className"], "pending": 0, "resolved": 0},
-        "dead code": {"keywords": ["commented-out", "unused import", "unreachable", "empty handler", "empty css", "unused state", "deprecated", "dead code", "no-op"], "pending": 0, "resolved": 0},
+        "typography": {
+            "keywords": [
+                "font",
+                "typography",
+                "inter",
+                "roboto",
+                "type scale",
+                "line-height",
+                "px font",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "color": {
+            "keywords": [
+                "color",
+                "gradient",
+                "palette",
+                "contrast",
+                "dark mode",
+                "purple",
+                "blue",
+                "black",
+                "hex color",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "layout": {
+            "keywords": [
+                "layout",
+                "grid",
+                "spacing",
+                "padding",
+                "margin",
+                "dashboard",
+                "card",
+                "center",
+                "viewport",
+                "h-screen",
+                "flex center",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "motion": {
+            "keywords": [
+                "animation",
+                "bounce",
+                "pulse",
+                "spin",
+                "transition",
+                "motion",
+                "hover",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "states": {
+            "keywords": [
+                "loading",
+                "error",
+                "empty",
+                "skeleton",
+                "disabled",
+                "hover state",
+                "focus",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "a11y": {
+            "keywords": [
+                "accessibility",
+                "a11y",
+                "aria",
+                "alt text",
+                "focus",
+                "contrast ratio",
+                "skip-to-content",
+                "htmlFor",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "materiality": {
+            "keywords": [
+                "shadow",
+                "glassmorphism",
+                "radius",
+                "border",
+                "backdrop",
+                "blur",
+                "glow",
+                "opacity",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "content": {
+            "keywords": [
+                "copy",
+                "lorem",
+                "generic",
+                "placeholder",
+                "cliche",
+                "john doe",
+                "acme",
+                "emoji",
+                "oops",
+                "exclamation",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "code quality": {
+            "keywords": [
+                "div soup",
+                "semantic",
+                "z-index",
+                "inline style",
+                "import",
+                "console",
+                "todo",
+                "fixme",
+                "!important",
+                "ternary",
+                "any type",
+                "ts-ignore",
+                "eslint-disable",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "duplication": {
+            "keywords": [
+                "duplicate",
+                "repeated",
+                "copy-paste",
+                "identical",
+                "same hex",
+                "same className",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
+        "dead code": {
+            "keywords": [
+                "commented-out",
+                "unused import",
+                "unreachable",
+                "empty handler",
+                "empty css",
+                "unused state",
+                "deprecated",
+                "dead code",
+                "no-op",
+            ],
+            "pending": 0,
+            "resolved": 0,
+        },
     }
     for issue in issues:
         desc = issue.get("issue", "").lower()
@@ -116,9 +264,9 @@ def run(args: argparse.Namespace):
         print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
         print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
     elif scans_run == 0 and scores["total_slop"] == 0:
-        print(f"  (Baseline — run 'uidetox scan' for an accurate score)")
+        print("  (Baseline — run 'uidetox scan' for an accurate score)")
     else:
-        print(f"    Objective only — run 'uidetox review' for LLM subjective score")
+        print("    Objective only — run 'uidetox review' for LLM subjective score")
     print()
 
     # Issue summary
@@ -141,7 +289,7 @@ def run(args: argparse.Namespace):
     print(f"  DESIGN_VARIANCE  : {config.get('DESIGN_VARIANCE', 8)}")
     print(f"  MOTION_INTENSITY : {config.get('MOTION_INTENSITY', 6)}")
     print(f"  VISUAL_DENSITY   : {config.get('VISUAL_DENSITY', 4)}")
-    auto_commit = config.get('auto_commit', False)
+    auto_commit = config.get("auto_commit", False)
     print(f"  AUTO_COMMIT      : {'enabled' if auto_commit else 'disabled'}")
     print(
         "  VISUAL_EVIDENCE  : "
@@ -151,10 +299,7 @@ def run(args: argparse.Namespace):
     for reason in visual_status.reasons:
         print(f"    - {reason}")
     if visual_status.incomplete_viewports:
-        print(
-            "    incomplete: "
-            + ", ".join(visual_status.incomplete_viewports)
-        )
+        print("    incomplete: " + ", ".join(visual_status.incomplete_viewports))
     generated_artifacts = [
         artifact
         for artifact in visual_status.reviewer_artifacts
@@ -187,7 +332,9 @@ def run(args: argparse.Namespace):
         print()
         print("  ─── Velocity & Progression ───")
         if total_found > 0:
-            print(f"  Fix rate        : {total_resolved}/{total_found} ({(total_resolved / total_found * 100):.0f}%)")
+            print(
+                f"  Fix rate        : {total_resolved}/{total_found} ({(total_resolved / total_found * 100):.0f}%)"
+            )
         if scans_run > 0:
             avg_per_scan = total_found / scans_run if total_found > 0 else 0
             print(f"  Avg issues/scan : {avg_per_scan:.1f}")
@@ -200,14 +347,16 @@ def run(args: argparse.Namespace):
             scores_list = [h["score"] for h in subjective_history]
             trend = scores_list[-1] - scores_list[0]
             trend_arrow = "↑" if trend > 0 else ("↓" if trend < 0 else "→")
-            print(f"  Subjective trend: {scores_list[0]} → {scores_list[-1]} ({trend_arrow}{abs(trend)}pts over {len(scores_list)} reviews)")
+            print(
+                f"  Subjective trend: {scores_list[0]} → {scores_list[-1]} ({trend_arrow}{abs(trend)}pts over {len(scores_list)} reviews)"
+            )
 
     # Session context
     session = get_session()
     if session:
-        phase = session.get('phase', 'unknown')
-        fixed = session.get('issues_fixed_this_session', 0)
-        last_component = session.get('last_component', '')
+        phase = session.get("phase", "unknown")
+        fixed = session.get("issues_fixed_this_session", 0)
+        last_component = session.get("last_component", "")
         session_parts = []
         session_parts.append(f"phase={phase}")
         if fixed > 0:
@@ -217,7 +366,9 @@ def run(args: argparse.Namespace):
         print(f"  Session         : {', '.join(session_parts)}")
 
     # Category breakdown with actionable hints
-    active_cats = {k: v for k, v in categories.items() if v["pending"] > 0 or v["resolved"] > 0}
+    active_cats = {
+        k: v for k, v in categories.items() if v["pending"] > 0 or v["resolved"] > 0
+    }
     if active_cats:
         print()
         print("  ─── Category Breakdown ───")
@@ -228,7 +379,9 @@ def run(args: argparse.Namespace):
             if total_cat > 0:
                 cat_score = int((resolved_val / total_cat) * 100)
                 cat_bar = "█" * (cat_score // 10) + "░" * (10 - cat_score // 10)
-                print(f"  {cat_name:<14} [{cat_bar}] {cat_score}%  ({pending_val} pending, {resolved_val} resolved)")
+                print(
+                    f"  {cat_name:<14} [{cat_bar}] {cat_score}%  ({pending_val} pending, {resolved_val} resolved)"
+                )
                 # Show hint for worst-performing categories
                 if cat_score == 0 and cat_name in _CATEGORY_HINTS:
                     print(f"                 ^ {_CATEGORY_HINTS[cat_name]}")
@@ -250,9 +403,13 @@ def run(args: argparse.Namespace):
     if score >= 95 and len(issues) == 0:
         print("TARGET REACHED. You may exit the loop.")
     elif len(issues) == 0:
-        print(f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design.")
+        print(
+            f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design."
+        )
     else:
-        print(f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue.")
+        print(
+            f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue."
+        )
 
     if visual_status.required and not visual_status.ready:
         sys.exit(1)

@@ -111,9 +111,7 @@ def test_threshold_boundary_is_strictly_greater_than_tolerance(tmp_path: Path) -
     changed.putpixel((1, 0), (31, 0, 0))
     changed.save(after)
 
-    manifest = build_visual_evidence(
-        _request(tmp_path, before, after, threshold=30)
-    )
+    manifest = build_visual_evidence(_request(tmp_path, before, after, threshold=30))
 
     assert manifest.comparisons[0].metrics.pixels_changed == 1
 
@@ -125,15 +123,15 @@ def test_threshold_is_constrained_before_saturating_channel_sum(tmp_path: Path) 
     Image.new("RGB", (1, 1), (255, 1, 0)).save(after)
 
     with pytest.raises(VisualEvidenceError) as error:
-        build_visual_evidence(
-            _request(tmp_path, before, after, threshold=255)
-        )
+        build_visual_evidence(_request(tmp_path, before, after, threshold=255))
 
     assert error.value.code == "invalid_request"
     assert "0 and 254" in str(error.value)
 
 
-def test_alpha_is_composited_deterministically_before_comparison(tmp_path: Path) -> None:
+def test_alpha_is_composited_deterministically_before_comparison(
+    tmp_path: Path,
+) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
     Image.new("RGBA", (1, 1), (255, 0, 0, 0)).save(before)
@@ -206,9 +204,7 @@ def test_pixel_limit_is_checked_before_full_decode(tmp_path: Path) -> None:
     Image.new("RGB", (2, 2)).save(after)
 
     with pytest.raises(VisualEvidenceError) as error:
-        build_visual_evidence(
-            _request(tmp_path, before, after, max_pixels=3)
-        )
+        build_visual_evidence(_request(tmp_path, before, after, max_pixels=3))
 
     assert error.value.code == "image_too_large"
 
@@ -461,16 +457,13 @@ def test_manifest_freshness_detects_source_context_and_tampering(
         expected_context_sha256s={},
     )
     assert context_missing.state == "stale"
-    assert any(
-        "no longer available" in reason
-        for reason in context_missing.reasons
-    )
+    assert any("no longer available" in reason for reason in context_missing.reasons)
 
     original_payload = json.loads(manifest_path.read_text())
     region_tampered_payload = json.loads(manifest_path.read_text())
-    region_tampered_payload["comparisons"][0]["regions"][0][
-        "provenance"
-    ] = "runtime:tampered"
+    region_tampered_payload["comparisons"][0]["regions"][0]["provenance"] = (
+        "runtime:tampered"
+    )
     manifest_path.write_text(json.dumps(region_tampered_payload))
     region_tampered = inspect_visual_evidence(manifest_path, required=True)
     assert region_tampered.state == "blocked"
@@ -543,8 +536,7 @@ def test_reviewer_artifacts_are_deterministic_and_localized(
 
     first = build_visual_evidence(request)
     comparison_artifacts = {
-        artifact.kind: artifact
-        for artifact in first.comparisons[0].artifacts
+        artifact.kind: artifact for artifact in first.comparisons[0].artifacts
     }
     assert set(comparison_artifacts) == {
         "amplified_diff",
@@ -572,12 +564,12 @@ def test_reviewer_artifacts_are_deterministic_and_localized(
     status = inspect_visual_evidence(request.manifest_path, required=True)
     assert status.incomplete_viewports == ()
     assert any(
-        artifact["kind"] == "contact_sheet"
-        for artifact in status.reviewer_artifacts
+        artifact["kind"] == "contact_sheet" for artifact in status.reviewer_artifacts
     )
-    assert [
-        region["region_id"] for region in status.top_changed_regions[:2]
-    ] == ["alpha-region", "changed-panel"]
+    assert [region["region_id"] for region in status.top_changed_regions[:2]] == [
+        "alpha-region",
+        "changed-panel",
+    ]
 
 
 def test_empty_diff_records_reviewer_artifact_omissions(
@@ -606,8 +598,7 @@ def test_empty_diff_records_reviewer_artifact_omissions(
 
     manifest = build_visual_evidence(request)
     artifacts = {
-        artifact.kind: artifact
-        for artifact in manifest.comparisons[0].artifacts
+        artifact.kind: artifact for artifact in manifest.comparisons[0].artifacts
     }
 
     assert artifacts["heat_overlay"].status == "omitted"
@@ -658,17 +649,13 @@ def test_invalid_icc_profile_warns_and_falls_back_to_native_pixels(
     )
 
     assert any("invalid ICC profile" in item for item in manifest.warnings)
-    assert manifest.comparisons[0].before.color_conversion == (
-        "native_fallback"
-    )
+    assert manifest.comparisons[0].before.color_conversion == ("native_fallback")
 
 
 def test_valid_icc_profile_converts_to_srgb_without_warning(
     tmp_path: Path,
 ) -> None:
-    profile = ImageCms.ImageCmsProfile(
-        ImageCms.createProfile("sRGB")
-    ).tobytes()
+    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
     Image.new("RGB", (10, 10), (10, 20, 30)).save(
@@ -726,7 +713,5 @@ def test_png_archival_controls_do_not_change_comparison_pixels(
     archive_path = archival.comparisons[0].artifacts[0].path
     assert fast_path is not None
     assert archive_path is not None
-    with Image.open(fast_path) as fast_image, Image.open(
-        archive_path
-    ) as archive_image:
+    with Image.open(fast_path) as fast_image, Image.open(archive_path) as archive_image:
         assert fast_image.tobytes() == archive_image.tobytes()

@@ -16,9 +16,7 @@ def render_untrusted_data(record: Mapping[str, object]) -> str:
     """Serialize repository-controlled data inside a fixed prompt boundary."""
     payload = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
     payload = (
-        payload.replace("&", r"\u0026")
-        .replace("<", r"\u003c")
-        .replace(">", r"\u003e")
+        payload.replace("&", r"\u0026").replace("<", r"\u003c").replace(">", r"\u003e")
     )
     return "\n".join(
         (

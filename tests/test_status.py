@@ -62,9 +62,9 @@ def test_status_json_exposes_visual_evidence(
     assert payload["visual_evidence"]["state"] == "fresh"
     assert payload["visual_evidence"]["comparisons"] == 4
     assert payload["visual_evidence"]["incomplete_viewports"] == ["mobile"]
-    assert payload["visual_evidence"]["top_changed_regions"][0][
-        "region_id"
-    ] == "primary"
+    assert (
+        payload["visual_evidence"]["top_changed_regions"][0]["region_id"] == "primary"
+    )
 
 
 def test_status_required_visual_evidence_gate_exits_nonzero(
@@ -97,6 +97,4 @@ def test_status_required_visual_evidence_gate_exits_nonzero(
         )
 
     assert exc_info.value.code == 1
-    assert json.loads(capsys.readouterr().out)["visual_evidence"]["state"] == (
-        "stale"
-    )
+    assert json.loads(capsys.readouterr().out)["visual_evidence"]["state"] == ("stale")

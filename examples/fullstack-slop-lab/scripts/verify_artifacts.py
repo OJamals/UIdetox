@@ -28,8 +28,14 @@ def main() -> None:
     require(evidence.get("runtime_status") == "current", "runtime evidence is stale")
     require(evidence.get("runtime_observed") is True, "runtime evidence is missing")
     require(evidence.get("files_mapped", 0) >= 20, "too few frontend files were mapped")
-    require(len(frontend_map.get("nodes", [])) >= 100, "semantic node graph is unexpectedly small")
-    require(len(frontend_map.get("edges", [])) >= 100, "semantic edge graph is unexpectedly small")
+    require(
+        len(frontend_map.get("nodes", [])) >= 100,
+        "semantic node graph is unexpectedly small",
+    )
+    require(
+        len(frontend_map.get("edges", [])) >= 100,
+        "semantic edge graph is unexpectedly small",
+    )
     source_manifest = evidence.get("source_manifest", {})
     mapped_hashes = {
         **source_manifest.get("files", {}),
@@ -40,7 +46,9 @@ def main() -> None:
         require(source_path.exists(), f"mapped source is missing: {relative_path}")
         if source_path.exists():
             actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-            require(actual_hash == expected_hash, f"mapped source changed: {relative_path}")
+            require(
+                actual_hash == expected_hash, f"mapped source changed: {relative_path}"
+            )
 
     mapped_routes = {
         node.get("name")
@@ -57,7 +65,10 @@ def main() -> None:
         for kind in ("frontend_only", "backend_only", "method_mismatch", "unresolved")
     }
     expected_parity = expectations["expected_parity_counts"]
-    require(actual_parity == expected_parity, f"parity mismatch: {actual_parity} != {expected_parity}")
+    require(
+        actual_parity == expected_parity,
+        f"parity mismatch: {actual_parity} != {expected_parity}",
+    )
     require(
         redesigns.get("parity", {}).get("counts") == expected_parity,
         "redesign artifact did not preserve parity findings",
@@ -67,8 +78,7 @@ def main() -> None:
     oracle = expectations["redesign_oracle"]
     require(len(proposals) == oracle["variants"], "unexpected redesign proposal count")
     distances = [
-        pair.get("score", 0)
-        for pair in redesigns.get("pairwise_distances", [])
+        pair.get("score", 0) for pair in redesigns.get("pairwise_distances", [])
     ]
     require(
         min(distances, default=0) >= oracle["minimum_pairwise_distance"],
@@ -78,7 +88,10 @@ def main() -> None:
     intent = redesigns.get("brief", {}).get("intent", {})
     expected_intent = expectations["intent"]
     for field, expected_value in expected_intent.items():
-        require(intent.get(field) == expected_value, f"intent field {field!r} lost its configured value")
+        require(
+            intent.get(field) == expected_value,
+            f"intent field {field!r} lost its configured value",
+        )
         require(
             intent.get("provenance", {}).get(field) == "explicit",
             f"intent field {field!r} lost explicit provenance",
@@ -97,7 +110,9 @@ def main() -> None:
         }
     )
     for proposal in proposals:
-        missing_targets = sorted(required_targets - set(proposal.get("source_targets", [])))
+        missing_targets = sorted(
+            required_targets - set(proposal.get("source_targets", []))
+        )
         require(
             not missing_targets,
             f"{proposal.get('id', '<unknown>')} missing source targets: {missing_targets}",

@@ -11,7 +11,7 @@ from uidetox.memory import (
     get_reviewed_files,
     get_session,
     get_last_scan,
-    get_progress_log
+    get_progress_log,
 )
 
 
@@ -40,7 +40,9 @@ def run(args: argparse.Namespace):
             print("  [CONTINUATION HINT]")
             phase = session.get("phase", "")
             if phase == "scan_complete":
-                print("    Last action was a scan. Continue with: uidetox plan → uidetox next")
+                print(
+                    "    Last action was a scan. Continue with: uidetox plan → uidetox next"
+                )
             elif phase == "fixing":
                 print("    Fixes were in progress. Continue with: uidetox next")
             else:
@@ -56,11 +58,16 @@ def run(args: argparse.Namespace):
             print(f"    Files Scanned  : {last_scan.get('files_scanned', 0)}")
             by_tier = last_scan.get("by_tier", {})
             if by_tier:
-                tier_str = ", ".join(f"{k}={v}" for k, v in sorted(by_tier.items()) if v > 0)
+                tier_str = ", ".join(
+                    f"{k}={v}" for k, v in sorted(by_tier.items()) if v > 0
+                )
                 print(f"    By Tier        : {tier_str or 'none'}")
             by_cat = last_scan.get("by_category", {})
             if by_cat:
-                cat_str = ", ".join(f"{k}={v}" for k, v in sorted(by_cat.items(), key=lambda x: -x[1])[:5])
+                cat_str = ", ".join(
+                    f"{k}={v}"
+                    for k, v in sorted(by_cat.items(), key=lambda x: -x[1])[:5]
+                )
                 print(f"    Top Categories : {cat_str}")
             top_files = last_scan.get("top_files", [])
             if top_files:
@@ -71,7 +78,7 @@ def run(args: argparse.Namespace):
         if patterns:
             print(f"\n  ─── Learned Patterns ({len(patterns)}) ───")
             for idx, p in enumerate(patterns):
-                print(f"    {idx+1}. [{p.get('category', 'general')}] {p['pattern']}")
+                print(f"    {idx + 1}. [{p.get('category', 'general')}] {p['pattern']}")
         else:
             print("\n  ─── Learned Patterns ───")
             print("    No patterns learned yet.")
@@ -81,14 +88,14 @@ def run(args: argparse.Namespace):
         if notes:
             print(f"\n  ─── Agent Notes ({len(notes)}) ───")
             for idx, n in enumerate(notes):
-                print(f"    {idx+1}. {n['note']}")
+                print(f"    {idx + 1}. {n['note']}")
         else:
             print("\n  ─── Agent Notes ───")
             print("    No notes saved yet.")
 
         # Reviewed files
         files = get_reviewed_files()
-        print(f"\n  ─── Reviewed Files ───")
+        print("\n  ─── Reviewed Files ───")
         print(f"    {len(files)} file(s) in memory.")
 
         # Progress log (auto-saved, last 10)
@@ -97,7 +104,9 @@ def run(args: argparse.Namespace):
             print(f"\n  ─── Recent Progress ({len(progress)} entries) ───")
             for entry in progress[-10:]:
                 ts = entry.get("timestamp", "")[:19]  # Trim to readable length
-                print(f"    [{ts}] {entry.get('action', '?')}: {entry.get('details', '')}")
+                print(
+                    f"    [{ts}] {entry.get('action', '?')}: {entry.get('details', '')}"
+                )
 
         print()
 

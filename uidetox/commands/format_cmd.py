@@ -19,11 +19,18 @@ def run(args: argparse.Namespace):
         if not profile.formatter:
             print("No formatter detected. Install biome or prettier.")
             return
-        formatter = {"name": profile.formatter.name, "run_cmd": profile.formatter.run_cmd,
-                     "fix_cmd": profile.formatter.fix_cmd}
+        formatter = {
+            "name": profile.formatter.name,
+            "run_cmd": profile.formatter.run_cmd,
+            "fix_cmd": profile.formatter.fix_cmd,
+        }
 
     fix = getattr(args, "fix", False)
-    cmd = formatter["fix_cmd"] if fix and formatter.get("fix_cmd") else formatter["run_cmd"]
+    cmd = (
+        formatter["fix_cmd"]
+        if fix and formatter.get("fix_cmd")
+        else formatter["run_cmd"]
+    )
 
     print("==============================")
     print(f" UIdetox Format ({formatter['name']})")
@@ -34,8 +41,7 @@ def run(args: argparse.Namespace):
     try:
         argv, env = prepare_subprocess_cmd(cmd)
         result = subprocess.run(
-            argv,
-            capture_output=True, text=True, cwd=project_root, timeout=120, env=env
+            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
         )
     except FileNotFoundError:
         print(f"Command not found. Install {formatter['name']}.")
@@ -60,4 +66,4 @@ def run(args: argparse.Namespace):
             print(output[:2000])
 
     if not fix and result.returncode != 0:
-        print(f"\nRun 'uidetox format --fix' to auto-fix formatting issues.")
+        print("\nRun 'uidetox format --fix' to auto-fix formatting issues.")

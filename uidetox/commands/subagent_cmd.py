@@ -37,18 +37,20 @@ def _handle_stage_prompt(stage: str, parallel: int):
         sys.exit(1)
 
     prompts = generate_stage_prompt(stage, parallel)
-    
-    print(f"\n[ORCHESTRATOR] Generated {len(prompts)} parallel prompt(s) for the '{stage.upper()}' stage.\n")
-    
+
+    print(
+        f"\n[ORCHESTRATOR] Generated {len(prompts)} parallel prompt(s) for the '{stage.upper()}' stage.\n"
+    )
+
     session_ids = []
     for i, prompt in enumerate(prompts):
         session_id = create_session(stage, prompt)
         session_ids.append(session_id)
-        
-        print(f"╔══════════════════════════════════════╗")
+
+        print("╔══════════════════════════════════════╗")
         print(f"║  Sub-Agent Session: {session_id:16s}  ║")
-        print(f"╚══════════════════════════════════════╝")
-        print(f"  Stage: {stage} (Shard {i+1}/{len(prompts)})")
+        print("╚══════════════════════════════════════╝")
+        print(f"  Stage: {stage} (Shard {i + 1}/{len(prompts)})")
         print(f"  Session stored in .uidetox/sessions/session_{session_id}/")
         print()
         print("━" * 60)
@@ -61,9 +63,13 @@ def _handle_stage_prompt(stage: str, parallel: int):
         print(f"Execute the {stage.upper()} stage prompt above.")
         print(f"When done, run: uidetox subagent --record {session_ids[0]}")
     else:
-        print(f"Launch {len(prompts)} parallel subagents and feed each one a distinct prompt from above.")
-        print(f"Each agent MUST only work on its assigned shard to prevent merge conflicts.")
-        print(f"When all agents are done, record them sequentially:")
+        print(
+            f"Launch {len(prompts)} parallel subagents and feed each one a distinct prompt from above."
+        )
+        print(
+            "Each agent MUST only work on its assigned shard to prevent merge conflicts."
+        )
+        print("When all agents are done, record them sequentially:")
         for sid in session_ids:
             print(f"  uidetox subagent --record {sid}")
 
@@ -79,7 +85,9 @@ def _handle_list():
     print("╚══════════════════════════════════════╝")
     for s in sessions:
         status_icon = "✅" if s.get("status") == "completed" else "⏳"
-        print(f"  {status_icon} {s.get('session_id', '?'):8s} | {s.get('stage', '?'):12s} | {s.get('status', '?')}")
+        print(
+            f"  {status_icon} {s.get('session_id', '?'):8s} | {s.get('stage', '?'):12s} | {s.get('status', '?')}"
+        )
     print(f"\n  Total: {len(sessions)} session(s)")
 
 
@@ -97,7 +105,7 @@ def _handle_show(session_id: str):
     if meta.get("completed_at"):
         print(f"Done:    {meta.get('completed_at')}")
     if "result" in session:
-        print(f"\nResult:")
+        print("\nResult:")
         print(json.dumps(session["result"], indent=2)[:2000])
 
 
@@ -120,7 +128,9 @@ def _handle_default():
     print("UIdetox Sub-Agent Manager")
     print()
     print("Usage:")
-    print("  uidetox subagent --stage-prompt <stage>  Generate a focused prompt for a stage")
+    print(
+        "  uidetox subagent --stage-prompt <stage>  Generate a focused prompt for a stage"
+    )
     print("  uidetox subagent --list                  List all sessions")
     print("  uidetox subagent --show <session_id>     Show session details")
     print("  uidetox subagent --record <session_id>   Mark a session as completed")

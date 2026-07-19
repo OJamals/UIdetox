@@ -66,8 +66,7 @@ class FakeWorkflow:
             }
         else:
             artifacts = {
-                kind: f"inline:{phase}:{kind}"
-                for kind in context.phase.artifact_kinds
+                kind: f"inline:{phase}:{kind}" for kind in context.phase.artifact_kinds
             }
         return AdapterResult(
             artifacts=artifacts,
@@ -76,9 +75,7 @@ class FakeWorkflow:
         )
 
     def adapters(self) -> WorkflowAdapters:
-        return WorkflowAdapters(
-            {phase.adapter: self.run for phase in PHASES}
-        )
+        return WorkflowAdapters({phase.adapter: self.run for phase in PHASES})
 
 
 def _inputs(
@@ -273,9 +270,7 @@ def test_artifact_invalidation_preserves_unaffected_issue_gate_signal(
     engine = _engine(tmp_path, fake)
     first = engine.run(_inputs(queue="queue-with-issues"))
     state = json.loads(first.state_path.read_text(encoding="utf-8"))
-    artifact = Path(
-        state["phases"]["semantic_map"]["artifacts"]["frontend_map"]
-    )
+    artifact = Path(state["phases"]["semantic_map"]["artifacts"]["frontend_map"])
     artifact.unlink()
     baseline_count = len(fake.calls)
 

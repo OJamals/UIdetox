@@ -35,8 +35,12 @@ def test_load_dynamic_colors_merges_supported_sources(tmp_path):
 
 
 def test_load_dynamic_colors_uses_first_tailwind_config(tmp_path):
-    (tmp_path / "tailwind.config.js").write_text("colors: { brand: '#111111' }", encoding="utf-8")
-    (tmp_path / "tailwind.config.ts").write_text("colors: { brand: '#222222' }", encoding="utf-8")
+    (tmp_path / "tailwind.config.js").write_text(
+        "colors: { brand: '#111111' }", encoding="utf-8"
+    )
+    (tmp_path / "tailwind.config.ts").write_text(
+        "colors: { brand: '#222222' }", encoding="utf-8"
+    )
 
     assert load_dynamic_colors(tmp_path)["brand"] == "#111111"
 

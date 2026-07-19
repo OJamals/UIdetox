@@ -15,7 +15,9 @@ def main() -> None:
     frontend_map_path = ROOT / ".uidetox" / "frontend-map.json"
     redesign_path = ROOT / ".uidetox" / "redesigns.json"
     if not frontend_map_path.exists():
-        raise SystemExit("Run `uidetox map frontend --runtime --url http://127.0.0.1:4173` first.")
+        raise SystemExit(
+            "Run `uidetox map frontend --runtime --url http://127.0.0.1:4173` first."
+        )
 
     frontend_map = load(frontend_map_path)
     evidence = frontend_map.get("evidence", {})
@@ -40,16 +42,14 @@ def main() -> None:
         redesigns = load(redesign_path)
         proposals = redesigns.get("proposals", [])
         distances = [
-            item.get("score", 0)
-            for item in redesigns.get("pairwise_distances", [])
+            item.get("score", 0) for item in redesigns.get("pairwise_distances", [])
         ]
         intent = redesigns.get("brief", {}).get("intent", {})
         summary["intent_provenance"] = intent.get("provenance", {})
         summary["pairwise_minimum_distance"] = min(distances, default=None)
         summary["proposal_count"] = len(proposals)
         summary["proposal_topologies"] = [
-            proposal.get("fingerprint", {}).get("topology")
-            for proposal in proposals
+            proposal.get("fingerprint", {}).get("topology") for proposal in proposals
         ]
         summary["proposal_targets"] = sorted(
             {

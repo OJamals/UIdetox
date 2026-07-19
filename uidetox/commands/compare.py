@@ -29,7 +29,9 @@ def run(args: argparse.Namespace) -> None:
         return
 
     print(f"Redesign comparison for: {redesign_set.target}")
-    print(f"  Baseline topology: {redesign_set.baseline_fingerprint.get('topology', 'unknown')}")
+    print(
+        f"  Baseline topology: {redesign_set.baseline_fingerprint.get('topology', 'unknown')}"
+    )
     print(f"  Proposals        : {len(redesign_set.proposals)}")
 
     for proposal in redesign_set.proposals:
@@ -43,7 +45,9 @@ def run(args: argparse.Namespace) -> None:
         print("\nPairwise structural distance")
         for distance in redesign_set.pairwise_distances:
             dimensions = ", ".join(distance.changed_dimensions)
-            print(f"  {distance.left} ↔ {distance.right}: {distance.score}/100 ({dimensions})")
+            print(
+                f"  {distance.left} ↔ {distance.right}: {distance.score}/100 ({dimensions})"
+            )
 
     recommendation = payload.get("recommended_proposal")
     if recommendation:

@@ -23,7 +23,10 @@ def _analyze_rule(
     issues = []
     # Skip rules conditioned on DESIGN_VARIANCE if below threshold
     variance_threshold = rule.get("_requires_variance_gt")
-    if isinstance(variance_threshold, (int, float)) and design_variance <= variance_threshold:
+    if (
+        isinstance(variance_threshold, (int, float))
+        and design_variance <= variance_threshold
+    ):
         return issues
 
     custom = rule.get("_custom_check")
@@ -38,20 +41,26 @@ def _analyze_rule(
     if isinstance(pattern, re.Pattern):
         m = pattern.search(content)
         if m:
-            line_number = content.count('\n', 0, m.start()) + 1
-            col = m.start() - content.rfind('\n', 0, m.start())
+            line_number = content.count("\n", 0, m.start()) + 1
+            col = m.start() - content.rfind("\n", 0, m.start())
             lines_list = content.splitlines()
-            snippet = lines_list[line_number - 1].strip() if line_number <= len(lines_list) else ""
-            issues.append({
-                "id": rule["id"],
-                "file": str(filepath.resolve()),
-                "tier": rule["tier"],
-                "issue": rule["description"],
-                "command": rule["command"],
-                "line": line_number,
-                "column": col,
-                "snippet": snippet,
-            })
+            snippet = (
+                lines_list[line_number - 1].strip()
+                if line_number <= len(lines_list)
+                else ""
+            )
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                    "line": line_number,
+                    "column": col,
+                    "snippet": snippet,
+                }
+            )
     return issues
 
 
@@ -105,11 +114,16 @@ def analyze_file(
 
     return issues
 
-def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = None,
-                      zone_overrides: dict[str, str] | None = None,
-                      design_variance: int = 8,
-                      target_files: list[str | Path] | None = None,
-                      *, _analyze_file=None) -> list[dict]:
+
+def analyze_directory(
+    root_path: str = ".",
+    exclude_paths: list[str] | None = None,
+    zone_overrides: dict[str, str] | None = None,
+    design_variance: int = 8,
+    target_files: list[str | Path] | None = None,
+    *,
+    _analyze_file=None,
+) -> list[dict]:
     """Walk directory and return a flat list of all detected slop issues.
 
     Args:
@@ -134,7 +148,11 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     analysis_targets = file_set.discover()
 
     from concurrent.futures import ThreadPoolExecutor
-    from uidetox.color_utils import load_dynamic_colors, audit_project_colors, find_color_config_sources
+    from uidetox.color_utils import (
+        load_dynamic_colors,
+        audit_project_colors,
+        find_color_config_sources,
+    )
 
     color_sources = find_color_config_sources(root)
     dynamic_colors = load_dynamic_colors(root)
@@ -147,12 +165,14 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     file_analyzer = _analyze_file or analyze_file
 
     def _analyze_wrapper(fp: Path) -> list:
-        return file_analyzer(fp, design_variance=design_variance, dynamic_colors=dynamic_colors) # type: ignore
+        return file_analyzer(
+            fp, design_variance=design_variance, dynamic_colors=dynamic_colors
+        )  # type: ignore
 
     futures = []
     with ThreadPoolExecutor() as executor:
         for file_path in analysis_targets:
-            futures.append(executor.submit(_analyze_wrapper, file_path)) # type: ignore
+            futures.append(executor.submit(_analyze_wrapper, file_path))  # type: ignore
 
         for future in futures:
             all_issues.extend(future.result())
@@ -162,15 +182,17 @@ def analyze_directory(root_path: str = ".", exclude_paths: list[str] | None = No
     # Project-level dynamic color audit based on actual Tailwind/theme tokens.
     # Cap output to keep the queue actionable rather than overwhelming.
     for violation in color_audit_violations[:8]:
-        all_issues.append({
-            "id": "LOW_CONTRAST_SLOP",
-            "file": color_issue_file,
-            "tier": "T1" if violation.get("severity") == "critical" else "T2",
-            "issue": (
-                f"Dynamic color audit: {violation['foreground']} on {violation['background']} "
-                f"fails WCAG AA ({violation['ratio']}:1 < {violation['required']}:1)."
-            ),
-            "command": "Adjust the theme token pair to meet WCAG AA contrast, then rescan to verify the updated palette."
-        })
+        all_issues.append(
+            {
+                "id": "LOW_CONTRAST_SLOP",
+                "file": color_issue_file,
+                "tier": "T1" if violation.get("severity") == "critical" else "T2",
+                "issue": (
+                    f"Dynamic color audit: {violation['foreground']} on {violation['background']} "
+                    f"fails WCAG AA ({violation['ratio']}:1 < {violation['required']}:1)."
+                ),
+                "command": "Adjust the theme token pair to meet WCAG AA contrast, then rescan to verify the updated palette.",
+            }
+        )
 
     return all_issues

@@ -8,37 +8,41 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping
 
 
-FRONTEND_EXTENSIONS = frozenset({
-    ".css",
-    ".html",
-    ".js",
-    ".jsx",
-    ".less",
-    ".md",
-    ".sass",
-    ".scss",
-    ".svelte",
-    ".ts",
-    ".tsx",
-    ".vue",
-})
+FRONTEND_EXTENSIONS = frozenset(
+    {
+        ".css",
+        ".html",
+        ".js",
+        ".jsx",
+        ".less",
+        ".md",
+        ".sass",
+        ".scss",
+        ".svelte",
+        ".ts",
+        ".tsx",
+        ".vue",
+    }
+)
 
-IGNORED_DIRECTORY_NAMES = frozenset({
-    ".claude",
-    ".cursor",
-    ".git",
-    ".next",
-    ".nuxt",
-    ".turbo",
-    ".uidetox",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "vendor",
-})
+IGNORED_DIRECTORY_NAMES = frozenset(
+    {
+        ".claude",
+        ".cursor",
+        ".git",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        ".uidetox",
+        "__pycache__",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "out",
+        "vendor",
+    }
+)
 
 _PROJECT_ROOT_MARKERS = (
     ".uidetox",
@@ -83,7 +87,9 @@ def _normalized_parts(value: str) -> tuple[str, ...]:
     normalized = value.strip().replace("\\", "/").strip("/")
     if not normalized:
         return ()
-    return tuple(part for part in PurePosixPath(normalized).parts if part not in ("", "."))
+    return tuple(
+        part for part in PurePosixPath(normalized).parts if part not in ("", ".")
+    )
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -167,14 +173,21 @@ class ProjectFileSet:
         candidate = self._resolve(path)
         if not candidate.is_dir():
             return False
-        if not _is_within(candidate, self.root) or not _is_within(candidate, self.scope):
+        if not _is_within(candidate, self.root) or not _is_within(
+            candidate, self.scope
+        ):
             return False
         relative_parts = candidate.relative_to(self.root).parts
-        if any(part.startswith(".") or part in IGNORED_DIRECTORY_NAMES for part in relative_parts):
+        if any(
+            part.startswith(".") or part in IGNORED_DIRECTORY_NAMES
+            for part in relative_parts
+        ):
             return False
         if any(part in self._excluded_basenames for part in relative_parts):
             return False
-        if any(relative_parts[:len(parts)] == parts for parts in self._excluded_subtrees):
+        if any(
+            relative_parts[: len(parts)] == parts for parts in self._excluded_subtrees
+        ):
             return False
         return not any(
             candidate == zone_path or _is_within(candidate, zone_path)
@@ -186,25 +199,37 @@ class ProjectFileSet:
         candidate = self._resolve(path)
         if not candidate.is_file():
             return False
-        if not _is_within(candidate, self.root) or not _is_within(candidate, self.scope):
+        if not _is_within(candidate, self.root) or not _is_within(
+            candidate, self.scope
+        ):
             return False
 
         relative = candidate.relative_to(self.root)
         directories = relative.parts[:-1]
-        if any(part.startswith(".") or part in IGNORED_DIRECTORY_NAMES for part in directories):
+        if any(
+            part.startswith(".") or part in IGNORED_DIRECTORY_NAMES
+            for part in directories
+        ):
             return False
 
         if any(part in self._excluded_basenames for part in directories):
             return False
         relative_parts = relative.parts
-        if any(relative_parts[:len(parts)] == parts for parts in self._excluded_subtrees):
+        if any(
+            relative_parts[: len(parts)] == parts for parts in self._excluded_subtrees
+        ):
             return False
 
-        if any(candidate == zone_path or _is_within(candidate, zone_path) for zone_path in self._skipped_zone_paths):
+        if any(
+            candidate == zone_path or _is_within(candidate, zone_path)
+            for zone_path in self._skipped_zone_paths
+        ):
             return False
         return not require_extension or candidate.suffix.lower() in FRONTEND_EXTENSIONS
 
-    def explicit_candidates(self, *, require_extension: bool = False) -> list[Path] | None:
+    def explicit_candidates(
+        self, *, require_extension: bool = False
+    ) -> list[Path] | None:
         """Resolve explicit targets; return ``None`` when discovery should walk."""
         if self.explicit_targets is None:
             return None

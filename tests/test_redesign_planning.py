@@ -119,8 +119,14 @@ app.get("/items", handler);
 
     _frontend_map, _redesigns, proposal = _proposal(tmp_path)
 
-    assert any("Align the frontend and backend HTTP methods" in item for item in proposal.feasibility_blockers)
-    assert any(item.startswith("Operation parity check:") for item in proposal.observable_checks)
+    assert any(
+        "Align the frontend and backend HTTP methods" in item
+        for item in proposal.feasibility_blockers
+    )
+    assert any(
+        item.startswith("Operation parity check:")
+        for item in proposal.observable_checks
+    )
 
 
 def test_stale_runtime_evidence_is_retained_but_cannot_satisfy_checks(
@@ -164,8 +170,12 @@ def test_stale_runtime_evidence_is_retained_but_cannot_satisfy_checks(
     assert refreshed.evidence["runtime_status"] == "stale"
     assert refreshed.evidence["runtime_screenshots"] == ["before.png"]
     assert proposal.evidence_freshness["runtime"]["status"] == "stale"
-    assert any("Runtime evidence is stale" in item for item in proposal.feasibility_blockers)
-    assert not any(item.startswith("Runtime check:") for item in proposal.observable_checks)
+    assert any(
+        "Runtime evidence is stale" in item for item in proposal.feasibility_blockers
+    )
+    assert not any(
+        item.startswith("Runtime check:") for item in proposal.observable_checks
+    )
 
 
 def test_retain_runtime_evidence_preserves_runtime_graph(tmp_path) -> None:
@@ -323,7 +333,11 @@ def test_new_fields_roundtrip_legacy_load_and_prototype_isolation(tmp_path) -> N
     assert "Observable acceptance checks:" in brief
     evidence_start = brief.index("\nBEGIN_UIDETOX_EVIDENCE\n")
     evidence_end = brief.index("\nEND_UIDETOX_EVIDENCE\n")
-    assert evidence_start < brief.index("Affected source modules with evidence:") < evidence_end
+    assert (
+        evidence_start
+        < brief.index("Affected source modules with evidence:")
+        < evidence_end
+    )
     assert evidence_start < brief.index("Observable acceptance checks:") < evidence_end
 
     legacy = proposal.__dict__.copy()

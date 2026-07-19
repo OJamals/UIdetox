@@ -55,22 +55,22 @@ def _list_available_skills() -> list[str]:
 def run(args: argparse.Namespace):
     skill_name = args.command
     target = getattr(args, "target", ".")
-    
+
     skill_file = _find_skill_file(skill_name)
-    
+
     if not skill_file:
         available = _list_available_skills()
         print(f"Error: Skill command '{skill_name}' not found.")
         if available:
             print(f"Available skills: {', '.join(available)}")
         sys.exit(1)
-        
+
     try:
         content = skill_file.read_text(encoding="utf-8")
     except Exception as e:
         print(f"Error reading skill file: {e}")
         sys.exit(1)
-        
+
     print("================================================================")
     print(f" UIdetox Skill Execution: /{skill_name.upper()}")
     print("================================================================")
@@ -84,6 +84,6 @@ def run(args: argparse.Namespace):
     print(content)
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print("\nWhen finished, track your architectural learnings:")
-    print("  uidetox memory pattern \"Discovered that...\"")
+    print('  uidetox memory pattern "Discovered that..."')
     print("Then check your score progression:")
     print("  uidetox status")
