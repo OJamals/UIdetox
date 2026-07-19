@@ -416,7 +416,10 @@ def parse_args(args_list=None):
 def main():
     args = parse_args()
     if not args.command:
-        # Just show help
+        from uidetox.onboarding import run_first_run
+
+        if run_first_run():
+            return
         parse_args(["--help"])
         return
 
