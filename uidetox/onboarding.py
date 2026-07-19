@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from uidetox.design_context import DesignSettings
+from uidetox.intent_journal import record_intent_artifacts
 from uidetox.state import get_uidetox_dir
 
 ONBOARDING_VERSION = 1
@@ -68,7 +70,9 @@ class _OnboardingState:
 
     @property
     def pending_steps(self) -> tuple[str, ...]:
-        return tuple(step for step in ONBOARDING_STEPS if step not in self.completed_steps)
+        return tuple(
+            step for step in ONBOARDING_STEPS if step not in self.completed_steps
+        )
 
     @property
     def next_step(self) -> str | None:
@@ -149,6 +153,42 @@ def _save_state(path: Path, state: _OnboardingState) -> None:
         raise
 
 
+def _load_onboarding_config(state_path: Path) -> dict[str, object]:
+    config_path = state_path.parent / "config.json"
+    if not config_path.exists():
+        return {}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_onboarding_config(
+    state_path: Path,
+    config: dict[str, object],
+) -> None:
+    config_path = state_path.parent / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        dir=config_path.parent,
+        prefix=f".{config_path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(config, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_name, config_path)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
 def _confirmed_start(environment: OnboardingEnvironment) -> bool:
     try:
         answer = environment.input_fn("Start guided setup now? [Y/n] ")
@@ -202,6 +242,7 @@ def run_first_run(environment: OnboardingEnvironment | None = None) -> bool:
         _save_state(environment.state_path, state)
         environment.output_fn("Resuming UIdetox guided setup")
 
+    entry_step = state.next_step
     if not starting_now and state.next_step == "agent":
         from uidetox.agent_integration import (
             AgentIntegrationEnvironment,
@@ -234,6 +275,45 @@ def run_first_run(environment: OnboardingEnvironment | None = None) -> bool:
         )
         if capability_result.complete:
             state = state.complete("capabilities", environment.now_fn())
+            _save_state(environment.state_path, state)
+
+    if state.next_step == "intent" and entry_step == "intent":
+        from uidetox.commands.setup import capture_interactive_intent
+
+        config = _load_onboarding_config(environment.state_path)
+        settings, intent_changed = capture_interactive_intent(
+            config,
+            input_fn=environment.input_fn,
+            output_fn=environment.output_fn,
+            confirmed_at=environment.now_fn(),
+        )
+        if intent_changed:
+            config.update(settings.dials.to_config())
+            _save_onboarding_config(environment.state_path, config)
+        if settings.intent.confirmation_status == "confirmed":
+            state = state.complete("intent", environment.now_fn())
+            _save_state(environment.state_path, state)
+        else:
+            environment.output_fn(
+                "Website intent is not confirmed. Provide the product goal, "
+                "audience, and primary job to continue."
+            )
+
+    if state.next_step == "handoff":
+        config = _load_onboarding_config(environment.state_path)
+        intent = DesignSettings.from_config(config).intent
+        if intent.confirmation_status == "confirmed":
+            artifacts = record_intent_artifacts(
+                intent,
+                source="onboarding:interactive",
+                project_root=environment.state_path.parent.parent,
+                uidetox_dir=environment.state_path.parent,
+            )
+            environment.output_fn(f"Intent event saved: {artifacts.event['event_id']}")
+            environment.output_fn(f"Agent handoff saved: {artifacts.handoff_path}")
+            environment.output_fn("Copy-ready agent prompt:")
+            environment.output_fn(artifacts.prompt)
+            state = state.complete("handoff", environment.now_fn())
             _save_state(environment.state_path, state)
 
     _render_pending(environment, state)

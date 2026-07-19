@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 from uidetox.cli import parse_args
 from uidetox.commands import setup as setup_command
@@ -98,6 +99,15 @@ def test_dials_change_proposal_structure_and_fingerprint(tmp_path):
 
 def test_setup_persists_typed_design_intent(monkeypatch):
     saved = {}
+    monkeypatch.setattr(
+        setup_command,
+        "record_intent_artifacts",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            event={"event_id": "intent-test"},
+            handoff_path=Path(".uidetox/agent-handoff.md"),
+            prompt="test prompt",
+        ),
+    )
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
     monkeypatch.setattr(setup_command, "load_config", lambda: {})
     monkeypatch.setattr(
@@ -147,6 +157,15 @@ def test_setup_persists_typed_design_intent(monkeypatch):
 def test_setup_interactively_captures_and_confirms_product_intent(monkeypatch):
     saved = {}
     prompts = []
+    monkeypatch.setattr(
+        setup_command,
+        "record_intent_artifacts",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            event={"event_id": "intent-test"},
+            handoff_path=Path(".uidetox/agent-handoff.md"),
+            prompt="test prompt",
+        ),
+    )
     answers = iter(
         [
             "help independent clinics reduce missed appointments",

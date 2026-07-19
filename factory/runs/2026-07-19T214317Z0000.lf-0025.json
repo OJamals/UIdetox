@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0025.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T21:43:17+00:00",
+  "id": "lf-0025",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0025.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0025-intent-journal-handoff.md",
+  "spec_sha256": "124af342d2e0c6d7c3d4571f29c0950d2d34dc810dbcd35ada1462cc29ba87de",
+  "status": "planned",
+  "title": "Journal intent provenance and generate an agent handoff"
+}
