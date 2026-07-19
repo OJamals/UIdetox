@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "569257235dac46300128cb1beb5e0123b2a91f8b",
-    "indexed_at": "2026-07-19T17:17:55Z",
+    "commit": "d577abba3a665e23c4c80417af32242e7e7768ba",
+    "indexed_at": "2026-07-19T17:20:12Z",
     "project": "Users-omar-Documents-Projects-UIdetox-uidetox",
     "nodes": 4127,
     "edges": 14136,
     "original_size": 10485760,
-    "compressed_size": 2266086,
+    "compressed_size": 2266046,
     "compression_level": 9
 }
