@@ -8,6 +8,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from uidetox.capabilities import capture_install_guidance
 from uidetox.frontend_map import FRONTEND_MAP_FILE
 from uidetox.runtime_observer import (
     RuntimeObservation,
@@ -37,10 +38,7 @@ from uidetox.visual_semantics import (
 )
 
 
-_CAPTURE_INSTALL_GUIDANCE = (
-    "Install capture support with: pip install 'uidetox[capture]'\n"
-    "Install Chromium with: python -m playwright install chromium"
-)
+_CAPTURE_INSTALL_GUIDANCE = capture_install_guidance()
 _RESPONSIVE_VIEWPORTS = (
     ("mobile", 375, 812),
     ("tablet", 768, 1024),

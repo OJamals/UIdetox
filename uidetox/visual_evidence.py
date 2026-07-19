@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from uidetox.capabilities import visual_install_guidance
 from uidetox.utils import now_iso
 
 
@@ -30,10 +31,7 @@ _NORMALIZED_MODE = "RGB"
 _CASE_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
 _ICC_TRANSFORM_CACHE: dict[str, Any] = {}
 _SRGB_PROFILE: Any | None = None
-_VISUAL_INSTALL_GUIDANCE = (
-    "Install visual evidence support with: pip install 'uidetox[visual]' "
-    "(or 'uidetox[capture]' for browser screenshots)."
-)
+_VISUAL_INSTALL_GUIDANCE = visual_install_guidance()
 
 
 class VisualEvidenceError(RuntimeError):

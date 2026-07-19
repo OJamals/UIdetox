@@ -201,5 +201,22 @@ def run_first_run(environment: OnboardingEnvironment | None = None) -> bool:
         _save_state(environment.state_path, state)
         environment.output_fn("Resuming UIdetox guided setup")
 
+    if state.next_step == "capabilities":
+        from uidetox.capabilities import (
+            CapabilityEnvironment,
+            provision_capabilities,
+        )
+
+        capability_result = provision_capabilities(
+            CapabilityEnvironment.from_system(
+                interactive=environment.interactive,
+                input_fn=environment.input_fn,
+                output_fn=environment.output_fn,
+            )
+        )
+        if capability_result.complete:
+            state = state.complete("capabilities", environment.now_fn())
+            _save_state(environment.state_path, state)
+
     _render_pending(environment, state)
     return True

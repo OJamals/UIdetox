@@ -16,6 +16,10 @@ from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from uidetox.capabilities import (
+    capture_install_guidance,
+    chromium_install_guidance,
+)
 from uidetox.utils import now_iso
 
 
@@ -155,8 +159,7 @@ def observe_frontend(
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise RuntimeError(
-            "Playwright unavailable. Install with `pip install playwright` and "
-            "`playwright install chromium`."
+            f"Playwright unavailable. {capture_install_guidance()}"
         ) from exc
 
     pages: list[RuntimePage] = []
@@ -220,7 +223,8 @@ def observe_frontend(
         raise
     except Exception as exc:
         raise RuntimeError(
-            "Playwright could not launch Chromium. Run `playwright install chromium`. "
+            "Playwright could not launch Chromium. "
+            f"{chromium_install_guidance()}. "
             f"Original error: {exc}"
         ) from exc
 
