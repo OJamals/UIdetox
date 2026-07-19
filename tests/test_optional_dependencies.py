@@ -9,8 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from uidetox import memory
-from uidetox import subagent
 from uidetox.commands import capture
 from uidetox.visual_evidence import (
     VisualEvidenceCase,
@@ -23,7 +21,6 @@ from uidetox.visual_evidence import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_EXTRA_COMMAND = "pip install 'uidetox[capture]'"
 CHROMIUM_COMMAND = "python -m playwright install chromium"
-MEMORY_EXTRA_COMMAND = "pip install 'uidetox[memory]'"
 VISUAL_EXTRA_COMMAND = "pip install 'uidetox[visual]'"
 
 
@@ -48,13 +45,15 @@ def _block_imports(monkeypatch: pytest.MonkeyPatch, blocked: set[str]) -> None:
 def test_optional_dependency_metadata_keeps_core_minimal() -> None:
     project = _project_metadata()
     base = set(project["dependencies"])
-    extras = {name: set(requirements) for name, requirements in project["optional-dependencies"].items()}
+    extras = {
+        name: set(requirements)
+        for name, requirements in project["optional-dependencies"].items()
+    }
 
-    assert {"dev", "memory", "visual", "capture", "all"} <= extras.keys()
-    assert extras["memory"] == {"chromadb>=0.4.24"}
+    assert set(extras) == {"dev", "visual", "capture", "all"}
     assert extras["visual"] == {"Pillow>=12.3.0"}
     assert extras["capture"] == {"Pillow>=12.3.0", "playwright>=1.42.0"}
-    assert extras["all"] == extras["memory"] | extras["capture"]
+    assert extras["all"] == extras["capture"]
     assert extras["dev"] == {"pytest>=8.0,<9.0", "Pillow>=12.3.0"}
     assert not base & extras["all"]
     assert {
@@ -71,7 +70,7 @@ def test_core_imports_work_without_optional_dependencies() -> None:
 import builtins
 
 real_import = builtins.__import__
-blocked = {"chromadb", "PIL", "playwright"}
+blocked = {"PIL", "playwright"}
 
 def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     if name.split(".", 1)[0] in blocked:
@@ -95,74 +94,6 @@ import uidetox.cli
     assert result.returncode == 0, result.stderr
 
 
-def test_explicit_memory_search_explains_memory_extra(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    stored_patterns = [{"pattern": "Use semantic buttons", "category": "design"}]
-    monkeypatch.setattr(memory, "load_memory", lambda: {"patterns": stored_patterns})
-    _block_imports(monkeypatch, {"chromadb"})
-
-    assert memory.get_patterns(query="buttons") == stored_patterns
-    assert MEMORY_EXTRA_COMMAND in capsys.readouterr().err
-
-
-def test_memory_block_emits_missing_extra_hint_once(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(
-        memory,
-        "load_memory",
-        lambda: {
-            "patterns": [{"pattern": "Use semantic buttons", "category": "design"}],
-            "notes": [{"note": "Keep actions explicit"}],
-        },
-    )
-    _block_imports(monkeypatch, {"chromadb"})
-
-    subagent._build_memory_block(query="buttons")
-
-    assert capsys.readouterr().err.count(MEMORY_EXTRA_COMMAND) == 1
-
-
-def test_parallel_fix_prompts_emit_missing_extra_hint_once(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(
-        subagent,
-        "load_state",
-        lambda: {
-            "issues": [
-                {
-                    "id": "ONE",
-                    "tier": "T1",
-                    "file": "src/One.tsx",
-                    "issue": "First issue",
-                    "command": "Fix first",
-                },
-                {
-                    "id": "TWO",
-                    "tier": "T1",
-                    "file": "src/Two.tsx",
-                    "issue": "Second issue",
-                    "command": "Fix second",
-                },
-            ],
-            "resolved": [],
-        },
-    )
-    monkeypatch.setattr(subagent, "load_config", lambda: {})
-    monkeypatch.setattr(memory, "load_memory", lambda: {"patterns": [], "notes": []})
-    _block_imports(monkeypatch, {"chromadb"})
-
-    prompts = subagent.generate_stage_prompt("fix", parallel=2)
-
-    assert len(prompts) == 2
-    assert capsys.readouterr().err.count(MEMORY_EXTRA_COMMAND) == 1
-
-
 def test_missing_playwright_explains_capture_setup(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -182,7 +113,9 @@ def test_missing_pillow_explains_capture_setup(
 ) -> None:
     _block_imports(monkeypatch, {"PIL"})
 
-    result = capture._generate_visual_diff(tmp_path / "before.png", tmp_path / "after.png")
+    result = capture._generate_visual_diff(
+        tmp_path / "before.png", tmp_path / "after.png"
+    )
 
     assert CAPTURE_EXTRA_COMMAND in result["note"]
     assert CHROMIUM_COMMAND in result["note"]
@@ -220,9 +153,7 @@ def test_missing_browser_executable_preserves_error_and_explains_setup(
     monkeypatch.setattr(
         capture,
         "observe_frontend",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            RuntimeError(original_error)
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(original_error)),
     )
 
     assert not capture._capture_screenshot("http://localhost", tmp_path / "shot.png")
@@ -241,9 +172,7 @@ def test_unrelated_capture_failure_preserves_error_without_install_advice(
     monkeypatch.setattr(
         capture,
         "observe_frontend",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            RuntimeError(original_error)
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(original_error)),
     )
 
     assert not capture._capture_screenshot("http://localhost", tmp_path / "shot.png")
@@ -256,7 +185,6 @@ def test_unrelated_capture_failure_preserves_error_without_install_advice(
 def test_optional_capability_docs_and_package_mirrors_are_synchronized() -> None:
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "## Optional Capabilities" in readme
-    assert MEMORY_EXTRA_COMMAND in readme
     assert CAPTURE_EXTRA_COMMAND in readme
     assert CHROMIUM_COMMAND in readme
     assert "pip install 'uidetox[all]'" in readme

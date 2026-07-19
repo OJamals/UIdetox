@@ -74,9 +74,9 @@ def test_diagnose_prompt_isolates_issue_summaries():
     records = _records(prompt)
 
     assert prompt.splitlines().count("## Your Mission") == 1
-    assert records == [{
-        "issues": [{"tier": "T1", "file": "src/hostile.tsx", "issue": hostile_issue}]
-    }]
+    assert records == [
+        {"issues": [{"tier": "T1", "file": "src/hostile.tsx", "issue": hostile_issue}]}
+    ]
     assert prompt.count(UNTRUSTED_DATA_CLOSE) == len(records)
 
 
@@ -148,16 +148,20 @@ def test_memory_block_isolates_repository_backed_memory(monkeypatch):
     )
     monkeypatch.setattr(memory, "get_session", lambda: {})
     monkeypatch.setattr(memory, "get_last_scan", lambda: {})
-    monkeypatch.setattr(memory, "build_targeted_context", lambda files, issue_text="": "")
+    monkeypatch.setattr(memory, "get_fix_history", lambda query="", **_kwargs: [])
 
     block = subagent._build_memory_block(query="synthetic")
     records = _records(block)
 
     assert block.splitlines().count("## Your Mission") == 0
-    assert records == [{
-        "memory": {
-            "learned_patterns": [{"category": "general", "pattern": "keep evidence"}],
-            "agent_notes": [hostile_note],
+    assert records == [
+        {
+            "memory": {
+                "learned_patterns": [
+                    {"category": "general", "pattern": "keep evidence"}
+                ],
+                "agent_notes": [hostile_note],
+            }
         }
-    }]
+    ]
     assert block.count(UNTRUSTED_DATA_CLOSE) == len(records)

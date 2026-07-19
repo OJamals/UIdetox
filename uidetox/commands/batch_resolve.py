@@ -6,9 +6,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from uidetox.state import batch_remove_issues, get_issue, get_project_root, load_state, load_config
+from uidetox.state import (
+    batch_remove_issues,
+    get_issue,
+    get_project_root,
+    load_state,
+    load_config,
+)
 from uidetox.memory import save_session, log_progress
-from uidetox.utils import prepare_subprocess_cmd, tracked_changed_entries, untracked_changed_files
+from uidetox.utils import (
+    prepare_subprocess_cmd,
+    tracked_changed_entries,
+    untracked_changed_files,
+)
 
 
 def _run_verification(config: dict) -> bool:
@@ -34,25 +44,38 @@ def _run_verification(config: dict) -> bool:
             print("  Running TypeScript check...")
             try:
                 argv, env = prepare_subprocess_cmd(cmd)
-                res = subprocess.run(argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env)
+                res = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=120,
+                    env=env,
+                )
                 if res.returncode != 0:
-                    print(f"  ⚠️  TypeScript errors remain. Fix before committing.")
+                    print("  ⚠️  TypeScript errors remain. Fix before committing.")
                     errors = res.stdout.strip() or res.stderr.strip()
                     if errors:
                         # Truncate to avoid context overflow but keep actionable info
                         truncated = "\n".join(errors.splitlines()[:30])
                         print(f"\n{truncated}\n")
-                        error_context.append(f"## TypeScript Errors\n```\n{truncated}\n```")
+                        error_context.append(
+                            f"## TypeScript Errors\n```\n{truncated}\n```"
+                        )
                     passed = False
                 else:
                     print("  ✓ TypeScript passed")
             except FileNotFoundError:
                 print("  ❌ TypeScript check failed: command not found.")
-                error_context.append(f"## TypeScript Errors\n```\nCommand not found: {cmd}\n```")
+                error_context.append(
+                    f"## TypeScript Errors\n```\nCommand not found: {cmd}\n```"
+                )
                 passed = False
             except subprocess.TimeoutExpired:
                 print("  ❌ TypeScript check timed out after 120s.")
-                error_context.append(f"## TypeScript Errors\n```\nTimed out after 120s: {cmd}\n```")
+                error_context.append(
+                    f"## TypeScript Errors\n```\nTimed out after 120s: {cmd}\n```"
+                )
                 passed = False
 
     # Lint (auto-fix)
@@ -62,23 +85,34 @@ def _run_verification(config: dict) -> bool:
             print("  Running linter auto-fix...")
             try:
                 argv, env = prepare_subprocess_cmd(fix_cmd)
-                res = subprocess.run(argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env)
+                res = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=120,
+                    env=env,
+                )
                 print("  ✓ Linter auto-fix applied")
                 if res.returncode != 0:
                     errors = res.stdout.strip() or res.stderr.strip()
                     if errors:
                         truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"  ⚠️  Linter warned of remaining issues:")
+                        print("  ⚠️  Linter warned of remaining issues:")
                         print(f"\n{truncated}\n")
                         error_context.append(f"## Linter Errors\n```\n{truncated}\n```")
                     passed = False
             except FileNotFoundError:
                 print("  ❌ Linter auto-fix failed: command not found.")
-                error_context.append(f"## Linter Errors\n```\nCommand not found: {fix_cmd}\n```")
+                error_context.append(
+                    f"## Linter Errors\n```\nCommand not found: {fix_cmd}\n```"
+                )
                 passed = False
             except subprocess.TimeoutExpired:
                 print("  ❌ Linter auto-fix timed out after 120s.")
-                error_context.append(f"## Linter Errors\n```\nTimed out after 120s: {fix_cmd}\n```")
+                error_context.append(
+                    f"## Linter Errors\n```\nTimed out after 120s: {fix_cmd}\n```"
+                )
                 passed = False
 
     # Format (auto-fix)
@@ -88,23 +122,36 @@ def _run_verification(config: dict) -> bool:
             print("  Running formatter auto-fix...")
             try:
                 argv, env = prepare_subprocess_cmd(fix_cmd)
-                res = subprocess.run(argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env)
+                res = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    cwd=project_root,
+                    timeout=120,
+                    env=env,
+                )
                 print("  ✓ Formatter auto-fix applied")
                 if res.returncode != 0:
                     errors = res.stdout.strip() or res.stderr.strip()
                     if errors:
                         truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"  ⚠️  Formatter warned of remaining issues:")
+                        print("  ⚠️  Formatter warned of remaining issues:")
                         print(f"\n{truncated}\n")
-                        error_context.append(f"## Formatter Errors\n```\n{truncated}\n```")
+                        error_context.append(
+                            f"## Formatter Errors\n```\n{truncated}\n```"
+                        )
                     passed = False
             except FileNotFoundError:
                 print("  ❌ Formatter auto-fix failed: command not found.")
-                error_context.append(f"## Formatter Errors\n```\nCommand not found: {fix_cmd}\n```")
+                error_context.append(
+                    f"## Formatter Errors\n```\nCommand not found: {fix_cmd}\n```"
+                )
                 passed = False
             except subprocess.TimeoutExpired:
                 print("  ❌ Formatter auto-fix timed out after 120s.")
-                error_context.append(f"## Formatter Errors\n```\nTimed out after 120s: {fix_cmd}\n```")
+                error_context.append(
+                    f"## Formatter Errors\n```\nTimed out after 120s: {fix_cmd}\n```"
+                )
                 passed = False
 
     # ── Self-Healing: inject error context for agent recovery ──
@@ -126,10 +173,14 @@ def _run_verification(config: dict) -> bool:
         # Persist the error context to memory so sub-agents can see it
         try:
             from uidetox.memory import add_note
+
             error_summary = "; ".join(
-                line.strip() for block in error_context
+                line.strip()
+                for block in error_context
                 for line in block.splitlines()
-                if line.strip() and not line.startswith("```") and not line.startswith("##")
+                if line.strip()
+                and not line.startswith("```")
+                and not line.startswith("##")
             )[:500]
             add_note(f"[SELF-HEAL] Build broken after fix attempt: {error_summary}")
         except Exception:
@@ -170,7 +221,10 @@ def run(args: argparse.Namespace):
     skip_verify = getattr(args, "skip_verify", False)
 
     if not note or not note.strip():
-        print("Error: --note cannot be empty. Provide a brief description of the fixes.", file=sys.stderr)
+        print(
+            "Error: --note cannot be empty. Provide a brief description of the fixes.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Validate all IDs exist
@@ -186,7 +240,9 @@ def run(args: argparse.Namespace):
         print(f"Error: Issue(s) not found: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    affected_files = list({issue.get("file", "") for issue in issue_records if issue.get("file")})
+    affected_files = list(
+        {issue.get("file", "") for issue in issue_records if issue.get("file")}
+    )
 
     config = load_config()
 
@@ -221,6 +277,7 @@ def run(args: argparse.Namespace):
 
     # ---- Progress snapshot ----
     from uidetox.utils import compute_design_score
+
     scores = compute_design_score(state)
     target = config.get("target_score", 95)
     filled = scores["blended_score"] // 5
@@ -230,14 +287,17 @@ def run(args: argparse.Namespace):
 
     # ---- Remaining issues in same component ----
     remaining_in_component = [
-        i for i in state.get("issues", [])
+        i
+        for i in state.get("issues", [])
         if _derive_component_name([i.get("file", "")]) == component
     ]
     if remaining_in_component:
         print(f"\n   ⚡ {len(remaining_in_component)} more issue(s) in {component}:")
         for i in remaining_in_component[:5]:
             short_file = Path(i.get("file", "")).name
-            print(f"      [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}: {i.get('issue', '?')[:55]}")
+            print(
+                f"      [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}: {i.get('issue', '?')[:55]}"
+            )
         if len(remaining_in_component) > 5:
             print(f"      ... +{len(remaining_in_component) - 5} more")
 
@@ -246,22 +306,30 @@ def run(args: argparse.Namespace):
         project_root = get_project_root()
 
         def _normalize(path: str) -> str:
-            return str((project_root / path).resolve()) if not os.path.isabs(path) else os.path.abspath(path)
+            return (
+                str((project_root / path).resolve())
+                if not os.path.isabs(path)
+                else os.path.abspath(path)
+            )
 
         allowed_tracked_changes = {
-            _normalize(path)
-            for path in affected_files + [".uidetox/state.json"]
+            _normalize(path) for path in affected_files + [".uidetox/state.json"]
         }
         stage_paths = {_normalize(path) for path in affected_files}
         missing_issue_paths = {path for path in stage_paths if not Path(path).exists()}
         missing_counts_by_parent: dict[Path, int] = {}
         for path in missing_issue_paths:
             parent = Path(path).parent
-            missing_counts_by_parent[parent] = missing_counts_by_parent.get(parent, 0) + 1
+            missing_counts_by_parent[parent] = (
+                missing_counts_by_parent.get(parent, 0) + 1
+            )
         unexpected_tracked_changes = {
             _normalize(current_path)
             for original_path, current_path in tracked_changed_entries()
-            if not ({_normalize(original_path), _normalize(current_path)} & allowed_tracked_changes)
+            if not (
+                {_normalize(original_path), _normalize(current_path)}
+                & allowed_tracked_changes
+            )
         }
         untracked_paths = {_normalize(path) for path in untracked_changed_files()}
         untracked_by_parent: dict[Path, set[str]] = {}
@@ -279,18 +347,36 @@ def run(args: argparse.Namespace):
                 stage_paths.update(normalized_paths)
         stage_paths.update(allowed_untracked_changes)
         if unexpected_tracked_changes or unexpected_untracked_changes:
-            print("\n   ⚠️  Skipped git auto-commit because changes exist outside the resolved files.")
+            print(
+                "\n   ⚠️  Skipped git auto-commit because changes exist outside the resolved files."
+            )
         else:
             try:
                 # Stage all affected files + state
                 for path in sorted(stage_paths):
-                    subprocess.run(["git", "add", path], check=True, capture_output=True, cwd=project_root)
-                subprocess.run(["git", "add", str((project_root / ".uidetox/state.json").resolve())], check=True, capture_output=True, cwd=project_root)
+                    subprocess.run(
+                        ["git", "add", path],
+                        check=True,
+                        capture_output=True,
+                        cwd=project_root,
+                    )
+                subprocess.run(
+                    [
+                        "git",
+                        "add",
+                        str((project_root / ".uidetox/state.json").resolve()),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    cwd=project_root,
+                )
 
                 commit_msg = f"[UIdetox] Detoxed {component}: {note} ({len(removed)} issues resolved)"
                 subprocess.run(
                     ["git", "commit", "-m", commit_msg, "--no-verify"],
-                    check=True, capture_output=True, cwd=project_root,
+                    check=True,
+                    capture_output=True,
+                    cwd=project_root,
                 )
                 print(f"\n   📦 Auto-committed: {commit_msg}")
             except subprocess.CalledProcessError:
@@ -302,29 +388,42 @@ def run(args: argparse.Namespace):
     print()
     print("[AGENT LOOP SIGNAL]")
     if remaining_in_component:
-        print(f"Same component has {len(remaining_in_component)} more issues. Run `uidetox next` to continue.")
+        print(
+            f"Same component has {len(remaining_in_component)} more issues. Run `uidetox next` to continue."
+        )
     elif remaining > 0:
-        print(f"{remaining} issues remain in other components. Run `uidetox next` to continue.")
+        print(
+            f"{remaining} issues remain in other components. Run `uidetox next` to continue."
+        )
     elif scores["blended_score"] >= target:
         print("Queue empty and target reached! Run `uidetox finish`.")
     else:
-        print(f"Queue empty but score {scores['blended_score']} < {target}. Run `uidetox rescan` for deeper analysis.")
+        print(
+            f"Queue empty but score {scores['blended_score']} < {target}. Run `uidetox rescan` for deeper analysis."
+        )
 
     # Auto-save progress
-    log_progress("batch-resolve", f"Detoxed {component}: {note} ({len(removed)} issues)")
-    save_session(phase="fixing", last_command="batch-resolve",
-                 last_component=component,
-                 issues_fixed=len(removed), context=note)
+    log_progress(
+        "batch-resolve", f"Detoxed {component}: {note} ({len(removed)} issues)"
+    )
+    save_session(
+        phase="fixing",
+        last_command="batch-resolve",
+        last_component=component,
+        issues_fixed=len(removed),
+        context=note,
+    )
 
-    # Embed fix outcomes for future sub-agent context injection
+    # Persist fix outcomes for future sub-agent context injection
     try:
-        from uidetox.memory import embed_fix_outcome
+        from uidetox.memory import record_fix_outcome
+
         for r in removed:
-            embed_fix_outcome(
+            record_fix_outcome(
                 file_path=r.get("file", ""),
                 issue=r.get("issue", ""),
                 fix=note,
                 outcome="resolved",
             )
-    except Exception:
-        pass  # ChromaDB is optional — never block on embedding failure
+    except OSError:
+        pass  # Resolution already succeeded; memory persistence must not undo it.

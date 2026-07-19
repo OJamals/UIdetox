@@ -131,7 +131,7 @@ index f8cd629..e59993d 100644
 +Execution never invokes an external agent CLI and never chooses a redesign proposal automatically. It stops explicitly when source fixes need an agent, proposal selection is missing, subjective scoring needs human/LLM input, or verification evidence is stale/blocked. Completed fresh phases are skipped on resume; source or input changes invalidate only dependent downstream phases. Failures are recorded once and retried only on a later invocation. Passing the score, queue, and freshness gates marks `uidetox finish` as eligible—it does not run finalization automatically.
 
  ### The Intelligence Layer
- UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
+ UIdetox combines static AST analysis with persistent local project memory so fixes remain correct and consistent with the project's identity.
 @@ -158,7 +166,7 @@ Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a sp
 
  | Command | Purpose |

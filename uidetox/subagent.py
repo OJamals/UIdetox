@@ -7,8 +7,8 @@ from pathlib import Path
 
 from uidetox.fileset import ProjectFileSet
 from uidetox.prompt_safety import render_untrusted_data
-from uidetox.state import get_project_root, get_uidetox_dir, ensure_uidetox_dir, load_state, load_config # type: ignore
-from uidetox.utils import now_iso # type: ignore
+from uidetox.state import get_project_root, get_uidetox_dir, load_state, load_config  # type: ignore
+from uidetox.utils import now_iso  # type: ignore
 
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
@@ -91,7 +91,9 @@ def record_result(session_id: str, result: dict) -> bool:
     # Determine status based on confidence thresholds
     if confidence < 0.6:
         meta["status"] = "needs_human_review"
-        meta["review_reason"] = "Very low confidence — agent is uncertain about fix quality"
+        meta["review_reason"] = (
+            "Very low confidence — agent is uncertain about fix quality"
+        )
     elif confidence < 0.85:
         meta["status"] = "completed_with_warnings"
         meta["review_reason"] = "Below confidence threshold — recommend verification"
@@ -118,7 +120,7 @@ def _extract_confidence(result: dict) -> float:
 
     # Strategy 1: Explicit CONFIDENCE: field in the note
     text = result.get("note", "")
-    m = re.search(r'CONFIDENCE:\s*(0\.\d+|1\.0|1)', text, re.IGNORECASE)
+    m = re.search(r"CONFIDENCE:\s*(0\.\d+|1\.0|1)", text, re.IGNORECASE)
     if m:
         return float(m.group(1))
 
@@ -132,14 +134,27 @@ def _extract_confidence(result: dict) -> float:
     # Strategy 3: Parse from verification output
     verify_text = result.get("verification", result.get("output", ""))
     if verify_text:
-        m = re.search(r'(?:confidence|certainty|score)[\s:]*(?:is\s+)?(0\.\d+|1\.0)', verify_text, re.IGNORECASE)
+        m = re.search(
+            r"(?:confidence|certainty|score)[\s:]*(?:is\s+)?(0\.\d+|1\.0)",
+            verify_text,
+            re.IGNORECASE,
+        )
         if m:
             return float(m.group(1))
 
     # Strategy 4: Infer from error/warning signals in the result
     all_text = json.dumps(result).lower()
-    warning_signals = ["unsure", "might not", "could break", "not certain", "unclear",
-                       "risky", "regression", "manual check", "verify manually"]
+    warning_signals = [
+        "unsure",
+        "might not",
+        "could break",
+        "not certain",
+        "unclear",
+        "risky",
+        "regression",
+        "manual check",
+        "verify manually",
+    ]
     warning_count = sum(1 for sig in warning_signals if sig in all_text)
     if warning_count >= 3:
         confidence = 0.5
@@ -166,8 +181,7 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
         "reason": meta.get("review_reason", "Below confidence threshold"),
         "flagged_at": _now_iso(),
         "action_required": (
-            "HUMAN_REVIEW_REQUIRED" if confidence < 0.6
-            else "REVIEW_RECOMMENDED"
+            "HUMAN_REVIEW_REQUIRED" if confidence < 0.6 else "REVIEW_RECOMMENDED"
         ),
     }
 
@@ -177,6 +191,7 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
     # Also log to memory for persistence
     try:
         from uidetox.memory import add_note
+
         add_note(
             f"[LOW CONFIDENCE] Session {session_id} ({meta.get('stage')}): "
             f"confidence={confidence:.2f}. {meta.get('review_reason', '')}. "
@@ -253,7 +268,9 @@ def get_frontend_files(
     project_root: str | Path | None = None,
     config: dict | None = None,
 ) -> list[str]:
-    root = Path(project_root).resolve() if project_root is not None else get_project_root()
+    root = (
+        Path(project_root).resolve() if project_root is not None else get_project_root()
+    )
     active_config = load_config() if config is None else config
     return ProjectFileSet(
         root,
@@ -265,37 +282,41 @@ def get_frontend_files(
 def _build_memory_block(
     query: str = "",
     files: list[str] | None = None,
-    *,
-    show_install_hint: bool = True,
 ) -> str:
     """Build a memory injection block from persistent agent memory.
 
     Injects learned patterns, notes, and session context so sub-agents
-    have continuity with prior work. If a query is provided, performs
-    a semantic search using ChromaDB. If files are provided, also injects
-    targeted embedding-matched context for those specific files.
+    have continuity with prior work. Query and file terms deterministically
+    filter local JSON memory to keep prompts focused.
     """
     try:
-        from uidetox.memory import (get_patterns, get_notes, get_session as get_mem_session,
-                                     get_last_scan, build_targeted_context)
+        from uidetox.memory import (
+            get_fix_history,
+            get_last_scan,
+            get_notes,
+            get_patterns,
+            get_session as get_mem_session,
+        )
     except ImportError:
         return ""
 
     memory_data: dict[str, object] = {}
+    memory_query = " ".join([query, *(files or [])]).strip()
 
-    patterns = get_patterns(
-        query=query,
-        show_install_hint=show_install_hint,
-    )
+    patterns = get_patterns(query=memory_query)
     if patterns:
         memory_data["learned_patterns"] = [
             {"category": p.get("category", "general"), "pattern": p["pattern"]}
             for p in patterns[-15:]
         ]
 
-    notes = get_notes(query=query, show_install_hint=False)
+    notes = get_notes(query=memory_query)
     if notes:
         memory_data["agent_notes"] = [n["note"] for n in notes[-10:]]
+
+    fix_history = get_fix_history(query=memory_query)
+    if fix_history:
+        memory_data["related_fix_history"] = fix_history[-10:]
 
     session = get_mem_session()
     if session:
@@ -318,22 +339,15 @@ def _build_memory_block(
             "top_files": last_scan.get("top_files", [])[:5],
         }
 
-    # ── Embedding-based targeted context (only if files provided) ──
-    if files:
-        try:
-            targeted = build_targeted_context(files, issue_text=query)
-            if targeted:
-                memory_data["targeted_context"] = targeted
-        except Exception:
-            pass  # ChromaDB optional — gracefully degrade
-
     if not memory_data:
         return ""
 
     return "# Memory Bank\n" + render_untrusted_data({"memory": memory_data}) + "\n"
 
 
-def _build_deconfliction_block(shard_index: int, total_shards: int, shard_files: list[str]) -> str:
+def _build_deconfliction_block(
+    shard_index: int, total_shards: int, shard_files: list[str]
+) -> str:
     """Build a deconfliction directive for parallel sub-agents.
 
     Prevents merge conflicts by ensuring each shard only touches its assigned files.
@@ -367,9 +381,9 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
     dials_block = f"""## Active Design Dials
-- DESIGN_VARIANCE  = {variance}  {'(asymmetric, masonry, massive whitespace)' if variance > 7 else '(varied sizes, offset margins)' if variance > 4 else '(clean, centered, standard grids)'}
-- MOTION_INTENSITY = {intensity}  {'(scroll-triggered, spring physics, magnetic)' if intensity > 7 else '(fade-ins, transitions, staggered entry)' if intensity > 5 else '(CSS hover/active only)'}
-- VISUAL_DENSITY   = {density}  {'(cockpit mode, dense data)' if density > 7 else '(standard web app spacing)' if density > 3 else '(art gallery, spacious, luxury)'}
+- DESIGN_VARIANCE  = {variance}  {"(asymmetric, masonry, massive whitespace)" if variance > 7 else "(varied sizes, offset margins)" if variance > 4 else "(clean, centered, standard grids)"}
+- MOTION_INTENSITY = {intensity}  {"(scroll-triggered, spring physics, magnetic)" if intensity > 7 else "(fade-ins, transitions, staggered entry)" if intensity > 5 else "(CSS hover/active only)"}
+- VISUAL_DENSITY   = {density}  {"(cockpit mode, dense data)" if density > 7 else "(standard web app spacing)" if density > 3 else "(art gallery, spacious, luxury)"}
 
 Use these dials to calibrate your decisions. Higher variance = more asymmetry required."""
 
@@ -380,13 +394,21 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
                 memory_block = _build_memory_block()
                 return [_observe_prompt(tooling, [], dials_block, memory_block, 0, 1)]
             chunk_size = max(1, len(files) // parallel)
-            chunks = [files[i:i + chunk_size] for i in range(0, len(files), chunk_size)] # type: ignore
+            chunks = [
+                files[i : i + chunk_size] for i in range(0, len(files), chunk_size)
+            ]  # type: ignore
             # Merge trailing chunk if rounding caused an extra bucket
             if len(chunks) > parallel:
-                chunks[parallel-1].extend(chunks.pop()) # type: ignore
+                chunks[parallel - 1].extend(chunks.pop())  # type: ignore
             return [
-                _observe_prompt(tooling, chunk, dials_block,
-                                _build_memory_block(files=chunk), idx, len(chunks))
+                _observe_prompt(
+                    tooling,
+                    chunk,
+                    dials_block,
+                    _build_memory_block(files=chunk),
+                    idx,
+                    len(chunks),
+                )
                 for idx, chunk in enumerate(chunks)
             ]
         memory_block = _build_memory_block()
@@ -413,11 +435,13 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
 
         sorted_groups = sorted(
             grouped.values(),
-            key=lambda group: min(tiers_order.get(i.get("tier", "T4"), 5) for i in group)
+            key=lambda group: min(
+                tiers_order.get(i.get("tier", "T4"), 5) for i in group
+            ),
         )
 
         # Take the most pressing file-groups to batch, up to parallel * 3
-        top_groups = sorted_groups[:parallel * 3] # type: ignore
+        top_groups = sorted_groups[: parallel * 3]  # type: ignore
 
         # Distribute file-groups into parallel buckets
         buckets = [[] for _ in range(parallel)]
@@ -428,7 +452,7 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         buckets = [b for b in buckets if b]
 
         if not buckets:  # Fallback sanity check
-            buckets = [issues[:5]] # type: ignore
+            buckets = [issues[:5]]  # type: ignore
 
         total_buckets = len(buckets)
         return [
@@ -437,7 +461,6 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
                 dials_block,
                 idx,
                 total_buckets,
-                show_install_hint=idx == 0,
             )
             for idx, bucket in enumerate(buckets)
         ]
@@ -448,10 +471,18 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
     return [f"Unknown stage: {stage}"]
 
 
-def _observe_prompt(tooling: dict, files: list[str], dials_block: str,
-                    memory_block: str = "", shard_index: int = 0, total_shards: int = 1) -> str:
+def _observe_prompt(
+    tooling: dict,
+    files: list[str],
+    dials_block: str,
+    memory_block: str = "",
+    shard_index: int = 0,
+    total_shards: int = 1,
+) -> str:
     # Build file target list if specific shard provided
-    target_directive = "Systematically scan the codebase and catalog everything you see."
+    target_directive = (
+        "Systematically scan the codebase and catalog everything you see."
+    )
     deconfliction = ""
     if files:
         target_directive = (
@@ -510,16 +541,22 @@ CONTENT: <quality of placeholder data and copy>
 
 
 def _diagnose_prompt(issues: list, dials_block: str) -> str:
-    existing = render_untrusted_data({
-        "issues": [
+    existing = (
+        render_untrusted_data(
             {
-                "tier": issue.get("tier"),
-                "file": issue.get("file"),
-                "issue": issue.get("issue"),
+                "issues": [
+                    {
+                        "tier": issue.get("tier"),
+                        "file": issue.get("file"),
+                        "issue": issue.get("issue"),
+                    }
+                    for issue in issues[:20]
+                ]
             }
-            for issue in issues[:20]
-        ]
-    }) if issues else "None yet."
+        )
+        if issues
+        else "None yet."
+    )
 
     return f"""# UIdetox Sub-Agent: DIAGNOSE Stage
 
@@ -630,17 +667,23 @@ uidetox add-issue --file <path> --tier <tier> --issue "<description>" --fix-comm
 
 
 def _prioritize_prompt(issues: list) -> str:
-    issue_list = render_untrusted_data({
-        "issues": [
+    issue_list = (
+        render_untrusted_data(
             {
-                "id": issue.get("id"),
-                "tier": issue.get("tier"),
-                "file": issue.get("file"),
-                "issue": issue.get("issue"),
+                "issues": [
+                    {
+                        "id": issue.get("id"),
+                        "tier": issue.get("tier"),
+                        "file": issue.get("file"),
+                        "issue": issue.get("issue"),
+                    }
+                    for issue in issues
+                ]
             }
-            for issue in issues
-        ]
-    }) if issues else "No issues in queue."
+        )
+        if issues
+        else "No issues in queue."
+    )
 
     return f"""# UIdetox Sub-Agent: PRIORITIZE Stage
 
@@ -669,30 +712,31 @@ def _fix_prompt(
     dials_block: str,
     shard_index: int = 0,
     total_shards: int = 1,
-    *,
-    show_install_hint: bool = True,
 ) -> str:
     if not batch:
         return "# No issues to fix. Run `uidetox scan` first."
 
-    batch_data = render_untrusted_data({
-        "issues": [
-            {
-                "id": issue.get("id"),
-                "tier": issue.get("tier"),
-                "file": issue.get("file"),
-                "issue": issue.get("issue"),
-                "command": issue.get("command", "manual fix"),
-            }
-            for issue in batch
-        ]
-    })
+    batch_data = render_untrusted_data(
+        {
+            "issues": [
+                {
+                    "id": issue.get("id"),
+                    "tier": issue.get("tier"),
+                    "file": issue.get("file"),
+                    "issue": issue.get("issue"),
+                    "command": issue.get("command", "manual fix"),
+                }
+                for issue in batch
+            ]
+        }
+    )
     query_text = " ".join(
         f"{issue.get('issue', '')} {issue.get('command', '')}" for issue in batch
     )
 
     # Build inline context for the fix batch (same pattern as next.py)
-    from uidetox.commands.next import SKILL_CONTEXT, _get_relevant_context # type: ignore
+    from uidetox.commands.next import _get_relevant_context  # type: ignore
+
     contexts = _get_relevant_context(batch)
     context_block = ""
     if contexts:
@@ -703,12 +747,11 @@ def _fix_prompt(
                 lines.append(f"  (Deep-dive: {ref_file})")
         context_block = "\n".join(lines)
 
-    # Build memory and deconfliction blocks with targeted embedding context
+    # Build memory and deconfliction blocks with targeted local context
     batch_files = list(set(i.get("file", "") for i in batch))
     memory_block = _build_memory_block(
         query=query_text,
         files=batch_files,
-        show_install_hint=show_install_hint,
     )
     deconfliction = _build_deconfliction_block(shard_index, total_shards, batch_files)
 
@@ -745,17 +788,19 @@ def _verify_prompt(issues: list, resolved: list) -> str:
     if pending_reviews:
         review_block = (
             "## Pending Review Requests (from prior low-confidence sessions)\n"
-            + render_untrusted_data({
-                "pending_reviews": [
-                    {
-                        "session_id": review.get("session_id"),
-                        "stage": review.get("stage"),
-                        "confidence": review.get("confidence"),
-                        "action_required": review.get("action_required"),
-                    }
-                    for review in pending_reviews
-                ]
-            })
+            + render_untrusted_data(
+                {
+                    "pending_reviews": [
+                        {
+                            "session_id": review.get("session_id"),
+                            "stage": review.get("stage"),
+                            "confidence": review.get("confidence"),
+                            "action_required": review.get("action_required"),
+                        }
+                        for review in pending_reviews
+                    ]
+                }
+            )
             + "\n"
         )
 

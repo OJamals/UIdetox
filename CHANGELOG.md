@@ -19,8 +19,10 @@
 
 - Split analyzer responsibilities into rule, AST, project, custom-check, and
   execution modules.
-- Moved ChromaDB, Pillow, and Playwright behind optional capability extras so
-  the base CLI installs only core analysis dependencies.
+- Project memory now uses deterministic local JSON relevance matching, reducing
+  base-install weight and dependency surface.
+- Kept Pillow and Playwright behind optional capability extras so the base CLI
+  installs only core analysis dependencies.
 - Unified frontend file discovery and preserved project-root backend/API context
   during scoped scans.
 - Hardened PyPI publication with release-only triggering, tag/version parity,

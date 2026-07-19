@@ -95,12 +95,11 @@ uidetox loop
 ## Optional Capabilities
 
 Base install includes scanning, checks, issue queues, and remediation workflows.
+Persistent project memory is also included and stored locally in
+`.uidetox/memory.json`; it needs no optional dependency.
 Install only capabilities needed by your workflow:
 
 ```bash
-# Semantic memory backed by ChromaDB
-pip install 'uidetox[memory]'
-
 # Screenshot capture and visual diffs
 pip install 'uidetox[capture]'
 python -m playwright install chromium
@@ -108,7 +107,7 @@ python -m playwright install chromium
 # Local PNG comparison without browser capture
 pip install 'uidetox[visual]'
 
-# Both optional capabilities
+# Every optional capability
 pip install 'uidetox[all]'
 ```
 
@@ -170,7 +169,7 @@ uidetox loop --execute --proposal-id REDESIGN-01-task-flow --review-score 97
 Execution never invokes an external agent CLI and never chooses a redesign proposal automatically. It stops explicitly when source fixes need an agent, proposal selection is missing, subjective scoring needs human/LLM input, or verification evidence is stale/blocked. Completed fresh phases are skipped on resume; source or input changes invalidate only dependent downstream phases. Failures are recorded once and retried only on a later invocation. Passing the score, queue, and freshness gates marks `uidetox finish` as eligible—it does not run finalization automatically.
 
 ### The Intelligence Layer
-UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
+UIdetox combines static AST analysis with persistent local project memory so fixes remain correct and consistent with the project's identity.
 
 ![The Intelligence Layer](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/intelligence.png)
 
