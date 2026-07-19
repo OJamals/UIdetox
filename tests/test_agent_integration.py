@@ -213,6 +213,26 @@ def test_write_failure_returns_structured_error_without_exiting(tmp_path: Path) 
     assert result.error
 
 
+def test_install_rejects_destination_symlink_that_escapes_project_root(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(tmp_path)
+    environment.project_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (environment.project_root / ".claude").symlink_to(
+        outside,
+        target_is_directory=True,
+    )
+
+    result = install_agent(Agent.CLAUDE, environment)
+
+    assert result.success is False
+    assert result.error_code == "unsafe_destination"
+    assert "outside the allowed root" in result.error
+    assert not (outside / "skills" / "uidetox" / "SKILL.md").exists()
+
+
 def test_candidate_detection_combines_project_home_and_executable_evidence(
     tmp_path: Path,
 ) -> None:

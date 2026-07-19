@@ -284,6 +284,14 @@ def _skill_destination(
     return root.joinpath(*spec.skill_root)
 
 
+def _destination_is_within_root(destination: Path, root: Path) -> bool:
+    try:
+        destination.resolve().relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
 def _copy_project_skill(
     data_root: Path,
     destination: Path,
@@ -469,8 +477,33 @@ def install_agent(
             error="Missing bundled assets: " + ", ".join(str(path) for path in missing),
         )
 
+    spec = _SPECS[resolved_agent]
     adapter = _ADAPTERS[resolved_agent]
     destinations = adapter.destinations(environment)
+    allowed_root = environment.home if spec.global_install else environment.project_root
+    unsafe_destination = next(
+        (
+            destination
+            for destination in destinations
+            if not _destination_is_within_root(destination, allowed_root)
+        ),
+        None,
+    )
+    if unsafe_destination is not None:
+        return AgentInstallResult(
+            agent=resolved_agent,
+            requested_agent=requested,
+            outcome=InstallOutcome.ERROR,
+            verified=False,
+            changed=False,
+            destinations=destinations,
+            error_code="unsafe_destination",
+            error=(
+                f"Refusing to write outside the allowed root {allowed_root}: "
+                f"{unsafe_destination}"
+            ),
+        )
+
     recorder = _InstallRecorder()
     try:
         adapter.install(environment, recorder)
@@ -500,7 +533,6 @@ def install_agent(
             error="Installed files did not match the bundled guidance.",
         )
 
-    spec = _SPECS[resolved_agent]
     guide_path = environment.data_root / "docs" / f"{resolved_agent.value.upper()}.md"
     guide = None
     if guide_path.is_file():
