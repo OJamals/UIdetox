@@ -1,4 +1,5 @@
 """uidetox watch — poll directory for file changes and re-scan on modification."""
+
 from __future__ import annotations
 
 import os
@@ -76,12 +77,16 @@ def _print_issues(issues: list[dict], filepath: str) -> None:
         col = issue.get("column")
         loc = f":{line}:{col}" if line else ""
         label = _colour_tier(tier, _TIER_LABEL.get(tier, f"T{tier}"))
-        print(f"    [{label}] {_DIM}{rule_id}{_RESET}  {description}{_DIM}{loc}{_RESET}")
+        print(
+            f"    [{label}] {_DIM}{rule_id}{_RESET}  {description}{_DIM}{loc}{_RESET}"
+        )
 
 
 def run(args) -> None:
     path_arg = getattr(args, "path", ".")
-    root = (Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)).resolve()
+    root = (
+        Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)
+    ).resolve()
     interval: float = getattr(args, "interval", 1.0)
     clear: bool = getattr(args, "clear", True)
 
@@ -105,10 +110,14 @@ def run(args) -> None:
     if clear:
         os.system("clear")
 
-    print(f"{_BOLD}uidetox watch{_RESET}  {_DIM}{root}{_RESET}  {_DIM}(Ctrl+C to stop){_RESET}\n")
+    print(
+        f"{_BOLD}uidetox watch{_RESET}  {_DIM}{root}{_RESET}  {_DIM}(Ctrl+C to stop){_RESET}\n"
+    )
     if initial_issues:
         total = sum(len(v) for v in initial_issues.values())
-        print(f"{_YELLOW}Initial scan: {total} issue(s) across {len(initial_issues)} file(s){_RESET}")
+        print(
+            f"{_YELLOW}Initial scan: {total} issue(s) across {len(initial_issues)} file(s){_RESET}"
+        )
         for fpath, issues in initial_issues.items():
             _print_issues(issues, fpath)
     else:
@@ -136,7 +145,9 @@ def run(args) -> None:
                 os.system("clear")
 
             ts = time.strftime("%H:%M:%S")
-            print(f"{_BOLD}uidetox watch{_RESET}  {_DIM}{root}{_RESET}  {_DIM}{ts} — Ctrl+C to stop{_RESET}\n")
+            print(
+                f"{_BOLD}uidetox watch{_RESET}  {_DIM}{root}{_RESET}  {_DIM}{ts} — Ctrl+C to stop{_RESET}\n"
+            )
 
             for fpath in sorted(changed):
                 issues = analyze_file(Path(fpath))

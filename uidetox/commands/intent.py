@@ -10,6 +10,7 @@ from uidetox.frontend_map import (
     frontend_map_is_fresh,
     load_frontend_map,
 )
+from uidetox.intent_journal import latest_intent_artifact_reference
 from uidetox.state import get_project_root, get_uidetox_dir, load_config
 
 
@@ -34,6 +35,11 @@ def run(args: argparse.Namespace) -> None:
     intent = DesignSettings.from_config(config, frontend_map, target).intent
     payload = intent.to_dict()
     payload["map_evidence_status"] = map_status
+    journal = latest_intent_artifact_reference(
+        get_uidetox_dir(),
+        project_root=get_project_root(),
+    )
+    payload["journal"] = journal
 
     if getattr(args, "json", False):
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -41,6 +47,11 @@ def run(args: argparse.Namespace) -> None:
         print("UIdetox Intent")
         print(f"  Confirmation: {intent.confirmation_status}")
         print(f"  Map evidence: {map_status}")
+        print(f"  Intent journal: {journal['status']}")
+        if journal.get("latest_event_id"):
+            print(f"  Latest event: {journal['latest_event_id']}")
+        if journal.get("handoff_path"):
+            print(f"  Agent handoff: {journal['handoff_path']}")
         for field_name, source in intent.provenance.items():
             value = getattr(intent, field_name)
             rendered = ", ".join(value) if isinstance(value, tuple) else value
@@ -51,8 +62,7 @@ def run(args: argparse.Namespace) -> None:
             print(f"    evidence={evidence}")
         if intent.unconfirmed_fields:
             print(
-                "\n  User confirmation needed: "
-                + ", ".join(intent.unconfirmed_fields)
+                "\n  User confirmation needed: " + ", ".join(intent.unconfirmed_fields)
             )
             print("  Run: uidetox setup")
 

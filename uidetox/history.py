@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from .state import get_uidetox_dir, ensure_uidetox_dir, load_config, load_state
+from .state import get_uidetox_dir, load_config, load_state
 from .utils import compute_design_score
 from .visual_semantics import project_visual_evidence_status
 

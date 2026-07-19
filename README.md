@@ -45,6 +45,26 @@ uvx --from . uidetox --version
 `uvx` creates a temporary isolated environment. A cold cache still downloads
 runtime dependencies; use `--offline` only after those dependencies are cached.
 
+### First-run guided setup
+
+Run `uvx uidetox` with no subcommand in an interactive terminal to start the
+resumable setup. Progress is saved in `.uidetox/onboarding.json`; rerun the same
+command to continue from the next incomplete step.
+
+The wizard:
+
+1. explains the workflow and detects supported coding agents,
+2. asks before installing namespaced UIdetox skills and instructions,
+3. detects optional codebase-memory, Pillow, Playwright, and Chromium support,
+4. asks for the website/app purpose, audience, primary job, tone, preserved
+   contracts, and constraints, and
+5. appends a redacted intent-provenance event and writes a copy-ready agent
+   prompt to `.uidetox/agent-handoff.md`.
+
+No optional installer runs without confirmation. Codebase-memory setup remains
+guidance-only because its installer restarts agent MCP processes. Noninteractive
+no-command runs, `--help`, and `--version` keep their normal read-only behavior.
+
 Install UIdetox when running a multi-command workflow:
 
 ```bash
@@ -75,12 +95,11 @@ uidetox loop
 ## Optional Capabilities
 
 Base install includes scanning, checks, issue queues, and remediation workflows.
+Persistent project memory is also included and stored locally in
+`.uidetox/memory.json`; it needs no optional dependency.
 Install only capabilities needed by your workflow:
 
 ```bash
-# Semantic memory backed by ChromaDB
-pip install 'uidetox[memory]'
-
 # Screenshot capture and visual diffs
 pip install 'uidetox[capture]'
 python -m playwright install chromium
@@ -88,7 +107,7 @@ python -m playwright install chromium
 # Local PNG comparison without browser capture
 pip install 'uidetox[visual]'
 
-# Both optional capabilities
+# Every optional capability
 pip install 'uidetox[all]'
 ```
 
@@ -150,7 +169,7 @@ uidetox loop --execute --proposal-id REDESIGN-01-task-flow --review-score 97
 Execution never invokes an external agent CLI and never chooses a redesign proposal automatically. It stops explicitly when source fixes need an agent, proposal selection is missing, subjective scoring needs human/LLM input, or verification evidence is stale/blocked. Completed fresh phases are skipped on resume; source or input changes invalidate only dependent downstream phases. Failures are recorded once and retried only on a later invocation. Passing the score, queue, and freshness gates marks `uidetox finish` as eligible—it does not run finalization automatically.
 
 ### The Intelligence Layer
-UIdetox uses a multi-modal approach to detect slop and plan remediation. It combines static AST analysis with persistent semantic memory to ensure fixes are both correct and consistent with the project's identity.
+UIdetox combines static AST analysis with persistent local project memory so fixes remain correct and consistent with the project's identity.
 
 ![The Intelligence Layer](https://raw.githubusercontent.com/OJamals/UIdetox/master/assets/intelligence.png)
 

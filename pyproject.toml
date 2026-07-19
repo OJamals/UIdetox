@@ -37,9 +37,6 @@ dev = [
     "pytest>=8.0,<9.0",
     "Pillow>=12.3.0",
 ]
-memory = [
-    "chromadb>=0.4.24",
-]
 visual = [
     "Pillow>=12.3.0",
 ]
@@ -48,7 +45,6 @@ capture = [
     "playwright>=1.42.0",
 ]
 all = [
-    "chromadb>=0.4.24",
     "Pillow>=12.3.0",
     "playwright>=1.42.0",
 ]

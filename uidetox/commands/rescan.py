@@ -71,7 +71,10 @@ def run(args: argparse.Namespace):
 
     # Validate path before doing anything
     if not os.path.isdir(path):
-        print(f"Error: scan path '{path}' does not exist or is not a directory.", file=sys.stderr)
+        print(
+            f"Error: scan path '{path}' does not exist or is not a directory.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print("=" * 58)
@@ -87,14 +90,19 @@ def run(args: argparse.Namespace):
     ignore_patterns = config.get("ignore_patterns", [])
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
-    slop_issues = analyze_directory(path, exclude_paths=exclude_paths, zone_overrides=zone_overrides, design_variance=variance)
+    slop_issues = analyze_directory(
+        path,
+        exclude_paths=exclude_paths,
+        zone_overrides=zone_overrides,
+        design_variance=variance,
+    )
 
     pending_issues = []
     dedup_skipped = 0
     escalated_count = 0
 
     for issue in slop_issues:
-        if _is_suppressed(issue['file'], issue['issue'], ignore_patterns):
+        if _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
             continue
 
         key = _dedup_key(issue)
@@ -116,10 +124,10 @@ def run(args: argparse.Namespace):
         issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
         new_issue = {
             "id": issue_id,
-            "file": issue['file'],
+            "file": issue["file"],
             "tier": tier,
             "issue": issue["issue"],
-            "command": issue["command"]
+            "command": issue["command"],
         }
         for meta_key in ("line", "column", "snippet"):
             if meta_key in issue:
@@ -131,12 +139,14 @@ def run(args: argparse.Namespace):
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
-        print(f"  -> No mechanical anti-patterns detected.")
+        print("  -> No mechanical anti-patterns detected.")
 
     if dedup_skipped > 0:
         print(f"  -> Skipped {dedup_skipped} already-resolved issue(s) (smart dedup).")
     if escalated_count > 0:
-        print(f"  -> Escalated {escalated_count} recurring issue(s) to higher severity.")
+        print(
+            f"  -> Escalated {escalated_count} recurring issue(s) to higher severity."
+        )
 
     # ---- SUBJECTIVE REVIEW PROMPT ----
     print()
@@ -147,17 +157,24 @@ def run(args: argparse.Namespace):
     print("    C. INTERACTION  (0-20): states/micro-interactions, edge cases/polish")
     print("    D. ARCHITECTURE (0-10): component structure, data flow, code quality")
     print("  Queue any new issues found:")
-    print('    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"')
+    print(
+        '    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
+    )
     print("  Record your score:  uidetox review --score <N>   (sum of A+B+C+D)")
     print()
 
     # ---- SUPPRESSIONS ----
     if ignore_patterns:
-        print(f"  Active suppressions: {len(ignore_patterns)} (do NOT flag matching issues)")
+        print(
+            f"  Active suppressions: {len(ignore_patterns)} (do NOT flag matching issues)"
+        )
 
     # ---- TARGET CHECK ----
     save_run_snapshot(trigger="rescan")
-    log_progress("rescan", f"Rescanned {path}: {queued_count} issues queued, {dedup_skipped} deduped, {escalated_count} escalated")
+    log_progress(
+        "rescan",
+        f"Rescanned {path}: {queued_count} issues queued, {dedup_skipped} deduped, {escalated_count} escalated",
+    )
     state = load_state()
     scores = compute_design_score(state)
     score = scores["blended_score"]
@@ -171,9 +188,9 @@ def run(args: argparse.Namespace):
     print(f"  Queue: {queue_size} issue(s)")
 
     if score >= target and queue_size == 0:
-        print(f"  TARGET REACHED -> Run `uidetox finish`")
+        print("  TARGET REACHED -> Run `uidetox finish`")
     elif queue_size > 0:
-        print(f"  -> Run `uidetox next` to enter fix loop.")
+        print("  -> Run `uidetox next` to enter fix loop.")
     else:
-        print(f"  -> Complete subjective review above, then `uidetox status`.")
+        print("  -> Complete subjective review above, then `uidetox status`.")
     print()

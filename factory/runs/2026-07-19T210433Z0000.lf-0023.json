@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0023.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T21:04:33+00:00",
+  "id": "lf-0023",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0023.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0023-capability-provisioning.md",
+  "spec_sha256": "188bb536855326341a23a1bf4375f1ff9426025c43efebccc504b8637eef9339",
+  "status": "planned",
+  "title": "Add consent-aware optional capability provisioning"
+}

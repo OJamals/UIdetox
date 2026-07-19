@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 from uidetox.cli import parse_args
 from uidetox.commands import setup as setup_command
@@ -98,6 +99,15 @@ def test_dials_change_proposal_structure_and_fingerprint(tmp_path):
 
 def test_setup_persists_typed_design_intent(monkeypatch):
     saved = {}
+    monkeypatch.setattr(
+        setup_command,
+        "record_intent_artifacts",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            event={"event_id": "intent-test"},
+            handoff_path=Path(".uidetox/agent-handoff.md"),
+            prompt="test prompt",
+        ),
+    )
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
     monkeypatch.setattr(setup_command, "load_config", lambda: {})
     monkeypatch.setattr(
@@ -138,15 +148,22 @@ def test_setup_persists_typed_design_intent(monkeypatch):
     assert saved["design_intent"]["preserve"] == ("offline operation",)
     assert saved["design_intent"]["constraints"] == ("glove-friendly targets",)
     assert saved["design_intent"]["provenance"]["primary_job"] == "explicit"
-    assert saved["design_intent"]["evidence"]["product_goal"] == (
-        "user:cli-setup",
-    )
+    assert saved["design_intent"]["evidence"]["product_goal"] == ("user:cli-setup",)
     assert saved["design_intent"]["confirmation_status"] == "confirmed"
 
 
 def test_setup_interactively_captures_and_confirms_product_intent(monkeypatch):
     saved = {}
     prompts = []
+    monkeypatch.setattr(
+        setup_command,
+        "record_intent_artifacts",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            event={"event_id": "intent-test"},
+            handoff_path=Path(".uidetox/agent-handoff.md"),
+            prompt="test prompt",
+        ),
+    )
     answers = iter(
         [
             "help independent clinics reduce missed appointments",
@@ -216,9 +233,7 @@ def test_setup_can_skip_interactive_intent_interview(monkeypatch):
         lambda *_args, **_kwargs: pytest.fail("intent prompt should be skipped"),
     )
 
-    setup_command.run(
-        parse_args(["setup", "--no-intent-prompt", "--no-auto-commit"])
-    )
+    setup_command.run(parse_args(["setup", "--no-intent-prompt", "--no-auto-commit"]))
 
     assert "design_intent" not in saved
 
@@ -231,9 +246,9 @@ def test_intent_provenance_tracks_mapped_evidence_and_confidence(tmp_path):
 
     assert intent.provenance["primary_job"] == "mapped"
     assert intent.confidence["primary_job"] > intent.confidence["audience"]
-    assert "frontend-map:fingerprint.topology=form-flow" in intent.evidence[
-        "primary_job"
-    ]
+    assert (
+        "frontend-map:fingerprint.topology=form-flow" in intent.evidence["primary_job"]
+    )
     assert intent.evidence["audience"] == ("fallback:audience",)
     assert intent.confirmation_status == "inferred"
     assert intent.confirmed_at == ""
@@ -275,9 +290,7 @@ def test_redesign_ranking_weights_user_intent_above_fallback_text(tmp_path):
     )
 
 
-def test_default_setup_preserves_mapped_intent_through_redesign(
-    monkeypatch, tmp_path
-):
+def test_default_setup_preserves_mapped_intent_through_redesign(monkeypatch, tmp_path):
     saved = {}
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
     monkeypatch.setattr(setup_command, "load_config", lambda: {})

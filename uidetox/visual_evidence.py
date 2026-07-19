@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from uidetox.capabilities import visual_install_guidance
 from uidetox.utils import now_iso
 
 
@@ -30,10 +31,7 @@ _NORMALIZED_MODE = "RGB"
 _CASE_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
 _ICC_TRANSFORM_CACHE: dict[str, Any] = {}
 _SRGB_PROFILE: Any | None = None
-_VISUAL_INSTALL_GUIDANCE = (
-    "Install visual evidence support with: pip install 'uidetox[visual]' "
-    "(or 'uidetox[capture]' for browser screenshots)."
-)
+_VISUAL_INSTALL_GUIDANCE = visual_install_guidance()
 
 
 class VisualEvidenceError(RuntimeError):
@@ -216,9 +214,7 @@ class VisualComparison:
             "after": self.after.to_dict(),
             "metrics": self.metrics.to_dict(),
             "regions": [region.to_dict() for region in self.regions],
-            "ignored_regions": [
-                region.to_dict() for region in self.ignored_regions
-            ],
+            "ignored_regions": [region.to_dict() for region in self.ignored_regions],
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
         }
 
@@ -294,9 +290,7 @@ class VisualEvidenceManifest:
             "generated_at": self.generated_at,
             "status": self.status,
             "parameters": self.parameters,
-            "comparisons": [
-                comparison.to_dict() for comparison in self.comparisons
-            ],
+            "comparisons": [comparison.to_dict() for comparison in self.comparisons],
             "freshness": self.freshness.to_dict(),
             "context": self.context,
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
@@ -417,7 +411,9 @@ def _atomic_save_png(
         temporary.unlink(missing_ok=True)
 
 
-def _normalize_image(image: Any, image_module: Any, background: tuple[int, int, int]) -> Any:
+def _normalize_image(
+    image: Any, image_module: Any, background: tuple[int, int, int]
+) -> Any:
     has_alpha = "A" in image.getbands() or "transparency" in image.info
     if not has_alpha:
         return image.convert(_NORMALIZED_MODE)
@@ -442,7 +438,9 @@ def _convert_rgb_to_srgb(
         return (
             image,
             "native_fallback",
-            ("sRGB conversion requested with an invalid ICC profile; used native pixels.",),
+            (
+                "sRGB conversion requested with an invalid ICC profile; used native pixels.",
+            ),
         )
     try:
         from PIL import ImageCms
@@ -450,7 +448,9 @@ def _convert_rgb_to_srgb(
         return (
             image,
             "native_fallback",
-            ("sRGB conversion requested but ImageCms is unavailable; used native pixels.",),
+            (
+                "sRGB conversion requested but ImageCms is unavailable; used native pixels.",
+            ),
         )
     try:
         global _SRGB_PROFILE
@@ -585,9 +585,7 @@ def _load_png(
         frames=frames,
         icc_profile_present=bool(icc_profile),
         color_conversion=color_conversion,
-        warnings=tuple(
-            f"{resolved}: {warning}" for warning in color_warnings
-        ),
+        warnings=tuple(f"{resolved}: {warning}" for warning in color_warnings),
     )
     return _LoadedImage(
         image=normalized,
@@ -662,9 +660,7 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
     if any(
         not isinstance(viewport, str) or not viewport.strip()
         for viewport in request.expected_viewports
-    ) or len(request.expected_viewports) != len(
-        set(request.expected_viewports)
-    ):
+    ) or len(request.expected_viewports) != len(set(request.expected_viewports)):
         raise VisualEvidenceError(
             "invalid_request",
             "Expected viewport names must be non-empty and unique.",
@@ -696,9 +692,7 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
         if case.viewport is not None and (
             len(case.viewport) != 2
             or any(
-                not isinstance(value, int)
-                or isinstance(value, bool)
-                or value <= 0
+                not isinstance(value, int) or isinstance(value, bool) or value <= 0
                 for value in case.viewport
             )
         ):
@@ -708,9 +702,7 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             )
         for source_path in (case.before_path, case.after_path):
             normalized_path = str(source_path).strip().lower()
-            if normalized_path.startswith(
-                ("http:/", "https:/", "ftp:/", "data:")
-            ):
+            if normalized_path.startswith(("http:/", "https:/", "ftp:/", "data:")):
                 raise VisualEvidenceError(
                     "invalid_request",
                     (
@@ -719,9 +711,7 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
                     ),
                 )
         for region in (*case.semantic_regions, *case.ignore_regions):
-            expected_kind = (
-                "semantic" if region in case.semantic_regions else "ignore"
-            )
+            expected_kind = "semantic" if region in case.semantic_regions else "ignore"
             if region.kind != expected_kind:
                 raise VisualEvidenceError(
                     "invalid_region",
@@ -759,10 +749,7 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
                     f"Ignore region {region.region_id!r} requires a reason.",
                 )
     if any(
-        not isinstance(key, str)
-        or not key
-        or not isinstance(value, str)
-        or not value
+        not isinstance(key, str) or not key or not isinstance(value, str) or not value
         for key, value in request.context_sha256s.items()
     ):
         raise VisualEvidenceError(
@@ -907,8 +894,7 @@ def _reviewer_case_artifacts(
     blend_artifact = _saved_artifact(
         kind="before_after_blend",
         image=blend,
-        path=request.output_dir.resolve()
-        / f"blend_{safe_case_id}.png",
+        path=request.output_dir.resolve() / f"blend_{safe_case_id}.png",
         request=request,
     )
     if changed_bounds is None:
@@ -916,9 +902,7 @@ def _reviewer_case_artifacts(
             f"heat_{safe_case_id}.png",
             f"crop_{safe_case_id}.png",
         ):
-            (request.output_dir.resolve() / stale_name).unlink(
-                missing_ok=True
-            )
+            (request.output_dir.resolve() / stale_name).unlink(missing_ok=True)
         reason = "Omitted because no changed pixels exceeded the threshold."
         return (
             _omitted_artifact("heat_overlay", reason),
@@ -932,8 +916,7 @@ def _reviewer_case_artifacts(
     overlay_artifact = _saved_artifact(
         kind="heat_overlay",
         image=overlay,
-        path=request.output_dir.resolve()
-        / f"heat_{safe_case_id}.png",
+        path=request.output_dir.resolve() / f"heat_{safe_case_id}.png",
         request=request,
     )
     left, top, right, bottom = changed_bounds
@@ -947,8 +930,7 @@ def _reviewer_case_artifacts(
     crop_artifact = _saved_artifact(
         kind="changed_crop",
         image=crop,
-        path=request.output_dir.resolve()
-        / f"crop_{safe_case_id}.png",
+        path=request.output_dir.resolve() / f"crop_{safe_case_id}.png",
         request=request,
     )
     return (overlay_artifact, crop_artifact, blend_artifact)
@@ -1060,9 +1042,7 @@ def _compare_images(
     red, green, blue = diff.split()
     channel_sum = ImageChops.add(red, green)
     channel_sum = ImageChops.add(channel_sum, blue)
-    threshold_lut = [
-        255 if value > request.threshold else 0 for value in range(256)
-    ]
+    threshold_lut = [255 if value > request.threshold else 0 for value in range(256)]
     changed_mask = channel_sum.point(threshold_lut, mode="L")
     raw_pixels_changed = _mask_count(changed_mask)
     total_pixels = before.evidence.width * before.evidence.height
@@ -1081,9 +1061,7 @@ def _compare_images(
     pixels_changed = _mask_count(effective_changed_mask)
     ignored_changed_pixels = raw_pixels_changed - pixels_changed
     changed_ratio = pixels_changed / total_pixels if total_pixels else 0.0
-    raw_percentage = (
-        changed_ratio * 100 if total_pixels else 0.0
-    )
+    raw_percentage = changed_ratio * 100 if total_pixels else 0.0
     changed_bounds = effective_changed_mask.getbbox()
     changed_bounds_area = (
         (changed_bounds[2] - changed_bounds[0])
@@ -1095,18 +1073,12 @@ def _compare_images(
         statistics = ImageStat.Stat(diff, mask=eligible_mask)
         mean_delta = tuple(round(float(value), 4) for value in statistics.mean)
         rms_delta = tuple(round(float(value), 4) for value in statistics.rms)
-        stddev_delta = tuple(
-            round(float(value), 4) for value in statistics.stddev
-        )
+        stddev_delta = tuple(round(float(value), 4) for value in statistics.stddev)
     else:
         mean_delta = rms_delta = stddev_delta = (0.0, 0.0, 0.0)
-    extrema = tuple(
-        (int(bounds[0]), int(bounds[1])) for bounds in diff.getextrema()
-    )
+    extrema = tuple((int(bounds[0]), int(bounds[1])) for bounds in diff.getextrema())
 
-    visible_diff = diff.point(
-        lambda value: min(255, value * request.amplification)
-    )
+    visible_diff = diff.point(lambda value: min(255, value * request.amplification))
     safe_case_id = _safe_case_id(case.case_id)
     artifact_path = request.output_dir.resolve() / f"diff_{safe_case_id}.png"
     artifact = _saved_artifact(
@@ -1214,8 +1186,7 @@ def build_visual_evidence(
         loaded.append((case, before, after))
 
     comparisons = tuple(
-        _compare_images(case, before, after, request)
-        for case, before, after in loaded
+        _compare_images(case, before, after, request) for case, before, after in loaded
     )
     source_sha256s = tuple(
         image.sha256
@@ -1223,9 +1194,7 @@ def build_visual_evidence(
         for image in (comparison.before, comparison.after)
     )
     manifest_artifacts = (
-        (_build_contact_sheet(loaded, request),)
-        if request.reviewer_artifacts
-        else ()
+        (_build_contact_sheet(loaded, request),) if request.reviewer_artifacts else ()
     )
     completed_viewports = {case.case_id for case in request.comparisons}
     incomplete_viewports = tuple(
@@ -1407,10 +1376,7 @@ def inspect_visual_evidence(
     stale: list[str] = []
     if payload.get("schema_version") != VISUAL_EVIDENCE_SCHEMA_VERSION:
         blocking.append(
-            (
-                f"unsupported visual evidence schema "
-                f"{payload.get('schema_version')!r}"
-            )
+            (f"unsupported visual evidence schema {payload.get('schema_version')!r}")
         )
     if payload.get("status") != "complete":
         blocking.append("visual evidence manifest is not complete")
@@ -1437,9 +1403,7 @@ def inspect_visual_evidence(
         else:
             for key, expected in expected_parameters.items():
                 if parameters.get(key) != expected:
-                    stale.append(
-                        f"visual evidence parameter {key!r} changed"
-                    )
+                    stale.append(f"visual evidence parameter {key!r} changed")
     stored_context = freshness.get("context_sha256s", {})
     if not isinstance(stored_context, dict):
         blocking.append("visual evidence context hashes are malformed")
@@ -1448,9 +1412,7 @@ def inspect_visual_evidence(
     if expected_context_sha256s is not None:
         missing_current_keys = sorted(set(stored_context) - set(expected_context))
         for key in missing_current_keys:
-            stale.append(
-                f"visual evidence context {key!r} is no longer available"
-            )
+            stale.append(f"visual evidence context {key!r} is no longer available")
     for key, expected in expected_context.items():
         if stored_context.get(key) != expected:
             stale.append(f"visual evidence context {key!r} changed")
@@ -1489,9 +1451,7 @@ def inspect_visual_evidence(
             return
         path_value = artifact.get("path")
         if not isinstance(path_value, str) or not path_value:
-            blocking.append(
-                f"visual evidence artifact {kind!r} has no path"
-            )
+            blocking.append(f"visual evidence artifact {kind!r} has no path")
             return
         path = Path(path_value).expanduser()
         if not path.is_file():
@@ -1547,12 +1507,8 @@ def inspect_visual_evidence(
                         "region_id": str(region.get("region_id", "")),
                         "pixels_changed": int(pixels_changed),
                         "changed_ratio": float(changed_ratio),
-                        "source_targets": list(
-                            region.get("source_targets", [])
-                        ),
-                        "intent_fields": list(
-                            region.get("intent_fields", [])
-                        ),
+                        "source_targets": list(region.get("source_targets", [])),
+                        "intent_fields": list(region.get("intent_fields", [])),
                         "preserve_contracts": list(
                             region.get("preserve_contracts", [])
                         ),
@@ -1566,16 +1522,14 @@ def inspect_visual_evidence(
         for artifact in manifest_artifacts:
             inspect_artifact_record(artifact, case_id=None)
     incomplete_viewports = payload.get("incomplete_viewports", [])
-    if (
-        not isinstance(incomplete_viewports, list)
-        or any(not isinstance(item, str) for item in incomplete_viewports)
+    if not isinstance(incomplete_viewports, list) or any(
+        not isinstance(item, str) for item in incomplete_viewports
     ):
         blocking.append("visual evidence incomplete viewport list is malformed")
         incomplete_viewports = []
     manifest_warnings = payload.get("warnings", [])
-    if (
-        not isinstance(manifest_warnings, list)
-        or any(not isinstance(item, str) for item in manifest_warnings)
+    if not isinstance(manifest_warnings, list) or any(
+        not isinstance(item, str) for item in manifest_warnings
     ):
         blocking.append("visual evidence warning list is malformed")
         manifest_warnings = []

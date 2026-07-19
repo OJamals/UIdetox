@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from uidetox.design_context import (
@@ -9,7 +10,14 @@ from uidetox.design_context import (
     DesignSettings,
     merge_explicit_design_intent,
 )
-from uidetox.state import save_config, ensure_uidetox_dir, load_config
+from uidetox.intent_journal import record_intent_artifacts
+from uidetox.state import (
+    ensure_uidetox_dir,
+    get_project_root,
+    get_uidetox_dir,
+    load_config,
+    save_config,
+)
 
 
 DEFAULT_CONFIG = {
@@ -73,8 +81,13 @@ def _prompt(prompt: str) -> str:
 def _interactive_intent_updates(
     current: DesignIntent,
     supplied_fields: set[str],
+    *,
+    input_fn: Callable[[str], str] | None = None,
+    output_fn: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
-    print("\nIntent preflight (Enter = keep existing or defer to map inference):")
+    ask = input_fn or _prompt
+    output = output_fn or print
+    output("\nIntent preflight (Enter = keep existing or defer to map inference):")
     updates: dict[str, object] = {}
     for field_name, label in _INTENT_INTERVIEW:
         if field_name in supplied_fields:
@@ -85,7 +98,10 @@ def _interactive_intent_updates(
             else ""
         )
         suffix = f" [{current_value}]" if current_value else ""
-        answer = _prompt(f"  {label}{suffix}: ")
+        try:
+            answer = str(ask(f"  {label}{suffix}: ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
         if answer:
             updates[field_name] = answer
 
@@ -101,12 +117,43 @@ def _interactive_intent_updates(
             else ()
         )
         suffix = f" [{', '.join(current_values)}]" if current_values else ""
-        answer = _prompt(f"  {label}{suffix}: ")
+        try:
+            answer = str(ask(f"  {label}{suffix}: ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
         if answer:
             updates[field_name] = tuple(
                 item.strip() for item in answer.split(",") if item.strip()
             )
     return updates
+
+
+def capture_interactive_intent(
+    config: dict[str, object],
+    *,
+    supplied_fields: set[str] | None = None,
+    input_fn: Callable[[str], str] | None = None,
+    output_fn: Callable[[str], None] | None = None,
+    confirmed_at: str | None = None,
+) -> tuple[DesignSettings, bool]:
+    """Run the shared intent interview and update the current config projection."""
+
+    settings = DesignSettings.from_config(config)
+    updates = _interactive_intent_updates(
+        settings.intent,
+        supplied_fields or set(),
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
+    if not updates:
+        return settings, False
+    config["design_intent"] = merge_explicit_design_intent(
+        config.get("design_intent"),
+        updates,
+        evidence_source="user:interactive-setup",
+        confirmed_at=confirmed_at or _confirmed_now(),
+    )
+    return DesignSettings.from_config(config), True
 
 
 def _confirmed_now() -> str:
@@ -132,6 +179,7 @@ def run(args: argparse.Namespace):
         config["VISUAL_DENSITY"] = args.visual_density
 
     intent_updates = _intent_updates_from_args(args)
+    intent_update_sources: list[str] = []
     configured_intent = merge_explicit_design_intent(
         config.get("design_intent"),
         intent_updates,
@@ -142,21 +190,20 @@ def run(args: argparse.Namespace):
         config["design_intent"] = configured_intent
     else:
         config.pop("design_intent", None)
+    if intent_updates:
+        intent_update_sources.append("cli")
 
     settings = DesignSettings.from_config(config)
     if _is_interactive() and not getattr(args, "no_intent_prompt", False):
-        interactive_updates = _interactive_intent_updates(
-            settings.intent,
-            set(intent_updates),
+        settings, interactive_changed = capture_interactive_intent(
+            config,
+            supplied_fields=set(intent_updates),
+            input_fn=_prompt,
+            output_fn=print,
+            confirmed_at=_confirmed_now(),
         )
-        if interactive_updates:
-            config["design_intent"] = merge_explicit_design_intent(
-                config.get("design_intent"),
-                interactive_updates,
-                evidence_source="user:interactive-setup",
-                confirmed_at=_confirmed_now(),
-            )
-            settings = DesignSettings.from_config(config)
+        if interactive_changed:
+            intent_update_sources.append("interactive")
 
     config.update(settings.dials.to_config())
 
@@ -243,3 +290,14 @@ def run(args: argparse.Namespace):
 
     # Ensures config exists if it didn't
     save_config(config)
+    if intent_update_sources and settings.intent.confirmation_status == "confirmed":
+        artifacts = record_intent_artifacts(
+            settings.intent,
+            source=f"setup:{'+'.join(intent_update_sources)}",
+            project_root=get_project_root(),
+            uidetox_dir=get_uidetox_dir(),
+        )
+        print(f"\nIntent event saved: {artifacts.event['event_id']}")
+        print(f"Agent handoff saved: {artifacts.handoff_path}")
+        print("\nCopy-ready agent prompt:\n")
+        print(artifacts.prompt)

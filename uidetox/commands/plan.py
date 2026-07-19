@@ -23,7 +23,17 @@ def _component_key(filepath: str) -> str:
     parts = p.parts
     # Skip system/absolute path prefixes, find the project-relevant directory
     for i, part in enumerate(parts):
-        if part in ("src", "app", "pages", "components", "features", "lib", "modules", "views", "layouts"):
+        if part in (
+            "src",
+            "app",
+            "pages",
+            "components",
+            "features",
+            "lib",
+            "modules",
+            "views",
+            "layouts",
+        ):
             # Return up to 2 levels deep from the meaningful directory
             remaining = parts[i:]
             if len(remaining) >= 3:
@@ -46,16 +56,65 @@ def _categorize_issue(desc: str) -> str:
     """Quick category inference from description."""
     desc_lower = desc.lower()
     category_keywords = {
-        "typography": ["font", "typography", "inter", "roboto", "type scale", "line-height", "px font"],
-        "color": ["color", "gradient", "palette", "contrast", "dark mode", "purple", "black"],
-        "layout": ["layout", "grid", "spacing", "padding", "center", "viewport", "card", "dashboard"],
+        "typography": [
+            "font",
+            "typography",
+            "inter",
+            "roboto",
+            "type scale",
+            "line-height",
+            "px font",
+        ],
+        "color": [
+            "color",
+            "gradient",
+            "palette",
+            "contrast",
+            "dark mode",
+            "purple",
+            "black",
+        ],
+        "layout": [
+            "layout",
+            "grid",
+            "spacing",
+            "padding",
+            "center",
+            "viewport",
+            "card",
+            "dashboard",
+        ],
         "motion": ["animation", "bounce", "pulse", "spin", "transition"],
         "materiality": ["shadow", "glassmorphism", "radius", "glow", "opacity", "blur"],
         "states": ["hover", "focus", "disabled", "loading", "error", "empty"],
-        "content": ["copy", "lorem", "generic", "placeholder", "emoji", "oops", "exclamation"],
-        "code quality": ["div soup", "z-index", "inline style", "!important", "ternary", "any type", "ts-ignore"],
+        "content": [
+            "copy",
+            "lorem",
+            "generic",
+            "placeholder",
+            "emoji",
+            "oops",
+            "exclamation",
+        ],
+        "code quality": [
+            "div soup",
+            "z-index",
+            "inline style",
+            "!important",
+            "ternary",
+            "any type",
+            "ts-ignore",
+        ],
         "duplication": ["duplicate", "repeated", "copy-paste", "identical"],
-        "dead code": ["commented", "unused", "unreachable", "empty handler", "dead", "deprecated", "console"],
+        "dead code": [
+            "commented",
+            "unused",
+            "unreachable",
+            "empty handler",
+            "dead",
+            "deprecated",
+            "console",
+        ],
     }
     for cat, kws in category_keywords.items():
         if any(kw in desc_lower for kw in kws):
@@ -86,8 +145,12 @@ def run(args: argparse.Namespace):
         tiers[t] = tiers.get(t, 0) + 1
         total_effort += _TIER_EFFORT.get(t, 45)
 
-    print(f"  Total: {len(issues)} issues  |  Resolved: {len(resolved)}  |  Est. effort: ~{total_effort} min")
-    print(f"  T1: {tiers['T1']}  T2: {tiers['T2']}  T3: {tiers['T3']}  T4: {tiers['T4']}")
+    print(
+        f"  Total: {len(issues)} issues  |  Resolved: {len(resolved)}  |  Est. effort: ~{total_effort} min"
+    )
+    print(
+        f"  T1: {tiers['T1']}  T2: {tiers['T2']}  T3: {tiers['T3']}  T4: {tiers['T4']}"
+    )
     print()
 
     # ---- Category breakdown ----
@@ -131,7 +194,9 @@ def run(args: argparse.Namespace):
             files_in_group.add(i.get("file", ""))
 
         tier_str = " ".join(f"{t}:{c}" for t, c in sorted(tier_breakdown.items()))
-        cat_str = ", ".join(f"{c}" for c, _ in sorted(cat_breakdown.items(), key=lambda x: -x[1])[:3])
+        cat_str = ", ".join(
+            f"{c}" for c, _ in sorted(cat_breakdown.items(), key=lambda x: -x[1])[:3]
+        )
 
         print(f"  {rank}. {comp}")
         print(f"     {len(comp_issues)} issues ({tier_str})  ~{effort}min  [{cat_str}]")
@@ -139,21 +204,28 @@ def run(args: argparse.Namespace):
 
         # Show up to 5 issues per group
         shown = 0
-        for i in sorted(comp_issues, key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(x.get("tier", "T4"), 4)):
+        for i in sorted(
+            comp_issues,
+            key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(
+                x.get("tier", "T4"), 4
+            ),
+        ):
             if shown >= 5:
                 remaining = len(comp_issues) - shown
                 print(f"       ... +{remaining} more")
                 break
             short_file = Path(i.get("file", "")).name
             location = f":{i.get('line')}:{i.get('column', 1)}" if i.get("line") else ""
-            print(f"       [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}{location}: {i.get('issue', '?')[:70]}")
+            print(
+                f"       [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}{location}: {i.get('issue', '?')[:70]}"
+            )
             shown += 1
         print()
 
     # ---- Score context ----
     scores = compute_design_score(state)
     target = config.get("target_score", 95)
-    print(f"  ─── Score Context ───")
+    print("  ─── Score Context ───")
     filled = scores["blended_score"] // 5
     bar = "█" * filled + "░" * (20 - filled)
     print(f"  Current: [{bar}] {scores['blended_score']}/100  (target: {target})")
@@ -168,8 +240,8 @@ def run(args: argparse.Namespace):
         top_comp = group_scores[0][0]
         top_count = len(group_scores[0][1])
         print(f"  Highest-impact component: {top_comp} ({top_count} issues)")
-        print(f"  Run `uidetox next` to get the batch with full SKILL.md context.")
-        print(f"  Fix all issues in the component, then:")
-        print(f"    `uidetox batch-resolve ID1 ID2 ... --note 'what you changed'`")
+        print("  Run `uidetox next` to get the batch with full SKILL.md context.")
+        print("  Fix all issues in the component, then:")
+        print("    `uidetox batch-resolve ID1 ID2 ... --note 'what you changed'`")
     else:
-        print(f"  Run `uidetox next` to get the next issue.")
+        print("  Run `uidetox next` to get the next issue.")

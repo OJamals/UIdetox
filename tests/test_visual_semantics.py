@@ -122,9 +122,7 @@ def test_runtime_regions_link_only_evidenced_sources_intent_and_contracts() -> N
     assert len(regions) == 1
     region = regions[0]
     assert region.bounds == (0.0, 0.0, 240.0, 800.0)
-    assert region.source_targets == (
-        "frontend/src/components/Sidebar.tsx",
-    )
+    assert region.source_targets == ("frontend/src/components/Sidebar.tsx",)
     assert region.intent_fields == (
         "audience",
         "primary_job",
@@ -177,9 +175,7 @@ def test_ignore_regions_require_explicit_config_reason_and_scope() -> None:
     assert len(regions) == 1
     assert regions[0].region_id == "animated-metric"
     assert regions[0].reason == "count-up animation"
-    assert regions[0].provenance == (
-        "config:visual_evidence.ignore_regions[0]"
-    )
+    assert regions[0].provenance == ("config:visual_evidence.ignore_regions[0]")
 
 
 def test_corrupt_or_deleted_map_invalidates_captured_context(

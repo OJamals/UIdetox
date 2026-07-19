@@ -71,7 +71,9 @@ def test_route_normalization_preserves_identity_but_compares_shapes() -> None:
         ("account",),
         ("member",),
     ]
-    assert normalize_route_path("https://example.test/api/items?page=1")[0] == "/api/items"
+    assert (
+        normalize_route_path("https://example.test/api/items?page=1")[0] == "/api/items"
+    )
 
 
 def test_openapi_json_yaml_extract_schema_refs_and_dedupe_provenance(tmp_path) -> None:
@@ -272,7 +274,7 @@ def test_unknown_route_syntax_is_unresolved_not_false_match(tmp_path) -> None:
     assert project.counts["frontend_only"] == 1
 
     (tmp_path / "unknown.ts").write_text(
-        'mystery.route(dynamicPath, handler);',
+        "mystery.route(dynamicPath, handler);",
         encoding="utf-8",
     )
     project = build_project_map(tmp_path, [_frontend_node("/users", "GET")])
@@ -463,13 +465,11 @@ app.get("/fake-js", handler);
 
     project = build_project_map(tmp_path)
 
-    assert all(
-        item.classification == "unknown"
-        for item in project.backend_operations
-    )
-    assert {
-        item.normalized_path for item in project.backend_operations
-    } == {"/fake-js", "/fake-python"}
+    assert all(item.classification == "unknown" for item in project.backend_operations)
+    assert {item.normalized_path for item in project.backend_operations} == {
+        "/fake-js",
+        "/fake-python",
+    }
     assert project.evidence["adapters"] == []
 
 

@@ -16,7 +16,9 @@ from uidetox.commands.show import format_issue_location
 from uidetox.state import ensure_uidetox_dir, load_state, save_config
 
 
-def test_codex_install_keeps_existing_prompts_and_uses_uidetox_namespace(tmp_path, monkeypatch):
+def test_codex_install_keeps_existing_prompts_and_uses_uidetox_namespace(
+    tmp_path, monkeypatch
+):
     data = tmp_path / "data"
     (data / "commands").mkdir(parents=True)
     (data / "reference").mkdir()
@@ -33,7 +35,9 @@ def test_codex_install_keeps_existing_prompts_and_uses_uidetox_namespace(tmp_pat
     update_skill._install_codex(data, tmp_path)
 
     assert existing_prompt.read_text(encoding="utf-8") == "keep me"
-    assert (home / ".codex" / "prompts" / "uidetox" / "audit.md").read_text(encoding="utf-8") == "audit"
+    assert (home / ".codex" / "prompts" / "uidetox" / "audit.md").read_text(
+        encoding="utf-8"
+    ) == "audit"
 
 
 def test_package_data_includes_transform_scripts():
@@ -46,7 +50,14 @@ def test_package_data_includes_transform_scripts():
 def test_scan_deduplicates_existing_issue_queue(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
-    save_config({"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4, "tooling": {}})
+    save_config(
+        {
+            "DESIGN_VARIANCE": 8,
+            "MOTION_INTENSITY": 6,
+            "VISUAL_DENSITY": 4,
+            "tooling": {},
+        }
+    )
 
     issue = {
         "file": str(tmp_path / "src" / "App.tsx"),
@@ -74,7 +85,14 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
-    save_config({"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4, "tooling": {}})
+    save_config(
+        {
+            "DESIGN_VARIANCE": 8,
+            "MOTION_INTENSITY": 6,
+            "VISUAL_DENSITY": 4,
+            "tooling": {},
+        }
+    )
     findings = [
         {
             "id": f"RULE-{index}",
@@ -114,7 +132,9 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
     monkeypatch.setattr(scan, "_save_scan_to_memory", capture_scan_memory)
     monkeypatch.setattr(scan, "save_session", lambda *args, **kwargs: None)
     monkeypatch.setattr(scan, "log_progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan, "load_state", lambda: {"issues": [], "resolved": [], "stats": {}})
+    monkeypatch.setattr(
+        scan, "load_state", lambda: {"issues": [], "resolved": [], "stats": {}}
+    )
 
     scan.run(argparse.Namespace(path="."))
 
@@ -158,10 +178,14 @@ def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
         "load_state",
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
-    monkeypatch.setattr(scan, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(
+        scan, "compute_design_score", lambda state: {"blended_score": 100}
+    )
 
 
-def test_scan_json_output_is_standalone_for_empty_results(monkeypatch, tmp_path, capsys):
+def test_scan_json_output_is_standalone_for_empty_results(
+    monkeypatch, tmp_path, capsys
+):
     import json
 
     _stub_scan_output_dependencies(monkeypatch, tmp_path, [])
@@ -253,7 +277,9 @@ def test_scan_json_output_routes_since_fallback_diagnostics_to_stderr(
         if failure == "missing_git":
             raise FileNotFoundError("git")
         if cmd[:2] == ["git", "rev-parse"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=f"{tmp_path}\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=f"{tmp_path}\n", stderr=""
+            )
         return subprocess.CompletedProcess(
             cmd,
             128,
@@ -377,7 +403,13 @@ def test_check_auto_commit_stages_only_changed_files(monkeypatch):
         )
     )
     expected_add = ["git", "add", "--", *expected_paths]
-    expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix", "--no-verify"]
+    expected_commit = [
+        "git",
+        "commit",
+        "-m",
+        "[UIdetox] Mechanical auto-fix",
+        "--no-verify",
+    ]
 
     assert [cmd for cmd, _ in calls] == [expected_add, expected_commit]
     assert result.staged_paths == expected_paths
@@ -424,12 +456,16 @@ def test_check_auto_commit_failure_reports_and_omits_success(
             if failure == "missing":
                 raise FileNotFoundError("git")
             if failure == "add":
-                return subprocess.CompletedProcess(cmd, 17, stdout="", stderr="add rejected TOKEN=top-secret")
+                return subprocess.CompletedProcess(
+                    cmd, 17, stdout="", stderr="add rejected TOKEN=top-secret"
+                )
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         if cmd[:2] == ["git", "commit"]:
             if failure == "commit":
-                return subprocess.CompletedProcess(cmd, 23, stdout="", stderr="hook rejected SECRET=top-secret")
+                return subprocess.CompletedProcess(
+                    cmd, 23, stdout="", stderr="hook rejected SECRET=top-secret"
+                )
             raise AssertionError("git commit should not run after add failure")
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -493,9 +529,15 @@ def test_check_auto_commit_real_git_repo_stages_exact_paths(tmp_path, monkeypatc
         "[UIdetox] Mechanical auto-fix",
     )
 
-    committed = git("show", "--pretty=format:", "--name-only", "HEAD").stdout.splitlines()
+    committed = git(
+        "show", "--pretty=format:", "--name-only", "HEAD"
+    ).stdout.splitlines()
     status = git("status", "--porcelain").stdout.splitlines()
-    expected_paths = tuple(sorted([str((repo / "a.txt").resolve()), str((repo / "nested/b.txt").resolve())]))
+    expected_paths = tuple(
+        sorted(
+            [str((repo / "a.txt").resolve()), str((repo / "nested/b.txt").resolve())]
+        )
+    )
 
     assert committed == ["a.txt", "nested/b.txt"]
     assert result.staged_paths == expected_paths
@@ -512,7 +554,9 @@ def test_check_run_skips_auto_commit_when_workspace_already_dirty(monkeypatch, c
         calls.append(cmd)
 
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/App.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/App.tsx\n", stderr=""
+            )
 
         if cmd == ["fmt"]:
             fmt_runs += 1
@@ -520,7 +564,9 @@ def test_check_run_skips_auto_commit_when_workspace_already_dirty(monkeypatch, c
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+            raise AssertionError(
+                "git add/commit should be skipped for a dirty workspace"
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -584,7 +630,13 @@ def test_check_run_auto_commits_only_new_mechanical_changes(monkeypatch):
 
     expected_add = ["git", "add", "--", str((Path.cwd() / "src/App.tsx").resolve())]
     assert expected_add in calls
-    assert ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"] in calls
+    assert [
+        "git",
+        "commit",
+        "-m",
+        "[UIdetox] Mechanical auto-fix (formatting/linting)",
+        "--no-verify",
+    ] in calls
     assert not any(cmd[:2] == ["git", "commit"] and "-am" in cmd for cmd in calls)
 
 
@@ -636,14 +688,26 @@ def test_check_run_auto_commits_from_subdirectory(monkeypatch, tmp_path, capsys)
     output = capsys.readouterr().out
 
     expected_add = ["git", "add", "--", str((root / "src/App.tsx").resolve())]
-    expected_commit = ["git", "commit", "-m", "[UIdetox] Mechanical auto-fix (formatting/linting)", "--no-verify"]
+    expected_commit = [
+        "git",
+        "commit",
+        "-m",
+        "[UIdetox] Mechanical auto-fix (formatting/linting)",
+        "--no-verify",
+    ]
 
     assert output.count("Auto-committed mechanical fixes") == 1
-    assert any(cmd == expected_add and kwargs.get("cwd") == root for cmd, kwargs in calls)
-    assert any(cmd == expected_commit and kwargs.get("cwd") == root for cmd, kwargs in calls)
+    assert any(
+        cmd == expected_add and kwargs.get("cwd") == root for cmd, kwargs in calls
+    )
+    assert any(
+        cmd == expected_commit and kwargs.get("cwd") == root for cmd, kwargs in calls
+    )
 
 
-def test_check_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+def test_check_run_detects_tooling_from_project_root_on_cold_start(
+    monkeypatch, tmp_path, capsys
+):
     root = tmp_path / "repo"
     nested_dir = root / "src" / "nested"
     nested_dir.mkdir(parents=True)
@@ -684,7 +748,9 @@ def test_check_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, 
     assert "Auto-detected project tooling" in output
 
 
-def test_check_run_executes_mechanical_fix_commands_from_project_root(monkeypatch, tmp_path, capsys):
+def test_check_run_executes_mechanical_fix_commands_from_project_root(
+    monkeypatch, tmp_path, capsys
+):
     root = tmp_path / "repo"
     nested_dir = root / "src" / "nested"
     nested_dir.mkdir(parents=True)
@@ -707,17 +773,33 @@ def test_check_run_executes_mechanical_fix_commands_from_project_root(monkeypatc
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(check.subprocess, "run", fake_run)
-    monkeypatch.setattr(check, "load_config", lambda: {"auto_commit": False, "tooling": {"typescript": None, "linter": None, "formatter": {"fix_cmd": "fmt --write ."}}})
+    monkeypatch.setattr(
+        check,
+        "load_config",
+        lambda: {
+            "auto_commit": False,
+            "tooling": {
+                "typescript": None,
+                "linter": None,
+                "formatter": {"fix_cmd": "fmt --write ."},
+            },
+        },
+    )
     monkeypatch.setattr(check, "save_config", lambda cfg: None)
 
     check.run(argparse.Namespace(fix=True))
     output = capsys.readouterr().out
 
     assert "Auto-fix phase complete" in output
-    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+    assert any(
+        cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve()
+        for cmd, kwargs in calls
+    )
 
 
-def test_detect_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+def test_detect_run_detects_tooling_from_project_root_on_cold_start(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import detect as detect_cmd
 
     root = tmp_path / "repo"
@@ -759,7 +841,9 @@ def test_detect_run_detects_tooling_from_project_root_on_cold_start(monkeypatch,
 
     monkeypatch.setattr(detect_cmd, "detect_all", fake_detect_all)
     monkeypatch.setattr(detect_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(detect_cmd, "save_config", lambda cfg: saved_configs.append(cfg))
+    monkeypatch.setattr(
+        detect_cmd, "save_config", lambda cfg: saved_configs.append(cfg)
+    )
 
     detect_cmd.run(argparse.Namespace(path="."))
     output = capsys.readouterr().out
@@ -769,7 +853,9 @@ def test_detect_run_detects_tooling_from_project_root_on_cold_start(monkeypatch,
     assert "Package Manager : npm" in output
 
 
-def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path, capsys):
+def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import scan as scan_cmd
 
     root = tmp_path / "repo"
@@ -815,8 +901,14 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch,
     monkeypatch.setattr(scan_cmd, "_save_scan_to_memory", lambda *args, **kwargs: None)
     monkeypatch.setattr(scan_cmd, "save_session", lambda **kwargs: None)
     monkeypatch.setattr(scan_cmd, "log_progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan_cmd, "load_state", lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}})
-    monkeypatch.setattr(scan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_state",
+        lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
+    )
+    monkeypatch.setattr(
+        scan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+    )
 
     scan_cmd.run(argparse.Namespace(path=".", output="json", since=None))
     output = capsys.readouterr().out
@@ -827,7 +919,9 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch,
     assert output.rstrip().endswith("[]")
 
 
-def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path, capsys):
+def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import scan as scan_cmd
 
     root = tmp_path / "repo"
@@ -852,9 +946,13 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
     def fake_run(cmd, **kwargs):
         git_call_cwds.append(Path(kwargs["cwd"]).resolve())
         if cmd[:2] == ["git", "rev-parse"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+            )
         if cmd[:3] == ["git", "diff", "--name-only"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="frontend/src/Button.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="frontend/src/Button.tsx\n", stderr=""
+            )
         raise AssertionError(f"Unexpected command: {cmd}")
 
     def fake_analyze_directory(path, **kwargs):
@@ -865,18 +963,37 @@ def test_scan_run_since_uses_project_root_on_cold_start_from_subdirectory(monkey
 
     monkeypatch.setattr(scan_cmd.subprocess, "run", fake_run)
     monkeypatch.setattr(scan_cmd, "analyze_directory", fake_analyze_directory)
-    monkeypatch.setattr(scan_cmd, "load_config", lambda: {"tooling": {"package_manager": "npm", "typescript": None, "linter": None, "formatter": None, "frontend": [], "backend": [], "database": [], "api": []}})
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_config",
+        lambda: {
+            "tooling": {
+                "package_manager": "npm",
+                "typescript": None,
+                "linter": None,
+                "formatter": None,
+                "frontend": [],
+                "backend": [],
+                "database": [],
+                "api": [],
+            }
+        },
+    )
 
     scan_cmd.run(argparse.Namespace(path=".", output="json", since="abc123"))
     output = capsys.readouterr().out
 
     assert analyzed_path == root.resolve()
-    assert analyzed_targets == [str((root / "frontend" / "src" / "Button.tsx").resolve())]
+    assert analyzed_targets == [
+        str((root / "frontend" / "src" / "Button.tsx").resolve())
+    ]
     assert git_call_cwds == [root.resolve(), root.resolve()]
     assert "frontend/src/Button.tsx" in output
 
 
-def test_batch_resolve_verification_runs_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+def test_batch_resolve_verification_runs_from_project_root_on_cold_start(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import batch_resolve
 
     root = tmp_path / "repo"
@@ -906,12 +1023,23 @@ def test_batch_resolve_verification_runs_from_project_root_on_cold_start(monkeyp
     output = capsys.readouterr().out
 
     assert "TypeScript passed" in output
-    assert any(cmd == ["tsc", "--noEmit"] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
-    assert any(cmd == ["lint", "--fix", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
-    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+    assert any(
+        cmd == ["tsc", "--noEmit"] and kwargs.get("cwd") == root.resolve()
+        for cmd, kwargs in calls
+    )
+    assert any(
+        cmd == ["lint", "--fix", "."] and kwargs.get("cwd") == root.resolve()
+        for cmd, kwargs in calls
+    )
+    assert any(
+        cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve()
+        for cmd, kwargs in calls
+    )
 
 
-def test_get_project_root_uses_git_root_on_cold_start_from_subdirectory(tmp_path, monkeypatch):
+def test_get_project_root_uses_git_root_on_cold_start_from_subdirectory(
+    tmp_path, monkeypatch
+):
     project_root = tmp_path / "repo"
     nested_dir = project_root / "src" / "nested"
     nested_dir.mkdir(parents=True)
@@ -924,7 +1052,9 @@ def test_get_project_root_uses_git_root_on_cold_start_from_subdirectory(tmp_path
     assert get_project_root() == project_root.resolve()
 
 
-def test_format_run_detects_and_executes_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+def test_format_run_detects_and_executes_from_project_root_on_cold_start(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import format_cmd as format_cmd_module
 
     root = tmp_path / "repo"
@@ -963,10 +1093,15 @@ def test_format_run_detects_and_executes_from_project_root_on_cold_start(monkeyp
 
     assert captured_root == root.resolve()
     assert "Formatting applied successfully" in output
-    assert any(cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve() for cmd, kwargs in calls)
+    assert any(
+        cmd == ["fmt", "--write", "."] and kwargs.get("cwd") == root.resolve()
+        for cmd, kwargs in calls
+    )
 
 
-def test_loop_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, tmp_path, capsys):
+def test_loop_run_detects_tooling_from_project_root_on_cold_start(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import loop as loop_cmd
 
     root = tmp_path / "repo"
@@ -999,7 +1134,9 @@ def test_loop_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, t
 
     monkeypatch.setattr(loop_cmd, "detect_all", fake_detect_all)
     monkeypatch.setattr(loop_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: saved_configs.append(dict(cfg)))
+    monkeypatch.setattr(
+        loop_cmd, "save_config", lambda cfg: saved_configs.append(dict(cfg))
+    )
     monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
     monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
     monkeypatch.setattr(loop_cmd, "get_notes", lambda: [])
@@ -1015,17 +1152,28 @@ def test_loop_run_detects_tooling_from_project_root_on_cold_start(monkeypatch, t
     assert "Auto-detecting project tooling" in output
 
 
-def test_loop_run_counts_frontend_files_when_repo_root_path_contains_excluded_dir_name(monkeypatch, tmp_path, capsys):
+def test_loop_run_counts_frontend_files_when_repo_root_path_contains_excluded_dir_name(
+    monkeypatch, tmp_path, capsys
+):
     from uidetox.commands import loop as loop_cmd
 
     root = tmp_path / "build" / "repo"
     (root / "src").mkdir(parents=True)
     (root / ".git").mkdir()
-    (root / "src" / "App.tsx").write_text("export const App = () => null;\n", encoding="utf-8")
+    (root / "src" / "App.tsx").write_text(
+        "export const App = () => null;\n", encoding="utf-8"
+    )
 
     monkeypatch.chdir(root)
 
-    monkeypatch.setattr(loop_cmd, "load_config", lambda: {"tooling": {"typescript": None, "linter": None, "formatter": None}, "auto_commit": False})
+    monkeypatch.setattr(
+        loop_cmd,
+        "load_config",
+        lambda: {
+            "tooling": {"typescript": None, "linter": None, "formatter": None},
+            "auto_commit": False,
+        },
+    )
     monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: None)
     monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
     monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
@@ -1040,7 +1188,9 @@ def test_loop_run_counts_frontend_files_when_repo_root_path_contains_excluded_di
     assert "Files: 1" in output
 
 
-def test_ensure_uidetox_dir_creates_state_dir_at_git_root_on_cold_start(tmp_path, monkeypatch):
+def test_ensure_uidetox_dir_creates_state_dir_at_git_root_on_cold_start(
+    tmp_path, monkeypatch
+):
     project_root = tmp_path / "repo"
     nested_dir = project_root / "src" / "nested"
     nested_dir.mkdir(parents=True)
@@ -1056,11 +1206,15 @@ def test_ensure_uidetox_dir_creates_state_dir_at_git_root_on_cold_start(tmp_path
     assert uidetox_dir.exists()
 
 
-def test_get_project_root_uses_manifest_marker_when_git_and_uidetox_are_missing(tmp_path, monkeypatch):
+def test_get_project_root_uses_manifest_marker_when_git_and_uidetox_are_missing(
+    tmp_path, monkeypatch
+):
     project_root = tmp_path / "project"
     nested_dir = project_root / "app" / "components"
     nested_dir.mkdir(parents=True)
-    (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    (project_root / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
 
     monkeypatch.chdir(nested_dir)
 
@@ -1069,12 +1223,16 @@ def test_get_project_root_uses_manifest_marker_when_git_and_uidetox_are_missing(
     assert get_project_root() == project_root.resolve()
 
 
-def test_get_project_root_prefers_git_root_over_nested_manifest_on_cold_start(tmp_path, monkeypatch):
+def test_get_project_root_prefers_git_root_over_nested_manifest_on_cold_start(
+    tmp_path, monkeypatch
+):
     repo_root = tmp_path / "repo"
     nested_dir = repo_root / "packages" / "app" / "src"
     nested_dir.mkdir(parents=True)
     (repo_root / ".git").mkdir()
-    (repo_root / "packages" / "app" / "package.json").write_text('{"name":"app"}\n', encoding="utf-8")
+    (repo_root / "packages" / "app" / "package.json").write_text(
+        '{"name":"app"}\n', encoding="utf-8"
+    )
 
     monkeypatch.chdir(nested_dir)
 
@@ -1100,7 +1258,9 @@ def test_check_run_with_missing_git_does_not_raise(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should not be reached when git is missing")
+            raise AssertionError(
+                "git add/commit should not be reached when git is missing"
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1126,7 +1286,9 @@ def test_check_run_with_missing_git_does_not_raise(monkeypatch):
 def test_prepare_subprocess_cmd_extracts_env_prefixes_and_preserves_quotes():
     from uidetox.utils import prepare_subprocess_cmd
 
-    argv, env = prepare_subprocess_cmd("CI=1 NODE_OPTIONS='--max-old-space-size=4096' prettier --check 'src/App File.tsx'")
+    argv, env = prepare_subprocess_cmd(
+        "CI=1 NODE_OPTIONS='--max-old-space-size=4096' prettier --check 'src/App File.tsx'"
+    )
 
     assert argv == ["prettier", "--check", "src/App File.tsx"]
     assert env is not None
@@ -1214,7 +1376,11 @@ def test_tsc_run_supports_env_prefixed_command(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(tsc_mod, "load_config", lambda: {"tooling": {"typescript": {"run_cmd": "CI=1 tsc --noEmit"}}})
+    monkeypatch.setattr(
+        tsc_mod,
+        "load_config",
+        lambda: {"tooling": {"typescript": {"run_cmd": "CI=1 tsc --noEmit"}}},
+    )
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
@@ -1249,7 +1415,9 @@ def test_batch_resolve_verification_supports_env_prefixed_commands(monkeypatch):
 def test_finish_preflight_rejects_dirty_workspace(monkeypatch):
     def fake_run(cmd, **kwargs):
         if cmd == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/App.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/App.tsx\n", stderr=""
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     monkeypatch.setattr(finish.subprocess, "run", fake_run)
@@ -1321,7 +1489,7 @@ def test_analyzer_reports_line_and_column_for_frontend_issue(tmp_path):
     target.write_text(
         "export function App() {\n"
         "  return <main>\n"
-        "    <div className=\"font-inter\">Hello</div>\n"
+        '    <div className="font-inter">Hello</div>\n'
         "  </main>\n"
         "}\n",
         encoding="utf-8",
@@ -1358,7 +1526,9 @@ def _rule_fired(code: str, rule_id: str, ext: str = ".tsx") -> bool:
 
 
 def test_outline_none_slop_fires_without_focus_visible():
-    assert _rule_fired('<button className="outline-none px-4 py-2">Click</button>', "OUTLINE_NONE_SLOP")
+    assert _rule_fired(
+        '<button className="outline-none px-4 py-2">Click</button>', "OUTLINE_NONE_SLOP"
+    )
 
 
 def test_outline_none_slop_does_not_fire_with_focus_visible():
@@ -1369,7 +1539,10 @@ def test_outline_none_slop_does_not_fire_with_focus_visible():
 
 
 def test_reduced_motion_missing_slop_fires_without_motion_reduce():
-    assert _rule_fired('<div className="animate-bounce bg-white">x</div>', "REDUCED_MOTION_MISSING_SLOP")
+    assert _rule_fired(
+        '<div className="animate-bounce bg-white">x</div>',
+        "REDUCED_MOTION_MISSING_SLOP",
+    )
 
 
 def test_reduced_motion_missing_slop_skips_when_motion_reduce_present():
@@ -1380,35 +1553,57 @@ def test_reduced_motion_missing_slop_skips_when_motion_reduce_present():
 
 
 def test_positive_tabindex_slop_fires_for_tabindex_gt_zero():
-    assert _rule_fired('<div tabIndex={3} className="cursor-pointer">item</div>', "TABINDEX_POSITIVE_SLOP")
+    assert _rule_fired(
+        '<div tabIndex={3} className="cursor-pointer">item</div>',
+        "TABINDEX_POSITIVE_SLOP",
+    )
 
 
 def test_positive_tabindex_slop_allows_zero():
-    assert not _rule_fired('<button tabIndex={0} className="btn">ok</button>', "TABINDEX_POSITIVE_SLOP")
+    assert not _rule_fired(
+        '<button tabIndex={0} className="btn">ok</button>', "TABINDEX_POSITIVE_SLOP"
+    )
 
 
 def test_tailwind_font_conflict_fires_with_two_size_classes():
-    assert _rule_fired('<h1 className="text-xs text-4xl font-bold">Title</h1>', "TAILWIND_FONT_CONFLICT_SLOP")
+    assert _rule_fired(
+        '<h1 className="text-xs text-4xl font-bold">Title</h1>',
+        "TAILWIND_FONT_CONFLICT_SLOP",
+    )
 
 
 def test_tailwind_font_conflict_skips_single_size():
-    assert not _rule_fired('<h1 className="text-4xl font-bold tracking-tight">Title</h1>', "TAILWIND_FONT_CONFLICT_SLOP")
+    assert not _rule_fired(
+        '<h1 className="text-4xl font-bold tracking-tight">Title</h1>',
+        "TAILWIND_FONT_CONFLICT_SLOP",
+    )
 
 
 def test_tailwind_weight_conflict_fires_with_two_weight_classes():
-    assert _rule_fired('<p className="font-bold font-medium text-base">Hello</p>', "TAILWIND_WEIGHT_CONFLICT_SLOP")
+    assert _rule_fired(
+        '<p className="font-bold font-medium text-base">Hello</p>',
+        "TAILWIND_WEIGHT_CONFLICT_SLOP",
+    )
 
 
 def test_tailwind_display_conflict_fires_flex_and_hidden():
-    assert _rule_fired('<div className="flex hidden items-center">x</div>', "TAILWIND_DISPLAY_CONFLICT_SLOP")
+    assert _rule_fired(
+        '<div className="flex hidden items-center">x</div>',
+        "TAILWIND_DISPLAY_CONFLICT_SLOP",
+    )
 
 
 def test_tailwind_display_conflict_fires_flex_and_block():
-    assert _rule_fired('<div className="flex block gap-4">x</div>', "TAILWIND_DISPLAY_CONFLICT_SLOP")
+    assert _rule_fired(
+        '<div className="flex block gap-4">x</div>', "TAILWIND_DISPLAY_CONFLICT_SLOP"
+    )
 
 
 def test_tailwind_display_conflict_skips_single_display():
-    assert not _rule_fired('<div className="flex gap-4 items-center">x</div>', "TAILWIND_DISPLAY_CONFLICT_SLOP")
+    assert not _rule_fired(
+        '<div className="flex gap-4 items-center">x</div>',
+        "TAILWIND_DISPLAY_CONFLICT_SLOP",
+    )
 
 
 def test_modal_no_aria_fires_for_div_with_modal_class():
@@ -1434,7 +1629,9 @@ def test_css_scroll_behavior_slop_fires_for_smooth_without_media(tmp_path):
 
 def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
     p = tmp_path / "layout.css"
-    p.write_text("@media (max-width: 768px) { .nav { display: none; } }", encoding="utf-8")
+    p.write_text(
+        "@media (max-width: 768px) { .nav { display: none; } }", encoding="utf-8"
+    )
     issues = analyze_file(p)
     assert any(i.get("id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
 
@@ -1470,17 +1667,21 @@ def test_autofix_loads_config_before_transform_auto_commit_check(tmp_path, monke
     ensure_uidetox_dir()
     save_config({"auto_commit": False})
     target = tmp_path / "App.tsx"
-    target.write_text("export const App = () => <div className=\"font-inter\" />", encoding="utf-8")
+    target.write_text(
+        'export const App = () => <div className="font-inter" />', encoding="utf-8"
+    )
 
     from uidetox.state import add_issue
 
-    add_issue({
-        "id": "SCAN-ABC123",
-        "file": str(target),
-        "tier": "T1",
-        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-        "command": "Swap font family.",
-    })
+    add_issue(
+        {
+            "id": "SCAN-ABC123",
+            "file": str(target),
+            "tier": "T1",
+            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+            "command": "Swap font family.",
+        }
+    )
 
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
@@ -1490,7 +1691,9 @@ def test_autofix_loads_config_before_transform_auto_commit_check(tmp_path, monke
     autofix.run(argparse.Namespace(dry_run=False))
 
 
-def test_autofix_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+def test_autofix_skips_auto_commit_when_workspace_already_dirty(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
     save_config({"auto_commit": True})
@@ -1500,13 +1703,15 @@ def test_autofix_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkey
 
     from uidetox.state import add_issue
 
-    add_issue({
-        "id": "SCAN-DIRTY1",
-        "file": str(target),
-        "tier": "T1",
-        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-        "command": "Swap font family.",
-    })
+    add_issue(
+        {
+            "id": "SCAN-DIRTY1",
+            "file": str(target),
+            "tier": "T1",
+            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+            "command": "Swap font family.",
+        }
+    )
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["git", "status", "--porcelain"]:
@@ -1517,7 +1722,9 @@ def test_autofix_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkey
             return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
 
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+            raise AssertionError(
+                "git add/commit should be skipped for a dirty workspace"
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1529,7 +1736,9 @@ def test_autofix_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkey
     assert "Skipped git auto-commit" in output
 
 
-def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(tmp_path, monkeypatch, capsys):
+def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
     save_config({"auto_commit": True})
@@ -1541,13 +1750,15 @@ def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(tmp_path, 
 
     from uidetox.state import add_issue
 
-    add_issue({
-        "id": "SCAN-RELATIVE1",
-        "file": "src/App.tsx",
-        "tier": "T1",
-        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-        "command": "Swap font family.",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RELATIVE1",
+            "file": "src/App.tsx",
+            "tier": "T1",
+            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+            "command": "Swap font family.",
+        }
+    )
 
     monkeypatch.chdir(nested_dir)
 
@@ -1576,7 +1787,9 @@ def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(tmp_path, 
     assert ["git", "add", str(target.resolve())] in calls
 
 
-def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_transform(tmp_path, monkeypatch, capsys):
+def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_transform(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
     save_config({"auto_commit": False})
@@ -1587,13 +1800,15 @@ def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_trans
 
     from uidetox.state import add_issue
 
-    add_issue({
-        "id": "SCAN-RELATIVE2",
-        "file": "src/App.tsx",
-        "tier": "T1",
-        "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-        "command": "Swap font family.",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RELATIVE2",
+            "file": "src/App.tsx",
+            "tier": "T1",
+            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
+            "command": "Swap font family.",
+        }
+    )
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["npx", "jscodeshift", "-t"]:
@@ -1609,7 +1824,9 @@ def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_trans
     assert "need manual fixing" not in output
 
 
-def test_batch_resolve_verification_fails_when_linter_command_missing(monkeypatch, capsys):
+def test_batch_resolve_verification_fails_when_linter_command_missing(
+    monkeypatch, capsys
+):
     from uidetox.commands import batch_resolve
 
     config = {"tooling": {"linter": {"fix_cmd": "missing-linter --fix"}}}
@@ -1639,7 +1856,9 @@ def test_batch_resolve_verification_fails_when_formatter_times_out(monkeypatch, 
     assert "Formatter auto-fix timed out" in output
 
 
-def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import batch_resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1653,35 +1872,47 @@ def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_pa
     issue_file.write_text("export const App = () => null;", encoding="utf-8")
     unrelated_file.write_text("export const Other = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-BATCH1",
-        "file": str(issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-BATCH1",
+            "file": str(issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Other.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/Other.tsx\n", stderr=""
+            )
 
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+            raise AssertionError(
+                "git add/commit should be skipped for a dirty workspace"
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
-    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH1"], note="Applied fix", skip_verify=False))
+    batch_resolve.run(
+        argparse.Namespace(
+            issue_ids=["SCAN-BATCH1"], note="Applied fix", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Skipped git auto-commit" in output
 
 
-def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(tmp_path, monkeypatch, capsys):
+def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import batch_resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1693,13 +1924,15 @@ def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(tmp_path
     issue_file.parent.mkdir(parents=True)
     issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-BATCH2",
-        "file": str(issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-BATCH2",
+            "file": str(issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
@@ -1709,22 +1942,36 @@ def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(tmp_path
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/App.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/App.tsx\n", stderr=""
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
-    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH2"], note="Applied fix", skip_verify=False))
+    batch_resolve.run(
+        argparse.Namespace(
+            issue_ids=["SCAN-BATCH2"], note="Applied fix", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Auto-committed" in output
     assert ["git", "add", str(issue_file)] in calls
     assert ["git", "add", str((tmp_path / ".uidetox/state.json").resolve())] in calls
-    assert ["git", "commit", "-m", "[UIdetox] Detoxed src: Applied fix (1 issues resolved)", "--no-verify"] in calls
+    assert [
+        "git",
+        "commit",
+        "-m",
+        "[UIdetox] Detoxed src: Applied fix (1 issues resolved)",
+        "--no-verify",
+    ] in calls
 
 
-def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
+def test_batch_resolve_run_auto_commits_renamed_issue_file(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import batch_resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1739,13 +1986,15 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch
     old_issue_file.unlink()
     new_issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-BATCH-RENAME",
-        "file": str(old_issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-BATCH-RENAME",
+            "file": str(old_issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
@@ -1758,14 +2007,14 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=' D src/OldApp.tsx\n',
+                stdout=" D src/OldApp.tsx\n",
                 stderr="",
             )
         if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=' D src/OldApp.tsx\n?? src/NewApp.tsx\n',
+                stdout=" D src/OldApp.tsx\n?? src/NewApp.tsx\n",
                 stderr="",
             )
 
@@ -1773,7 +2022,11 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch
 
     monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
-    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH-RENAME"], note="Renamed file", skip_verify=False))
+    batch_resolve.run(
+        argparse.Namespace(
+            issue_ids=["SCAN-BATCH-RENAME"], note="Renamed file", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Auto-committed" in output
@@ -1781,7 +2034,9 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch
     assert ["git", "add", str(new_issue_file)] in calls
 
 
-def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(tmp_path, monkeypatch, capsys):
+def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import batch_resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1793,35 +2048,52 @@ def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exist
     old_issue_file.parent.mkdir(parents=True)
     old_issue_file.write_text("export const App = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-BATCH-UNTRACKED",
-        "file": str(old_issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-BATCH-UNTRACKED",
+            "file": str(old_issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldApp.tsx\n', stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" D src/OldApp.tsx\n", stderr=""
+            )
         if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldApp.tsx\n?? src/NewApp.tsx\n?? src/UNRELATED.txt\n', stderr="")
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=" D src/OldApp.tsx\n?? src/NewApp.tsx\n?? src/UNRELATED.txt\n",
+                stderr="",
+            )
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped when unrelated untracked files exist")
+            raise AssertionError(
+                "git add/commit should be skipped when unrelated untracked files exist"
+            )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
-    batch_resolve.run(argparse.Namespace(issue_ids=["SCAN-BATCH-UNTRACKED"], note="Renamed file", skip_verify=False))
+    batch_resolve.run(
+        argparse.Namespace(
+            issue_ids=["SCAN-BATCH-UNTRACKED"], note="Renamed file", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Skipped git auto-commit" in output
 
 
-def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_path, monkeypatch, capsys):
+def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1835,35 +2107,47 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(tmp_path, mo
     issue_file.write_text("export const Button = () => null;", encoding="utf-8")
     unrelated_file.write_text("export const Other = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-RESOLVE1",
-        "file": str(issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RESOLVE1",
+            "file": str(issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Other.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/Other.tsx\n", stderr=""
+            )
 
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped for a dirty workspace")
+            raise AssertionError(
+                "git add/commit should be skipped for a dirty workspace"
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(resolve.subprocess, "run", fake_run)
 
-    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE1", note="Applied fix", skip_verify=False))
+    resolve.run(
+        argparse.Namespace(
+            issue_id="SCAN-RESOLVE1", note="Applied fix", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Skipped git auto-commit" in output
 
 
-def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(tmp_path, monkeypatch, capsys):
+def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1875,13 +2159,15 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(tmp_path, monkey
     issue_file.parent.mkdir(parents=True)
     issue_file.write_text("export const Button = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-RESOLVE2",
-        "file": str(issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RESOLVE2",
+            "file": str(issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
@@ -1891,19 +2177,31 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(tmp_path, monkey
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Button.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/Button.tsx\n", stderr=""
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(resolve.subprocess, "run", fake_run)
 
-    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE2", note="Applied fix", skip_verify=False))
+    resolve.run(
+        argparse.Namespace(
+            issue_id="SCAN-RESOLVE2", note="Applied fix", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Auto-committed to git" in output
     assert ["git", "add", str(issue_file)] in calls
     assert ["git", "add", str((tmp_path / ".uidetox/state.json").resolve())] in calls
-    assert ["git", "commit", "-m", "[UIdetox] Fixed SCAN-RESOLVE2: Applied fix", "--no-verify"] in calls
+    assert [
+        "git",
+        "commit",
+        "-m",
+        "[UIdetox] Fixed SCAN-RESOLVE2: Applied fix",
+        "--no-verify",
+    ] in calls
 
 
 def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
@@ -1921,13 +2219,15 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
     old_issue_file.unlink()
     new_issue_file.write_text("export const Button = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-RESOLVE-RENAME",
-        "file": str(old_issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RESOLVE-RENAME",
+            "file": str(old_issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
@@ -1940,14 +2240,14 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=' D src/OldButton.tsx\n',
+                stdout=" D src/OldButton.tsx\n",
                 stderr="",
             )
         if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=' D src/OldButton.tsx\n?? src/NewButton.tsx\n',
+                stdout=" D src/OldButton.tsx\n?? src/NewButton.tsx\n",
                 stderr="",
             )
 
@@ -1955,7 +2255,11 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
 
     monkeypatch.setattr(resolve.subprocess, "run", fake_run)
 
-    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-RENAME", note="Renamed file", skip_verify=False))
+    resolve.run(
+        argparse.Namespace(
+            issue_id="SCAN-RESOLVE-RENAME", note="Renamed file", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Auto-committed to git" in output
@@ -1963,7 +2267,9 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
     assert ["git", "add", str(new_issue_file)] in calls
 
 
-def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(tmp_path, monkeypatch, capsys):
+def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import resolve
 
     monkeypatch.chdir(tmp_path)
@@ -1975,35 +2281,52 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
     old_issue_file.parent.mkdir(parents=True)
     old_issue_file.write_text("export const Button = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-RESOLVE-UNTRACKED",
-        "file": str(old_issue_file),
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RESOLVE-UNTRACKED",
+            "file": str(old_issue_file),
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldButton.tsx\n', stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" D src/OldButton.tsx\n", stderr=""
+            )
         if cmd == ["git", "status", "--porcelain", "--untracked-files=all"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=' D src/OldButton.tsx\n?? src/NewButton.tsx\n?? src/UNRELATED.txt\n', stderr="")
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=" D src/OldButton.tsx\n?? src/NewButton.tsx\n?? src/UNRELATED.txt\n",
+                stderr="",
+            )
         if cmd[:2] in (["git", "add"], ["git", "commit"]):
-            raise AssertionError("git add/commit should be skipped when unrelated untracked files exist")
+            raise AssertionError(
+                "git add/commit should be skipped when unrelated untracked files exist"
+            )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(resolve.subprocess, "run", fake_run)
 
-    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-UNTRACKED", note="Renamed file", skip_verify=False))
+    resolve.run(
+        argparse.Namespace(
+            issue_id="SCAN-RESOLVE-UNTRACKED", note="Renamed file", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Skipped git auto-commit" in output
 
 
-def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_path(tmp_path, monkeypatch, capsys):
+def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_path(
+    tmp_path, monkeypatch, capsys
+):
     from uidetox.commands import resolve
 
     root = tmp_path
@@ -2018,13 +2341,15 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
     issue_file = root / "src" / "Button.tsx"
     issue_file.write_text("export const Button = () => null;", encoding="utf-8")
 
-    add_issue({
-        "id": "SCAN-RESOLVE-SUBDIR",
-        "file": "src/Button.tsx",
-        "tier": "T1",
-        "issue": "Example issue",
-        "command": "fix",
-    })
+    add_issue(
+        {
+            "id": "SCAN-RESOLVE-SUBDIR",
+            "file": "src/Button.tsx",
+            "tier": "T1",
+            "issue": "Example issue",
+            "command": "fix",
+        }
+    )
 
     monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
     monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
@@ -2034,13 +2359,19 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
         if cmd[:3] == ["git", "status", "--porcelain"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/Button.tsx\n", stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=" M src/Button.tsx\n", stderr=""
+            )
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(resolve.subprocess, "run", fake_run)
 
-    resolve.run(argparse.Namespace(issue_id="SCAN-RESOLVE-SUBDIR", note="Applied fix", skip_verify=False))
+    resolve.run(
+        argparse.Namespace(
+            issue_id="SCAN-RESOLVE-SUBDIR", note="Applied fix", skip_verify=False
+        )
+    )
     output = capsys.readouterr().out
 
     assert "Auto-committed to git" in output
@@ -2049,6 +2380,7 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
 
 
 # ── Batch 3: new detection rule tests ───────────────────────────────────────
+
 
 def test_three_equal_column_slop_fires_for_repetitive_grid():
     code = dedent("""\
@@ -2163,6 +2495,7 @@ def test_round_number_slop_skips_organic_number():
 
 # ── Batch 4: new detection rule tests ───────────────────────────────────────
 
+
 def test_arbitrary_px_value_slop_fires_for_magic_pixel():
     assert _rule_fired(
         '<div className="w-[347px] h-[892px] p-[17px]">Panel</div>',
@@ -2179,21 +2512,21 @@ def test_arbitrary_px_value_slop_skips_rem_units():
 
 def test_verbose_handler_name_slop_fires_for_handle_button_click():
     assert _rule_fired(
-        'const handleButtonClick = () => doSomething();',
+        "const handleButtonClick = () => doSomething();",
         "VERBOSE_HANDLER_NAME_SLOP",
     )
 
 
 def test_verbose_handler_name_slop_fires_for_handle_form_submit():
     assert _rule_fired(
-        'function handleFormSubmit(e: React.FormEvent) { e.preventDefault(); }',
+        "function handleFormSubmit(e: React.FormEvent) { e.preventDefault(); }",
         "VERBOSE_HANDLER_NAME_SLOP",
     )
 
 
 def test_verbose_handler_name_slop_skips_concise_names():
     assert not _rule_fired(
-        'const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); };',
+        "const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); };",
         "VERBOSE_HANDLER_NAME_SLOP",
     )
 
@@ -2260,6 +2593,7 @@ def test_accordion_faq_slop_fires_for_accordion_with_faq():
 
 
 # ── Batch 5: discoverability, content, and UX slop tests ─────────────────────
+
 
 def test_title_case_header_slop_fires_for_four_caps_words():
     assert _rule_fired(
@@ -2705,7 +3039,7 @@ def test_lorem_ipsum_slop_fires_in_html():
 
 
 def test_lorem_ipsum_slop_fires_in_jsx():
-    code = 'const Bio = () => <p>Lorem ipsum dolor sit amet.</p>;'
+    code = "const Bio = () => <p>Lorem ipsum dolor sit amet.</p>;"
     assert _rule_fired(code, "LOREM_IPSUM_SLOP", ".tsx")
 
 
@@ -2752,6 +3086,7 @@ def test_pure_gray_neutral_slop_skips_non_token():
 
 # ── Batch 9 ──────────────────────────────────────────────────────────────────
 
+
 def test_user_scalable_disabled_slop_fires():
     code = '<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">'
     assert _rule_fired(code, "USER_SCALABLE_DISABLED_SLOP", ".html")
@@ -2793,7 +3128,9 @@ def test_srcset_missing_slop_fires_jsx():
 
 
 def test_srcset_missing_slop_skips_with_srcset():
-    code = '<img src="hero.jpg" srcset="hero-400.jpg 400w, hero-800.jpg 800w" alt="Hero">'
+    code = (
+        '<img src="hero.jpg" srcset="hero-400.jpg 400w, hero-800.jpg 800w" alt="Hero">'
+    )
     assert not _rule_fired(code, "SRCSET_MISSING_SLOP", ".html")
 
 
@@ -2871,6 +3208,7 @@ def test_alpha_color_abuse_slop_skips_under_threshold():
 
 # ── Batch 10 ─────────────────────────────────────────────────────────────────
 
+
 def test_pure_white_background_slop_fires_hex():
     code = "body { background-color: #ffffff; }"
     assert _rule_fired(code, "PURE_WHITE_BACKGROUND_SLOP", ".css")
@@ -2928,7 +3266,7 @@ def test_generic_loading_text_slop_fires_string():
 
 
 def test_generic_loading_text_slop_fires_jsx():
-    code = '<span>{isLoading && <p>Loading...</p>}</span>'
+    code = "<span>{isLoading && <p>Loading...</p>}</span>"
     assert _rule_fired(code, "GENERIC_LOADING_TEXT_SLOP", ".tsx")
 
 
@@ -2964,6 +3302,7 @@ def test_scroll_snap_without_behavior_slop_skips_no_snap():
 
 
 # ── Batch 11 ─────────────────────────────────────────────────────────────────
+
 
 def test_aspect_ratio_hack_slop_fires_16_9():
     code = ".video { padding-bottom: 56.25%; position: relative; }"
@@ -3347,7 +3686,9 @@ def test_form_no_submit_slop_fires_for_html_form():
 
 
 def test_form_no_submit_slop_skips_with_onsubmit():
-    code = '<form onSubmit={handleSubmit}><input type="email" /><button>Go</button></form>'
+    code = (
+        '<form onSubmit={handleSubmit}><input type="email" /><button>Go</button></form>'
+    )
     assert not _rule_fired(code, "FORM_NO_SUBMIT_SLOP")
 
 
@@ -3635,7 +3976,9 @@ def test_async_useeffect_slop_skips_correct_pattern():
 
 
 def test_typography_slop_fires_for_inter():
-    assert _rule_fired('<p className="font-inter text-gray-700">Hello</p>', "TYPOGRAPHY_SLOP")
+    assert _rule_fired(
+        '<p className="font-inter text-gray-700">Hello</p>', "TYPOGRAPHY_SLOP"
+    )
 
 
 def test_typography_slop_fires_for_css_inter():
@@ -3643,7 +3986,9 @@ def test_typography_slop_fires_for_css_inter():
 
 
 def test_typography_slop_skips_distinctive_font():
-    assert not _rule_fired('.body { font-family: "Satoshi", sans-serif; }', "TYPOGRAPHY_SLOP", ".css")
+    assert not _rule_fired(
+        '.body { font-family: "Satoshi", sans-serif; }', "TYPOGRAPHY_SLOP", ".css"
+    )
 
 
 def test_color_gradient_slop_fires_for_blue_to_purple():
@@ -3661,7 +4006,9 @@ def test_color_gradient_slop_skips_orange_yellow():
 
 
 def test_color_black_slop_fires_for_bg_black():
-    assert _rule_fired('<div className="bg-black text-white">dark</div>', "COLOR_BLACK_SLOP")
+    assert _rule_fired(
+        '<div className="bg-black text-white">dark</div>', "COLOR_BLACK_SLOP"
+    )
 
 
 def test_color_black_slop_fires_for_hex_000000():
@@ -3673,23 +4020,36 @@ def test_color_black_slop_skips_near_black():
 
 
 def test_iconography_slop_fires_for_lucide():
-    assert _rule_fired("import { Search } from 'lucide-react';", "ICONOGRAPHY_SLOP", ".ts")
+    assert _rule_fired(
+        "import { Search } from 'lucide-react';", "ICONOGRAPHY_SLOP", ".ts"
+    )
 
 
 def test_iconography_slop_skips_phosphor():
-    assert not _rule_fired("import { MagnifyingGlass } from '@phosphor-icons/react';", "ICONOGRAPHY_SLOP", ".ts")
+    assert not _rule_fired(
+        "import { MagnifyingGlass } from '@phosphor-icons/react';",
+        "ICONOGRAPHY_SLOP",
+        ".ts",
+    )
 
 
 def test_materiality_radius_slop_fires_for_rounded_2xl():
-    assert _rule_fired('<div className="rounded-2xl bg-white p-6">Card</div>', "MATERIALITY_RADIUS_SLOP")
+    assert _rule_fired(
+        '<div className="rounded-2xl bg-white p-6">Card</div>',
+        "MATERIALITY_RADIUS_SLOP",
+    )
 
 
 def test_materiality_radius_slop_fires_for_rounded_3xl():
-    assert _rule_fired('<div className="rounded-3xl shadow-md">Card</div>', "MATERIALITY_RADIUS_SLOP")
+    assert _rule_fired(
+        '<div className="rounded-3xl shadow-md">Card</div>', "MATERIALITY_RADIUS_SLOP"
+    )
 
 
 def test_materiality_radius_slop_skips_rounded_xl():
-    assert not _rule_fired('<div className="rounded-xl p-4">Card</div>', "MATERIALITY_RADIUS_SLOP")
+    assert not _rule_fired(
+        '<div className="rounded-xl p-4">Card</div>', "MATERIALITY_RADIUS_SLOP"
+    )
 
 
 def test_layout_math_slop_fires_for_w_one_third():
@@ -3697,27 +4057,40 @@ def test_layout_math_slop_fires_for_w_one_third():
 
 
 def test_layout_math_slop_fires_for_grid_cols_3():
-    assert _rule_fired('<div className="grid grid-cols-3 gap-6">x</div>', "LAYOUT_MATH_SLOP")
+    assert _rule_fired(
+        '<div className="grid grid-cols-3 gap-6">x</div>', "LAYOUT_MATH_SLOP"
+    )
 
 
 def test_layout_math_slop_skips_grid_cols_2():
-    assert not _rule_fired('<div className="grid grid-cols-2 gap-4">x</div>', "LAYOUT_MATH_SLOP")
+    assert not _rule_fired(
+        '<div className="grid grid-cols-2 gap-4">x</div>', "LAYOUT_MATH_SLOP"
+    )
 
 
 def test_glassmorphism_slop_fires_for_backdrop_blur():
-    assert _rule_fired('<div className="backdrop-blur bg-white/20">modal</div>', "GLASSMORPHISM_SLOP")
+    assert _rule_fired(
+        '<div className="backdrop-blur bg-white/20">modal</div>', "GLASSMORPHISM_SLOP"
+    )
 
 
 def test_glassmorphism_slop_fires_in_css():
-    assert _rule_fired(".card { @apply backdrop-blur bg-white/20; }", "GLASSMORPHISM_SLOP", ".css")
+    assert _rule_fired(
+        ".card { @apply backdrop-blur bg-white/20; }", "GLASSMORPHISM_SLOP", ".css"
+    )
 
 
 def test_glassmorphism_slop_skips_solid_card():
-    assert not _rule_fired('<div className="bg-zinc-900 border border-zinc-800">card</div>', "GLASSMORPHISM_SLOP")
+    assert not _rule_fired(
+        '<div className="bg-zinc-900 border border-zinc-800">card</div>',
+        "GLASSMORPHISM_SLOP",
+    )
 
 
 def test_shadow_slop_fires_for_shadow_2xl():
-    assert _rule_fired('<div className="shadow-2xl rounded-lg">Card</div>', "SHADOW_SLOP")
+    assert _rule_fired(
+        '<div className="shadow-2xl rounded-lg">Card</div>', "SHADOW_SLOP"
+    )
 
 
 def test_shadow_slop_fires_for_shadow_3xl():
@@ -3729,7 +4102,9 @@ def test_shadow_slop_skips_shadow_md():
 
 
 def test_hero_dashboard_slop_fires_for_stat_card():
-    assert _rule_fired('<div className="stat-card flex flex-col">Revenue</div>', "HERO_DASHBOARD_SLOP")
+    assert _rule_fired(
+        '<div className="stat-card flex flex-col">Revenue</div>', "HERO_DASHBOARD_SLOP"
+    )
 
 
 def test_hero_dashboard_slop_fires_for_kpi_card():
@@ -3737,19 +4112,28 @@ def test_hero_dashboard_slop_fires_for_kpi_card():
 
 
 def test_hero_dashboard_slop_skips_regular_card():
-    assert not _rule_fired('<div className="feature-card bg-white">Feature</div>', "HERO_DASHBOARD_SLOP")
+    assert not _rule_fired(
+        '<div className="feature-card bg-white">Feature</div>', "HERO_DASHBOARD_SLOP"
+    )
 
 
 def test_bounce_animation_slop_fires_for_animate_bounce():
-    assert _rule_fired('<div className="animate-bounce">Loading</div>', "BOUNCE_ANIMATION_SLOP")
+    assert _rule_fired(
+        '<div className="animate-bounce">Loading</div>', "BOUNCE_ANIMATION_SLOP"
+    )
 
 
 def test_bounce_animation_slop_fires_for_animate_pulse():
-    assert _rule_fired('<div className="animate-pulse bg-gray-200 h-4 w-32" />', "BOUNCE_ANIMATION_SLOP")
+    assert _rule_fired(
+        '<div className="animate-pulse bg-gray-200 h-4 w-32" />',
+        "BOUNCE_ANIMATION_SLOP",
+    )
 
 
 def test_bounce_animation_slop_skips_no_animation():
-    assert not _rule_fired('<div className="bg-white p-4">No animation</div>', "BOUNCE_ANIMATION_SLOP")
+    assert not _rule_fired(
+        '<div className="bg-white p-4">No animation</div>', "BOUNCE_ANIMATION_SLOP"
+    )
 
 
 def test_gray_on_color_slop_fires():
@@ -3767,7 +4151,9 @@ def test_gray_on_color_slop_skips_white_on_color():
 
 
 def test_missing_dark_mode_fires_for_bg_white():
-    assert _rule_fired('<div className="bg-white px-4 py-8">content</div>', "MISSING_DARK_MODE")
+    assert _rule_fired(
+        '<div className="bg-white px-4 py-8">content</div>', "MISSING_DARK_MODE"
+    )
 
 
 def test_missing_dark_mode_skips_with_dark_variant():
@@ -3797,11 +4183,16 @@ def test_generic_copy_slop_fires_for_supercharge():
 
 
 def test_generic_copy_slop_fires_for_revolutionize():
-    assert _rule_fired("<p>Revolutionize how your team collaborates</p>", "GENERIC_COPY_SLOP")
+    assert _rule_fired(
+        "<p>Revolutionize how your team collaborates</p>", "GENERIC_COPY_SLOP"
+    )
 
 
 def test_generic_copy_slop_skips_specific_copy():
-    assert not _rule_fired("<h1>Ship features 3x faster with automated code review</h1>", "GENERIC_COPY_SLOP")
+    assert not _rule_fired(
+        "<h1>Ship features 3x faster with automated code review</h1>",
+        "GENERIC_COPY_SLOP",
+    )
 
 
 def test_emoji_heavy_slop_fires_for_seven_emoji():
@@ -3815,11 +4206,15 @@ def test_emoji_heavy_slop_skips_two_emoji():
 
 
 def test_viewport_height_slop_fires_for_h_screen():
-    assert _rule_fired('<div className="h-screen flex items-center">full</div>', "VIEWPORT_HEIGHT_SLOP")
+    assert _rule_fired(
+        '<div className="h-screen flex items-center">full</div>', "VIEWPORT_HEIGHT_SLOP"
+    )
 
 
 def test_viewport_height_slop_skips_min_h_dvh():
-    assert not _rule_fired('<div className="min-h-[100dvh] flex">full</div>', "VIEWPORT_HEIGHT_SLOP")
+    assert not _rule_fired(
+        '<div className="min-h-[100dvh] flex">full</div>', "VIEWPORT_HEIGHT_SLOP"
+    )
 
 
 def test_neon_glow_slop_fires_for_shadow_zero_zero():
@@ -3827,43 +4222,64 @@ def test_neon_glow_slop_fires_for_shadow_zero_zero():
 
 
 def test_neon_glow_slop_fires_for_shadow_neon():
-    assert _rule_fired('<div className="shadow-neon text-white">neon</div>', "NEON_GLOW_SLOP")
+    assert _rule_fired(
+        '<div className="shadow-neon text-white">neon</div>', "NEON_GLOW_SLOP"
+    )
 
 
 def test_neon_glow_slop_skips_regular_shadow():
-    assert not _rule_fired('<div className="shadow-lg border border-zinc-800">card</div>', "NEON_GLOW_SLOP")
+    assert not _rule_fired(
+        '<div className="shadow-lg border border-zinc-800">card</div>', "NEON_GLOW_SLOP"
+    )
 
 
 def test_pill_badge_slop_fires():
-    assert _rule_fired('<span className="rounded-full badge text-xs px-2">New</span>', "PILL_BADGE_SLOP")
+    assert _rule_fired(
+        '<span className="rounded-full badge text-xs px-2">New</span>',
+        "PILL_BADGE_SLOP",
+    )
 
 
 def test_pill_badge_slop_fires_for_chip():
-    assert _rule_fired('<span className="rounded-full chip px-3 py-1">Tag</span>', "PILL_BADGE_SLOP")
+    assert _rule_fired(
+        '<span className="rounded-full chip px-3 py-1">Tag</span>', "PILL_BADGE_SLOP"
+    )
 
 
 def test_pill_badge_slop_skips_rounded_full_button():
-    assert not _rule_fired('<button className="rounded-full px-6 py-2">CTA</button>', "PILL_BADGE_SLOP")
+    assert not _rule_fired(
+        '<button className="rounded-full px-6 py-2">CTA</button>', "PILL_BADGE_SLOP"
+    )
 
 
 def test_generic_name_slop_fires_for_john_doe():
-    assert _rule_fired('<p>Reviewed by John Doe, Senior Engineer</p>', "GENERIC_NAME_SLOP")
+    assert _rule_fired(
+        "<p>Reviewed by John Doe, Senior Engineer</p>", "GENERIC_NAME_SLOP"
+    )
 
 
 def test_generic_name_slop_fires_for_acme_corp():
-    assert _rule_fired('<span className="text-sm">Trusted by Acme Corp</span>', "GENERIC_NAME_SLOP")
+    assert _rule_fired(
+        '<span className="text-sm">Trusted by Acme Corp</span>', "GENERIC_NAME_SLOP"
+    )
 
 
 def test_generic_name_slop_skips_real_name():
-    assert not _rule_fired('<p>Reviewed by Sofia Espinoza, Staff Eng</p>', "GENERIC_NAME_SLOP")
+    assert not _rule_fired(
+        "<p>Reviewed by Sofia Espinoza, Staff Eng</p>", "GENERIC_NAME_SLOP"
+    )
 
 
 def test_ai_copy_cliche_slop_fires_for_next_gen():
-    assert _rule_fired("<h2>Next-Gen AI tooling for enterprises</h2>", "AI_COPY_CLICHE_SLOP")
+    assert _rule_fired(
+        "<h2>Next-Gen AI tooling for enterprises</h2>", "AI_COPY_CLICHE_SLOP"
+    )
 
 
 def test_ai_copy_cliche_slop_fires_for_delve():
-    assert _rule_fired("<p>Let's delve into the architecture</p>", "AI_COPY_CLICHE_SLOP")
+    assert _rule_fired(
+        "<p>Let's delve into the architecture</p>", "AI_COPY_CLICHE_SLOP"
+    )
 
 
 def test_ai_copy_cliche_slop_skips_neutral_text():
@@ -3895,11 +4311,15 @@ def test_css_pure_black_slop_fires():
 
 
 def test_css_pure_black_slop_fires_six_digit():
-    assert _rule_fired(".bg { background-color: #000000; }", "CSS_PURE_BLACK_SLOP", ".css")
+    assert _rule_fired(
+        ".bg { background-color: #000000; }", "CSS_PURE_BLACK_SLOP", ".css"
+    )
 
 
 def test_css_pure_black_slop_skips_off_black():
-    assert not _rule_fired(".bg { background: #0d1117; }", "CSS_PURE_BLACK_SLOP", ".css")
+    assert not _rule_fired(
+        ".bg { background: #0d1117; }", "CSS_PURE_BLACK_SLOP", ".css"
+    )
 
 
 def test_hardcoded_zindex_slop_fires_for_9999():
@@ -3933,19 +4353,29 @@ def test_hardcoded_px_font_slop_fires_for_font_size_px():
 
 
 def test_hardcoded_px_font_slop_fires_for_tailwind_px():
-    assert _rule_fired('<p className="text-[18px] font-normal">body</p>', "HARDCODED_PX_FONT_SLOP")
+    assert _rule_fired(
+        '<p className="text-[18px] font-normal">body</p>', "HARDCODED_PX_FONT_SLOP"
+    )
 
 
 def test_hardcoded_px_font_slop_skips_rem():
-    assert not _rule_fired(".body { font-size: 1.125rem; }", "HARDCODED_PX_FONT_SLOP", ".css")
+    assert not _rule_fired(
+        ".body { font-size: 1.125rem; }", "HARDCODED_PX_FONT_SLOP", ".css"
+    )
 
 
 def test_tight_line_height_slop_fires():
-    assert _rule_fired('<p className="text-sm leading-tight text-gray-600">body</p>', "TIGHT_LINE_HEIGHT_SLOP")
+    assert _rule_fired(
+        '<p className="text-sm leading-tight text-gray-600">body</p>',
+        "TIGHT_LINE_HEIGHT_SLOP",
+    )
 
 
 def test_tight_line_height_slop_skips_relaxed():
-    assert not _rule_fired('<p className="text-sm leading-relaxed text-gray-600">body</p>', "TIGHT_LINE_HEIGHT_SLOP")
+    assert not _rule_fired(
+        '<p className="text-sm leading-relaxed text-gray-600">body</p>',
+        "TIGHT_LINE_HEIGHT_SLOP",
+    )
 
 
 def test_lazy_flex_center_slop_fires():
@@ -3982,7 +4412,9 @@ def test_raw_color_slop_skips_hex():
 
 
 def test_important_abuse_slop_fires():
-    assert _rule_fired(".btn { color: red !important; }", "IMPORTANT_ABUSE_SLOP", ".css")
+    assert _rule_fired(
+        ".btn { color: red !important; }", "IMPORTANT_ABUSE_SLOP", ".css"
+    )
 
 
 def test_important_abuse_slop_skips_no_important():
@@ -3995,7 +4427,9 @@ def test_inline_style_slop_fires_for_long_style_prop():
 
 
 def test_inline_style_slop_skips_short_style():
-    assert not _rule_fired('<div style={{ color: "red" }}>short</div>', "INLINE_STYLE_SLOP")
+    assert not _rule_fired(
+        '<div style={{ color: "red" }}>short</div>', "INLINE_STYLE_SLOP"
+    )
 
 
 def test_console_log_slop_fires():
@@ -4007,7 +4441,9 @@ def test_console_log_slop_fires_for_warn():
 
 
 def test_console_log_slop_skips_string_content():
-    assert not _rule_fired('const msg = "console.log is not called";', "CONSOLE_LOG_SLOP", ".ts")
+    assert not _rule_fired(
+        'const msg = "console.log is not called";', "CONSOLE_LOG_SLOP", ".ts"
+    )
 
 
 def test_todo_fixme_slop_fires_for_todo():
@@ -4023,7 +4459,9 @@ def test_todo_fixme_slop_fires_for_hack():
 
 
 def test_todo_fixme_slop_skips_regular_comment():
-    assert not _rule_fired("// This function handles authentication", "TODO_FIXME_SLOP", ".ts")
+    assert not _rule_fired(
+        "// This function handles authentication", "TODO_FIXME_SLOP", ".ts"
+    )
 
 
 def test_magic_number_slop_fires_for_padding_px():
@@ -4049,31 +4487,42 @@ def test_broken_image_slop_fires_for_source_unsplash():
 
 
 def test_broken_image_slop_skips_picsum():
-    assert not _rule_fired('<img src="https://picsum.photos/800/600" alt="placeholder" />', "BROKEN_IMAGE_SLOP")
+    assert not _rule_fired(
+        '<img src="https://picsum.photos/800/600" alt="placeholder" />',
+        "BROKEN_IMAGE_SLOP",
+    )
 
 
 def test_exclamation_ux_slop_fires_for_success():
-    assert _rule_fired('<p>Success! Your changes have been saved.</p>', "EXCLAMATION_UX_SLOP")
+    assert _rule_fired(
+        "<p>Success! Your changes have been saved.</p>", "EXCLAMATION_UX_SLOP"
+    )
 
 
 def test_exclamation_ux_slop_fires_for_created():
-    assert _rule_fired('<span>Created! The item is now live.</span>', "EXCLAMATION_UX_SLOP")
+    assert _rule_fired(
+        "<span>Created! The item is now live.</span>", "EXCLAMATION_UX_SLOP"
+    )
 
 
 def test_exclamation_ux_slop_skips_neutral_message():
-    assert not _rule_fired('<p>Your changes have been saved.</p>', "EXCLAMATION_UX_SLOP")
+    assert not _rule_fired(
+        "<p>Your changes have been saved.</p>", "EXCLAMATION_UX_SLOP"
+    )
 
 
 def test_oops_error_slop_fires_for_oops():
-    assert _rule_fired('<h2>Oops, something went wrong.</h2>', "OOPS_ERROR_SLOP")
+    assert _rule_fired("<h2>Oops, something went wrong.</h2>", "OOPS_ERROR_SLOP")
 
 
 def test_oops_error_slop_fires_for_whoops():
-    assert _rule_fired('<p>Whoops! That didn\'t work.</p>', "OOPS_ERROR_SLOP")
+    assert _rule_fired("<p>Whoops! That didn't work.</p>", "OOPS_ERROR_SLOP")
 
 
 def test_oops_error_slop_skips_direct_error():
-    assert not _rule_fired('<p>Unable to connect. Check your network and try again.</p>', "OOPS_ERROR_SLOP")
+    assert not _rule_fired(
+        "<p>Unable to connect. Check your network and try again.</p>", "OOPS_ERROR_SLOP"
+    )
 
 
 def test_unreachable_code_fires():
@@ -4097,15 +4546,17 @@ def test_unreachable_code_skips_normal_code():
 
 
 def test_empty_handler_fires():
-    assert _rule_fired('<button onClick={() => {}}>Submit</button>', "EMPTY_HANDLER")
+    assert _rule_fired("<button onClick={() => {}}>Submit</button>", "EMPTY_HANDLER")
 
 
 def test_empty_handler_fires_for_onchange():
-    assert _rule_fired('<input onChange={() => {}} />', "EMPTY_HANDLER")
+    assert _rule_fired("<input onChange={() => {}} />", "EMPTY_HANDLER")
 
 
 def test_empty_handler_skips_with_body():
-    assert not _rule_fired('<button onClick={() => handleClick()}>Submit</button>', "EMPTY_HANDLER")
+    assert not _rule_fired(
+        "<button onClick={() => handleClick()}>Submit</button>", "EMPTY_HANDLER"
+    )
 
 
 def test_dead_css_class_fires():
@@ -4127,23 +4578,33 @@ def test_deprecated_lifecycle_fires_for_will_receive_props():
 
 
 def test_deprecated_lifecycle_skips_modern_hooks():
-    assert not _rule_fired("useEffect(() => { fetchData(); }, []);", "DEPRECATED_LIFECYCLE", ".tsx")
+    assert not _rule_fired(
+        "useEffect(() => { fetchData(); }, []);", "DEPRECATED_LIFECYCLE", ".tsx"
+    )
 
 
 def test_disabled_lint_rule_fires_for_eslint_disable():
-    assert _rule_fired("// eslint-disable-next-line no-unused-vars", "DISABLED_LINT_RULE", ".ts")
+    assert _rule_fired(
+        "// eslint-disable-next-line no-unused-vars", "DISABLED_LINT_RULE", ".ts"
+    )
 
 
 def test_disabled_lint_rule_fires_for_block_disable():
-    assert _rule_fired("/* eslint-disable react-hooks/exhaustive-deps */", "DISABLED_LINT_RULE", ".ts")
+    assert _rule_fired(
+        "/* eslint-disable react-hooks/exhaustive-deps */", "DISABLED_LINT_RULE", ".ts"
+    )
 
 
 def test_disabled_lint_rule_skips_regular_comment():
-    assert not _rule_fired("// This function handles the auth flow", "DISABLED_LINT_RULE", ".ts")
+    assert not _rule_fired(
+        "// This function handles the auth flow", "DISABLED_LINT_RULE", ".ts"
+    )
 
 
 def test_any_type_slop_fires_for_colon_any():
-    assert _rule_fired("function process(data: any) { return data; }", "ANY_TYPE_SLOP", ".ts")
+    assert _rule_fired(
+        "function process(data: any) { return data; }", "ANY_TYPE_SLOP", ".ts"
+    )
 
 
 def test_any_type_slop_fires_for_as_any():
@@ -4151,7 +4612,9 @@ def test_any_type_slop_fires_for_as_any():
 
 
 def test_any_type_slop_skips_unknown():
-    assert not _rule_fired("function process(data: unknown) { return data; }", "ANY_TYPE_SLOP", ".ts")
+    assert not _rule_fired(
+        "function process(data: unknown) { return data; }", "ANY_TYPE_SLOP", ".ts"
+    )
 
 
 def test_ts_ignore_slop_fires_for_ts_ignore():
@@ -4177,7 +4640,10 @@ def test_hardcoded_color_style_slop_fires_for_rgb():
 
 
 def test_hardcoded_color_style_slop_skips_tailwind_class():
-    assert not _rule_fired('<div className="text-blue-500 bg-white">styled</div>', "HARDCODED_COLOR_STYLE_SLOP")
+    assert not _rule_fired(
+        '<div className="text-blue-500 bg-white">styled</div>',
+        "HARDCODED_COLOR_STYLE_SLOP",
+    )
 
 
 def test_star_rating_slop_fires_for_unicode_stars():
@@ -4185,7 +4651,7 @@ def test_star_rating_slop_fires_for_unicode_stars():
 
 
 def test_star_rating_slop_fires_for_emoji_stars():
-    assert _rule_fired('<div>★★★★★ Trusted by 10,000+ users</div>', "STAR_RATING_SLOP")
+    assert _rule_fired("<div>★★★★★ Trusted by 10,000+ users</div>", "STAR_RATING_SLOP")
 
 
 def test_gradient_border_slop_fires():
@@ -4194,39 +4660,55 @@ def test_gradient_border_slop_fires():
 
 
 def test_gradient_border_slop_skips_solid_border():
-    assert not _rule_fired(".card { border: 1px solid #e5e7eb; }", "GRADIENT_BORDER_SLOP", ".css")
+    assert not _rule_fired(
+        ".card { border: 1px solid #e5e7eb; }", "GRADIENT_BORDER_SLOP", ".css"
+    )
 
 
 def test_tailwind_v4_gradient_slop_fires_for_from_blue():
-    assert _rule_fired('<div className="from-blue-500 to-purple-600 bg-gradient-to-r">hero</div>', "TAILWIND_V4_GRADIENT_SLOP")
+    assert _rule_fired(
+        '<div className="from-blue-500 to-purple-600 bg-gradient-to-r">hero</div>',
+        "TAILWIND_V4_GRADIENT_SLOP",
+    )
 
 
 def test_tailwind_v4_gradient_slop_fires_for_from_indigo():
-    assert _rule_fired('<div className="from-indigo-400 to-cyan-500">section</div>', "TAILWIND_V4_GRADIENT_SLOP")
+    assert _rule_fired(
+        '<div className="from-indigo-400 to-cyan-500">section</div>',
+        "TAILWIND_V4_GRADIENT_SLOP",
+    )
 
 
 def test_tailwind_v4_gradient_slop_skips_amber_gradient():
-    assert not _rule_fired('<div className="from-amber-400 to-orange-500">warm</div>', "TAILWIND_V4_GRADIENT_SLOP")
+    assert not _rule_fired(
+        '<div className="from-amber-400 to-orange-500">warm</div>',
+        "TAILWIND_V4_GRADIENT_SLOP",
+    )
 
 
 def test_fake_metric_slop_fires_for_uptime():
-    assert _rule_fired('<p>99.99% uptime guaranteed</p>', "FAKE_METRIC_SLOP")
+    assert _rule_fired("<p>99.99% uptime guaranteed</p>", "FAKE_METRIC_SLOP")
 
 
 def test_fake_metric_slop_fires_for_10x():
-    assert _rule_fired('<h3>10x faster than the competition</h3>', "FAKE_METRIC_SLOP")
+    assert _rule_fired("<h3>10x faster than the competition</h3>", "FAKE_METRIC_SLOP")
 
 
 def test_fake_metric_slop_fires_for_dollar_amount():
-    assert _rule_fired('<span>$1M+ saved for customers</span>', "FAKE_METRIC_SLOP")
+    assert _rule_fired("<span>$1M+ saved for customers</span>", "FAKE_METRIC_SLOP")
 
 
 def test_fake_metric_slop_skips_specific_metric():
-    assert not _rule_fired('<p>Reduced deploy time from 12min to 4min</p>', "FAKE_METRIC_SLOP")
+    assert not _rule_fired(
+        "<p>Reduced deploy time from 12min to 4min</p>", "FAKE_METRIC_SLOP"
+    )
 
 
 def test_scroll_smooth_no_motion_slop_fires():
-    assert _rule_fired('<div className="scroll-smooth overflow-auto">nav</div>', "SCROLL_SMOOTH_NO_MOTION_SLOP")
+    assert _rule_fired(
+        '<div className="scroll-smooth overflow-auto">nav</div>',
+        "SCROLL_SMOOTH_NO_MOTION_SLOP",
+    )
 
 
 def test_scroll_smooth_no_motion_slop_skips_with_motion_reduce():
@@ -4247,11 +4729,17 @@ def test_autofocus_slop_skips_autofocus_false():
 
 
 def test_no_select_content_slop_fires():
-    assert _rule_fired('<p className="select-none text-gray-700">Copy this important text</p>', "NO_SELECT_CONTENT_SLOP")
+    assert _rule_fired(
+        '<p className="select-none text-gray-700">Copy this important text</p>',
+        "NO_SELECT_CONTENT_SLOP",
+    )
 
 
 def test_no_select_content_slop_skips_icon_button():
-    assert not _rule_fired('<button className="select-none p-2" aria-label="close">✕</button>', "NO_SELECT_CONTENT_SLOP")
+    assert not _rule_fired(
+        '<button className="select-none p-2" aria-label="close">✕</button>',
+        "NO_SELECT_CONTENT_SLOP",
+    )
 
 
 # ── Custom-check rules (Batches 1-2): missing_hover, missing_focus, etc. ─────
@@ -4268,7 +4756,9 @@ def test_spacing_repetition_slop_skips_varied_spacing():
 
 
 def test_missing_hover_states_fires_for_button_no_hover():
-    code = '<button className="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>'
+    code = (
+        '<button className="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>'
+    )
     assert _rule_fired(code, "MISSING_HOVER_STATES")
 
 
@@ -4289,7 +4779,9 @@ def test_missing_focus_slop_skips_with_focus_ring():
 
 def test_div_soup_slop_fires_for_div_heavy_file():
     # AST path: works on .tsx; needs >20 divs and zero semantic elements
-    cols = "\n".join(f'<div className="col-{i}"><div>Item {i}</div></div>' for i in range(12))
+    cols = "\n".join(
+        f'<div className="col-{i}"><div>Item {i}</div></div>' for i in range(12)
+    )
     code = f"export default function Page() {{ return (<div><div><div>{cols}</div></div></div>); }}"
     assert _rule_fired(code, "DIV_SOUP_SLOP", ".tsx")
 
@@ -4356,7 +4848,9 @@ def test_img_alt_missing_slop_fires():
 
 
 def test_img_alt_missing_slop_skips_with_alt():
-    assert not _rule_fired('<img src="/hero.jpg" alt="Hero illustration" />', "IMG_ALT_MISSING_SLOP")
+    assert not _rule_fired(
+        '<img src="/hero.jpg" alt="Hero illustration" />', "IMG_ALT_MISSING_SLOP"
+    )
 
 
 def test_img_alt_missing_slop_skips_decorative_empty_alt():
@@ -4402,6 +4896,7 @@ def test_centered_paragraph_slop_skips_short_centered():
 # OPACITY_ABUSE_SLOP — 5+ opacity/transparency usages in a single file
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_opacity_abuse_slop_fires_for_five_usages():
     code = '<div className="opacity-50 bg-white/20 opacity-75 bg-blue-500/30 bg-gray-900/40">Content</div>'
     assert _rule_fired(code, "OPACITY_ABUSE_SLOP")
@@ -4415,6 +4910,7 @@ def test_opacity_abuse_slop_skips_four_usages():
 # ──────────────────────────────────────────────────────────────────────────────
 # UGLY_SCROLLBAR_SLOP — overflow-x/y-auto|scroll without scrollbar styling
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_ugly_scrollbar_slop_fires_for_overflow_x_auto():
     code = '<div className="overflow-x-auto h-64 w-full">table content</div>'
@@ -4430,6 +4926,7 @@ def test_ugly_scrollbar_slop_skips_with_scrollbar_class():
 # MISSING_TRANSITION_SLOP — hover: class without transition in same className
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_missing_transition_slop_fires_without_transition():
     code = '<button className="hover:bg-blue-600 bg-blue-500 text-white px-4 py-2">Click</button>'
     assert _rule_fired(code, "MISSING_TRANSITION_SLOP")
@@ -4444,8 +4941,11 @@ def test_missing_transition_slop_skips_with_transition():
 # DISABLED_NO_CURSOR_SLOP — disabled element missing cursor-not-allowed
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_disabled_no_cursor_slop_fires():
-    code = '<button disabled className="bg-gray-300 text-gray-500 px-4 py-2">Send</button>'
+    code = (
+        '<button disabled className="bg-gray-300 text-gray-500 px-4 py-2">Send</button>'
+    )
     assert _rule_fired(code, "DISABLED_NO_CURSOR_SLOP")
 
 
@@ -4457,6 +4957,7 @@ def test_disabled_no_cursor_slop_skips_with_cursor_not_allowed():
 # ──────────────────────────────────────────────────────────────────────────────
 # COPY_PASTE_COMPONENT — near-identical block elements
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_copy_paste_component_fires_for_duplicate_blocks():
     inner = dedent("""\
@@ -4490,6 +4991,7 @@ def test_copy_paste_component_skips_different_blocks():
 # COMMENTED_OUT_CODE — 3+ lines of commented-out source code
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_commented_out_code_fires_for_three_code_lines():
     code = dedent("""\
         // const Header = () => {
@@ -4513,6 +5015,7 @@ def test_commented_out_code_skips_regular_comments():
 # ──────────────────────────────────────────────────────────────────────────────
 # UNUSED_IMPORT — import identifier never referenced elsewhere in the file
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_unused_import_fires_when_identifier_not_used():
     code = dedent("""\
@@ -4557,6 +5060,7 @@ def test_unused_import_skips_used_default_alias_and_namespace_names():
 # UNUSED_STATE — useState state variable never read
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_unused_state_fires_when_state_var_not_read():
     code = dedent("""\
         import { useState } from 'react';
@@ -4583,6 +5087,7 @@ def test_unused_state_skips_when_state_var_is_read():
 # ──────────────────────────────────────────────────────────────────────────────
 # LOW_CONTRAST_SLOP — insufficient color contrast between text and background
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_low_contrast_slop_fires_for_poor_contrast(tmp_path):
     code = '<p className="bg-yellow-300 text-white font-bold">Warning text</p>'
@@ -4618,7 +5123,8 @@ def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_p
     issues = analyze_directory(str(tmp_path))
 
     assert not any(
-        i.get("id") == "LOW_CONTRAST_SLOP" and "Dynamic color audit" in i.get("issue", "")
+        i.get("id") == "LOW_CONTRAST_SLOP"
+        and "Dynamic color audit" in i.get("issue", "")
         for i in issues
     )
 
@@ -4705,7 +5211,9 @@ def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
     component.parent.mkdir()
     component.write_text("export default null", encoding="utf-8")
     color_source = tmp_path / "tailwind.config.js"
-    color_source.write_text("module.exports = { theme: { colors: {} } }", encoding="utf-8")
+    color_source.write_text(
+        "module.exports = { theme: { colors: {} } }", encoding="utf-8"
+    )
 
     audit_calls = []
     monkeypatch.setattr(analyzer_module, "analyze_file", lambda *args, **kwargs: [])
@@ -4723,7 +5231,9 @@ def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
     assert audit_calls == [tmp_path.resolve()]
 
 
-def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(tmp_path):
+def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(
+    tmp_path,
+):
     from uidetox.color_utils import audit_project_colors
 
     (tmp_path / "src").mkdir()
@@ -4739,6 +5249,7 @@ def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(t
 # ──────────────────────────────────────────────────────────────────────────────
 # EMOJI_BULLET_LIST_SLOP — 3+ emoji-prefixed bullet lines
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_emoji_bullet_list_slop_fires_for_three_bullets():
     code = dedent("""\
@@ -4761,6 +5272,7 @@ def test_emoji_bullet_list_slop_skips_two_bullets():
 # TESTIMONIAL_GRID_SLOP — 3+ quoted testimonials with attribution dashes
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_testimonial_grid_slop_fires_for_three_testimonials():
     code = dedent("""\
         "This product changed our workflow and saved us hours every day." — Sarah Johnson, CEO
@@ -4781,6 +5293,7 @@ def test_testimonial_grid_slop_skips_two_testimonials():
 # ──────────────────────────────────────────────────────────────────────────────
 # PRICING_TABLE_SLOP — 3+ pricing tier names (Free, Pro, Enterprise, etc.)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_pricing_table_slop_fires_for_three_tiers():
     code = dedent("""\
@@ -4812,6 +5325,7 @@ def test_pricing_table_slop_skips_two_tiers():
 # BATCH 18: Accessibility, semantic HTML, and modern JS anti-patterns
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_button_type_missing_slop_fires_for_button_without_type():
     code = '<button className="btn-primary px-4 py-2">Submit</button>'
     assert _rule_fired(code, "BUTTON_TYPE_MISSING_SLOP")
@@ -4828,17 +5342,17 @@ def test_button_type_missing_slop_skips_with_type_submit():
 
 
 def test_float_layout_slop_fires_for_float_left():
-    code = '.sidebar { float: left; width: 300px; }'
+    code = ".sidebar { float: left; width: 300px; }"
     assert _rule_fired(code, "FLOAT_LAYOUT_SLOP", ext=".css")
 
 
 def test_float_layout_slop_fires_for_float_right():
-    code = '.logo { float: right; margin-left: auto; }'
+    code = ".logo { float: right; margin-left: auto; }"
     assert _rule_fired(code, "FLOAT_LAYOUT_SLOP", ext=".css")
 
 
 def test_float_layout_slop_skips_float_none():
-    code = '.clearfix { float: none; }'
+    code = ".clearfix { float: none; }"
     assert not _rule_fired(code, "FLOAT_LAYOUT_SLOP", ext=".css")
 
 
@@ -4858,17 +5372,19 @@ def test_autocomplete_off_slop_skips_specific_token():
 
 
 def test_focus_outline_removed_slop_fires_for_outline_none():
-    code = 'button:focus { outline: none; color: blue; }'
+    code = "button:focus { outline: none; color: blue; }"
     assert _rule_fired(code, "FOCUS_OUTLINE_REMOVED_SLOP", ext=".css")
 
 
 def test_focus_outline_removed_slop_fires_for_outline_zero():
-    code = '.btn:focus { outline: 0; border: none; }'
+    code = ".btn:focus { outline: 0; border: none; }"
     assert _rule_fired(code, "FOCUS_OUTLINE_REMOVED_SLOP", ext=".css")
 
 
 def test_focus_outline_removed_slop_skips_accessible_outline():
-    code = 'button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }'
+    code = (
+        "button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }"
+    )
     assert not _rule_fired(code, "FOCUS_OUTLINE_REMOVED_SLOP", ext=".css")
 
 
@@ -4888,7 +5404,7 @@ def test_tabindex_positive_slop_skips_zero():
 
 
 def test_tabindex_positive_slop_skips_negative_one():
-    code = '<div tabIndex={-1}>Hidden from tab order</div>'
+    code = "<div tabIndex={-1}>Hidden from tab order</div>"
     assert not _rule_fired(code, "TABINDEX_POSITIVE_SLOP")
 
 
@@ -4905,42 +5421,42 @@ def test_style_tag_in_jsx_slop_fires():
 
 
 def test_style_tag_in_jsx_slop_skips_css_file():
-    code = '.card { background: blue; }'
+    code = ".card { background: blue; }"
     assert not _rule_fired(code, "STYLE_TAG_IN_JSX_SLOP", ext=".css")
 
 
 def test_use_index_as_key_slop_fires():
-    code = 'items.map((item, index) => <li key={index}>{item.name}</li>)'
+    code = "items.map((item, index) => <li key={index}>{item.name}</li>)"
     assert _rule_fired(code, "USE_INDEX_AS_KEY_SLOP")
 
 
 def test_use_index_as_key_slop_fires_for_idx():
-    code = 'list.map((el, idx) => <div key={idx}>{el}</div>)'
+    code = "list.map((el, idx) => <div key={idx}>{el}</div>)"
     assert _rule_fired(code, "USE_INDEX_AS_KEY_SLOP")
 
 
 def test_use_index_as_key_slop_skips_stable_id():
-    code = 'items.map((item) => <li key={item.id}>{item.name}</li>)'
+    code = "items.map((item) => <li key={item.id}>{item.name}</li>)"
     assert not _rule_fired(code, "USE_INDEX_AS_KEY_SLOP")
 
 
 def test_redundant_bool_compare_slop_fires_for_triple_eq_true():
-    code = 'if (isLoading === true) { showSpinner(); }'
+    code = "if (isLoading === true) { showSpinner(); }"
     assert _rule_fired(code, "REDUNDANT_BOOL_COMPARE_SLOP")
 
 
 def test_redundant_bool_compare_slop_fires_for_not_eq_false():
-    code = 'const show = isVisible !== false;'
+    code = "const show = isVisible !== false;"
     assert _rule_fired(code, "REDUNDANT_BOOL_COMPARE_SLOP")
 
 
 def test_redundant_bool_compare_slop_skips_direct_check():
-    code = 'if (isLoading) { showSpinner(); } else if (!isVisible) { hide(); }'
+    code = "if (isLoading) { showSpinner(); } else if (!isVisible) { hide(); }"
     assert not _rule_fired(code, "REDUNDANT_BOOL_COMPARE_SLOP")
 
 
 def test_table_header_no_scope_slop_fires():
-    code = '<table><thead><tr><th>Name</th><th>Email</th></tr></thead></table>'
+    code = "<table><thead><tr><th>Name</th><th>Email</th></tr></thead></table>"
     assert _rule_fired(code, "TABLE_HEADER_NO_SCOPE_SLOP")
 
 
@@ -4985,7 +5501,7 @@ def test_alert_usage_slop_fires_for_string_arg():
 
 
 def test_alert_usage_slop_fires_for_template_literal():
-    code = 'alert(`Error: ${message}`)'
+    code = "alert(`Error: ${message}`)"
     assert _rule_fired(code, "ALERT_USAGE_SLOP")
 
 
@@ -5003,12 +5519,12 @@ def test_prop_spreading_slop_fires_on_props():
 
 
 def test_prop_spreading_slop_fires_on_rest():
-    code = 'return <button {...rest} onClick={handleClick} />;'
+    code = "return <button {...rest} onClick={handleClick} />;"
     assert _rule_fired(code, "PROP_SPREADING_SLOP")
 
 
 def test_prop_spreading_slop_skips_named_spread():
-    code = '<div {...{ className, style }} />'
+    code = "<div {...{ className, style }} />"
     assert not _rule_fired(code, "PROP_SPREADING_SLOP")
 
 
@@ -5028,42 +5544,42 @@ def test_css_empty_rule_slop_skips_populated_rule():
 
 
 def test_catch_console_only_slop_fires():
-    code = 'try { fetch(url); } catch (e) { console.error(e); }'
+    code = "try { fetch(url); } catch (e) { console.error(e); }"
     assert _rule_fired(code, "CATCH_CONSOLE_ONLY_SLOP")
 
 
 def test_catch_console_only_slop_skips_rethrow():
-    code = 'try { fetch(url); } catch (e) { console.error(e); throw e; }'
+    code = "try { fetch(url); } catch (e) { console.error(e); throw e; }"
     assert not _rule_fired(code, "CATCH_CONSOLE_ONLY_SLOP")
 
 
 def test_hardcoded_timeout_slop_fires_on_large_number():
-    code = 'setTimeout(() => hideToast(), 3000)'
+    code = "setTimeout(() => hideToast(), 3000)"
     assert _rule_fired(code, "HARDCODED_TIMEOUT_SLOP")
 
 
 def test_hardcoded_timeout_slop_fires_on_interval():
-    code = 'setInterval(poll, 5000)'
+    code = "setInterval(poll, 5000)"
     assert _rule_fired(code, "HARDCODED_TIMEOUT_SLOP")
 
 
 def test_hardcoded_timeout_slop_skips_zero():
-    code = 'setTimeout(callback, 0)'
+    code = "setTimeout(callback, 0)"
     assert not _rule_fired(code, "HARDCODED_TIMEOUT_SLOP")
 
 
 def test_hardcoded_timeout_slop_skips_small_number():
-    code = 'setTimeout(callback, 50)'
+    code = "setTimeout(callback, 50)"
     assert not _rule_fired(code, "HARDCODED_TIMEOUT_SLOP")
 
 
 def test_deprecated_finddomnode_slop_fires_on_reactdom():
-    code = 'const node = ReactDOM.findDOMNode(this);'
+    code = "const node = ReactDOM.findDOMNode(this);"
     assert _rule_fired(code, "DEPRECATED_FINDDOMNODE_SLOP")
 
 
 def test_deprecated_finddomnode_slop_fires_bare():
-    code = 'const el = findDOMNode(componentInstance);'
+    code = "const el = findDOMNode(componentInstance);"
     assert _rule_fired(code, "DEPRECATED_FINDDOMNODE_SLOP")
 
 
@@ -5088,32 +5604,32 @@ def test_no_passive_scroll_listener_slop_skips_click():
 
 
 def test_deprecated_class_component_slop_fires_on_component():
-    code = 'class MyWidget extends Component { render() { return <div />; } }'
+    code = "class MyWidget extends Component { render() { return <div />; } }"
     assert _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
 
 
 def test_deprecated_class_component_slop_fires_on_pure_component():
-    code = 'class List extends React.PureComponent { render() { return null; } }'
+    code = "class List extends React.PureComponent { render() { return null; } }"
     assert _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
 
 
 def test_deprecated_class_component_slop_skips_plain_class():
-    code = 'class MyService extends BaseService { constructor() { super(); } }'
+    code = "class MyService extends BaseService { constructor() { super(); } }"
     assert not _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
 
 
 def test_css_important_animation_slop_fires_on_transition():
-    code = '.btn { transition: all 0.3s ease !important; }'
+    code = ".btn { transition: all 0.3s ease !important; }"
     assert _rule_fired(code, "CSS_IMPORTANT_ANIMATION_SLOP", ".css")
 
 
 def test_css_important_animation_slop_fires_on_animation():
-    code = '.spinner { animation: spin 1s linear infinite !important; }'
+    code = ".spinner { animation: spin 1s linear infinite !important; }"
     assert _rule_fired(code, "CSS_IMPORTANT_ANIMATION_SLOP", ".css")
 
 
 def test_css_important_animation_slop_skips_color_important():
-    code = '.btn { color: red !important; }'
+    code = ".btn { color: red !important; }"
     assert not _rule_fired(code, "CSS_IMPORTANT_ANIMATION_SLOP", ".css")
 
 
@@ -5123,7 +5639,7 @@ def test_missing_aria_role_slop_fires_on_div_with_onclick():
 
 
 def test_missing_aria_role_slop_fires_on_span_with_onkeydown():
-    code = '<span onKeydown={handleKey} tabIndex={0}>Option</span>'
+    code = "<span onKeydown={handleKey} tabIndex={0}>Option</span>"
     assert _rule_fired(code, "MISSING_ARIA_ROLE_SLOP")
 
 
@@ -5133,17 +5649,17 @@ def test_missing_aria_role_slop_skips_div_with_role():
 
 
 def test_css_overflow_hidden_body_slop_fires():
-    code = 'body { margin: 0; overflow: hidden; font-family: sans-serif; }'
+    code = "body { margin: 0; overflow: hidden; font-family: sans-serif; }"
     assert _rule_fired(code, "CSS_OVERFLOW_HIDDEN_BODY_SLOP", ".css")
 
 
 def test_css_overflow_hidden_body_slop_fires_on_html():
-    code = 'html { box-sizing: border-box; overflow: hidden; }'
+    code = "html { box-sizing: border-box; overflow: hidden; }"
     assert _rule_fired(code, "CSS_OVERFLOW_HIDDEN_BODY_SLOP", ".css")
 
 
 def test_css_overflow_hidden_body_slop_skips_component():
-    code = '.modal-container { overflow: hidden; position: fixed; }'
+    code = ".modal-container { overflow: hidden; position: fixed; }"
     assert not _rule_fired(code, "CSS_OVERFLOW_HIDDEN_BODY_SLOP", ".css")
 
 
@@ -5158,7 +5674,9 @@ def test_vague_aria_label_slop_fires_on_close():
 
 
 def test_vague_aria_label_slop_skips_descriptive():
-    code = '<button aria-label="Close settings panel" onClick={onClose}><XIcon /></button>'
+    code = (
+        '<button aria-label="Close settings panel" onClick={onClose}><XIcon /></button>'
+    )
     assert not _rule_fired(code, "VAGUE_ARIA_LABEL_SLOP")
 
 
@@ -5173,29 +5691,30 @@ def test_lazy_without_suspense_slop_fires_on_bare_lazy():
 
 
 def test_lazy_without_suspense_slop_skips_other_lazy():
-    code = 'const lazyValue = computeExpensiveValue();'
+    code = "const lazyValue = computeExpensiveValue();"
     assert not _rule_fired(code, "LAZY_WITHOUT_SUSPENSE_SLOP")
 
 
 # ── Batch 20 ──────────────────────────────────────────────────────────────────
 
+
 def test_non_null_assertion_slop_fires_on_property_access():
-    code = 'const name = user!.profile.name;'
+    code = "const name = user!.profile.name;"
     assert _rule_fired(code, "NON_NULL_ASSERTION_SLOP")
 
 
 def test_non_null_assertion_slop_fires_on_index_access():
-    code = 'const first = items![0];'
+    code = "const first = items![0];"
     assert _rule_fired(code, "NON_NULL_ASSERTION_SLOP")
 
 
 def test_non_null_assertion_slop_skips_logical_not():
-    code = 'const isValid = !user.name;'
+    code = "const isValid = !user.name;"
     assert not _rule_fired(code, "NON_NULL_ASSERTION_SLOP")
 
 
 def test_eval_usage_slop_fires_on_eval_call():
-    code = 'const result = eval(userInput);'
+    code = "const result = eval(userInput);"
     assert _rule_fired(code, "EVAL_USAGE_SLOP")
 
 
@@ -5205,37 +5724,37 @@ def test_eval_usage_slop_fires_with_space():
 
 
 def test_eval_usage_slop_skips_evaluate():
-    code = 'const ok = evaluate(expr);'
+    code = "const ok = evaluate(expr);"
     assert not _rule_fired(code, "EVAL_USAGE_SLOP")
 
 
 def test_empty_interface_slop_fires_on_empty_interface():
-    code = 'interface Props {}'
+    code = "interface Props {}"
     assert _rule_fired(code, "EMPTY_INTERFACE_SLOP")
 
 
 def test_empty_interface_slop_fires_on_extends_empty():
-    code = 'interface AdminProps extends BaseProps {}'
+    code = "interface AdminProps extends BaseProps {}"
     assert _rule_fired(code, "EMPTY_INTERFACE_SLOP")
 
 
 def test_empty_interface_slop_skips_non_empty():
-    code = 'interface Props { id: string; }'
+    code = "interface Props { id: string; }"
     assert not _rule_fired(code, "EMPTY_INTERFACE_SLOP")
 
 
 def test_fragment_shorthand_slop_fires_on_react_fragment():
-    code = 'return <React.Fragment><h1>Hi</h1></React.Fragment>;'
+    code = "return <React.Fragment><h1>Hi</h1></React.Fragment>;"
     assert _rule_fired(code, "FRAGMENT_SHORTHAND_SLOP")
 
 
 def test_fragment_shorthand_slop_fires_without_attrs():
-    code = 'const el = <React.Fragment><p>text</p></React.Fragment>;'
+    code = "const el = <React.Fragment><p>text</p></React.Fragment>;"
     assert _rule_fired(code, "FRAGMENT_SHORTHAND_SLOP")
 
 
 def test_fragment_shorthand_slop_skips_shorthand():
-    code = 'return <><h1>Hi</h1></>;'
+    code = "return <><h1>Hi</h1></>;"
     assert not _rule_fired(code, "FRAGMENT_SHORTHAND_SLOP")
 
 
@@ -5245,7 +5764,7 @@ def test_select_no_label_slop_fires_on_unlabelled_select():
 
 
 def test_select_no_label_slop_fires_on_bare_select():
-    code = '<select onChange={handleChange}></select>'
+    code = "<select onChange={handleChange}></select>"
     assert _rule_fired(code, "SELECT_NO_LABEL_SLOP")
 
 
@@ -5255,77 +5774,77 @@ def test_select_no_label_slop_skips_aria_labelled():
 
 
 def test_absolute_font_size_body_slop_fires_on_html():
-    code = 'html { font-size: 16px; }'
+    code = "html { font-size: 16px; }"
     assert _rule_fired(code, "ABSOLUTE_FONT_SIZE_BODY_SLOP", ext=".css")
 
 
 def test_absolute_font_size_body_slop_fires_on_body():
-    code = 'body { margin: 0; font-size: 14px; }'
+    code = "body { margin: 0; font-size: 14px; }"
     assert _rule_fired(code, "ABSOLUTE_FONT_SIZE_BODY_SLOP", ext=".css")
 
 
 def test_absolute_font_size_body_slop_skips_percent():
-    code = 'html { font-size: 100%; }'
+    code = "html { font-size: 100%; }"
     assert not _rule_fired(code, "ABSOLUTE_FONT_SIZE_BODY_SLOP", ext=".css")
 
 
 def test_grid_auto_fit_missing_slop_fires_on_fixed_repeat():
-    code = '.grid { grid-template-columns: repeat(3, 1fr); }'
+    code = ".grid { grid-template-columns: repeat(3, 1fr); }"
     assert _rule_fired(code, "GRID_AUTO_FIT_MISSING_SLOP", ext=".css")
 
 
 def test_grid_auto_fit_missing_slop_fires_on_four_col():
-    code = '.layout { grid-template-columns: repeat(4, minmax(0, 1fr)); }'
+    code = ".layout { grid-template-columns: repeat(4, minmax(0, 1fr)); }"
     assert _rule_fired(code, "GRID_AUTO_FIT_MISSING_SLOP", ext=".css")
 
 
 def test_grid_auto_fit_missing_slop_skips_auto_fit():
-    code = '.grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }'
+    code = ".grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }"
     assert not _rule_fired(code, "GRID_AUTO_FIT_MISSING_SLOP", ext=".css")
 
 
 def test_css_overflow_scroll_slop_fires_on_overflow_scroll():
-    code = '.box { overflow: scroll; }'
+    code = ".box { overflow: scroll; }"
     assert _rule_fired(code, "CSS_OVERFLOW_SCROLL_SLOP", ext=".css")
 
 
 def test_css_overflow_scroll_slop_fires_on_overflow_x_scroll():
-    code = '.table { overflow-x: scroll; }'
+    code = ".table { overflow-x: scroll; }"
     assert _rule_fired(code, "CSS_OVERFLOW_SCROLL_SLOP", ext=".css")
 
 
 def test_css_overflow_scroll_slop_skips_overflow_auto():
-    code = '.box { overflow: auto; }'
+    code = ".box { overflow: auto; }"
     assert not _rule_fired(code, "CSS_OVERFLOW_SCROLL_SLOP", ext=".css")
 
 
 def test_background_attachment_fixed_slop_fires():
-    code = '.hero { background-attachment: fixed; }'
+    code = ".hero { background-attachment: fixed; }"
     assert _rule_fired(code, "BACKGROUND_ATTACHMENT_FIXED_SLOP", ext=".css")
 
 
 def test_background_attachment_fixed_slop_fires_in_rule():
-    code = 'body { background-image: url(bg.jpg); background-attachment: fixed; }'
+    code = "body { background-image: url(bg.jpg); background-attachment: fixed; }"
     assert _rule_fired(code, "BACKGROUND_ATTACHMENT_FIXED_SLOP", ext=".css")
 
 
 def test_background_attachment_fixed_slop_skips_scroll():
-    code = '.card { background-attachment: scroll; }'
+    code = ".card { background-attachment: scroll; }"
     assert not _rule_fired(code, "BACKGROUND_ATTACHMENT_FIXED_SLOP", ext=".css")
 
 
 def test_resize_none_slop_fires_on_textarea():
-    code = 'textarea { resize: none; }'
+    code = "textarea { resize: none; }"
     assert _rule_fired(code, "RESIZE_NONE_SLOP", ext=".css")
 
 
 def test_resize_none_slop_fires_in_class():
-    code = '.input-box { width: 100%; resize: none; }'
+    code = ".input-box { width: 100%; resize: none; }"
     assert _rule_fired(code, "RESIZE_NONE_SLOP", ext=".css")
 
 
 def test_resize_none_slop_skips_vertical():
-    code = 'textarea { resize: vertical; }'
+    code = "textarea { resize: vertical; }"
     assert not _rule_fired(code, "RESIZE_NONE_SLOP", ext=".css")
 
 
@@ -5345,23 +5864,22 @@ def test_button_type_reset_slop_skips_submit():
 
 
 def test_css_vendor_prefix_slop_fires_on_webkit():
-    code = '.el { -webkit-transform: translateX(10px); }'
+    code = ".el { -webkit-transform: translateX(10px); }"
     assert _rule_fired(code, "CSS_VENDOR_PREFIX_SLOP", ext=".css")
 
 
 def test_css_vendor_prefix_slop_fires_on_moz():
-    code = '.el { -moz-user-select: none; }'
+    code = ".el { -moz-user-select: none; }"
     assert _rule_fired(code, "CSS_VENDOR_PREFIX_SLOP", ext=".css")
 
 
 def test_css_vendor_prefix_slop_skips_standard():
-    code = '.el { transform: translateX(10px); }'
+    code = ".el { transform: translateX(10px); }"
     assert not _rule_fired(code, "CSS_VENDOR_PREFIX_SLOP", ext=".css")
 
 
-
-
 # ── Batch 21 tests ──────────────────────────────────────────────────────────
+
 
 # DOCUMENT_WRITE_SLOP
 def test_document_write_slop_fires_on_write():
@@ -5370,12 +5888,12 @@ def test_document_write_slop_fires_on_write():
 
 
 def test_document_write_slop_fires_with_variable():
-    code = 'document.write(userInput);'
+    code = "document.write(userInput);"
     assert _rule_fired(code, "DOCUMENT_WRITE_SLOP", ext=".js")
 
 
 def test_document_write_slop_skips_document_element():
-    code = 'const el = document.documentElement;'
+    code = "const el = document.documentElement;"
     assert not _rule_fired(code, "DOCUMENT_WRITE_SLOP", ext=".ts")
 
 
@@ -5386,7 +5904,7 @@ def test_inner_html_assign_slop_fires_on_assignment():
 
 
 def test_inner_html_assign_slop_fires_on_concat():
-    code = 'container.innerHTML += unsafeContent;'
+    code = "container.innerHTML += unsafeContent;"
     assert _rule_fired(code, "INNER_HTML_ASSIGN_SLOP", ext=".ts")
 
 
@@ -5413,12 +5931,12 @@ def test_localstorage_sensitive_slop_skips_theme():
 
 # OPEN_REDIRECT_SLOP
 def test_open_redirect_slop_fires_on_href_variable():
-    code = 'location.href = returnUrl;'
+    code = "location.href = returnUrl;"
     assert _rule_fired(code, "OPEN_REDIRECT_SLOP", ext=".ts")
 
 
 def test_open_redirect_slop_fires_on_window_location():
-    code = 'window.location.href = userParam;'
+    code = "window.location.href = userParam;"
     assert _rule_fired(code, "OPEN_REDIRECT_SLOP", ext=".ts")
 
 
@@ -5429,30 +5947,28 @@ def test_open_redirect_slop_skips_hardcoded_path():
 
 # NAVIGATOR_SSR_SLOP
 def test_navigator_ssr_slop_fires_on_module_scope():
-    code = 'const ua = navigator.userAgent;'
+    code = "const ua = navigator.userAgent;"
     assert _rule_fired(code, "NAVIGATOR_SSR_SLOP", ext=".ts")
 
 
 def test_navigator_ssr_slop_fires_on_export_const():
-    code = 'export const isMobile = navigator.maxTouchPoints > 0;'
+    code = "export const isMobile = navigator.maxTouchPoints > 0;"
     assert _rule_fired(code, "NAVIGATOR_SSR_SLOP", ext=".ts")
 
 
 def test_navigator_ssr_slop_skips_with_typeof_guard():
-    code = (
-        "const ua = typeof window !== 'undefined' ? navigator.userAgent : '';"
-    )
+    code = "const ua = typeof window !== 'undefined' ? navigator.userAgent : '';"
     assert not _rule_fired(code, "NAVIGATOR_SSR_SLOP", ext=".ts")
 
 
 # PROCESS_BROWSER_DEPRECATED_SLOP
 def test_process_browser_deprecated_slop_fires_on_condition():
-    code = 'if (process.browser) { doSomething(); }'
+    code = "if (process.browser) { doSomething(); }"
     assert _rule_fired(code, "PROCESS_BROWSER_DEPRECATED_SLOP", ext=".ts")
 
 
 def test_process_browser_deprecated_slop_fires_on_negation():
-    code = 'const isSSR = !process.browser;'
+    code = "const isSSR = !process.browser;"
     assert _rule_fired(code, "PROCESS_BROWSER_DEPRECATED_SLOP", ext=".ts")
 
 
@@ -5463,49 +5979,49 @@ def test_process_browser_deprecated_slop_skips_env():
 
 # TEXT_TRANSFORM_UPPERCASE_SLOP
 def test_text_transform_uppercase_slop_fires_on_heading():
-    code = 'h1 { text-transform: uppercase; }'
+    code = "h1 { text-transform: uppercase; }"
     assert _rule_fired(code, "TEXT_TRANSFORM_UPPERCASE_SLOP", ext=".css")
 
 
 def test_text_transform_uppercase_slop_fires_on_label():
-    code = '.label { text-transform: uppercase; letter-spacing: 0.1em; }'
+    code = ".label { text-transform: uppercase; letter-spacing: 0.1em; }"
     assert _rule_fired(code, "TEXT_TRANSFORM_UPPERCASE_SLOP", ext=".scss")
 
 
 def test_text_transform_uppercase_slop_skips_capitalize():
-    code = 'h1 { text-transform: capitalize; }'
+    code = "h1 { text-transform: capitalize; }"
     assert not _rule_fired(code, "TEXT_TRANSFORM_UPPERCASE_SLOP", ext=".css")
 
 
 # FONT_WEIGHT_TOO_LIGHT_SLOP
 def test_font_weight_too_light_slop_fires_on_100():
-    code = 'body { font-weight: 100; }'
+    code = "body { font-weight: 100; }"
     assert _rule_fired(code, "FONT_WEIGHT_TOO_LIGHT_SLOP", ext=".css")
 
 
 def test_font_weight_too_light_slop_fires_on_200():
-    code = '.thin { font-weight: 200; }'
+    code = ".thin { font-weight: 200; }"
     assert _rule_fired(code, "FONT_WEIGHT_TOO_LIGHT_SLOP", ext=".scss")
 
 
 def test_font_weight_too_light_slop_skips_400():
-    code = 'body { font-weight: 400; }'
+    code = "body { font-weight: 400; }"
     assert not _rule_fired(code, "FONT_WEIGHT_TOO_LIGHT_SLOP", ext=".css")
 
 
 # FONT_SIZE_ZERO_SLOP
 def test_font_size_zero_slop_fires_on_zero():
-    code = '.container { font-size: 0; }'
+    code = ".container { font-size: 0; }"
     assert _rule_fired(code, "FONT_SIZE_ZERO_SLOP", ext=".css")
 
 
 def test_font_size_zero_slop_fires_in_rule():
-    code = 'ul { margin: 0; font-size: 0; }'
+    code = "ul { margin: 0; font-size: 0; }"
     assert _rule_fired(code, "FONT_SIZE_ZERO_SLOP", ext=".css")
 
 
 def test_font_size_zero_slop_skips_nonzero():
-    code = '.text { font-size: 16px; }'
+    code = ".text { font-size: 16px; }"
     assert not _rule_fired(code, "FONT_SIZE_ZERO_SLOP", ext=".css")
 
 
@@ -5532,15 +6048,13 @@ def test_video_no_captions_slop_fires_on_video_without_track():
 
 
 def test_video_no_captions_slop_fires_on_muted_autoplay():
-    code = '<video autoPlay muted loop></video>'
+    code = "<video autoPlay muted loop></video>"
     assert _rule_fired(code, "VIDEO_NO_CAPTIONS_SLOP", ext=".tsx")
 
 
 def test_video_no_captions_slop_skips_video_with_captions():
     code = (
-        '<video controls>'
-        '<track kind="captions" src="en.vtt" label="English">'
-        '</video>'
+        '<video controls><track kind="captions" src="en.vtt" label="English"></video>'
     )
     assert not _rule_fired(code, "VIDEO_NO_CAPTIONS_SLOP", ext=".tsx")
 
@@ -5563,19 +6077,20 @@ def test_star_import_slop_skips_react():
 
 # ── Batch 22 tests ──────────────────────────────────────────────────────────
 
+
 # DEBUGGER_STATEMENT_SLOP
 def test_debugger_statement_slop_fires_on_bare_debugger():
-    code = 'function foo() { debugger; return 42; }'
+    code = "function foo() { debugger; return 42; }"
     assert _rule_fired(code, "DEBUGGER_STATEMENT_SLOP", ext=".ts")
 
 
 def test_debugger_statement_slop_fires_on_standalone_line():
-    code = 'const x = compute();\ndebugger;\nconsole.log(x);'
+    code = "const x = compute();\ndebugger;\nconsole.log(x);"
     assert _rule_fired(code, "DEBUGGER_STATEMENT_SLOP", ext=".ts")
 
 
 def test_debugger_statement_slop_skips_no_debugger():
-    code = 'const x = compute(); return x;'
+    code = "const x = compute(); return x;"
     assert not _rule_fired(code, "DEBUGGER_STATEMENT_SLOP", ext=".ts")
 
 
@@ -5607,8 +6122,7 @@ def test_duplicate_import_slop_fires_on_two_imports_same_module():
 
 def test_duplicate_import_slop_fires_on_consecutive_duplicates():
     code = (
-        "import { A } from '@app/components';\n"
-        "import { B } from '@app/components';\n"
+        "import { A } from '@app/components';\nimport { B } from '@app/components';\n"
     )
     assert _rule_fired(code, "DUPLICATE_IMPORT_SLOP", ext=".tsx")
 
@@ -5624,44 +6138,44 @@ def test_duplicate_import_slop_skips_unique_modules():
 
 # CONTEXT_VALUE_INLINE_SLOP
 def test_context_value_inline_slop_fires_on_provider_inline_object():
-    code = '<ThemeContext.Provider value={{ theme, setTheme }}><App /></ThemeContext.Provider>'
+    code = "<ThemeContext.Provider value={{ theme, setTheme }}><App /></ThemeContext.Provider>"
     assert _rule_fired(code, "CONTEXT_VALUE_INLINE_SLOP", ext=".tsx")
 
 
 def test_context_value_inline_slop_fires_on_nested_context():
-    code = '<App.Context.Provider value={{ user, dispatch }}>{children}</App.Context.Provider>'
+    code = "<App.Context.Provider value={{ user, dispatch }}>{children}</App.Context.Provider>"
     assert _rule_fired(code, "CONTEXT_VALUE_INLINE_SLOP", ext=".tsx")
 
 
 def test_context_value_inline_slop_skips_memoized_value():
-    code = '<ThemeContext.Provider value={contextValue}><App /></ThemeContext.Provider>'
+    code = "<ThemeContext.Provider value={contextValue}><App /></ThemeContext.Provider>"
     assert not _rule_fired(code, "CONTEXT_VALUE_INLINE_SLOP", ext=".tsx")
 
 
 # USE_STATE_INIT_SLOP
 def test_use_state_init_slop_fires_on_new_map():
-    code = 'const [data, setData] = useState(new Map());'
+    code = "const [data, setData] = useState(new Map());"
     assert _rule_fired(code, "USE_STATE_INIT_SLOP", ext=".tsx")
 
 
 def test_use_state_init_slop_fires_on_new_set():
-    code = 'const [ids, setIds] = useState(new Set());'
+    code = "const [ids, setIds] = useState(new Set());"
     assert _rule_fired(code, "USE_STATE_INIT_SLOP", ext=".tsx")
 
 
 def test_use_state_init_slop_skips_primitive():
-    code = 'const [count, setCount] = useState(0);'
+    code = "const [count, setCount] = useState(0);"
     assert not _rule_fired(code, "USE_STATE_INIT_SLOP", ext=".tsx")
 
 
 # DOCUMENT_COOKIE_SSR_SLOP
 def test_document_cookie_ssr_slop_fires_on_module_scope():
-    code = 'const token = document.cookie;'
+    code = "const token = document.cookie;"
     assert _rule_fired(code, "DOCUMENT_COOKIE_SSR_SLOP", ext=".ts")
 
 
 def test_document_cookie_ssr_slop_fires_on_export_const():
-    code = 'export const cookieStr = document.cookie;'
+    code = "export const cookieStr = document.cookie;"
     assert _rule_fired(code, "DOCUMENT_COOKIE_SSR_SLOP", ext=".ts")
 
 
@@ -5672,7 +6186,9 @@ def test_document_cookie_ssr_slop_skips_with_typeof_guard():
 
 # POSTMESSAGE_ORIGIN_MISSING_SLOP
 def test_postmessage_origin_missing_slop_fires_without_origin_check():
-    code = "window.addEventListener('message', (event) => { processData(event.data); });"
+    code = (
+        "window.addEventListener('message', (event) => { processData(event.data); });"
+    )
     assert _rule_fired(code, "POSTMESSAGE_ORIGIN_MISSING_SLOP", ext=".ts")
 
 
@@ -5693,7 +6209,7 @@ def test_postmessage_origin_missing_slop_skips_with_origin_check():
 
 # TABINDEX_ZERO_DIV_SLOP
 def test_tabindex_zero_div_slop_fires_on_tabindex_zero():
-    code = '<div tabIndex={0} onClick={handleClick}>click me</div>'
+    code = "<div tabIndex={0} onClick={handleClick}>click me</div>"
     assert _rule_fired(code, "TABINDEX_ZERO_DIV_SLOP", ext=".tsx")
 
 
@@ -5703,7 +6219,7 @@ def test_tabindex_zero_div_slop_fires_on_tabindex_string_zero():
 
 
 def test_tabindex_zero_div_slop_skips_button():
-    code = '<button tabIndex={0} onClick={handleClick}>click me</button>'
+    code = "<button tabIndex={0} onClick={handleClick}>click me</button>"
     assert not _rule_fired(code, "TABINDEX_ZERO_DIV_SLOP", ext=".tsx")
 
 
@@ -5741,7 +6257,7 @@ def test_svg_without_viewbox_slop_skips_svg_with_viewbox():
 
 # USER_AGENT_SNIFF_SLOP
 def test_user_agent_sniff_slop_fires_on_useragent_read():
-    code = 'const ua = navigator.userAgent;'
+    code = "const ua = navigator.userAgent;"
     assert _rule_fired(code, "USER_AGENT_SNIFF_SLOP", ext=".ts")
 
 
@@ -5751,40 +6267,47 @@ def test_user_agent_sniff_slop_fires_on_condition():
 
 
 def test_user_agent_sniff_slop_skips_navigator_online():
-    code = 'const isOnline = navigator.onLine;'
+    code = "const isOnline = navigator.onLine;"
     assert not _rule_fired(code, "USER_AGENT_SNIFF_SLOP", ext=".ts")
 
 
 # STICKY_WITHOUT_TOP_SLOP
 def test_sticky_without_top_slop_fires_on_sticky_no_top():
-    code = '.header { position: sticky; background: white; }'
+    code = ".header { position: sticky; background: white; }"
     assert _rule_fired(code, "STICKY_WITHOUT_TOP_SLOP", ext=".css")
 
 
 def test_sticky_without_top_slop_fires_on_sticky_no_offset():
-    code = 'nav { position: sticky; z-index: 100; }'
+    code = "nav { position: sticky; z-index: 100; }"
     assert _rule_fired(code, "STICKY_WITHOUT_TOP_SLOP", ext=".scss")
 
 
 def test_sticky_without_top_slop_skips_sticky_with_top():
-    code = '.header { position: sticky; top: 0; background: white; }'
+    code = ".header { position: sticky; top: 0; background: white; }"
     assert not _rule_fired(code, "STICKY_WITHOUT_TOP_SLOP", ext=".css")
 
 
 # ── Duplicate rule deduplication ─────────────────────────────────────────────
 
+
 def test_window_confirm_slop_fires_exactly_once():
     """WINDOW_CONFIRM_SLOP must not be duplicated in RULES — should fire once per file."""
     from uidetox.analyzer import analyze_file
-    import tempfile, os
+    import tempfile
+    import os
+
     code = 'if (window.confirm("sure?")) { doThing(); }'
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
         issues = analyze_file(Path(tmp))
         confirm_issues = [i for i in issues if i.get("id") == "WINDOW_CONFIRM_SLOP"]
-        assert len(confirm_issues) == 1, f"Expected exactly 1 WINDOW_CONFIRM_SLOP issue, got {len(confirm_issues)}"
+        assert len(confirm_issues) == 1, (
+            f"Expected exactly 1 WINDOW_CONFIRM_SLOP issue, got {len(confirm_issues)}"
+        )
     finally:
         os.unlink(tmp)
 
@@ -5792,14 +6315,22 @@ def test_window_confirm_slop_fires_exactly_once():
 def test_tabindex_positive_not_duplicated_with_removed_rule():
     """After removing POSITIVE_TABINDEX_SLOP, only TABINDEX_POSITIVE_SLOP should fire."""
     from uidetox.analyzer import analyze_file
-    import tempfile, os
-    code = '<div tabIndex={5}>click me</div>'
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    import tempfile
+    import os
+
+    code = "<div tabIndex={5}>click me</div>"
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
         issues = analyze_file(Path(tmp))
-        positive_ids = [i.get("id") for i in issues if "TABINDEX" in (i.get("id") or "") and "ZERO" not in (i.get("id") or "")]
+        positive_ids = [
+            i.get("id")
+            for i in issues
+            if "TABINDEX" in (i.get("id") or "") and "ZERO" not in (i.get("id") or "")
+        ]
         # Should only see TABINDEX_POSITIVE_SLOP, NOT the removed POSITIVE_TABINDEX_SLOP
         assert "POSITIVE_TABINDEX_SLOP" not in positive_ids
         assert "TABINDEX_POSITIVE_SLOP" in positive_ids
@@ -5809,11 +6340,14 @@ def test_tabindex_positive_not_duplicated_with_removed_rule():
 
 # ── AST analysis issues must have "id" field ─────────────────────────────────
 
+
 def test_analyze_ast_all_issues_have_id_field():
     """Every issue returned by _analyze_ast must have an 'id' key."""
     from uidetox.analyzer import _analyze_ast
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     # Code that triggers multiple AST paths: dashboard + animation state + siblings
     code = """
 import React, { useState } from 'react';
@@ -5827,7 +6361,9 @@ export default function Dashboard() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -5842,7 +6378,9 @@ def test_analyze_ast_dashboard_issue_has_correct_id():
     """Dashboard slop detected via AST should have id='HERO_DASHBOARD_SLOP'."""
     from uidetox.analyzer import _analyze_ast
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     code = """
 export default function Dash() {
   return (
@@ -5853,7 +6391,9 @@ export default function Dash() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -5868,7 +6408,9 @@ def test_analyze_ast_prop_drilling_issue_has_id():
     """Prop drilling detected via AST should have id='PROP_DRILLING_SLOP'."""
     from uidetox.analyzer import _analyze_ast
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     # Pass same prop name through 4+ different components
     code = """
 export default function Root() {
@@ -5882,7 +6424,9 @@ export default function Root() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -5951,7 +6495,9 @@ def _analyze_animate_state_code(code):
 
     from uidetox.analyzer import _analyze_ast
 
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -5970,13 +6516,15 @@ def test_analyze_ast_animate_state_positive_identifiers(identifier):
     issues, filepath = _analyze_animate_state_code(code)
     animate_issues = [i for i in issues if i.get("id") == "ANIMATE_STATE_SLOP"]
 
-    assert animate_issues == [{
-        "id": "ANIMATE_STATE_SLOP",
-        "file": filepath,
-        "tier": "T2",
-        "issue": "React useState used for animation values — causes re-renders on every frame.",
-        "command": "Use CSS transitions/animations, Framer Motion, or useRef for animation state. Never drive 60fps animations through React state.",
-    }]
+    assert animate_issues == [
+        {
+            "id": "ANIMATE_STATE_SLOP",
+            "file": filepath,
+            "tier": "T2",
+            "issue": "React useState used for animation values — causes re-renders on every frame.",
+            "command": "Use CSS transitions/animations, Framer Motion, or useRef for animation state. Never drive 60fps animations through React state.",
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -6006,7 +6554,9 @@ def test_analyze_ast_identical_siblings_has_id():
     """Identical sibling components detected via AST should have id='IDENTICAL_SIBLINGS_SLOP'."""
     from uidetox.analyzer import _analyze_ast
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     code = """
 export default function Grid() {
   return (
@@ -6016,7 +6566,9 @@ export default function Grid() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -6029,11 +6581,14 @@ export default function Grid() {
 
 # ── Component layout heuristic issues must have "id" field ───────────────────
 
+
 def test_analyze_component_layout_all_issues_have_id():
     """Every issue returned by _analyze_component_layout must have an 'id' key."""
     from uidetox.analyzer import _analyze_component_layout
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     # Code that triggers multiple heuristics: pricing + testimonials
     code = """
 export default function Page() {
@@ -6050,7 +6605,9 @@ export default function Page() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -6065,7 +6622,9 @@ def test_analyze_component_layout_pricing_table_id():
     """Pricing table heuristic should emit id='PRICING_TABLE_SLOP'."""
     from uidetox.analyzer import _analyze_component_layout
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     code = """
 export default function Pricing() {
   return (
@@ -6078,7 +6637,9 @@ export default function Pricing() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -6093,7 +6654,9 @@ def test_analyze_component_layout_testimonial_grid_id():
     """Testimonial grid heuristic should emit id='TESTIMONIAL_GRID_SLOP'."""
     from uidetox.analyzer import _analyze_component_layout
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     code = """
 export default function Reviews() {
   return (
@@ -6105,12 +6668,16 @@ export default function Reviews() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
         issues = _analyze_component_layout(Path(tmp), code, ".tsx")
-        testimonial_issues = [i for i in issues if i.get("id") == "TESTIMONIAL_GRID_SLOP"]
+        testimonial_issues = [
+            i for i in issues if i.get("id") == "TESTIMONIAL_GRID_SLOP"
+        ]
         assert len(testimonial_issues) >= 1
     finally:
         os.unlink(tmp)
@@ -6120,9 +6687,12 @@ def test_analyze_component_layout_static_component_id():
     """Zero-interactivity heuristic should emit id='STATIC_COMPONENT_SLOP'."""
     from uidetox.analyzer import _analyze_component_layout
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     # A static component: many JSX elements, no handlers, no animation, no hooks
-    code = """
+    code = (
+        """
 export default function Static() {
   return (
     <section>
@@ -6135,8 +6705,12 @@ export default function Static() {
     </section>
   );
 }
-""" + "\n" * 55  # Ensure file_len > 50
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+"""
+        + "\n" * 55
+    )  # Ensure file_len > 50
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -6153,7 +6727,9 @@ def test_analyze_component_layout_dashboard_id():
     """KPI dashboard heuristic should emit id='DASHBOARD_LAYOUT_SLOP'."""
     from uidetox.analyzer import _analyze_component_layout
     from pathlib import Path
-    import tempfile, os
+    import tempfile
+    import os
+
     code = """
 export default function Dashboard() {
   return (
@@ -6167,7 +6743,9 @@ export default function Dashboard() {
   );
 }
 """
-    with tempfile.NamedTemporaryFile(suffix=".tsx", mode="w", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".tsx", mode="w", delete=False, encoding="utf-8"
+    ) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -6180,9 +6758,11 @@ export default function Dashboard() {
 
 # ── All issues from analyze_file must have "id" field ────────────────────────
 
+
 def test_analyze_file_all_issues_have_id_field(tmp_path):
     """Every issue dict returned by analyze_file() must contain an 'id' key."""
     from uidetox.analyzer import analyze_file
+
     code = """
 import React, { useState } from 'react';
 export default function Page() {
@@ -6205,9 +6785,11 @@ export default function Page() {
 
 # ── scan.py _AUTO_CATEGORIES no stale rule IDs ──────────────────────────────
 
+
 def test_auto_categories_no_positive_tabindex_slop():
     """POSITIVE_TABINDEX_SLOP was removed from RULES; _AUTO_CATEGORIES must not reference it."""
     from uidetox.commands.scan import _AUTO_CATEGORIES
+
     for cat, rule_ids in _AUTO_CATEGORIES.items():
         assert "POSITIVE_TABINDEX_SLOP" not in rule_ids, (
             f"Stale rule 'POSITIVE_TABINDEX_SLOP' found in _AUTO_CATEGORIES['{cat}']"
@@ -6218,6 +6800,7 @@ def test_auto_categories_all_rule_ids_exist_in_rules():
     """Every rule ID referenced in _AUTO_CATEGORIES must exist in the RULES list."""
     from uidetox.commands.scan import _AUTO_CATEGORIES
     from uidetox.analyzer import RULES
+
     rule_ids_in_rules = {r["id"] for r in RULES}
     for cat, rule_ids in _AUTO_CATEGORIES.items():
         for rule_id in rule_ids:
@@ -6229,6 +6812,7 @@ def test_auto_categories_all_rule_ids_exist_in_rules():
 def test_auto_categories_tabindex_positive_slop_present():
     """TABINDEX_POSITIVE_SLOP (the surviving rule) must remain in _AUTO_CATEGORIES accessibility."""
     from uidetox.commands.scan import _AUTO_CATEGORIES
+
     assert "TABINDEX_POSITIVE_SLOP" in _AUTO_CATEGORIES.get("accessibility", set()), (
         "TABINDEX_POSITIVE_SLOP should be in _AUTO_CATEGORIES['accessibility']"
     )
@@ -6236,9 +6820,11 @@ def test_auto_categories_tabindex_positive_slop_present():
 
 # ── color_utils.luminance handles all hex formats ───────────────────────────
 
+
 def test_luminance_3_char_hex():
     """3-char hex shorthand is expanded correctly."""
     from uidetox.color_utils import luminance
+
     assert luminance("#fff") == luminance("#ffffff")
     assert luminance("#000") == luminance("#000000")
 
@@ -6246,6 +6832,7 @@ def test_luminance_3_char_hex():
 def test_luminance_4_char_hex():
     """4-char hex shorthand (RGBA) is expanded to 8-char; alpha ignored."""
     from uidetox.color_utils import luminance
+
     # #FFFF should expand to #FFFFFFFF (white + full alpha)
     assert luminance("#ffff") == luminance("#ffffff")
     # #000f should expand to #000000ff (black + full alpha)
@@ -6255,6 +6842,7 @@ def test_luminance_4_char_hex():
 def test_luminance_4_char_hex_not_one():
     """4-char hex must not silently return 1.0 (white) for non-white input."""
     from uidetox.color_utils import luminance
+
     # #0000 = black + zero alpha; luminance should be 0.0, not 1.0 (the old bug)
     result = luminance("#0000")
     assert result == 0.0, f"Expected 0.0 for #0000, got {result}"
@@ -6263,6 +6851,7 @@ def test_luminance_4_char_hex_not_one():
 def test_luminance_8_char_hex():
     """8-char hex (RGBA full) parses RGB ignoring alpha."""
     from uidetox.color_utils import luminance
+
     # #ffffffff = white with full alpha — same luminance as #ffffff
     assert luminance("#ffffffff") == luminance("#ffffff")
     # #00000000 = black with zero alpha — same luminance as #000000
@@ -6272,20 +6861,22 @@ def test_luminance_8_char_hex():
 def test_contrast_ratio_with_4_char_hex():
     """contrast_ratio works when 4-char hex codes are passed."""
     from uidetox.color_utils import contrast_ratio
+
     # #000f (black) vs #ffff (white) should give 21:1
     ratio = contrast_ratio("#000f", "#ffff")
-    assert abs(ratio - 21.0) < 0.1, f"Expected ~21.0 contrast for black/white, got {ratio}"
+    assert abs(ratio - 21.0) < 0.1, (
+        f"Expected ~21.0 contrast for black/white, got {ratio}"
+    )
 
 
 # ── scan.py triggered_rules uses direct issue ID (not description match) ────
+
 
 def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     """triggered_rules should be populated via issue['id'] not description substring match."""
     import sys
     import argparse
-    from pathlib import Path
     from uidetox.commands import scan as scan_cmd
-    from uidetox.analyzer import RULES
 
     # Write a file that will trigger a well-known rule
     tsx = tmp_path / "Component.tsx"
@@ -6301,7 +6892,10 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     monkeypatch.setattr("uidetox.commands.scan.ensure_uidetox_dir", lambda: state_dir)
     monkeypatch.setattr("uidetox.commands.scan.load_config", lambda: {})
     monkeypatch.setattr("uidetox.commands.scan.save_config", lambda c: None)
-    monkeypatch.setattr("uidetox.commands.scan.detect_all", lambda path=".": type("P", (), {"to_dict": lambda s: {}})())
+    monkeypatch.setattr(
+        "uidetox.commands.scan.detect_all",
+        lambda path=".": type("P", (), {"to_dict": lambda s: {}})(),
+    )
     monkeypatch.setattr("uidetox.commands.scan.add_issues", lambda issues: len(issues))
     monkeypatch.setattr("uidetox.commands.scan.increment_scans", lambda: None)
     monkeypatch.setattr("uidetox.commands.scan.save_run_snapshot", lambda **kw: None)
@@ -6309,13 +6903,16 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     monkeypatch.setattr("uidetox.commands.scan.save_session", lambda **kw: None)
     monkeypatch.setattr("uidetox.commands.scan.log_progress", lambda *a, **kw: None)
 
-    captured_triggered = []
-
-    original_analyze = scan_cmd.analyze_directory
-
     def fake_analyze(path, **kwargs):
-        return [{"id": "IMG_ALT_MISSING_SLOP", "file": str(tsx), "tier": "T2",
-                 "issue": "img tag missing alt attribute", "command": "add alt"}]
+        return [
+            {
+                "id": "IMG_ALT_MISSING_SLOP",
+                "file": str(tsx),
+                "tier": "T2",
+                "issue": "img tag missing alt attribute",
+                "command": "add alt",
+            }
+        ]
 
     monkeypatch.setattr("uidetox.commands.scan.analyze_directory", fake_analyze)
 
@@ -6323,6 +6920,7 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
 
     # Capture stdout to avoid noise
     import io
+
     monkeypatch.setattr(sys, "stdout", io.StringIO())
     try:
         scan_cmd.run(args)
@@ -6337,13 +6935,16 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
 
 # ── diff.py: correct config key for exclude_paths ──────────────────────────
 
+
 def test_diff_analyze_target_uses_exclude_config_key(tmp_path, monkeypatch):
     """_analyze_target must pass config['exclude'] to analyze_directory, not 'ignore_patterns'."""
     from uidetox.commands.diff import _analyze_target
 
     captured_exclude = []
 
-    def fake_analyze_dir(root_path, exclude_paths=None, zone_overrides=None, design_variance=8):
+    def fake_analyze_dir(
+        root_path, exclude_paths=None, zone_overrides=None, design_variance=8
+    ):
         captured_exclude.append(exclude_paths)
         return []
 
@@ -6363,7 +6964,9 @@ def test_diff_analyze_target_uses_exclude_config_key(tmp_path, monkeypatch):
     )
 
 
-def test_diff_analyze_target_ignore_patterns_used_for_suppressions(tmp_path, monkeypatch):
+def test_diff_analyze_target_ignore_patterns_used_for_suppressions(
+    tmp_path, monkeypatch
+):
     """_analyze_target filters issues using config['ignore_patterns'] for suppressions."""
     from uidetox.commands.diff import _analyze_target
 
@@ -6375,7 +6978,9 @@ def test_diff_analyze_target_ignore_patterns_used_for_suppressions(tmp_path, mon
         "command": "fix",
     }
 
-    monkeypatch.setattr("uidetox.commands.diff.analyze_directory", lambda *a, **kw: [fake_issue])
+    monkeypatch.setattr(
+        "uidetox.commands.diff.analyze_directory", lambda *a, **kw: [fake_issue]
+    )
     monkeypatch.setattr(
         "uidetox.commands.diff._is_suppressed",
         lambda file, issue, patterns: "suppress pattern" in issue and bool(patterns),
@@ -6387,6 +6992,7 @@ def test_diff_analyze_target_ignore_patterns_used_for_suppressions(tmp_path, mon
 
 
 # ── diff.py: scope_files uses git root, not path argument ──────────────────
+
 
 def test_diff_scope_files_uses_git_root(monkeypatch, tmp_path):
     """When --since is used, absolute paths in scope_files come from git rev-parse
@@ -6412,22 +7018,27 @@ def test_diff_scope_files_uses_git_root(monkeypatch, tmp_path):
 
     def fake_run(cmd, **kwargs):
         if cmd[:2] == ["git", "rev-parse"] and "--show-toplevel" in cmd:
+
             class R:
                 returncode = 0
                 stdout = git_root + "\n"
                 stderr = ""
+
             return R()
         if cmd[:3] == ["git", "diff", "--name-only"]:
+
             class R2:
                 returncode = 0
                 stdout = "src/components/Foo.tsx\n"
                 stderr = ""
+
             return R2()
         return original_run(cmd, **kwargs)
 
     monkeypatch.setattr(_sp, "run", fake_run)
 
     from uidetox.commands.diff import _get_changed_files
+
     # Simulate what run() does when since_sha is set
     changed = _get_changed_files("abc123", cwd=str(subdir))
     assert changed is not None, "Should return list of changed files"
@@ -6445,7 +7056,9 @@ def test_diff_scope_files_uses_git_root(monkeypatch, tmp_path):
     assert bad_path not in scope_files, "Old doubled-path construction must not appear"
 
 
-def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6463,7 +7076,9 @@ def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch,
         return []
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []})
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []}
+    )
     monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
     monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
 
@@ -6472,7 +7087,9 @@ def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch,
     assert analyzed_path == root.resolve()
 
 
-def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_as_fixed(monkeypatch, tmp_path):
+def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_as_fixed(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6497,7 +7114,9 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
 
     def fake_git_run(cmd, **kwargs):
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
-        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
 
     def fake_analyze_target(path, config, target_files=None):
         if Path(path).resolve() == root.resolve():
@@ -6512,13 +7131,19 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
         }
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]})
-    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]}
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"]
+    )
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
     monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
-    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+    diff_cmd.run(
+        argparse.Namespace(path=".", since="abc123", output="json", save=False)
+    )
 
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 1}
 
@@ -6566,7 +7191,9 @@ def test_diff_run_since_file_scope_ignores_changed_sibling(monkeypatch, tmp_path
     monkeypatch.setattr(
         diff_cmd,
         "_analyze_target",
-        lambda *args, **kwargs: pytest.fail("out-of-scope sibling must not trigger analysis"),
+        lambda *args, **kwargs: pytest.fail(
+            "out-of-scope sibling must not trigger analysis"
+        ),
     )
 
     def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
@@ -6597,7 +7224,9 @@ def test_diff_run_since_file_scope_accepts_only_requested_file(monkeypatch, tmp_
 
     monkeypatch.chdir(root)
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []})
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []}
+    )
     git_cwds = []
 
     def fake_git_run(cmd, **kwargs):
@@ -6627,7 +7256,9 @@ def test_diff_run_since_file_scope_accepts_only_requested_file(monkeypatch, tmp_
     assert git_cwds == [src.resolve(), src.resolve()]
 
 
-def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(monkeypatch, tmp_path):
+def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6652,7 +7283,9 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(m
 
     def fake_git_run(cmd, **kwargs):
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
-        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
 
     def fake_analyze_target(path, config, target_files=None):
         if Path(path).resolve() == root.resolve():
@@ -6660,9 +7293,15 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(m
         return []
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]})
-    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
-    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]}
+    )
+    monkeypatch.setattr(
+        diff_cmd, "save_state", lambda state: saved_states.append(state)
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"]
+    )
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
     monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
     monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
@@ -6674,7 +7313,9 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(m
     assert saved_states[-1]["diff_baseline"][0]["file"] == issue["file"]
 
 
-def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as_unchanged(monkeypatch, tmp_path):
+def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as_unchanged(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6706,7 +7347,9 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
 
     def fake_git_run(cmd, **kwargs):
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
-        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
 
     def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
         emitted["summary"] = {
@@ -6716,8 +7359,14 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
         }
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [baseline_issue]})
-    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(
+        diff_cmd,
+        "load_state",
+        lambda: {"issues": [], "diff_baseline": [baseline_issue]},
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"]
+    )
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
     monkeypatch.setattr(
         diff_cmd,
@@ -6726,12 +7375,16 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
     )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
-    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+    diff_cmd.run(
+        argparse.Namespace(path=".", since="abc123", output="json", save=False)
+    )
 
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 1}
 
 
-def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseline_issue(monkeypatch, tmp_path):
+def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseline_issue(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6763,12 +7416,22 @@ def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseli
 
     def fake_git_run(cmd, **kwargs):
         assert Path(kwargs["cwd"]).resolve() == root.resolve()
-        return subprocess.CompletedProcess(cmd, 0, stdout=f"{root.resolve()}\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
+        )
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [baseline_issue]})
-    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
-    monkeypatch.setattr(diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"])
+    monkeypatch.setattr(
+        diff_cmd,
+        "load_state",
+        lambda: {"issues": [], "diff_baseline": [baseline_issue]},
+    )
+    monkeypatch.setattr(
+        diff_cmd, "save_state", lambda state: saved_states.append(state)
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_get_changed_files", lambda since_sha, cwd: ["src/App.tsx"]
+    )
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
     monkeypatch.setattr(
         diff_cmd,
@@ -6817,11 +7480,13 @@ def test_diff_run_save_round_trip_keeps_unchanged_issue_stable(monkeypatch, tmp_
         state_store["diff_baseline"] = list(state.get("diff_baseline", []))
 
     def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
-        emitted.append({
-            "new": len(new_issues),
-            "fixed": len(fixed_issues),
-            "unchanged": len(unchanged_issues),
-        })
+        emitted.append(
+            {
+                "new": len(new_issues),
+                "fixed": len(fixed_issues),
+                "unchanged": len(unchanged_issues),
+            }
+        )
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
@@ -6837,7 +7502,9 @@ def test_diff_run_save_round_trip_keeps_unchanged_issue_stable(monkeypatch, tmp_
     assert emitted[1] == {"new": 0, "fixed": 0, "unchanged": 1}
 
 
-def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(monkeypatch, tmp_path):
+def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6876,8 +7543,14 @@ def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(monkeypatch
         }
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue1, issue2]})
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2])
+    monkeypatch.setattr(
+        diff_cmd,
+        "load_state",
+        lambda: {"issues": [], "diff_baseline": [issue1, issue2]},
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2]
+    )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
     diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
@@ -6885,7 +7558,9 @@ def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(monkeypatch
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 2}
 
 
-def test_diff_run_save_round_trip_preserves_duplicate_issue_texts_at_different_lines(monkeypatch, tmp_path):
+def test_diff_run_save_round_trip_preserves_duplicate_issue_texts_at_different_lines(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -6928,16 +7603,20 @@ def test_diff_run_save_round_trip_preserves_duplicate_issue_texts_at_different_l
         state_store["diff_baseline"] = list(state.get("diff_baseline", []))
 
     def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
-        emitted.append({
-            "new": len(new_issues),
-            "fixed": len(fixed_issues),
-            "unchanged": len(unchanged_issues),
-        })
+        emitted.append(
+            {
+                "new": len(new_issues),
+                "fixed": len(fixed_issues),
+                "unchanged": len(unchanged_issues),
+            }
+        )
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
     monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2])
+    monkeypatch.setattr(
+        diff_cmd, "_analyze_target", lambda path, config: [issue1, issue2]
+    )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
     diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
@@ -6977,8 +7656,14 @@ def test_diff_run_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_pa
         }
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [dict(issue), dict(issue)]})
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)])
+    monkeypatch.setattr(
+        diff_cmd,
+        "load_state",
+        lambda: {"issues": [], "diff_baseline": [dict(issue), dict(issue)]},
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)]
+    )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
     diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=False))
@@ -6986,7 +7671,9 @@ def test_diff_run_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_pa
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 2}
 
 
-def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_path):
+def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -7018,16 +7705,20 @@ def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(mon
         state_store["diff_baseline"] = list(state.get("diff_baseline", []))
 
     def fake_emit(fmt, new_issues, fixed_issues, unchanged_issues, since_sha):
-        emitted.append({
-            "new": len(new_issues),
-            "fixed": len(fixed_issues),
-            "unchanged": len(unchanged_issues),
-        })
+        emitted.append(
+            {
+                "new": len(new_issues),
+                "fixed": len(fixed_issues),
+                "unchanged": len(unchanged_issues),
+            }
+        )
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
     monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)])
+    monkeypatch.setattr(
+        diff_cmd, "_analyze_target", lambda path, config: [dict(issue), dict(issue)]
+    )
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
     diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
@@ -7039,7 +7730,9 @@ def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(mon
     assert emitted[1] == {"new": 0, "fixed": 0, "unchanged": 2}
 
 
-def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(monkeypatch, tmp_path):
+def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -7067,7 +7760,9 @@ def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(monkeypatch, t
         }
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []})
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []}
+    )
     monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [])
     monkeypatch.setattr(diff_cmd, "_emit", fake_emit)
 
@@ -7076,7 +7771,9 @@ def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(monkeypatch, t
     assert emitted["summary"] == {"new": 0, "fixed": 0, "unchanged": 0}
 
 
-def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(monkeypatch, tmp_path):
+def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import diff as diff_cmd
 
     root = tmp_path / "repo"
@@ -7104,9 +7801,15 @@ def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(monkeypatc
     saved_states = []
 
     monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []})
-    monkeypatch.setattr(diff_cmd, "save_state", lambda state: saved_states.append(state))
-    monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [static_issue])
+    monkeypatch.setattr(
+        diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []}
+    )
+    monkeypatch.setattr(
+        diff_cmd, "save_state", lambda state: saved_states.append(state)
+    )
+    monkeypatch.setattr(
+        diff_cmd, "_analyze_target", lambda path, config: [static_issue]
+    )
     monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
 
     diff_cmd.run(argparse.Namespace(path=".", since=None, output="json", save=True))
@@ -7116,7 +7819,9 @@ def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(monkeypatc
     assert saved_states[-1]["diff_baseline"] == [static_issue]
 
 
-def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(tmp_path, monkeypatch):
+def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(
+    tmp_path, monkeypatch
+):
     from uidetox.commands import suppress as suppress_cmd
     from uidetox.state import load_config, save_state
 
@@ -7173,7 +7878,9 @@ def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(t
     assert state["diff_baseline"] == [baseline_keep]
 
 
-def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(tmp_path, monkeypatch):
+def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(
+    tmp_path, monkeypatch
+):
     from uidetox.commands import suppress as suppress_cmd
     from uidetox.state import load_config, save_state
 
@@ -7216,7 +7923,9 @@ def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(tmp_path
     assert state["diff_baseline"] == []
 
 
-def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import rescan as rescan_cmd
 
     root = tmp_path / "repo"
@@ -7233,13 +7942,17 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatc
         analyzed_path = Path(path).resolve()
         return []
 
-    monkeypatch.setattr(rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(
+        rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []}
+    )
     monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
     monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
+    monkeypatch.setattr(
+        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+    )
     monkeypatch.setattr(rescan_cmd, "analyze_directory", fake_analyze_directory)
 
     rescan_cmd.run(argparse.Namespace(path="."))
@@ -7247,7 +7960,9 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatc
     assert analyzed_path == root.resolve()
 
 
-def test_rescan_batches_queue_and_preserves_recurrence_semantics(tmp_path, monkeypatch, capsys):
+def test_rescan_batches_queue_and_preserves_recurrence_semantics(
+    tmp_path, monkeypatch, capsys
+):
     import uidetox.state as state_module
     from uidetox.commands import rescan as rescan_cmd
 
@@ -7308,13 +8023,19 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(tmp_path, monke
     monkeypatch.setattr(state_module, "load_state", counted_load_state)
     monkeypatch.setattr(state_module, "save_state", counted_save_state)
     monkeypatch.setattr(rescan_cmd, "load_state", lambda: initial_state)
-    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {"ignore_patterns": ["suppressed"]})
+    monkeypatch.setattr(
+        rescan_cmd, "load_config", lambda: {"ignore_patterns": ["suppressed"]}
+    )
     monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100})
-    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings)
+    monkeypatch.setattr(
+        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+    )
+    monkeypatch.setattr(
+        rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings
+    )
     monkeypatch.setattr(
         rescan_cmd,
         "_is_suppressed",
@@ -7338,7 +8059,9 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(tmp_path, monke
     assert "Escalated 1 recurring issue" in output
 
 
-def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import viz as viz_cmd
 
     root = tmp_path / "repo"
@@ -7362,7 +8085,9 @@ def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, 
     assert captured_root == root.resolve()
 
 
-def test_watch_run_uses_project_root_on_cold_start_from_subdirectory(monkeypatch, tmp_path):
+def test_watch_run_uses_project_root_on_cold_start_from_subdirectory(
+    monkeypatch, tmp_path
+):
     from uidetox.commands import watch as watch_cmd
 
     root = tmp_path / "repo"
@@ -7401,17 +8126,19 @@ def test_viz_build_tree_uses_root_relative_paths_for_absolute_issue_files(tmp_pa
 
     tree = _build_tree(root, issue_map)
 
-    assert "/" not in tree["children"], "Tree should not start from filesystem root for absolute issue paths"
+    assert "/" not in tree["children"], (
+        "Tree should not start from filesystem root for absolute issue paths"
+    )
     assert "src" in tree["children"]
     assert "App.tsx" in tree["children"]["src"]["children"]
 
 
 # ── viz.py: HTML injection prevention ─────────────────────────────────────
 
+
 def test_viz_treemap_html_escapes_issue_descriptions(tmp_path, monkeypatch):
     """Treemap HTML must escape special chars in issue descriptions and file paths."""
     from uidetox.commands.viz import _render_html_treemap
-    from pathlib import Path
 
     # Ensure output goes to tmp_path
     uidetox_dir = tmp_path / ".uidetox"
@@ -7424,7 +8151,7 @@ def test_viz_treemap_html_escapes_issue_descriptions(tmp_path, monkeypatch):
         "issue": '<script>alert("xss")</script> & "quoted"',
         "command": "fix",
     }
-    malicious_path = 'src/<Evil>.tsx'
+    malicious_path = "src/<Evil>.tsx"
 
     issue_map = {malicious_path: [malicious_issue]}
 
@@ -7435,7 +8162,9 @@ def test_viz_treemap_html_escapes_issue_descriptions(tmp_path, monkeypatch):
     content = html_file.read_text(encoding="utf-8")
 
     # Raw script tag must not appear
-    assert "<script>alert" not in content, "Raw <script> must not appear unescaped in HTML output"
+    assert "<script>alert" not in content, (
+        "Raw <script> must not appear unescaped in HTML output"
+    )
     # Escaped versions should appear
     assert "&lt;script&gt;" in content, "< and > must be HTML-escaped"
     assert "&amp;" in content, "& must be HTML-escaped"
@@ -7453,7 +8182,7 @@ def test_viz_treemap_html_escapes_file_names(tmp_path, monkeypatch):
     monkeypatch.setattr("uidetox.commands.viz.ensure_uidetox_dir", lambda: uidetox_dir)
 
     issue_map = {
-        'src/a&b.tsx': [{"tier": "T1", "issue": "some issue", "command": "fix"}],
+        "src/a&b.tsx": [{"tier": "T1", "issue": "some issue", "command": "fix"}],
     }
 
     _render_html_treemap(tmp_path, issue_map)
@@ -7466,6 +8195,7 @@ def test_viz_treemap_html_escapes_file_names(tmp_path, monkeypatch):
 
 # ── next.py: SKILL_CONTEXT duplicate key detection ─────────────────────────
 
+
 def test_next_skill_context_no_duplicate_keys():
     """SKILL_CONTEXT dict must not have duplicate keys.
 
@@ -7473,12 +8203,17 @@ def test_next_skill_context_no_duplicate_keys():
     each duplicated key is permanently lost, so the corresponding design
     context is never injected into agent prompts.
     """
-    from uidetox.commands.next import SKILL_CONTEXT
 
     # Detect duplicates by re-parsing the source file
-    import ast, pathlib
+    import ast
+    import pathlib
 
-    src = pathlib.Path(__file__).resolve().parent.parent / "uidetox" / "commands" / "next.py"
+    src = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "uidetox"
+        / "commands"
+        / "next.py"
+    )
     tree = ast.parse(src.read_text(encoding="utf-8"))
 
     # Find the SKILL_CONTEXT assignment
@@ -7523,12 +8258,15 @@ def test_next_skill_context_important_merged_guidance():
     assert "specificity" in context_text.lower() or "specificity" in context_text, (
         "General CSS specificity guidance must be present"
     )
-    assert "animation" in context_text.lower() or "motion" in context_text.lower() or "transition" in context_text.lower(), (
-        "Motion/animation accessibility warning must also be present after merge"
-    )
+    assert (
+        "animation" in context_text.lower()
+        or "motion" in context_text.lower()
+        or "transition" in context_text.lower()
+    ), "Motion/animation accessibility warning must also be present after merge"
 
 
 # ── batch_resolve.py: _derive_component_name path-prefix bug ───────────────
+
 
 def test_derive_component_name_sibling_dirs():
     """Sibling directories sharing a path prefix must resolve to their common parent.
@@ -7542,7 +8280,9 @@ def test_derive_component_name_sibling_dirs():
 
     # Use os.sep-joined paths so the test works on Windows too
     button = os.path.join(os.sep, "usr", "src", "components", "button", "Button.tsx")
-    button_group = os.path.join(os.sep, "usr", "src", "components", "button-group", "ButtonGroup.tsx")
+    button_group = os.path.join(
+        os.sep, "usr", "src", "components", "button-group", "ButtonGroup.tsx"
+    )
     result = _derive_component_name([button, button_group])
     assert result == "components", (
         f"Expected 'components' as common ancestor of button/ and button-group/, got '{result}'"
@@ -7580,6 +8320,7 @@ def test_derive_component_name_empty():
 
 # ── scan.py: --since incremental mode uses git root, not args.path ──────────
 
+
 def test_scan_since_uses_git_root(tmp_path, monkeypatch):
     """scan --since must join changed file names against the git repo root, not args.path.
 
@@ -7588,7 +8329,6 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
     would produce wrong paths like /project/frontend/frontend/src/Button.tsx instead
     of /project/frontend/src/Button.tsx, causing all incremental issues to be dropped.
     """
-    import subprocess
     from unittest.mock import patch, MagicMock
 
     # Simulate:
@@ -7600,7 +8340,15 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
 
     # Issue coming from analyze_directory: file path is absolute
     issue_abs_path = str(tmp_path / "repo" / "frontend" / "src" / "Button.tsx")
-    fake_issues = [{"file": issue_abs_path, "tier": "T2", "issue": "test issue", "id": "X", "command": "fix"}]
+    fake_issues = [
+        {
+            "file": issue_abs_path,
+            "tier": "T2",
+            "issue": "test issue",
+            "id": "X",
+            "command": "fix",
+        }
+    ]
 
     run_results = [
         # First call: git rev-parse --show-toplevel -> git_root
@@ -7613,6 +8361,7 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
         with patch("uidetox.commands.scan.analyze_directory", return_value=fake_issues):
             # Simulate the filtering logic directly (not calling run() to avoid full setup)
             import os
+
             since_files: list[str] | None = None
             since_root: str = os.path.abspath(scan_path)
 
@@ -7622,14 +8371,22 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
 
             diff_result = run_results[1]
             if diff_result.returncode == 0:
-                since_files = [l.strip() for l in diff_result.stdout.splitlines() if l.strip()]
+                since_files = [
+                    line.strip()
+                    for line in diff_result.stdout.splitlines()
+                    if line.strip()
+                ]
 
             assert since_files == ["frontend/src/Button.tsx"]
             assert since_root == git_root  # must use git root, not scan_path
 
             # Apply the filtering: join against since_root (git root), not scan_path
-            since_abs = {os.path.abspath(os.path.join(since_root, f)) for f in since_files}
-            filtered = [i for i in fake_issues if os.path.abspath(i["file"]) in since_abs]
+            since_abs = {
+                os.path.abspath(os.path.join(since_root, f)) for f in since_files
+            }
+            filtered = [
+                i for i in fake_issues if os.path.abspath(i["file"]) in since_abs
+            ]
 
             assert len(filtered) == 1, (
                 "Issue should be included when since_root (git root) is used. "
@@ -7638,7 +8395,9 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
 
             # Verify the OLD behavior (using scan_path) would have been wrong
             bad_abs = {os.path.abspath(os.path.join(scan_path, f)) for f in since_files}
-            bad_filtered = [i for i in fake_issues if os.path.abspath(i["file"]) in bad_abs]
+            bad_filtered = [
+                i for i in fake_issues if os.path.abspath(i["file"]) in bad_abs
+            ]
             assert len(bad_filtered) == 0, (
                 "Sanity check: old behavior (joining with scan_path) should produce wrong paths and drop the issue"
             )
@@ -7646,12 +8405,14 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
 
 # ── subagent.py corruption resilience ───────────────────────────────────────
 
+
 class TestSubagentCorruptedJsonResilience:
     """record_result() and get_session() must not raise when session files are corrupted."""
 
     def _make_session_dir(self, tmp_path, monkeypatch):
         """Create a minimal session directory and point subagent at tmp_path."""
         import uidetox.subagent as sa
+
         sessions_root = tmp_path / ".uidetox" / "sessions"
         sessions_root.mkdir(parents=True)
 
@@ -7662,7 +8423,9 @@ class TestSubagentCorruptedJsonResilience:
         session_dir.mkdir()
         return sa, sid, session_dir
 
-    def test_record_result_corrupted_meta_json_returns_true(self, tmp_path, monkeypatch):
+    def test_record_result_corrupted_meta_json_returns_true(
+        self, tmp_path, monkeypatch
+    ):
         """record_result should recover when meta.json contains invalid JSON."""
         sa, sid, session_dir = self._make_session_dir(tmp_path, monkeypatch)
 
@@ -7675,6 +8438,7 @@ class TestSubagentCorruptedJsonResilience:
 
         # The meta.json should now be valid (was rewritten by record_result)
         import json as _json
+
         written = _json.loads((session_dir / "meta.json").read_text())
         assert written["session_id"] == sid
         assert "status" in written
@@ -7682,6 +8446,7 @@ class TestSubagentCorruptedJsonResilience:
     def test_record_result_missing_meta_json_returns_false(self, tmp_path, monkeypatch):
         """record_result should return False when the session directory doesn't exist."""
         import uidetox.subagent as sa
+
         sessions_root = tmp_path / ".uidetox" / "sessions"
         sessions_root.mkdir(parents=True)
         monkeypatch.setattr(sa, "_sessions_dir", lambda: sessions_root)
@@ -7689,7 +8454,9 @@ class TestSubagentCorruptedJsonResilience:
         result = sa.record_result("nonexistent", {"note": "done"})
         assert result is False
 
-    def test_get_session_corrupted_meta_json_returns_dict_with_error(self, tmp_path, monkeypatch):
+    def test_get_session_corrupted_meta_json_returns_dict_with_error(
+        self, tmp_path, monkeypatch
+    ):
         """get_session should return a dict with a 'corrupted' status instead of raising."""
         sa, sid, session_dir = self._make_session_dir(tmp_path, monkeypatch)
 
@@ -7700,12 +8467,15 @@ class TestSubagentCorruptedJsonResilience:
         assert "meta" in session
         assert session["meta"].get("status") == "corrupted"
 
-    def test_get_session_corrupted_result_json_returns_error_entry(self, tmp_path, monkeypatch):
+    def test_get_session_corrupted_result_json_returns_error_entry(
+        self, tmp_path, monkeypatch
+    ):
         """get_session should return an error entry for result when result.json is corrupt."""
         sa, sid, session_dir = self._make_session_dir(tmp_path, monkeypatch)
 
         # Write valid meta, corrupt result
         import json as _json
+
         (session_dir / "meta.json").write_text(
             _json.dumps({"session_id": sid, "stage": "fix", "status": "pending"}),
             encoding="utf-8",
@@ -7720,6 +8490,7 @@ class TestSubagentCorruptedJsonResilience:
     def test_get_session_nonexistent_returns_none(self, tmp_path, monkeypatch):
         """get_session should return None for a missing session."""
         import uidetox.subagent as sa
+
         sessions_root = tmp_path / ".uidetox" / "sessions"
         sessions_root.mkdir(parents=True)
         monkeypatch.setattr(sa, "_sessions_dir", lambda: sessions_root)
@@ -7737,7 +8508,10 @@ class TestSubagentCodebaseMemoryPromptGuidance:
         legacy_tool = "git" + "nexus"
 
         assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
-        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound")' in prompt
+        assert (
+            'trace_path(function_name="symbolName", mode="calls", direction="inbound")'
+            in prompt
+        )
         assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
         assert legacy_tool not in prompt.lower()
 
@@ -7746,17 +8520,29 @@ class TestSubagentCodebaseMemoryPromptGuidance:
         import uidetox.commands.next as next_mod
 
         monkeypatch.setattr(sa, "_build_memory_block", lambda *args, **kwargs: "")
-        monkeypatch.setattr(sa, "_build_deconfliction_block", lambda *args, **kwargs: "")
+        monkeypatch.setattr(
+            sa, "_build_deconfliction_block", lambda *args, **kwargs: ""
+        )
         monkeypatch.setattr(next_mod, "_get_relevant_context", lambda batch: [])
 
         prompt = sa._fix_prompt(
-            [{"id": "SCAN-1", "tier": "T1", "file": "src/App.tsx", "issue": "Example issue"}],
+            [
+                {
+                    "id": "SCAN-1",
+                    "tier": "T1",
+                    "file": "src/App.tsx",
+                    "issue": "Example issue",
+                }
+            ],
             "## Active Design Dials",
         )
         legacy_tool = "git" + "nexus"
 
         assert 'search_graph(name_pattern=".*symbolName.*")' in prompt
-        assert 'trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)' in prompt
+        assert (
+            'trace_path(function_name="symbolName", mode="calls", direction="inbound", risk_labels=true)'
+            in prompt
+        )
         assert 'get_code_snippet(qualified_name="exact.qualified.name")' in prompt
         assert legacy_tool not in prompt.lower()
 
@@ -7777,10 +8563,13 @@ def test_agents_docs_use_only_codebase_memory():
 # setup.py — EOFError resilience in non-interactive mode
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestSetupEOFErrorResilience:
     """setup.py input() must not raise EOFError in non-interactive/CI environments."""
 
-    def test_auto_commit_prompt_with_closed_stdin_does_not_raise(self, tmp_path, monkeypatch):
+    def test_auto_commit_prompt_with_closed_stdin_does_not_raise(
+        self, tmp_path, monkeypatch
+    ):
         """When stdin is closed (CI, piped input, subprocess), setup run() must not crash."""
         import uidetox.commands.setup as setup_mod
 
@@ -7796,13 +8585,17 @@ class TestSetupEOFErrorResilience:
         monkeypatch.setattr(setup_mod.sys, "stdin", _FakeInteractiveStdin())
 
         # Simulate closed stdin: input() raises EOFError
-        monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError))
+        monkeypatch.setattr(
+            "builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError)
+        )
 
         args = argparse.Namespace(path=".", auto_commit=None)
         # Must not raise
         setup_mod.run(args)
 
-    def test_auto_commit_prompt_eoferror_keeps_existing_value(self, tmp_path, monkeypatch):
+    def test_auto_commit_prompt_eoferror_keeps_existing_value(
+        self, tmp_path, monkeypatch
+    ):
         """When EOFError is raised, existing auto_commit value should be preserved."""
         import uidetox.commands.setup as setup_mod
 
@@ -7821,7 +8614,9 @@ class TestSetupEOFErrorResilience:
                 return True
 
         monkeypatch.setattr(setup_mod.sys, "stdin", _FakeInteractiveStdin())
-        monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError))
+        monkeypatch.setattr(
+            "builtins.input", lambda *a, **kw: (_ for _ in ()).throw(EOFError)
+        )
 
         args = argparse.Namespace(path=".", auto_commit=None)
         setup_mod.run(args)
@@ -7829,7 +8624,9 @@ class TestSetupEOFErrorResilience:
         # auto_commit should remain False (not erroneously changed to True)
         assert captured_cfg.get("auto_commit") is False
 
-    def test_setup_non_interactive_applies_flags_without_prompt(self, tmp_path, monkeypatch, capsys):
+    def test_setup_non_interactive_applies_flags_without_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import uidetox.commands.setup as setup_mod
 
         captured_cfg = {}
@@ -7841,9 +8638,16 @@ class TestSetupEOFErrorResilience:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(setup_mod, "ensure_uidetox_dir", lambda: None)
         monkeypatch.setattr(setup_mod, "load_config", lambda: {})
-        monkeypatch.setattr(setup_mod, "save_config", lambda cfg: captured_cfg.update(cfg))
+        monkeypatch.setattr(
+            setup_mod, "save_config", lambda cfg: captured_cfg.update(cfg)
+        )
         monkeypatch.setattr(setup_mod.sys, "stdin", _FakeStdin())
-        monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("input() should not be called")))
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("input() should not be called")
+            ),
+        )
 
         args = argparse.Namespace(
             path=".",
@@ -7866,6 +8670,7 @@ class TestSetupEOFErrorResilience:
 
 class _FakeToolingProfile:
     """Minimal tooling profile stub used by scan/setup tests."""
+
     def to_dict(self):
         return {}
 
@@ -7874,28 +8679,33 @@ class _FakeToolingProfile:
 # cli.py — watch subcommand registration
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestWatchSubcommandRegistration:
     """uidetox watch must be registered in argparse so it is reachable."""
 
     def test_watch_is_a_valid_argparse_choice(self):
         """parse_args(['watch', '--path', '.']) must not raise SystemExit."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["watch", "--path", "."])
         assert ns.command == "watch"
         assert ns.path == "."
 
     def test_watch_default_interval_is_one_second(self):
         from uidetox.cli import parse_args
+
         ns = parse_args(["watch"])
         assert ns.interval == 1.0
 
     def test_watch_no_clear_flag(self):
         from uidetox.cli import parse_args
+
         ns = parse_args(["watch", "--no-clear"])
         assert ns.clear is False
 
     def test_watch_clear_default_is_true(self):
         from uidetox.cli import parse_args
+
         ns = parse_args(["watch"])
         assert ns.clear is True
 
@@ -7906,14 +8716,20 @@ class TestSetupSubcommandRegistration:
     def test_setup_accepts_dials_and_dev_server(self):
         from uidetox.cli import parse_args
 
-        ns = parse_args([
-            "setup",
-            "--design-variance", "9",
-            "--motion-intensity", "7",
-            "--visual-density", "5",
-            "--dev-server", "http://localhost:5173",
-            "--auto-commit",
-        ])
+        ns = parse_args(
+            [
+                "setup",
+                "--design-variance",
+                "9",
+                "--motion-intensity",
+                "7",
+                "--visual-density",
+                "5",
+                "--dev-server",
+                "http://localhost:5173",
+                "--auto-commit",
+            ]
+        )
 
         assert ns.command == "setup"
         assert ns.design_variance == 9
@@ -7933,6 +8749,7 @@ class TestSetupSubcommandRegistration:
 # scan.py — GitHub Actions annotation tier mapping
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestScanGithubAnnotationTierMapping:
     """GitHub annotation output must map T3/T4 → error and T1/T2 → warning."""
 
@@ -7949,7 +8766,9 @@ class TestScanGithubAnnotationTierMapping:
         monkeypatch.setattr(scan_mod, "save_session", lambda *a, **kw: None)
         monkeypatch.setattr(scan_mod, "log_progress", lambda *a, **kw: None)
         monkeypatch.setattr(scan_mod, "increment_scans", lambda: None)
-        monkeypatch.setattr(scan_mod, "load_state", lambda: {"issues": [], "resolved": []})
+        monkeypatch.setattr(
+            scan_mod, "load_state", lambda: {"issues": [], "resolved": []}
+        )
 
         (tmp_path / ".uidetox").mkdir(exist_ok=True)
         (tmp_path / ".uidetox" / "config.json").write_text("{}", encoding="utf-8")
@@ -7960,27 +8779,63 @@ class TestScanGithubAnnotationTierMapping:
 
     def test_t1_is_warning_not_error(self, tmp_path, monkeypatch, capsys):
         """T1 issues must produce ::warning annotations, not ::error."""
-        issues = [{"file": "a.tsx", "issue": "x", "tier": "T1", "command": "fix", "line": 1, "column": 1}]
+        issues = [
+            {
+                "file": "a.tsx",
+                "issue": "x",
+                "tier": "T1",
+                "command": "fix",
+                "line": 1,
+                "column": 1,
+            }
+        ]
         out = self._run_github_output(issues, monkeypatch, tmp_path, capsys)
         assert "::warning" in out
         assert "::error" not in out
 
     def test_t2_is_warning_not_error(self, tmp_path, monkeypatch, capsys):
         """T2 issues must produce ::warning annotations."""
-        issues = [{"file": "a.tsx", "issue": "y", "tier": "T2", "command": "fix", "line": 1, "column": 1}]
+        issues = [
+            {
+                "file": "a.tsx",
+                "issue": "y",
+                "tier": "T2",
+                "command": "fix",
+                "line": 1,
+                "column": 1,
+            }
+        ]
         out = self._run_github_output(issues, monkeypatch, tmp_path, capsys)
         assert "::warning" in out
         assert "::error" not in out
 
     def test_t3_is_error(self, tmp_path, monkeypatch, capsys):
         """T3 issues must produce ::error annotations."""
-        issues = [{"file": "a.tsx", "issue": "z", "tier": "T3", "command": "fix", "line": 1, "column": 1}]
+        issues = [
+            {
+                "file": "a.tsx",
+                "issue": "z",
+                "tier": "T3",
+                "command": "fix",
+                "line": 1,
+                "column": 1,
+            }
+        ]
         out = self._run_github_output(issues, monkeypatch, tmp_path, capsys)
         assert "::error" in out
 
     def test_t4_is_error(self, tmp_path, monkeypatch, capsys):
         """T4 issues must produce ::error annotations."""
-        issues = [{"file": "a.tsx", "issue": "w", "tier": "T4", "command": "fix", "line": 1, "column": 1}]
+        issues = [
+            {
+                "file": "a.tsx",
+                "issue": "w",
+                "tier": "T4",
+                "command": "fix",
+                "line": 1,
+                "column": 1,
+            }
+        ]
         out = self._run_github_output(issues, monkeypatch, tmp_path, capsys)
         assert "::error" in out
 
@@ -7989,53 +8844,67 @@ class TestScanGithubAnnotationTierMapping:
 # cli.py — diff subcommand registration
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestDiffSubcommandRegistration:
     """uidetox diff must be registered in argparse so it is reachable."""
 
     def test_diff_is_a_valid_argparse_choice(self):
         """parse_args(['diff']) must not raise SystemExit."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff"])
         assert ns.command == "diff"
 
     def test_diff_base_arg_default_is_none(self):
         """--since should default to None (not 'HEAD')."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff"])
         assert ns.since is None
 
     def test_diff_output_arg_default_is_table(self):
         """--output should default to 'table'."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff"])
         assert ns.output == "table"
 
     def test_diff_accepts_github_output_format(self):
         """--output github must parse successfully."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff", "--output", "github"])
         assert ns.output == "github"
 
     def test_diff_accepts_since_sha(self):
         """--since <SHA> must populate args.since."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff", "--since", "abc1234"])
         assert ns.since == "abc1234"
 
     def test_diff_save_flag_defaults_false(self):
         """--save flag must default to False."""
         from uidetox.cli import parse_args
+
         ns = parse_args(["diff"])
         assert ns.save is False
 
     def test_diff_is_not_a_dynamic_skill(self):
         """diff must be a real subcommand, not routed through skill_cmd."""
         from uidetox.cli import _get_commands_dir
+
         cmd_dir = _get_commands_dir()
         if cmd_dir is None:
             return
-        skill_names = {f.stem for f in cmd_dir.glob("*.md") if f.stem not in ["scan", "setup", "fix"]}
-        assert "diff" not in skill_names, "diff should be a real command, not a dynamic skill"
+        skill_names = {
+            f.stem
+            for f in cmd_dir.glob("*.md")
+            if f.stem not in ["scan", "setup", "fix"]
+        }
+        assert "diff" not in skill_names, (
+            "diff should be a real command, not a dynamic skill"
+        )
 
 
 def test_cli_get_commands_dir_prefers_project_root_commands(tmp_path, monkeypatch):
@@ -8066,7 +8935,9 @@ def test_cli_parse_args_registers_custom_claude_skill_directory(tmp_path, monkey
 class TestStateAndMemoryChaosResilience:
     """Persistent JSON stores should survive wrong-but-valid JSON shapes."""
 
-    def test_load_config_wrong_top_level_type_falls_back_to_defaults(self, tmp_path, monkeypatch):
+    def test_load_config_wrong_top_level_type_falls_back_to_defaults(
+        self, tmp_path, monkeypatch
+    ):
         from uidetox.state import load_config
 
         monkeypatch.chdir(tmp_path)
@@ -8081,7 +8952,9 @@ class TestStateAndMemoryChaosResilience:
         assert config["MOTION_INTENSITY"] == 6
         assert config["VISUAL_DENSITY"] == 4
 
-    def test_load_config_invalid_utf8_falls_back_to_defaults(self, tmp_path, monkeypatch):
+    def test_load_config_invalid_utf8_falls_back_to_defaults(
+        self, tmp_path, monkeypatch
+    ):
         from uidetox.state import load_config
 
         monkeypatch.chdir(tmp_path)
@@ -8095,7 +8968,9 @@ class TestStateAndMemoryChaosResilience:
         assert config["MOTION_INTENSITY"] == 6
         assert config["VISUAL_DENSITY"] == 4
 
-    def test_load_config_normalizes_runtime_critical_nested_types(self, tmp_path, monkeypatch):
+    def test_load_config_normalizes_runtime_critical_nested_types(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_config
 
@@ -8167,7 +9042,9 @@ class TestStateAndMemoryChaosResilience:
         assert config["tooling"]["database"] == []
         assert config["tooling"]["api"] == []
 
-    def test_load_config_filters_invalid_collection_members_and_tool_commands(self, tmp_path, monkeypatch):
+    def test_load_config_filters_invalid_collection_members_and_tool_commands(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_config
 
@@ -8200,9 +9077,13 @@ class TestStateAndMemoryChaosResilience:
         assert config["ignore_patterns"] == ["*.tmp"]
         assert config["exclude"] == ["node_modules"]
         assert config["tooling"]["formatter"] is None
-        assert config["tooling"]["frontend"] == [{"name": "vite", "run_cmd": "npx vite build"}]
+        assert config["tooling"]["frontend"] == [
+            {"name": "vite", "run_cmd": "npx vite build"}
+        ]
 
-    def test_load_state_invalid_utf8_falls_back_to_default_state(self, tmp_path, monkeypatch):
+    def test_load_state_invalid_utf8_falls_back_to_default_state(
+        self, tmp_path, monkeypatch
+    ):
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -8218,7 +9099,9 @@ class TestStateAndMemoryChaosResilience:
         assert state["resolved"] == []
         assert state["stats"] == {"total_found": 0, "total_resolved": 0, "scans_run": 0}
 
-    def test_load_state_normalizes_nested_stats_and_issue_shapes(self, tmp_path, monkeypatch):
+    def test_load_state_normalizes_nested_stats_and_issue_shapes(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_state
 
@@ -8271,7 +9154,9 @@ class TestStateAndMemoryChaosResilience:
 
         assert state["diff_baseline"] == [{"id": "BASE-1", "file": "src/App.tsx"}]
 
-    def test_load_state_backfills_missing_diff_baseline_for_legacy_state(self, tmp_path, monkeypatch):
+    def test_load_state_backfills_missing_diff_baseline_for_legacy_state(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_state
 
@@ -8295,7 +9180,9 @@ class TestStateAndMemoryChaosResilience:
         assert state["diff_baseline"] == []
         assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
 
-    def test_load_state_normalizes_subjective_score_and_history(self, tmp_path, monkeypatch):
+    def test_load_state_normalizes_subjective_score_and_history(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_state
 
@@ -8327,7 +9214,9 @@ class TestStateAndMemoryChaosResilience:
             {"score": 91, "timestamp": "2026-05-02T00:00:00Z"},
         ]
 
-    def test_load_state_preserves_extra_stats_keys_and_subjective_history_metadata(self, tmp_path, monkeypatch):
+    def test_load_state_preserves_extra_stats_keys_and_subjective_history_metadata(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.state import load_state
 
@@ -8345,7 +9234,12 @@ class TestStateAndMemoryChaosResilience:
                     },
                     "subjective": {
                         "history": [
-                            {"score": 88, "timestamp": 123, "source": "agent", "notes": {"keep": True}},
+                            {
+                                "score": 88,
+                                "timestamp": 123,
+                                "source": "agent",
+                                "notes": {"keep": True},
+                            },
                         ]
                     },
                 }
@@ -8361,7 +9255,9 @@ class TestStateAndMemoryChaosResilience:
             {"score": 88, "timestamp": "", "source": "agent", "notes": {"keep": True}}
         ]
 
-    def test_store_subjective_score_recovers_from_non_dict_subjective_state(self, tmp_path, monkeypatch):
+    def test_store_subjective_score_recovers_from_non_dict_subjective_state(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.commands import review as review_cmd
         from uidetox.state import load_state
@@ -8387,7 +9283,9 @@ class TestStateAndMemoryChaosResilience:
         assert state["subjective"]["score"] == 87
         assert state["subjective"]["history"][-1]["score"] == 87
 
-    def test_status_run_tolerates_corrupted_subjective_state(self, tmp_path, monkeypatch, capsys):
+    def test_status_run_tolerates_corrupted_subjective_state(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import status as status_cmd
 
@@ -8412,14 +9310,18 @@ class TestStateAndMemoryChaosResilience:
         assert payload["subjective_score"] is None
         assert payload["design_score"] == 50
 
-    def test_load_run_history_skips_non_dict_snapshot_files(self, tmp_path, monkeypatch):
+    def test_load_run_history_skips_non_dict_snapshot_files(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.history import load_run_history
 
         monkeypatch.chdir(tmp_path)
         history_dir = tmp_path / ".uidetox" / "history"
         history_dir.mkdir(parents=True)
-        (history_dir / "run_2026-05-02T00-00-00.json").write_text("[]", encoding="utf-8")
+        (history_dir / "run_2026-05-02T00-00-00.json").write_text(
+            "[]", encoding="utf-8"
+        )
         (history_dir / "run_2026-05-02T00-00-01.json").write_text(
             json.dumps({"timestamp": "2026-05-02T00:00:01Z", "design_score": 97}),
             encoding="utf-8",
@@ -8431,7 +9333,9 @@ class TestStateAndMemoryChaosResilience:
         assert runs[0]["timestamp"] == "2026-05-02T00:00:01Z"
         assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
 
-    def test_load_run_history_skips_invalid_utf8_snapshot_files(self, tmp_path, monkeypatch):
+    def test_load_run_history_skips_invalid_utf8_snapshot_files(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.history import load_run_history
 
@@ -8449,7 +9353,9 @@ class TestStateAndMemoryChaosResilience:
         assert len(runs) == 1
         assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
 
-    def test_history_command_tolerates_malformed_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+    def test_history_command_tolerates_malformed_snapshot_fields(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import history_cmd
 
@@ -8477,7 +9383,9 @@ class TestStateAndMemoryChaosResilience:
         assert "loud" not in output
         assert "many" not in output
 
-    def test_history_command_full_json_includes_raw_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+    def test_history_command_full_json_includes_raw_snapshot_fields(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import history_cmd
 
@@ -8512,7 +9420,9 @@ class TestStateAndMemoryChaosResilience:
         assert payload["runs"][0]["issues"] == [{"id": "ISSUE-1"}]
         assert payload["runs"][0]["_file"] == "run_2026-05-02T00-00-00.json"
 
-    def test_history_command_full_text_prints_per_run_details(self, tmp_path, monkeypatch, capsys):
+    def test_history_command_full_text_prints_per_run_details(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import history_cmd
 
@@ -8546,7 +9456,9 @@ class TestStateAndMemoryChaosResilience:
         assert "Subjective" in output
         assert "Pending issues" in output
 
-    def test_history_command_full_text_tolerates_malformed_snapshot_fields(self, tmp_path, monkeypatch, capsys):
+    def test_history_command_full_text_tolerates_malformed_snapshot_fields(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import history_cmd
 
@@ -8578,7 +9490,9 @@ class TestStateAndMemoryChaosResilience:
         assert "loud" not in output
         assert "many" not in output
 
-    def test_load_memory_wrong_top_level_type_falls_back_to_defaults(self, tmp_path, monkeypatch):
+    def test_load_memory_wrong_top_level_type_falls_back_to_defaults(
+        self, tmp_path, monkeypatch
+    ):
         from uidetox.memory import load_memory
 
         monkeypatch.chdir(tmp_path)
@@ -8594,7 +9508,9 @@ class TestStateAndMemoryChaosResilience:
         assert memory["notes"] == []
         assert memory["session"] == {}
 
-    def test_load_memory_invalid_utf8_falls_back_to_defaults(self, tmp_path, monkeypatch):
+    def test_load_memory_invalid_utf8_falls_back_to_defaults(
+        self, tmp_path, monkeypatch
+    ):
         from uidetox.memory import load_memory
 
         monkeypatch.chdir(tmp_path)
@@ -8609,7 +9525,9 @@ class TestStateAndMemoryChaosResilience:
         assert memory["notes"] == []
         assert memory["session"] == {}
 
-    def test_load_memory_resets_wrong_nested_types_but_preserves_valid_fields(self, tmp_path, monkeypatch):
+    def test_load_memory_resets_wrong_nested_types_but_preserves_valid_fields(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.memory import load_memory
 
@@ -8646,7 +9564,9 @@ class TestStateAndMemoryChaosResilience:
         assert memory["last_scan"]["files_scanned"] == 0
         assert memory["progress_log"] == []
 
-    def test_load_memory_does_not_fabricate_session_checkpoint_for_missing_session(self, tmp_path, monkeypatch, capsys):
+    def test_load_memory_does_not_fabricate_session_checkpoint_for_missing_session(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         import contextlib
         import io
@@ -8670,7 +9590,9 @@ class TestStateAndMemoryChaosResilience:
 
         assert "Session Checkpoint" not in buffer.getvalue()
 
-    def test_load_memory_filters_invalid_pattern_and_note_entries(self, tmp_path, monkeypatch):
+    def test_load_memory_filters_invalid_pattern_and_note_entries(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.memory import load_memory
         from uidetox.subagent import _build_memory_block
@@ -8681,7 +9603,10 @@ class TestStateAndMemoryChaosResilience:
         (uidetox_dir / "memory.json").write_text(
             json.dumps(
                 {
-                    "patterns": ["oops", {"pattern": "Keep this pattern", "category": "general"}],
+                    "patterns": [
+                        "oops",
+                        {"pattern": "Keep this pattern", "category": "general"},
+                    ],
                     "notes": ["oops", {"note": "Keep this note"}],
                 }
             ),
@@ -8691,12 +9616,16 @@ class TestStateAndMemoryChaosResilience:
         memory = load_memory()
         block = _build_memory_block(query="keep")
 
-        assert memory["patterns"] == [{"pattern": "Keep this pattern", "category": "general"}]
+        assert memory["patterns"] == [
+            {"pattern": "Keep this pattern", "category": "general"}
+        ]
         assert memory["notes"] == [{"note": "Keep this note"}]
         assert "Keep this pattern" in block
         assert "Keep this note" in block
 
-    def test_save_session_recovers_from_corrupted_issue_counter(self, tmp_path, monkeypatch):
+    def test_save_session_recovers_from_corrupted_issue_counter(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.memory import get_session, save_session
 
@@ -8715,7 +9644,9 @@ class TestStateAndMemoryChaosResilience:
         assert session["last_command"] == "uidetox next"
         assert session["issues_fixed_this_session"] == 2
 
-    def test_load_memory_normalizes_last_scan_counts_and_progress_log_entries(self, tmp_path, monkeypatch):
+    def test_load_memory_normalizes_last_scan_counts_and_progress_log_entries(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.memory import load_memory
 
@@ -8737,7 +9668,12 @@ class TestStateAndMemoryChaosResilience:
                     "progress_log": [
                         "oops",
                         {"action": ["bad"], "details": {"bad": True}, "timestamp": 123},
-                        {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z", "source": "agent"},
+                        {
+                            "action": "scan",
+                            "details": "ok",
+                            "timestamp": "2026-05-02T00:00:00Z",
+                            "source": "agent",
+                        },
                     ],
                 }
             ),
@@ -8754,10 +9690,17 @@ class TestStateAndMemoryChaosResilience:
         assert memory["last_scan"]["top_files"] == ["src/App.tsx"]
         assert memory["last_scan"]["future_meta"] == {"keep": True}
         assert memory["progress_log"] == [
-            {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z", "source": "agent"},
+            {
+                "action": "scan",
+                "details": "ok",
+                "timestamp": "2026-05-02T00:00:00Z",
+                "source": "agent",
+            },
         ]
 
-    def test_load_memory_preserves_extra_last_scan_and_progress_log_metadata(self, tmp_path, monkeypatch):
+    def test_load_memory_preserves_extra_last_scan_and_progress_log_metadata(
+        self, tmp_path, monkeypatch
+    ):
         import json
         from uidetox.memory import load_memory
 
@@ -8822,7 +9765,9 @@ class TestStateAndMemoryChaosResilience:
         assert memory["last_scan"]["by_category"] == {"layout": 0}
         assert memory["session"] == {}
 
-    def test_memory_command_show_tolerates_malformed_last_scan_and_progress_log(self, tmp_path, monkeypatch, capsys):
+    def test_memory_command_show_tolerates_malformed_last_scan_and_progress_log(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import json
         from uidetox.commands import memory_cmd
 
@@ -8842,7 +9787,11 @@ class TestStateAndMemoryChaosResilience:
                     },
                     "progress_log": [
                         "oops",
-                        {"action": "scan", "details": "ok", "timestamp": "2026-05-02T00:00:00Z"},
+                        {
+                            "action": "scan",
+                            "details": "ok",
+                            "timestamp": "2026-05-02T00:00:00Z",
+                        },
                     ],
                 }
             ),
@@ -8891,12 +9840,24 @@ def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):
     from uidetox.fileset import FRONTEND_EXTENSIONS, ProjectFileSet
 
     expected_extensions = {
-        ".css", ".html", ".js", ".jsx", ".less", ".md", ".sass",
-        ".scss", ".svelte", ".ts", ".tsx", ".vue",
+        ".css",
+        ".html",
+        ".js",
+        ".jsx",
+        ".less",
+        ".md",
+        ".sass",
+        ".scss",
+        ".svelte",
+        ".ts",
+        ".tsx",
+        ".vue",
     }
     assert FRONTEND_EXTENSIONS == frozenset(expected_extensions)
 
-    accepted = [tmp_path / "src" / f"file{extension}" for extension in expected_extensions]
+    accepted = [
+        tmp_path / "src" / f"file{extension}" for extension in expected_extensions
+    ]
     zoned_file = tmp_path / "src" / "Zoned.tsx"
     zoned_dir_file = tmp_path / "generated" / "Nested.tsx"
     outside = tmp_path.parent / "Outside.tsx"
@@ -8914,9 +9875,18 @@ def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):
     file_set = ProjectFileSet(
         tmp_path,
         zone_overrides={"generated": "generated", str(zoned_file): "vendor"},
-        explicit_targets=[*accepted, zoned_file, zoned_dir_file, outside, missing, escape],
+        explicit_targets=[
+            *accepted,
+            zoned_file,
+            zoned_dir_file,
+            outside,
+            missing,
+            escape,
+        ],
     )
-    assert file_set.discover() == sorted((path.resolve() for path in accepted), key=lambda path: path.as_posix())
+    assert file_set.discover() == sorted(
+        (path.resolve() for path in accepted), key=lambda path: path.as_posix()
+    )
 
 
 def test_get_frontend_files_nested_cwd_uses_project_root_config(monkeypatch, tmp_path):
@@ -8933,7 +9903,9 @@ def test_get_frontend_files_nested_cwd_uses_project_root_config(monkeypatch, tmp
     skip.write_text("body {}", encoding="utf-8")
 
     monkeypatch.chdir(nested)
-    monkeypatch.setattr(subagent, "load_config", lambda: {"exclude": ["packages/generated"]})
+    monkeypatch.setattr(
+        subagent, "load_config", lambda: {"exclude": ["packages/generated"]}
+    )
 
     assert subagent.get_frontend_files() == ["src/Keep.sass"]
 
@@ -8985,8 +9957,7 @@ def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
     assert set(file_set.relative_paths()) == expected
     assert set(get_frontend_files(root, config)) == expected
     assert {
-        Path(path).relative_to(root).as_posix()
-        for path in _snapshot(root, file_set)
+        Path(path).relative_to(root).as_posix() for path in _snapshot(root, file_set)
     } == expected
 
     analyzed: list[Path] = []
@@ -9043,13 +10014,19 @@ def test_diff_since_passes_only_canonical_frontend_files(monkeypatch, tmp_path):
     monkeypatch.setattr(
         diff_cmd,
         "_get_changed_files",
-        lambda since_sha, cwd: ["src/App.tsx", "packages/generated/Skip.tsx", "src/Zoned.tsx"],
+        lambda since_sha, cwd: [
+            "src/App.tsx",
+            "packages/generated/Skip.tsx",
+            "src/Zoned.tsx",
+        ],
     )
     monkeypatch.setattr(diff_cmd.subprocess, "run", fake_git_run)
     monkeypatch.setattr(diff_cmd, "_analyze_target", fake_analyze_target)
     monkeypatch.setattr(diff_cmd, "_emit", lambda *args, **kwargs: None)
 
-    diff_cmd.run(argparse.Namespace(path=".", since="abc123", output="json", save=False))
+    diff_cmd.run(
+        argparse.Namespace(path=".", since="abc123", output="json", save=False)
+    )
 
     assert captured_targets == {str(accepted.resolve())}
 
@@ -9251,11 +10228,14 @@ def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
     monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
     monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
-    assert analyzer_module.analyze_directory(
-        str(tmp_path),
-        exclude_paths=["generated"],
-        target_files=[accepted, excluded, unsupported],
-    ) == []
+    assert (
+        analyzer_module.analyze_directory(
+            str(tmp_path),
+            exclude_paths=["generated"],
+            target_files=[accepted, excluded, unsupported],
+        )
+        == []
+    )
     assert discovered == [accepted.resolve()]
     assert analyzed == discovered
     assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []

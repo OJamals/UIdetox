@@ -11,6 +11,7 @@ from uidetox.utils import now_iso
 
 try:
     import fcntl as _fcntl
+
     _HAS_FLOCK = True
 except ImportError:
     _HAS_FLOCK = False  # Windows — locking is best-effort only
@@ -34,6 +35,7 @@ def _state_lock():
             yield
         finally:
             _fcntl.flock(lf.fileno(), _fcntl.LOCK_UN)
+
 
 UIDETOX_DIR = ".uidetox"
 CONFIG_FILE = "config.json"
@@ -62,6 +64,7 @@ def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path |
             return None
         current = current.parent
 
+
 def get_project_root() -> Path:
     """Find the project root from the current working directory.
 
@@ -86,13 +89,16 @@ def get_project_root() -> Path:
 
     return cwd
 
+
 def get_uidetox_dir() -> Path:
     return get_project_root() / UIDETOX_DIR
+
 
 def ensure_uidetox_dir():
     d = get_uidetox_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
+
 
 def _now_iso() -> str:
     return now_iso()
@@ -205,18 +211,17 @@ def _normalize_tooling_config(tooling: object) -> dict:
         if key in normalized:
             normalized[key] = _normalize_tool_collection(normalized[key])
 
-    if "package_manager" in normalized and not isinstance(normalized["package_manager"], str):
+    if "package_manager" in normalized and not isinstance(
+        normalized["package_manager"], str
+    ):
         normalized["package_manager"] = None
 
     return normalized
 
+
 def load_config() -> dict:
     config_path = get_uidetox_dir() / CONFIG_FILE
-    default_config = {
-        "DESIGN_VARIANCE": 8,
-        "MOTION_INTENSITY": 6,
-        "VISUAL_DENSITY": 4
-    }
+    default_config = {"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4}
     if not config_path.exists():
         return default_config.copy()
     try:
@@ -241,7 +246,9 @@ def load_config() -> dict:
     if "ignore_patterns" in data and not isinstance(data["ignore_patterns"], list):
         data["ignore_patterns"] = []
     elif "ignore_patterns" in data:
-        data["ignore_patterns"] = [pattern for pattern in data["ignore_patterns"] if isinstance(pattern, str)]
+        data["ignore_patterns"] = [
+            pattern for pattern in data["ignore_patterns"] if isinstance(pattern, str)
+        ]
     if "exclude" in data and not isinstance(data["exclude"], list):
         data["exclude"] = []
     elif "exclude" in data:
@@ -254,6 +261,7 @@ def load_config() -> dict:
         data.pop("dev_server", None)
 
     return data
+
 
 def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
     d = ensure_uidetox_dir()
@@ -316,6 +324,7 @@ def load_state() -> dict:
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
     return data
 
+
 def _default_state() -> dict:
     return {
         "last_scan": None,
@@ -326,8 +335,10 @@ def _default_state() -> dict:
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }
 
+
 def save_state(state: dict):
     _save_json(state, STATE_FILE, "state_")
+
 
 def get_issue(issue_id: str) -> dict | None:
     state = load_state()
@@ -336,12 +347,15 @@ def get_issue(issue_id: str) -> dict | None:
             return item
     return None
 
+
 def remove_issue(issue_id: str, note: str = "") -> bool:
     with _state_lock():
         state = load_state()
         original_len = len(state.get("issues", []))
         removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
-        state["issues"] = [i for i in state.get("issues", []) if i.get("id") != issue_id]
+        state["issues"] = [
+            i for i in state.get("issues", []) if i.get("id") != issue_id
+        ]
         if len(state["issues"]) < original_len:
             # Track resolved issues
             for r in removed:
@@ -350,7 +364,9 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
                     r["note"] = note
                 state.setdefault("resolved", []).append(r)
             state.setdefault("stats", {})
-            state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
+            state["stats"]["total_resolved"] = state["stats"].get(
+                "total_resolved", 0
+            ) + len(removed)
             save_state(state)
             return True
         return False
@@ -359,8 +375,7 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
 def issue_dedup_key(issue: dict) -> str:
     """Return a stable key for detecting duplicate pending issues."""
     return "::".join(
-        str(issue.get(field, "")).strip()
-        for field in ("file", "issue", "command")
+        str(issue.get(field, "")).strip() for field in ("file", "issue", "command")
     )
 
 
@@ -395,6 +410,7 @@ def add_issues(issues: Iterable[dict]) -> int:
 def add_issue(issue: dict) -> bool:
     return add_issues((issue,)) == 1
 
+
 def increment_scans():
     """Track number of scans run."""
     with _state_lock():
@@ -403,6 +419,7 @@ def increment_scans():
         state["stats"]["scans_run"] = state["stats"].get("scans_run", 0) + 1
         state["last_scan"] = _now_iso()
         save_state(state)
+
 
 def clear_issues():
     """Clear all pending issues (used by rescan)."""
@@ -426,7 +443,9 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
         state = load_state()
         id_set = set(issue_ids)
         removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
-        state["issues"] = [i for i in state.get("issues", []) if i.get("id") not in id_set]
+        state["issues"] = [
+            i for i in state.get("issues", []) if i.get("id") not in id_set
+        ]
 
         for r in removed:
             r["resolved_at"] = _now_iso()
@@ -435,6 +454,8 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
             state.setdefault("resolved", []).append(r)
 
         state.setdefault("stats", {})
-        state["stats"]["total_resolved"] = state["stats"].get("total_resolved", 0) + len(removed)
+        state["stats"]["total_resolved"] = state["stats"].get(
+            "total_resolved", 0
+        ) + len(removed)
         save_state(state)
         return removed

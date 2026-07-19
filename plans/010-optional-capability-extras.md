@@ -4,7 +4,7 @@
 > mirrors. This plan is reconciled through completed plans 001-009; keep plan 001's
 > `dev` extra and all later stacked behavior intact. Update plan index after completion.
 >
-> **Drift check (run first)**: `git diff --stat 54dc45c..HEAD -- pyproject.toml README.md uidetox/memory.py uidetox/commands/capture.py docs uidetox/data/docs tests/test_optional_dependencies.py`
+> **Drift check (run first)**: `git diff --stat 54dc45c..HEAD -- pyproject.toml README.md uidetox/commands/capture.py docs uidetox/data/docs tests/test_optional_dependencies.py`
 
 ## Status
 
@@ -17,16 +17,15 @@
 
 ## Why this matters
 
-Base installation currently pulls ChromaDB, Playwright, and Pillow although each is
-used by an optional capability and imports defensively. Users running scan/check/queue
+Base installation currently pulls Playwright and Pillow although each is used by an
+optional capability and imports defensively. Users running scan/check/queue
 pay larger installs and broader dependency-conflict/security surface. Playwright's
 Python package also does not install Chromium, so documented base installation still
 leaves capture unusable without an extra browser step.
 
 ## Current state
 
-- `pyproject.toml:27-35` makes Pillow, ChromaDB, and Playwright mandatory.
-- `uidetox/memory.py:15-26` returns `None` when ChromaDB is unavailable.
+- `pyproject.toml:27-35` makes Pillow and Playwright mandatory.
 - `uidetox/commands/capture.py:28-38` handles missing Playwright import.
 - `uidetox/commands/capture.py:89-132` handles missing Pillow.
 - `README.md:33-60` documents only `pip install uidetox`.
@@ -38,7 +37,7 @@ dependencies. Plan 001's `dev` extra must remain intact.
 
 | Purpose | Command | Expected on success |
 |---------|---------|---------------------|
-| Metadata | `python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['optional-dependencies'].keys())"` | includes `dev`, `memory`, `capture`, `all` |
+| Metadata | `python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['optional-dependencies'].keys())"` | includes `dev`, `visual`, `capture`, `all` |
 | Base wheel | `python -m pip wheel . --no-deps --wheel-dir /tmp/uidetox-wheel` | exit 0, wheel created |
 | Tests | `python -m pytest -q tests/test_optional_dependencies.py` | all pass |
 | Full | `python -m pytest -q` | all pass |
@@ -48,7 +47,6 @@ dependencies. Plan 001's `dev` extra must remain intact.
 **In scope**:
 - `pyproject.toml`
 - `README.md`
-- `uidetox/memory.py`
 - `uidetox/commands/capture.py`
 - root `docs/*.md` installation/capture sections only
 - matching `uidetox/data/docs/*.md` mirrors
@@ -57,7 +55,7 @@ dependencies. Plan 001's `dev` extra must remain intact.
 **Out of scope**:
 - Making Tree-sitter optional.
 - Automatically downloading browsers during package install.
-- Replacing ChromaDB or Pillow.
+- Replacing Pillow.
 - Changing capture image algorithms.
 
 ## Git workflow
@@ -70,12 +68,12 @@ dependencies. Plan 001's `dev` extra must remain intact.
 
 ### Step 1: Define extras without losing plan 001 metadata
 
-Move existing ChromaDB requirement into `memory`; move existing Pillow and Playwright
-requirements into `capture`; define `all` with the union. Preserve version constraints
-already present. Keep or merge `dev` from plan 001. Base dependencies retain PyYAML
-and all Tree-sitter packages.
+Move existing Pillow and Playwright requirements into `capture`; define `all` with
+the complete optional set. Preserve version constraints already present. Keep or
+merge `dev` from plan 001. Base dependencies retain PyYAML and all Tree-sitter
+packages.
 
-**Verify**: metadata command lists all four extras; base dependency list excludes the three optional packages.
+**Verify**: metadata command lists all four extras; base dependency list excludes both optional packages.
 
 ### Step 2: Improve unavailable-feature guidance
 
@@ -86,16 +84,14 @@ pip install 'uidetox[capture]'
 python -m playwright install chromium
 ```
 
-Preserve original exception summary for non-browser launch failures. Memory's silent
-non-vector fallback may remain, but any user-facing semantic-search request should
-state how to install `uidetox[memory]`.
+Preserve original exception summary for non-browser launch failures.
 
 **Verify**: tests monkeypatch imports/launch and assert actionable text.
 
 ### Step 3: Update installation documentation and mirrors
 
 README Quick Start keeps minimal base install. Add an Optional Capabilities section
-for `memory`, `capture`, `all`, and Chromium bootstrap. Update provider docs only where
+for `visual`, `capture`, `all`, and Chromium bootstrap. Update provider docs only where
 they describe installation/capture. Keep every root doc byte-identical to its
 `uidetox/data/docs` counterpart after edits.
 
@@ -112,15 +108,14 @@ uninstall packages from executor environment; monkeypatch import boundaries.
 ## Test plan
 
 - Metadata extras contain expected distributions; base excludes them.
-- Missing ChromaDB returns current fallback and actionable status when invoked.
 - Missing Playwright/Pillow does not crash unrelated commands.
 - Missing Chromium message contains exact browser-install command.
 - Root and bundled docs remain synchronized.
 
 ## Done criteria
 
-- [ ] Minimal install excludes ChromaDB, Playwright, Pillow.
-- [ ] `memory`, `capture`, `all`, `dev` extras coexist.
+- [ ] Minimal install excludes Playwright and Pillow.
+- [ ] `visual`, `capture`, `all`, `dev` extras coexist.
 - [ ] Capture remediation names both package extra and Chromium install.
 - [ ] Docs/mirrors synchronized.
 - [ ] Base wheel builds; full tests pass; plan status updated.

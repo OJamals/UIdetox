@@ -125,9 +125,7 @@ _REGION_TAGS = frozenset(
     }
 )
 _SCRIPT_EXTENSIONS = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"})
-_HTTP_METHODS = frozenset(
-    {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-)
+_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
 @dataclass(frozen=True)
@@ -439,9 +437,7 @@ def _collect_semantic_node(
 def _collect_analyzer_node(node, state: _MutableAnalyzerState) -> None:
     if node.type in {"jsx_element", "jsx_self_closing_element"}:
         open_tag = (
-            node.child_by_field_name("open_tag")
-            if node.type == "jsx_element"
-            else node
+            node.child_by_field_name("open_tag") if node.type == "jsx_element" else node
         )
         if open_tag is None:
             return

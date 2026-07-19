@@ -48,9 +48,7 @@ createBrowserRouter(routes);
     )
 
     assert facts.imports == ("react", "./Dashboard", "react-router-dom")
-    assert facts.react_aliases == (
-        ImportAlias("react", "useState", "useLocalState"),
-    )
+    assert facts.react_aliases == (ImportAlias("react", "useState", "useLocalState"),)
     assert facts.rendered_modules == ("Dashboard", "Route")
     assert facts.declared_ui_modules == (SourceOccurrence("Shell", 4),)
     assert facts.regions == (SourceOccurrence("main", 10),)
@@ -90,8 +88,7 @@ def test_source_facts_report_semantic_parse_errors_without_leaking_tree_nodes():
                 yield from values(item)
 
     assert not any(
-        hasattr(value, "type") and hasattr(value, "children")
-        for value in values(facts)
+        hasattr(value, "type") and hasattr(value, "children") for value in values(facts)
     )
 
 

@@ -2,6 +2,8 @@
 
 import argparse
 import sys
+
+from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 from importlib import import_module
 from pathlib import Path
 
@@ -10,6 +12,7 @@ def _get_version() -> str:
     """Return package version."""
     try:
         from uidetox import __version__
+
         return __version__
     except ImportError:
         return "0.1.0"
@@ -59,8 +62,7 @@ def _add_visual_worker_options(parser: argparse.ArgumentParser) -> None:
         "--worker-max-memory-mb",
         type=int,
         help=(
-            "Worker address-space limit in MiB on supported platforms "
-            "(default: 1024)"
+            "Worker address-space limit in MiB on supported platforms (default: 1024)"
         ),
     )
     parser.add_argument(
@@ -81,6 +83,7 @@ def _get_commands_dirs() -> list[Path]:
 
     try:
         from uidetox.state import get_project_root
+
         candidates.append(get_project_root() / "commands")
     except Exception:
         pass
@@ -121,125 +124,372 @@ def _iter_dynamic_skill_names() -> list[str]:
 def parse_args(args_list=None):
     parser = argparse.ArgumentParser(
         prog="uidetox",
-        description="UIdetox — agent harness to eliminate AI slop and enforce code quality across frontend, backend, and database layers."
+        description="UIdetox — agent harness to eliminate AI slop and enforce code quality across frontend, backend, and database layers.",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {_get_version()}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {_get_version()}"
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Command: setup
-    setup_parser = subparsers.add_parser("setup", help="Gather project design context and configure dials")
+    setup_parser = subparsers.add_parser(
+        "setup", help="Gather project design context and configure dials"
+    )
     setup_parser.set_defaults(auto_commit=None)
     auto_commit_group = setup_parser.add_mutually_exclusive_group()
-    auto_commit_group.add_argument("--auto-commit", dest="auto_commit", action="store_true", help="Enable automated git commits for resolved issues")
-    auto_commit_group.add_argument("--no-auto-commit", dest="auto_commit", action="store_false", help="Disable automated git commits for resolved issues")
-    setup_parser.add_argument("--design-variance", type=int, choices=range(1, 11), help="Persist DESIGN_VARIANCE (1-10)")
-    setup_parser.add_argument("--motion-intensity", type=int, choices=range(1, 11), help="Persist MOTION_INTENSITY (1-10)")
-    setup_parser.add_argument("--visual-density", type=int, choices=range(1, 11), help="Persist VISUAL_DENSITY (1-10)")
-    setup_parser.add_argument("--product-goal", help="Why the website/app exists and what outcome it should create")
+    auto_commit_group.add_argument(
+        "--auto-commit",
+        dest="auto_commit",
+        action="store_true",
+        help="Enable automated git commits for resolved issues",
+    )
+    auto_commit_group.add_argument(
+        "--no-auto-commit",
+        dest="auto_commit",
+        action="store_false",
+        help="Disable automated git commits for resolved issues",
+    )
+    setup_parser.add_argument(
+        "--design-variance",
+        type=int,
+        choices=range(1, 11),
+        help="Persist DESIGN_VARIANCE (1-10)",
+    )
+    setup_parser.add_argument(
+        "--motion-intensity",
+        type=int,
+        choices=range(1, 11),
+        help="Persist MOTION_INTENSITY (1-10)",
+    )
+    setup_parser.add_argument(
+        "--visual-density",
+        type=int,
+        choices=range(1, 11),
+        help="Persist VISUAL_DENSITY (1-10)",
+    )
+    setup_parser.add_argument(
+        "--product-goal",
+        help="Why the website/app exists and what outcome it should create",
+    )
     setup_parser.add_argument("--audience", help="Who the redesigned interface serves")
-    setup_parser.add_argument("--primary-job", help="Primary job the interface must make easy")
+    setup_parser.add_argument(
+        "--primary-job", help="Primary job the interface must make easy"
+    )
     setup_parser.add_argument("--tone", help="Desired expressive tone")
     setup_parser.add_argument("--genre", help="Product/interface genre")
-    setup_parser.add_argument("--page-kind", choices=("page", "component", "flow", "application"))
+    setup_parser.add_argument(
+        "--page-kind", choices=("page", "component", "flow", "application")
+    )
     setup_parser.add_argument("--brand", help="Brand signals to preserve or introduce")
-    setup_parser.add_argument("--preserve", action="append", default=None, help="Contract to preserve; repeatable")
-    setup_parser.add_argument("--constraint", action="append", default=None, help="Design constraint; repeatable")
-    setup_parser.add_argument("--dev-server", type=str, help="Persist the default preview URL used by capture (e.g. http://localhost:5173)")
-    setup_parser.add_argument("--visual-threshold", type=int, choices=range(0, 255), help="Persist the per-channel visual change threshold (0-254)")
-    setup_parser.add_argument("--visual-max-pixels", type=int, help="Persist the maximum decoded pixels per visual input")
-    setup_parser.add_argument("--visual-evidence-file", help="Persist the visual evidence manifest path")
+    setup_parser.add_argument(
+        "--preserve",
+        action="append",
+        default=None,
+        help="Contract to preserve; repeatable",
+    )
+    setup_parser.add_argument(
+        "--constraint",
+        action="append",
+        default=None,
+        help="Design constraint; repeatable",
+    )
+    setup_parser.add_argument(
+        "--dev-server",
+        type=str,
+        help="Persist the default preview URL used by capture (e.g. http://localhost:5173)",
+    )
+    setup_parser.add_argument(
+        "--visual-threshold",
+        type=int,
+        choices=range(0, 255),
+        help="Persist the per-channel visual change threshold (0-254)",
+    )
+    setup_parser.add_argument(
+        "--visual-max-pixels",
+        type=int,
+        help="Persist the maximum decoded pixels per visual input",
+    )
+    setup_parser.add_argument(
+        "--visual-evidence-file", help="Persist the visual evidence manifest path"
+    )
     visual_gate_group = setup_parser.add_mutually_exclusive_group()
-    visual_gate_group.add_argument("--require-visual-evidence", dest="require_visual_evidence", action="store_true", help="Require fresh visual evidence at workflow/release gates")
-    visual_gate_group.add_argument("--no-require-visual-evidence", dest="require_visual_evidence", action="store_false", help="Keep visual evidence optional")
+    visual_gate_group.add_argument(
+        "--require-visual-evidence",
+        dest="require_visual_evidence",
+        action="store_true",
+        help="Require fresh visual evidence at workflow/release gates",
+    )
+    visual_gate_group.add_argument(
+        "--no-require-visual-evidence",
+        dest="require_visual_evidence",
+        action="store_false",
+        help="Keep visual evidence optional",
+    )
     setup_parser.set_defaults(require_visual_evidence=None)
-    setup_parser.add_argument("--no-intent-prompt", action="store_true", help="Skip the interactive website/app intent interview")
+    setup_parser.add_argument(
+        "--no-intent-prompt",
+        action="store_true",
+        help="Skip the interactive website/app intent interview",
+    )
 
     # Command: intent
-    intent_parser = subparsers.add_parser("intent", help="Inspect effective design intent, provenance, and confidence")
-    intent_parser.add_argument("--json", action="store_true", help="Output intent and provenance as JSON")
-    intent_parser.add_argument("--require-confirmed", action="store_true", help="Exit 2 unless product goal, audience, and primary job are user-confirmed")
+    intent_parser = subparsers.add_parser(
+        "intent", help="Inspect effective design intent, provenance, and confidence"
+    )
+    intent_parser.add_argument(
+        "--json", action="store_true", help="Output intent and provenance as JSON"
+    )
+    intent_parser.add_argument(
+        "--require-confirmed",
+        action="store_true",
+        help="Exit 2 unless product goal, audience, and primary job are user-confirmed",
+    )
 
     # Command: scan
-    scan_parser = subparsers.add_parser("scan", help="Full diagnostic audit of frontend interface quality")
+    scan_parser = subparsers.add_parser(
+        "scan", help="Full diagnostic audit of frontend interface quality"
+    )
     scan_parser.add_argument("--path", default=".", help="Directory to scan")
-    scan_parser.add_argument("--since", default=None, metavar="SHA", help="Only scan files changed since this git SHA (incremental mode)")
-    scan_parser.add_argument("--output", default="table", choices=["table", "json", "github"], help="Output format (default: table)")
+    scan_parser.add_argument(
+        "--since",
+        default=None,
+        metavar="SHA",
+        help="Only scan files changed since this git SHA (incremental mode)",
+    )
+    scan_parser.add_argument(
+        "--output",
+        default="table",
+        choices=["table", "json", "github"],
+        help="Output format (default: table)",
+    )
 
     # Command: map
-    map_parser = subparsers.add_parser("map", help="Map frontend structure, behavior, contracts, and design evidence")
-    map_parser.add_argument("target", nargs="?", default=".", help="Frontend file or directory to map")
-    map_parser.add_argument("--runtime", action="store_true", help="Observe rendered DOM evidence at mobile, tablet, and desktop viewports")
-    map_parser.add_argument("--url", dest="urls", action="append", help="Runtime URL to observe; repeat for multiple routes (default: configured dev_server)")
-    map_parser.add_argument("--screenshots", action="store_true", help="Save full-page runtime screenshots (requires --runtime)")
-    map_parser.add_argument("--timeout", type=int, default=15000, help="Runtime navigation timeout in milliseconds (default: 15000)")
-    map_parser.add_argument("--output", help="Artifact path (default: .uidetox/frontend-map.json)")
-    map_parser.add_argument("--json", action="store_true", help="Print the full frontend map as JSON")
+    map_parser = subparsers.add_parser(
+        "map", help="Map frontend structure, behavior, contracts, and design evidence"
+    )
+    map_parser.add_argument(
+        "target", nargs="?", default=".", help="Frontend file or directory to map"
+    )
+    map_parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Observe rendered DOM evidence at mobile, tablet, and desktop viewports",
+    )
+    map_parser.add_argument(
+        "--url",
+        dest="urls",
+        action="append",
+        help="Runtime URL to observe; repeat for multiple routes (default: configured dev_server)",
+    )
+    map_parser.add_argument(
+        "--screenshots",
+        action="store_true",
+        help="Save full-page runtime screenshots (requires --runtime)",
+    )
+    map_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=15000,
+        help="Runtime navigation timeout in milliseconds (default: 15000)",
+    )
+    map_parser.add_argument(
+        "--output", help="Artifact path (default: .uidetox/frontend-map.json)"
+    )
+    map_parser.add_argument(
+        "--json", action="store_true", help="Print the full frontend map as JSON"
+    )
 
     # Command: redesign
-    redesign_parser = subparsers.add_parser("redesign", help="Generate structurally divergent frontend redesign plans")
-    redesign_parser.add_argument("target", nargs="?", default=".", help="Frontend file or directory to redesign")
-    redesign_parser.add_argument("--variants", type=int, choices=range(1, 6), default=3, help="Number of divergent proposals (1-5, default: 3)")
-    redesign_parser.add_argument("--map-file", help="Existing frontend map artifact to consume")
-    redesign_parser.add_argument("--refresh-map", action="store_true", help="Rebuild the frontend map before planning")
-    redesign_parser.add_argument("--output", help="Artifact path (default: .uidetox/redesigns.json)")
-    redesign_parser.add_argument("--json", action="store_true", help="Print redesign proposals as JSON")
+    redesign_parser = subparsers.add_parser(
+        "redesign", help="Generate structurally divergent frontend redesign plans"
+    )
+    redesign_parser.add_argument(
+        "target", nargs="?", default=".", help="Frontend file or directory to redesign"
+    )
+    redesign_parser.add_argument(
+        "--variants",
+        type=int,
+        choices=range(1, 6),
+        default=3,
+        help="Number of divergent proposals (1-5, default: 3)",
+    )
+    redesign_parser.add_argument(
+        "--map-file", help="Existing frontend map artifact to consume"
+    )
+    redesign_parser.add_argument(
+        "--refresh-map",
+        action="store_true",
+        help="Rebuild the frontend map before planning",
+    )
+    redesign_parser.add_argument(
+        "--output", help="Artifact path (default: .uidetox/redesigns.json)"
+    )
+    redesign_parser.add_argument(
+        "--json", action="store_true", help="Print redesign proposals as JSON"
+    )
 
     # Command: compare
-    compare_parser = subparsers.add_parser("compare", help="Compare redesign proposals across structural dimensions")
-    compare_parser.add_argument("--file", dest="redesign_file", help="Redesign artifact (default: .uidetox/redesigns.json)")
-    compare_parser.add_argument("--json", action="store_true", help="Print comparison as JSON")
+    compare_parser = subparsers.add_parser(
+        "compare", help="Compare redesign proposals across structural dimensions"
+    )
+    compare_parser.add_argument(
+        "--file",
+        dest="redesign_file",
+        help="Redesign artifact (default: .uidetox/redesigns.json)",
+    )
+    compare_parser.add_argument(
+        "--json", action="store_true", help="Print comparison as JSON"
+    )
 
     # Command: prototype
-    prototype_parser = subparsers.add_parser("prototype", help="Create a disposable implementation brief for one redesign proposal")
-    prototype_parser.add_argument("proposal_id", help="Proposal ID from `uidetox redesign` or `uidetox compare`")
-    prototype_parser.add_argument("--file", dest="redesign_file", help="Redesign artifact (default: .uidetox/redesigns.json)")
-    prototype_parser.add_argument("--output", help="Prototype brief path (default: .uidetox/prototypes/<proposal-id>.md)")
-    prototype_parser.add_argument("--stdout", action="store_true", help="Print the prototype brief after saving it")
+    prototype_parser = subparsers.add_parser(
+        "prototype",
+        help="Create a disposable implementation brief for one redesign proposal",
+    )
+    prototype_parser.add_argument(
+        "proposal_id", help="Proposal ID from `uidetox redesign` or `uidetox compare`"
+    )
+    prototype_parser.add_argument(
+        "--file",
+        dest="redesign_file",
+        help="Redesign artifact (default: .uidetox/redesigns.json)",
+    )
+    prototype_parser.add_argument(
+        "--output",
+        help="Prototype brief path (default: .uidetox/prototypes/<proposal-id>.md)",
+    )
+    prototype_parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print the prototype brief after saving it",
+    )
 
     # Command: add-issue (For agent use during scan)
-    add_parser = subparsers.add_parser("add-issue", help="Add an issue to the state queue (Agent use)")
+    add_parser = subparsers.add_parser(
+        "add-issue", help="Add an issue to the state queue (Agent use)"
+    )
     add_parser.add_argument("--file", required=True, help="File path with the issue")
-    add_parser.add_argument("--tier", required=True, choices=["T1", "T2", "T3", "T4"], help="Severity tier")
+    add_parser.add_argument(
+        "--tier", required=True, choices=["T1", "T2", "T3", "T4"], help="Severity tier"
+    )
     add_parser.add_argument("--issue", required=True, help="Description of the issue")
-    add_parser.add_argument("--fix-command", required=True, help="Suggested command to fix")
+    add_parser.add_argument(
+        "--fix-command", required=True, help="Suggested command to fix"
+    )
 
     # Command: next
-    subparsers.add_parser("next", help="Picks the next highest-priority issue from the scan queue")
+    subparsers.add_parser(
+        "next", help="Picks the next highest-priority issue from the scan queue"
+    )
 
     # Command: resolve
-    resolve_parser = subparsers.add_parser("resolve", help="Mark a specific issue as resolved")
-    resolve_parser.add_argument("issue_id", help="The ID of the issue to resolve (e.g. SCAN-001)")
-    resolve_parser.add_argument("--note", required=True, help="Mandatory explanation of the fix applied")
+    resolve_parser = subparsers.add_parser(
+        "resolve", help="Mark a specific issue as resolved"
+    )
+    resolve_parser.add_argument(
+        "issue_id", help="The ID of the issue to resolve (e.g. SCAN-001)"
+    )
+    resolve_parser.add_argument(
+        "--note", required=True, help="Mandatory explanation of the fix applied"
+    )
 
     # Command: batch-resolve
-    batch_resolve_parser = subparsers.add_parser("batch-resolve", help="Resolve multiple issues with a single coherent commit")
-    batch_resolve_parser.add_argument("issue_ids", nargs="+", help="Issue IDs to resolve (e.g. SCAN-001 SCAN-002 SCAN-003)")
-    batch_resolve_parser.add_argument("--note", required=True, help="Mandatory explanation of fixes applied")
-    batch_resolve_parser.add_argument("--skip-verify", action="store_true", help="Skip pre-commit verification gate")
+    batch_resolve_parser = subparsers.add_parser(
+        "batch-resolve", help="Resolve multiple issues with a single coherent commit"
+    )
+    batch_resolve_parser.add_argument(
+        "issue_ids",
+        nargs="+",
+        help="Issue IDs to resolve (e.g. SCAN-001 SCAN-002 SCAN-003)",
+    )
+    batch_resolve_parser.add_argument(
+        "--note", required=True, help="Mandatory explanation of fixes applied"
+    )
+    batch_resolve_parser.add_argument(
+        "--skip-verify", action="store_true", help="Skip pre-commit verification gate"
+    )
 
     # Command: plan
-    subparsers.add_parser("plan", help="Reorder priorities or cluster related issues in the queue")
+    subparsers.add_parser(
+        "plan", help="Reorder priorities or cluster related issues in the queue"
+    )
 
     # Command: review
-    review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
-    review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
-    review_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
-    review_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
+    review_parser = subparsers.add_parser(
+        "review", help="Subjective UX review of the latest changes"
+    )
+    review_parser.add_argument(
+        "--score",
+        type=int,
+        help="Store an LLM-assigned subjective design score (0-100)",
+    )
+    review_parser.add_argument(
+        "--require-visual-evidence",
+        action="store_true",
+        help="Exit unless current visual evidence is fresh",
+    )
+    review_parser.add_argument(
+        "--visual-evidence-file", help="Visual evidence manifest to inspect"
+    )
 
     # Command: capture
-    capture_parser = subparsers.add_parser("capture", help="Capture visual regression screenshots via Playwright")
-    capture_parser.add_argument("--url", type=str, help="URL of the local dev server (default: http://localhost:3000)")
-    capture_parser.add_argument("--stage", choices=["before", "after"], help="Capture baseline (before) or post-fix (after) screenshot")
-    capture_parser.add_argument("--responsive", action="store_true", help="Capture at multiple viewports (mobile, tablet, desktop, wide)")
-    capture_parser.add_argument("--threshold", type=int, choices=range(0, 255), help="Per-channel visual change threshold (0-254)")
-    capture_parser.add_argument("--max-pixels", type=int, help="Maximum decoded pixels per visual input")
-    capture_parser.add_argument("--dimension-policy", choices=["strict"], help="Image dimension mismatch policy")
-    capture_parser.add_argument("--color-policy", choices=["native", "srgb"], help="Image color normalization policy")
-    capture_parser.add_argument("--evidence-file", help="Visual evidence manifest output path")
-    capture_parser.add_argument("--reviewer-artifacts", action="store_true", help="Generate overlays, changed crops, blends, and a contact sheet")
-    capture_parser.add_argument("--crop-padding", type=int, help="Padding around reviewer changed-area crops")
-    capture_parser.add_argument("--png-compress-level", type=int, choices=range(0, 10), help="Lossless PNG compression level (0-9)")
-    capture_parser.add_argument("--png-optimize", action="store_true", help="Use slower lossless PNG optimization for archival artifacts")
+    capture_parser = subparsers.add_parser(
+        "capture", help="Capture visual regression screenshots via Playwright"
+    )
+    capture_parser.add_argument(
+        "--url",
+        type=str,
+        help="URL of the local dev server (default: http://localhost:3000)",
+    )
+    capture_parser.add_argument(
+        "--stage",
+        choices=["before", "after"],
+        help="Capture baseline (before) or post-fix (after) screenshot",
+    )
+    capture_parser.add_argument(
+        "--responsive",
+        action="store_true",
+        help="Capture at multiple viewports (mobile, tablet, desktop, wide)",
+    )
+    capture_parser.add_argument(
+        "--threshold",
+        type=int,
+        choices=range(0, 255),
+        help="Per-channel visual change threshold (0-254)",
+    )
+    capture_parser.add_argument(
+        "--max-pixels", type=int, help="Maximum decoded pixels per visual input"
+    )
+    capture_parser.add_argument(
+        "--dimension-policy", choices=["strict"], help="Image dimension mismatch policy"
+    )
+    capture_parser.add_argument(
+        "--color-policy",
+        choices=["native", "srgb"],
+        help="Image color normalization policy",
+    )
+    capture_parser.add_argument(
+        "--evidence-file", help="Visual evidence manifest output path"
+    )
+    capture_parser.add_argument(
+        "--reviewer-artifacts",
+        action="store_true",
+        help="Generate overlays, changed crops, blends, and a contact sheet",
+    )
+    capture_parser.add_argument(
+        "--crop-padding", type=int, help="Padding around reviewer changed-area crops"
+    )
+    capture_parser.add_argument(
+        "--png-compress-level",
+        type=int,
+        choices=range(0, 10),
+        help="Lossless PNG compression level (0-9)",
+    )
+    capture_parser.add_argument(
+        "--png-optimize",
+        action="store_true",
+        help="Use slower lossless PNG optimization for archival artifacts",
+    )
     _add_visual_worker_options(capture_parser)
 
     # Command: visual-evidence
@@ -287,108 +537,264 @@ def parse_args(args_list=None):
     _add_visual_worker_options(visual_parser)
 
     # Command: update-skill
-    update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
-    update_parser.add_argument("agent", choices=["claude", "cursor", "gemini", "codex", "windsurf", "copilot"], help="Target AI agent")
+    update_parser = subparsers.add_parser(
+        "update-skill", help="Installs UIdetox rules into your agent's configuration"
+    )
+    update_parser.add_argument(
+        "agent",
+        choices=SUPPORTED_AGENT_NAMES,
+        help="Target AI agent",
+    )
 
     # Command: status
-    status_parser = subparsers.add_parser("status", help="Show project health dashboard with design score")
+    status_parser = subparsers.add_parser(
+        "status", help="Show project health dashboard with design score"
+    )
     status_parser.add_argument("--json", action="store_true", help="Output as JSON")
-    status_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
-    status_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
+    status_parser.add_argument(
+        "--require-visual-evidence",
+        action="store_true",
+        help="Exit unless current visual evidence is fresh",
+    )
+    status_parser.add_argument(
+        "--visual-evidence-file", help="Visual evidence manifest to inspect"
+    )
 
     # Command: show
-    show_parser = subparsers.add_parser("show", help="Show details of issues, filter by file/tier/ID")
-    show_parser.add_argument("pattern", nargs="?", default=None, help="Filter by issue ID, file path, or tier (T1-T4)")
+    show_parser = subparsers.add_parser(
+        "show", help="Show details of issues, filter by file/tier/ID"
+    )
+    show_parser.add_argument(
+        "pattern",
+        nargs="?",
+        default=None,
+        help="Filter by issue ID, file path, or tier (T1-T4)",
+    )
 
     # Command: exclude
-    exclude_parser = subparsers.add_parser("exclude", help="Exclude a directory from scanning")
-    exclude_parser.add_argument("path", help="Path to exclude (e.g. node_modules, dist)")
+    exclude_parser = subparsers.add_parser(
+        "exclude", help="Exclude a directory from scanning"
+    )
+    exclude_parser.add_argument(
+        "path", help="Path to exclude (e.g. node_modules, dist)"
+    )
 
     # Command: autofix
-    autofix_parser = subparsers.add_parser("autofix", help="Batch-apply all safe T1 quick fixes")
-    autofix_parser.add_argument("--dry-run", action="store_true", help="Preview fixes without applying")
+    autofix_parser = subparsers.add_parser(
+        "autofix", help="Batch-apply all safe T1 quick fixes"
+    )
+    autofix_parser.add_argument(
+        "--dry-run", action="store_true", help="Preview fixes without applying"
+    )
 
     # Command: rescan
-    rescan_parser = subparsers.add_parser("rescan", help="Clear queue and re-scan the project fresh")
+    rescan_parser = subparsers.add_parser(
+        "rescan", help="Clear queue and re-scan the project fresh"
+    )
     rescan_parser.add_argument("--path", default=".", help="Directory to rescan")
 
     # Command: diff
-    diff_parser = subparsers.add_parser("diff", help="Compare fresh static analysis against the stored issue baseline (shows new/fixed/unchanged issues)")
-    diff_parser.add_argument("--path", default=".", help="Target path to diff (file or directory, default: current directory)")
-    diff_parser.add_argument("--since", default=None, metavar="SHA", help="Only diff files changed since this git SHA")
-    diff_parser.add_argument("--output", default="table", choices=["table", "json", "github"], help="Output format (default: table)")
-    diff_parser.add_argument("--save", action="store_true", help="Save fresh analysis as new baseline in state")
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare fresh static analysis against the stored issue baseline (shows new/fixed/unchanged issues)",
+    )
+    diff_parser.add_argument(
+        "--path",
+        default=".",
+        help="Target path to diff (file or directory, default: current directory)",
+    )
+    diff_parser.add_argument(
+        "--since",
+        default=None,
+        metavar="SHA",
+        help="Only diff files changed since this git SHA",
+    )
+    diff_parser.add_argument(
+        "--output",
+        default="table",
+        choices=["table", "json", "github"],
+        help="Output format (default: table)",
+    )
+    diff_parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Save fresh analysis as new baseline in state",
+    )
 
     # Command: loop
-    loop_parser = subparsers.add_parser("loop", help="Instruct the AI agent to enter an autonomous fix loop")
-    loop_parser.add_argument("--target", type=int, default=95, help="Target design score to reach (default 95)")
-    loop_parser.add_argument("--orchestrator", action="store_true", help="Use sub-agent orchestrator mode (one agent per stage)")
-    loop_parser.add_argument("--execute", action="store_true", help="Execute resumable phases in process (preview remains the default)")
-    loop_parser.add_argument("--proposal-id", help="Explicit redesign proposal selected for prototype generation")
-    loop_parser.add_argument("--review-score", type=int, choices=range(0, 101), help="Human/LLM subjective review score used to resume the review gate")
-    loop_parser.add_argument("--require-visual-evidence", action="store_true", help="Require fresh visual evidence before verification can pass")
-    loop_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
+    loop_parser = subparsers.add_parser(
+        "loop", help="Instruct the AI agent to enter an autonomous fix loop"
+    )
+    loop_parser.add_argument(
+        "--target",
+        type=int,
+        default=95,
+        help="Target design score to reach (default 95)",
+    )
+    loop_parser.add_argument(
+        "--orchestrator",
+        action="store_true",
+        help="Use sub-agent orchestrator mode (one agent per stage)",
+    )
+    loop_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Execute resumable phases in process (preview remains the default)",
+    )
+    loop_parser.add_argument(
+        "--proposal-id",
+        help="Explicit redesign proposal selected for prototype generation",
+    )
+    loop_parser.add_argument(
+        "--review-score",
+        type=int,
+        choices=range(0, 101),
+        help="Human/LLM subjective review score used to resume the review gate",
+    )
+    loop_parser.add_argument(
+        "--require-visual-evidence",
+        action="store_true",
+        help="Require fresh visual evidence before verification can pass",
+    )
+    loop_parser.add_argument(
+        "--visual-evidence-file", help="Visual evidence manifest to inspect"
+    )
 
     # Command: finish
-    finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
-    finish_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
-    finish_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
+    finish_parser = subparsers.add_parser(
+        "finish", help="Squash-merge and commit an active UIdetox session branch"
+    )
+    finish_parser.add_argument(
+        "--require-visual-evidence",
+        action="store_true",
+        help="Exit unless current visual evidence is fresh",
+    )
+    finish_parser.add_argument(
+        "--visual-evidence-file", help="Visual evidence manifest to inspect"
+    )
 
     # Command: subagent
-    sub_parser = subparsers.add_parser("subagent", help="Manage sub-agent sessions and generate stage prompts")
-    sub_parser.add_argument("--stage-prompt", type=str, help="Generate prompt for a stage (observe/diagnose/prioritize/fix/verify)")
-    sub_parser.add_argument("--parallel", type=int, default=1, help="Number of parallel sub-agents to shard the workload across")
-    sub_parser.add_argument("--list", action="store_true", help="List all sub-agent sessions")
+    sub_parser = subparsers.add_parser(
+        "subagent", help="Manage sub-agent sessions and generate stage prompts"
+    )
+    sub_parser.add_argument(
+        "--stage-prompt",
+        type=str,
+        help="Generate prompt for a stage (observe/diagnose/prioritize/fix/verify)",
+    )
+    sub_parser.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="Number of parallel sub-agents to shard the workload across",
+    )
+    sub_parser.add_argument(
+        "--list", action="store_true", help="List all sub-agent sessions"
+    )
     sub_parser.add_argument("--show", type=str, help="Show details of a session by ID")
     sub_parser.add_argument("--record", type=str, help="Mark a session as completed")
     sub_parser.add_argument("--note", type=str, default="", help="Note for --record")
 
     # Command: history
-    history_parser = subparsers.add_parser("history", help="View run history and score progression")
-    history_parser.add_argument("--full", action="store_true", help="Show full run details")
+    history_parser = subparsers.add_parser(
+        "history", help="View run history and score progression"
+    )
+    history_parser.add_argument(
+        "--full", action="store_true", help="Show full run details"
+    )
     history_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # Command: viz
-    viz_parser = subparsers.add_parser("viz", help="Generate an HTML treemap heatmap of codebase issues")
+    viz_parser = subparsers.add_parser(
+        "viz", help="Generate an HTML treemap heatmap of codebase issues"
+    )
     viz_parser.add_argument("--path", default=".", help="Directory to visualize")
     viz_parser.set_defaults(viz_cmd="viz")
 
     # Command: tree
-    tree_parser = subparsers.add_parser("tree", help="Print a terminal tree of codebase issues")
+    tree_parser = subparsers.add_parser(
+        "tree", help="Print a terminal tree of codebase issues"
+    )
     tree_parser.add_argument("--path", default=".", help="Directory to visualize")
-    tree_parser.add_argument("--depth", type=int, default=3, help="Max depth of the tree")
+    tree_parser.add_argument(
+        "--depth", type=int, default=3, help="Max depth of the tree"
+    )
     tree_parser.set_defaults(viz_cmd="tree")
 
     # Command: zone
-    zone_parser = subparsers.add_parser("zone", help="Show, set, or clear file classifications (production, test, vendor, etc.)")
-    zone_parser.add_argument("zone_action", nargs="?", choices=["show", "set", "clear"], default="show", help="Action to perform")
+    zone_parser = subparsers.add_parser(
+        "zone",
+        help="Show, set, or clear file classifications (production, test, vendor, etc.)",
+    )
+    zone_parser.add_argument(
+        "zone_action",
+        nargs="?",
+        choices=["show", "set", "clear"],
+        default="show",
+        help="Action to perform",
+    )
     zone_parser.add_argument("zone_path", nargs="?", help="File path to override")
-    zone_parser.add_argument("zone_value", nargs="?", help="Zone value (production, test, config, generated, script, vendor)")
+    zone_parser.add_argument(
+        "zone_value",
+        nargs="?",
+        help="Zone value (production, test, config, generated, script, vendor)",
+    )
 
     # Command: suppress
-    suppress_parser = subparsers.add_parser("suppress", help="Permanently suppress issues matching a pattern")
-    suppress_parser.add_argument("pattern", nargs="?", help="Pattern to suppress (e.g., *vendor/* or 'Uses Inter font')")
-    suppress_parser.add_argument("--remove", action="store_true", help="Remove an existing suppression pattern")
+    suppress_parser = subparsers.add_parser(
+        "suppress", help="Permanently suppress issues matching a pattern"
+    )
+    suppress_parser.add_argument(
+        "pattern",
+        nargs="?",
+        help="Pattern to suppress (e.g., *vendor/* or 'Uses Inter font')",
+    )
+    suppress_parser.add_argument(
+        "--remove", action="store_true", help="Remove an existing suppression pattern"
+    )
 
     # Command: memory
-    memory_parser = subparsers.add_parser("memory", help="Read or write to the persistent agent memory bank")
-    memory_parser.add_argument("memory_action", nargs="?", choices=["show", "pattern", "note", "clear"], default="show", help="Action to perform")
-    memory_parser.add_argument("value", nargs="?", help="The pattern or note string to save")
+    memory_parser = subparsers.add_parser(
+        "memory", help="Read or write to the persistent agent memory bank"
+    )
+    memory_parser.add_argument(
+        "memory_action",
+        nargs="?",
+        choices=["show", "pattern", "note", "clear"],
+        default="show",
+        help="Action to perform",
+    )
+    memory_parser.add_argument(
+        "value", nargs="?", help="The pattern or note string to save"
+    )
 
     # Command: detect
-    detect_parser = subparsers.add_parser("detect", help="Auto-detect project tooling (linters, formatters, tsc, backend, db)")
+    detect_parser = subparsers.add_parser(
+        "detect",
+        help="Auto-detect project tooling (linters, formatters, tsc, backend, db)",
+    )
     detect_parser.add_argument("--path", default=".", help="Project root to scan")
 
     # Command: check (master: tsc → lint → format)
-    check_parser = subparsers.add_parser("check", help="Run tsc → lint → format in sequence")
-    check_parser.add_argument("--fix", action="store_true", help="Auto-fix lint and format issues")
+    check_parser = subparsers.add_parser(
+        "check", help="Run tsc → lint → format in sequence"
+    )
+    check_parser.add_argument(
+        "--fix", action="store_true", help="Auto-fix lint and format issues"
+    )
 
     # Command: tsc
-    tsc_parser = subparsers.add_parser("tsc", help="Run TypeScript compiler and queue errors")
-    tsc_parser.add_argument("--fix", action="store_true", help="(reserved for future use)")
+    tsc_parser = subparsers.add_parser(
+        "tsc", help="Run TypeScript compiler and queue errors"
+    )
+    tsc_parser.add_argument(
+        "--fix", action="store_true", help="(reserved for future use)"
+    )
 
     # Command: lint
-    lint_parser = subparsers.add_parser("lint", help="Run detected linter and queue errors")
+    lint_parser = subparsers.add_parser(
+        "lint", help="Run detected linter and queue errors"
+    )
     lint_parser.add_argument("--fix", action="store_true", help="Auto-fix lint errors")
 
     # Command: format
@@ -396,27 +802,55 @@ def parse_args(args_list=None):
     format_parser.add_argument("--fix", action="store_true", help="Auto-fix formatting")
 
     # Command: watch
-    watch_parser = subparsers.add_parser("watch", help="Poll a directory for file changes and re-scan on modification")
-    watch_parser.add_argument("--path", default=".", help="Directory to watch (default: current directory)")
-    watch_parser.add_argument("--interval", type=float, default=1.0, help="Poll interval in seconds (default: 1.0)")
-    watch_parser.add_argument("--no-clear", dest="clear", action="store_false", default=True, help="Disable screen clear between updates")
+    watch_parser = subparsers.add_parser(
+        "watch", help="Poll a directory for file changes and re-scan on modification"
+    )
+    watch_parser.add_argument(
+        "--path", default=".", help="Directory to watch (default: current directory)"
+    )
+    watch_parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Poll interval in seconds (default: 1.0)",
+    )
+    watch_parser.add_argument(
+        "--no-clear",
+        dest="clear",
+        action="store_false",
+        default=True,
+        help="Disable screen clear between updates",
+    )
 
     # Dynamic Slash Commands (e.g., /audit, /polish) from the commands/ directory
     for skill_name in _iter_dynamic_skill_names():
-        skill_parser = subparsers.add_parser(skill_name, help=f"Execute the '{skill_name}' UX design skill")
-        skill_parser.add_argument("target", nargs="?", default=".", help="Target file, directory, or component pattern")
+        skill_parser = subparsers.add_parser(
+            skill_name, help=f"Execute the '{skill_name}' UX design skill"
+        )
+        skill_parser.add_argument(
+            "target",
+            nargs="?",
+            default=".",
+            help="Target file, directory, or component pattern",
+        )
 
     # Catch common mistake: uidetox --check → redirect to uidetox check
     if args_list is None and len(sys.argv) > 1 and sys.argv[1] == "--check":
-        print("Did you mean 'uidetox check'? Run 'uidetox check --fix' for mechanical fixes.")
+        print(
+            "Did you mean 'uidetox check'? Run 'uidetox check --fix' for mechanical fixes."
+        )
         sys.exit(0)
 
     return parser.parse_args(args_list)
 
+
 def main():
     args = parse_args()
     if not args.command:
-        # Just show help
+        from uidetox.onboarding import run_first_run
+
+        if run_first_run():
+            return
         parse_args(["--help"])
         return
 
@@ -437,7 +871,7 @@ def main():
             "history": "history_cmd",
             "memory": "memory_cmd",
             "visual_evidence": "visual_evidence_cmd",
-            "tree": "viz" # route 'tree' to 'viz.py'
+            "tree": "viz",  # route 'tree' to 'viz.py'
         }
         command_name = name_map.get(command_name, command_name)
         module = import_module(f"uidetox.commands.{command_name}")
@@ -446,18 +880,25 @@ def main():
             # Pass args to the command runner
             module.run(args)
         else:
-            print(f"Error: Command module for '{args.command}' lacks a run() function.", file=sys.stderr)
+            print(
+                f"Error: Command module for '{args.command}' lacks a run() function.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted. Run 'uidetox status' to see where you left off.")
         sys.exit(130)
     except ImportError as e:
-        print(f"Error: Command '{args.command}' is not implemented yet. ({e})", file=sys.stderr)
+        print(
+            f"Error: Command '{args.command}' is not implemented yet. ({e})",
+            file=sys.stderr,
+        )
         sys.exit(1)
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

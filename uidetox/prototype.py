@@ -141,8 +141,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             f"- Source: {source_freshness.get('status', 'unknown')}",
             f"- Runtime: {runtime_freshness.get('status', 'unknown')}",
             (
-                "- Runtime stale reason: "
-                + str(runtime_freshness.get("stale_reason"))
+                "- Runtime stale reason: " + str(runtime_freshness.get("stale_reason"))
                 if runtime_freshness.get("stale_reason")
                 else "- Runtime stale reason: none"
             ),
@@ -152,10 +151,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             *_bullets(redesign_set.unknowns),
             "Cross-stack parity counts:",
             *(
-                [
-                    f"- {kind}: {count}"
-                    for kind, count in sorted(parity_counts.items())
-                ]
+                [f"- {kind}: {count}" for kind, count in sorted(parity_counts.items())]
                 or ["- None recorded."]
             ),
             "Cross-stack parity findings:",
@@ -242,4 +238,6 @@ def _bullets(items: tuple[str, ...]) -> list[str]:
 
 
 def _numbered(items: tuple[str, ...]) -> list[str]:
-    return [f"{index}. {item}" for index, item in enumerate(items, start=1)] or ["1. None recorded."]
+    return [f"{index}. {item}" for index, item in enumerate(items, start=1)] or [
+        "1. None recorded."
+    ]

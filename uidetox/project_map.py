@@ -320,16 +320,8 @@ def reconcile_operations(
             )
         )
 
-    comparable_front = [
-        item
-        for item in front
-        if item not in unresolved_front
-    ]
-    comparable_back = [
-        item
-        for item in back
-        if item not in unresolved_back
-    ]
+    comparable_front = [item for item in front if item not in unresolved_front]
+    comparable_back = [item for item in back if item not in unresolved_back]
     front_by_path = _group_by_path(comparable_front)
     back_by_path = _group_by_path(comparable_back)
 
@@ -443,9 +435,8 @@ def _extract_backend_operations(
             continue
         relative = path.relative_to(root).as_posix()
         lower_name = path.name.lower()
-        if (
-            path.suffix.lower() in {".json", ".yaml", ".yml"}
-            and (lower_name.startswith("openapi") or lower_name.startswith("swagger"))
+        if path.suffix.lower() in {".json", ".yaml", ".yml"} and (
+            lower_name.startswith("openapi") or lower_name.startswith("swagger")
         ):
             try:
                 content = path.read_text(encoding="utf-8")
@@ -472,9 +463,7 @@ def _extract_backend_operations(
         suffix = path.suffix.lower()
         if not _looks_like_backend_source(content, suffix):
             continue
-        source_manifest[relative] = hashlib.sha256(
-            content.encode("utf-8")
-        ).hexdigest()
+        source_manifest[relative] = hashlib.sha256(content.encode("utf-8")).hexdigest()
         files_scanned += 1
         extracted: list[OperationEvidence] = []
         if suffix == ".py":
@@ -484,9 +473,7 @@ def _extract_backend_operations(
         if extracted:
             operations.extend(extracted)
             adapters.update(found_adapters)
-            unknown += sum(
-                item.classification == "unknown" for item in extracted
-            )
+            unknown += sum(item.classification == "unknown" for item in extracted)
         elif _contains_route_syntax(content, suffix):
             operations.append(_unknown_backend(relative, "unknown", "route-syntax"))
             unknown += 1
@@ -506,14 +493,20 @@ def _extract_openapi(path: Path, relative: str) -> list[OperationEvidence]:
             document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, yaml.YAMLError):
         return []
-    if not isinstance(document, Mapping) or not isinstance(document.get("paths"), Mapping):
+    if not isinstance(document, Mapping) or not isinstance(
+        document.get("paths"), Mapping
+    ):
         return []
     operations: list[OperationEvidence] = []
-    for route, path_item in sorted(document["paths"].items(), key=lambda item: str(item[0])):
+    for route, path_item in sorted(
+        document["paths"].items(), key=lambda item: str(item[0])
+    ):
         if not isinstance(path_item, Mapping):
             continue
         inherited_schemas = _schema_references(path_item.get("parameters", []))
-        for method, operation in sorted(path_item.items(), key=lambda item: str(item[0])):
+        for method, operation in sorted(
+            path_item.items(), key=lambda item: str(item[0])
+        ):
             normalized_method = _normalize_method(method)
             if normalized_method is None or not isinstance(operation, Mapping):
                 continue
@@ -693,10 +686,7 @@ def _extract_javascript_routes(
                 )
                 continue
             adapters.add("fastify")
-            prefix = (
-                prefixes.get(match.group("receiver"), "")
-                or fastify_prefix
-            )
+            prefix = prefixes.get(match.group("receiver"), "") or fastify_prefix
             operations.append(
                 _operation(
                     side="backend",
@@ -838,7 +828,9 @@ def _dedupe_operations(
             OperationEvidence(
                 side=members[0].side,
                 method=members[0].method,
-                path=next((item.path for item in members if item.path is not None), None),
+                path=next(
+                    (item.path for item in members if item.path is not None), None
+                ),
                 normalized_path=members[0].normalized_path,
                 parameters=tuple(
                     sorted({value for item in members for value in item.parameters})
@@ -1035,9 +1027,7 @@ def _javascript_framework_factories(content: str) -> dict[str, str]:
             factories[binding] = framework
             if framework == "express":
                 factories[f"{binding}.Router"] = framework
-        namespace_match = re.search(
-            r"\*\s+as\s+(?P<binding>[A-Za-z_$][\w$]*)", clause
-        )
+        namespace_match = re.search(r"\*\s+as\s+(?P<binding>[A-Za-z_$][\w$]*)", clause)
         if namespace_match:
             binding = namespace_match.group("binding")
             factories[binding] = framework
@@ -1212,9 +1202,7 @@ def _contains_route_syntax(content: str, suffix: str) -> bool:
         r"(?:@\w+\s*\(|\.\s*(?:route|get|post|put|patch|delete)\s*\()",
         re.IGNORECASE,
     )
-    return any(
-        code_positions[match.start()] for match in pattern.finditer(content)
-    )
+    return any(code_positions[match.start()] for match in pattern.finditer(content))
 
 
 def _python_code_positions(content: str) -> tuple[bool, ...]:
@@ -1258,7 +1246,7 @@ def _javascript_code_positions(content: str) -> tuple[bool, ...]:
             positions[index:end] = [False] * (end - index)
             index = end
             continue
-        if character in {"\"", "'", "`"}:
+        if character in {'"', "'", "`"}:
             quote = character
             end = index + 1
             while end < len(content):

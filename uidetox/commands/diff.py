@@ -18,7 +18,6 @@ from collections import defaultdict
 import json
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 from uidetox.analyzer import analyze_directory, analyze_file
@@ -88,7 +87,11 @@ def _load_diff_baseline(state: dict, project_root: Path) -> list[dict]:
     baseline = state.get("diff_baseline", [])
     if not isinstance(baseline, list):
         return []
-    return [_normalize_issue_file(issue, project_root) for issue in baseline if isinstance(issue, dict)]
+    return [
+        _normalize_issue_file(issue, project_root)
+        for issue in baseline
+        if isinstance(issue, dict)
+    ]
 
 
 def _analyze_target(
@@ -111,7 +114,11 @@ def _analyze_target(
             explicit_targets=[target],
             scope_root=target.parent,
         )
-        raw = analyze_file(target, design_variance=variance) if file_set.accepts(target) else []
+        raw = (
+            analyze_file(target, design_variance=variance)
+            if file_set.accepts(target)
+            else []
+        )
     else:
         kwargs = dict(
             root_path=path,
@@ -123,7 +130,11 @@ def _analyze_target(
             kwargs["target_files"] = list(target_files)
         raw = analyze_directory(**kwargs)
 
-    return [i for i in raw if not _is_suppressed(i.get("file", ""), i.get("issue", ""), suppressions)]
+    return [
+        i
+        for i in raw
+        if not _is_suppressed(i.get("file", ""), i.get("issue", ""), suppressions)
+    ]
 
 
 def run(args: argparse.Namespace):
@@ -155,10 +166,16 @@ def run(args: argparse.Namespace):
             try:
                 gr = subprocess.run(
                     ["git", "rev-parse", "--show-toplevel"],
-                    capture_output=True, text=True,
-                    cwd=str(git_cwd), timeout=5,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(git_cwd),
+                    timeout=5,
                 )
-                root_abs = gr.stdout.strip() if gr.returncode == 0 and gr.stdout.strip() else str(git_cwd)
+                root_abs = (
+                    gr.stdout.strip()
+                    if gr.returncode == 0 and gr.stdout.strip()
+                    else str(git_cwd)
+                )
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 root_abs = str(git_cwd)
             requested_files = {str((Path(root_abs) / f).resolve()) for f in changed}
@@ -186,8 +203,7 @@ def run(args: argparse.Namespace):
     baseline_issues: list[dict] = stored_baseline
     if scope_files is not None:
         baseline_issues = [
-            i for i in baseline_issues
-            if i.get("file", "") in scope_files
+            i for i in baseline_issues if i.get("file", "") in scope_files
         ]
 
     # ── Fresh: re-run static analysis ──
@@ -196,14 +212,10 @@ def run(args: argparse.Namespace):
     else:
         analyzed_issues = _analyze_target(path, config, target_files=scope_files)
     fresh_issues = [
-        _normalize_issue_file(issue, project_root)
-        for issue in analyzed_issues
+        _normalize_issue_file(issue, project_root) for issue in analyzed_issues
     ]
     if scope_files is not None:
-        fresh_issues = [
-            i for i in fresh_issues
-            if i.get("file", "") in scope_files
-        ]
+        fresh_issues = [i for i in fresh_issues if i.get("file", "") in scope_files]
 
     # ── Compute diff sets ──
     baseline_groups = _group_issues_by_fingerprint(baseline_issues)
@@ -230,15 +242,16 @@ def run(args: argparse.Namespace):
         if scope_files is not None:
             # Partial diff: merge fresh into the full state (replace scoped files)
             other_issues = [
-                i for i in stored_baseline
-                if i.get("file", "") not in scope_files
+                i for i in stored_baseline if i.get("file", "") not in scope_files
             ]
             state["diff_baseline"] = other_issues + fresh_issues
         else:
             state["diff_baseline"] = fresh_issues
         save_state(state)
         if output_fmt != "json":
-            print(f"  [diff] Baseline updated — {len(state['diff_baseline'])} issue(s) saved to diff baseline.")
+            print(
+                f"  [diff] Baseline updated — {len(state['diff_baseline'])} issue(s) saved to diff baseline."
+            )
 
 
 def _emit(

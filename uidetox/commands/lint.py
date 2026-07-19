@@ -21,8 +21,11 @@ def run(args: argparse.Namespace):
         if not profile.linter:
             print("No linter detected. Install biome or eslint.")
             return
-        linter = {"name": profile.linter.name, "run_cmd": profile.linter.run_cmd,
-                  "fix_cmd": profile.linter.fix_cmd}
+        linter = {
+            "name": profile.linter.name,
+            "run_cmd": profile.linter.run_cmd,
+            "fix_cmd": profile.linter.fix_cmd,
+        }
 
     fix = getattr(args, "fix", False)
     cmd = linter["fix_cmd"] if fix and linter.get("fix_cmd") else linter["run_cmd"]
@@ -36,8 +39,7 @@ def run(args: argparse.Namespace):
     try:
         argv, env = prepare_subprocess_cmd(cmd)
         result = subprocess.run(
-            argv,
-            capture_output=True, text=True, cwd=project_root, timeout=120, env=env
+            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
         )
     except FileNotFoundError:
         print(f"Command not found. Install {linter['name']}.")
@@ -60,20 +62,28 @@ def run(args: argparse.Namespace):
 
     # Generic parser that catches file.ts:line:col (with optional trailing colon)
     # Works for ESLint (unix/stylish), Biome, TSC, and standard GNU outputs
-    pattern = re.compile(r"^([^:\n]+?):(\d+):(\d+)(?::\s*|\s+-\s*|\s+)(.+)$", re.MULTILINE)
+    pattern = re.compile(
+        r"^([^:\n]+?):(\d+):(\d+)(?::\s*|\s+-\s*|\s+)(.+)$", re.MULTILINE
+    )
     errors = pattern.findall(output)
 
     queued = 0
     for file_path, line, col, msg in errors:
-        if file_path.startswith("/") or file_path.startswith(".") or ":" not in file_path:
+        if (
+            file_path.startswith("/")
+            or file_path.startswith(".")
+            or ":" not in file_path
+        ):
             issue_id = f"LINT-{str(uuid.uuid4())[:6].upper()}"
-            add_issue({
-                "id": issue_id,
-                "file": file_path,
-                "tier": "T1",
-                "issue": f"Lint: {msg.strip()} (line {line})",
-                "command": "lint-fix",
-            })
+            add_issue(
+                {
+                    "id": issue_id,
+                    "file": file_path,
+                    "tier": "T1",
+                    "issue": f"Lint: {msg.strip()} (line {line})",
+                    "command": "lint-fix",
+                }
+            )
             queued += 1
             if queued <= 10:
                 print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")
@@ -83,7 +93,9 @@ def run(args: argparse.Namespace):
 
     if queued > 0:
         print(f"\n📋 Queued {queued} lint error(s) as T1 issues.")
-        print("Run 'uidetox next' to start fixing, or 'uidetox lint --fix' to auto-fix.")
+        print(
+            "Run 'uidetox next' to start fixing, or 'uidetox lint --fix' to auto-fix."
+        )
     else:
         # Couldn't parse, just show raw output
         print(output[:2000])

@@ -2,27 +2,33 @@
 
 import argparse
 import html
-import json
 from pathlib import Path
 from collections import defaultdict
-from uidetox.state import load_state, ensure_uidetox_dir, get_project_root, get_uidetox_dir
+from uidetox.state import (
+    load_state,
+    ensure_uidetox_dir,
+    get_project_root,
+    get_uidetox_dir,
+)
 
 
 def run(args: argparse.Namespace):
     # Depending on how the command was invoked (viz or tree)
     cmd = getattr(args, "viz_cmd", "viz")
     path_arg = getattr(args, "path", ".")
-    path_root = Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)
-    
+    path_root = (
+        Path(get_project_root()) if path_arg in (None, "", ".") else Path(path_arg)
+    )
+
     state = load_state()
     issues = state.get("issues", [])
-    
+
     # Map issues to files
     issue_map = defaultdict(list)
     for issue in issues:
         # File paths in state are usually relative to project root
         issue_map[issue.get("file", "")].append(issue)
-        
+
     if cmd == "tree":
         _render_tree(path_root, issue_map, max_depth=getattr(args, "depth", 3))
     else:
@@ -41,8 +47,14 @@ def _issue_display_path(root_path: Path, file_path_str: str) -> Path:
 
 def _build_tree(root_path: Path, issue_map: dict) -> dict:
     """Builds a nested dictionary representing the directory structure with issue counts."""
-    tree = {"name": root_path.name or str(root_path), "path": str(root_path), "type": "dir", "issues": 0, "children": {}}
-    
+    tree = {
+        "name": root_path.name or str(root_path),
+        "path": str(root_path),
+        "type": "dir",
+        "issues": 0,
+        "children": {},
+    }
+
     for file_path_str, file_issues in issue_map.items():
         if not file_path_str:
             continue
@@ -54,18 +66,18 @@ def _build_tree(root_path: Path, issue_map: dict) -> dict:
 
         current = tree
         current["issues"] += len(file_issues)
-        
+
         for i, part in enumerate(parts):
-            is_file = (i == len(parts) - 1)
-            
+            is_file = i == len(parts) - 1
+
             if part not in current["children"]:
                 current["children"][part] = {
                     "name": part,
-                    "path": str(Path(*parts[:i+1])),
+                    "path": str(Path(*parts[: i + 1])),
                     "type": "file" if is_file else "dir",
                     "issues": 0,
                     "issues_list": [],
-                    "children": {} if not is_file else None
+                    "children": {} if not is_file else None,
                 }
 
             node = current["children"][part]
@@ -90,7 +102,7 @@ def _print_tree(node: dict, indent: int, max_depth: int):
     prefix = "  " * indent
     name = f"{node['name']}/" if node["type"] == "dir" else node["name"]
     issue_count = node["issues"]
-    
+
     if issue_count > 0:
         # Colorize issue count based on severity (if possible, sticking to basic for now)
         color_start = "\033[91m" if issue_count >= 5 else "\033[93m"
@@ -98,10 +110,10 @@ def _print_tree(node: dict, indent: int, max_depth: int):
         annotation = f" {color_start}⚠ {issue_count} issue(s){color_end}"
     else:
         annotation = ""
-        
+
     if node["type"] == "file" or indent == 0 or issue_count > 0:
         print(f"{prefix}{name}{annotation}")
-        
+
         # If it's a file with issues, optionally list the tiers
         if node["type"] == "file" and issue_count > 0:
             tiers = defaultdict(int)
@@ -113,10 +125,14 @@ def _print_tree(node: dict, indent: int, max_depth: int):
     if node["type"] == "dir" and indent < max_depth and node["children"]:
         # Sort children: dirs first, then files, both sorted by issue count (descending)
         children = list(node["children"].values())
-        children.sort(key=lambda x: (0 if x["type"] == "dir" else 1, -x["issues"], x["name"]))
-        
+        children.sort(
+            key=lambda x: (0 if x["type"] == "dir" else 1, -x["issues"], x["name"])
+        )
+
         for child in children:
-            if child["issues"] > 0 or child["type"] == "dir": # Only show paths leading to issues
+            if (
+                child["issues"] > 0 or child["type"] == "dir"
+            ):  # Only show paths leading to issues
                 _print_tree(child, indent + 1, max_depth)
 
 
@@ -125,7 +141,7 @@ def _render_tree(root_path: Path, issue_map: dict, max_depth: int):
     if not issue_map:
         print("  Codebase is clean! No issues found. 🌱")
         return
-        
+
     tree = _build_tree(root_path, issue_map)
     _print_tree(tree, 0, max_depth)
     print()
@@ -134,17 +150,12 @@ def _render_tree(root_path: Path, issue_map: dict, max_depth: int):
 def _render_html_treemap(root_path: Path, issue_map: dict):
     ensure_uidetox_dir()
     output_path = get_uidetox_dir() / "treemap.html"
-    
+
     if not issue_map:
         print("\n  Codebase is clean! No issues found to visualize. 🌱")
         return
 
-    # Prepare data for a simple D3/ECharts style treemap or a nested HTML visualization
-    # For a CLI robust solution without external dependencies, we generate a self-contained HTML file
-    # utilizing basic CSS grid/flexbox based on the tree structure.
-    
-    tree = _build_tree(root_path, issue_map)
-    
+    # Generate a self-contained HTML visualization without external dependencies.
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -203,32 +214,37 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
     
     <div class="heatmap-container">
 """
-    
+
     # Flatten just the files with issues for the simple heatmap
     files_with_issues = []
     for file_path, file_issues in issue_map.items():
         if not file_path:
             continue
         display_path = _issue_display_path(root_path, file_path)
-        files_with_issues.append({
-            "path": str(display_path),
-            "name": display_path.name,
-            "issues": len(file_issues),
-            "issue_details": file_issues
-        })
-        
+        files_with_issues.append(
+            {
+                "path": str(display_path),
+                "name": display_path.name,
+                "issues": len(file_issues),
+                "issue_details": file_issues,
+            }
+        )
+
     # Sort by issue count descending
     files_with_issues.sort(key=lambda x: -x["issues"])
-    
+
     for f in files_with_issues:
         heat_class = "heat-1"
-        if f["issues"] >= 8: heat_class = "heat-4"
-        elif f["issues"] >= 4: heat_class = "heat-3"
-        elif f["issues"] >= 2: heat_class = "heat-2"
-        
+        if f["issues"] >= 8:
+            heat_class = "heat-4"
+        elif f["issues"] >= 4:
+            heat_class = "heat-3"
+        elif f["issues"] >= 2:
+            heat_class = "heat-2"
+
         # Calculate flexible width based on issue weight (more issues = larger block)
         flex_basis = f["issues"] * 50
-        
+
         tooltip_li = "".join(
             f"<li>[{html.escape(str(i.get('tier', '?')))}] {html.escape(i.get('issue', ''))}</li>"
             for i in f["issue_details"]
@@ -248,7 +264,7 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
             </div>
         </div>
         """
-        
+
     html_content += """
     </div>
 </body>
@@ -257,7 +273,7 @@ def _render_html_treemap(root_path: Path, issue_map: dict):
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
-        
-    print(f"\n✅ Visualization generated successfully.")
+
+    print("\n✅ Visualization generated successfully.")
     print(f"  Heatmap written to: {output_path}")
     print(f"  Open in browser: file://{output_path.resolve()}\n")

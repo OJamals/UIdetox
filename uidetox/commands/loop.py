@@ -13,15 +13,19 @@ Flow (from desloppify architecture):
 """
 
 import argparse
-import pathlib
 import subprocess
-import sys
 import uuid
 
-from ..state import get_project_root, load_config, save_config, load_state, ensure_uidetox_dir
+from ..state import (
+    get_project_root,
+    load_config,
+    save_config,
+    load_state,
+    ensure_uidetox_dir,
+)
 from ..fileset import ProjectFileSet
 from ..tooling import detect_all
-from ..memory import get_patterns, get_notes, get_session, get_last_scan, save_session, log_progress
+from ..memory import get_patterns, get_notes, get_session, get_last_scan, log_progress
 from ..utils import compute_design_score
 from ..workflow import run_executable_workflow
 
@@ -42,9 +46,7 @@ def run(args: argparse.Namespace):
             proposal_id=getattr(args, "proposal_id", None),
             subjective_score=getattr(args, "review_score", None),
             require_visual_evidence=(
-                True
-                if getattr(args, "require_visual_evidence", False)
-                else None
+                True if getattr(args, "require_visual_evidence", False) else None
             ),
             visual_evidence_file=getattr(
                 args,
@@ -77,14 +79,18 @@ def run(args: argparse.Namespace):
     issues = state.get("issues", [])
     resolved = len(state.get("resolved", []))
     tooling = config.get("tooling", {})
-    has_mechanical = tooling.get("typescript") or tooling.get("linter") or tooling.get("formatter")
+    has_mechanical = (
+        tooling.get("typescript") or tooling.get("linter") or tooling.get("formatter")
+    )
 
     # ---- Codebase sizing ----
-    frontend_count = len(ProjectFileSet(
-        project_root,
-        excludes=config.get("exclude", []),
-        zone_overrides=config.get("zone_overrides", {}),
-    ).discover())
+    frontend_count = len(
+        ProjectFileSet(
+            project_root,
+            excludes=config.get("exclude", []),
+            zone_overrides=config.get("zone_overrides", {}),
+        ).discover()
+    )
     unique_files = len(set(i.get("file", "") for i in issues))
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))
@@ -100,7 +106,9 @@ def run(args: argparse.Namespace):
     print("  UIdetox Autonomous Loop")
     print("=" * 60)
     print(f"  Target: {target}  |  Queue: {len(issues)}  |  Resolved: {resolved}")
-    print(f"  Files: {frontend_count}  |  Orchestrator: {'yes' if is_orchestrator else 'no'}")
+    print(
+        f"  Files: {frontend_count}  |  Orchestrator: {'yes' if is_orchestrator else 'no'}"
+    )
     print()
 
     # ---- Autonomous directive ----
@@ -117,16 +125,16 @@ def run(args: argparse.Namespace):
         print("  CONTINUATION CONTEXT")
         print("-" * 60)
         if session:
-            phase = session.get('phase', 'unknown')
-            last_cmd = session.get('last_command', 'none')
-            fixed = session.get('issues_fixed_this_session', 0)
+            phase = session.get("phase", "unknown")
+            last_cmd = session.get("last_command", "none")
+            fixed = session.get("issues_fixed_this_session", 0)
             print(f"  Last phase: {phase}  |  Last cmd: {last_cmd}  |  Fixed: {fixed}")
             if session.get("last_component"):
                 print(f"  Last component: {session['last_component']}")
         if last_scan:
-            ts = last_scan.get('timestamp', 'unknown')[:19]
-            found = last_scan.get('total_found', 0)
-            top = last_scan.get('top_files', [])[:3]
+            ts = last_scan.get("timestamp", "unknown")[:19]
+            found = last_scan.get("total_found", 0)
+            top = last_scan.get("top_files", [])[:3]
             print(f"  Last scan: {ts}  |  Found: {found}")
             if top:
                 print(f"  Hottest: {', '.join(top)}")
@@ -184,9 +192,11 @@ def run(args: argparse.Namespace):
     print("        This runs the static analyzer AND prompts subjective review.")
     print("        Both mechanical issues and subjective analysis happen together.")
     if is_orchestrator:
-        print(f"    1c. Orchestrator: `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`")
-        print(f"        Launch sub-agents to read files in parallel shards.")
-        print(f"        Then: `uidetox subagent --stage-prompt diagnose`")
+        print(
+            f"    1c. Orchestrator: `uidetox subagent --stage-prompt observe --parallel {auto_parallel}`"
+        )
+        print("        Launch sub-agents to read files in parallel shards.")
+        print("        Then: `uidetox subagent --stage-prompt diagnose`")
     print()
 
     # ---- STAGE 2: FIX LOOP ----
@@ -213,7 +223,7 @@ def run(args: argparse.Namespace):
 
     if is_orchestrator:
         print()
-        print(f"    Orchestrator mode: distribute fixes across sub-agents:")
+        print("    Orchestrator mode: distribute fixes across sub-agents:")
         print(f"      `uidetox subagent --stage-prompt fix --parallel {auto_parallel}`")
     print()
 
@@ -269,14 +279,19 @@ def run(args: argparse.Namespace):
         print("  -> STAGE 2: Run `uidetox next` to start fixing.")
     else:
         if has_mechanical:
-            print("  -> STAGE 1: Run `uidetox check --fix` then `uidetox scan --path .`")
+            print(
+                "  -> STAGE 1: Run `uidetox check --fix` then `uidetox scan --path .`"
+            )
         else:
             print("  -> STAGE 1: Run `uidetox scan --path .`")
 
     print()
 
     # Log the loop invocation
-    log_progress("loop_start", f"target={target}, score={blended}, queue={queue_size}, orchestrator={is_orchestrator}")
+    log_progress(
+        "loop_start",
+        f"target={target}, score={blended}, queue={queue_size}, orchestrator={is_orchestrator}",
+    )
 
 
 def _ensure_session_branch():
@@ -284,7 +299,9 @@ def _ensure_session_branch():
     try:
         current = subprocess.run(
             ["git", "branch", "--show-current"],
-            capture_output=True, text=True, check=True
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
 
         if not current.startswith("uidetox-session-"):
@@ -295,4 +312,6 @@ def _ensure_session_branch():
         else:
             print(f"  Git: resuming session branch {current}")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("  Git: not initialized or branching failed. Proceeding without isolation.")
+        print(
+            "  Git: not initialized or branching failed. Proceeding without isolation."
+        )

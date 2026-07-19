@@ -8,7 +8,8 @@ from uidetox.analyzer import ast_capabilities
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Reject contributor environments without the core AST dependencies."""
     unavailable = [
-        name for name, capability in ast_capabilities().items()
+        name
+        for name, capability in ast_capabilities().items()
         if not capability["available"]
     ]
     if unavailable:

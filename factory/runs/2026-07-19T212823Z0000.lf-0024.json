@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0024.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T21:28:23+00:00",
+  "id": "lf-0024",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0024.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0024-agent-integration.md",
+  "spec_sha256": "ef0888aff4d652a8c411af95fde823422bfd43b434a3d3bbd3f7b9ebae75fae3",
+  "status": "planned",
+  "title": "Deepen agent skill and instruction installation"
+}

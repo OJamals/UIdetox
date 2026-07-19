@@ -105,14 +105,12 @@ class DesignIntent:
     )
     evidence: dict[str, tuple[str, ...]] = field(
         default_factory=lambda: {
-            field_name: (f"fallback:{field_name}",)
-            for field_name in _INTENT_FIELDS
+            field_name: (f"fallback:{field_name}",) for field_name in _INTENT_FIELDS
         }
     )
     confidence: dict[str, float] = field(
         default_factory=lambda: {
-            field_name: _SOURCE_CONFIDENCE["fallback"]
-            for field_name in _INTENT_FIELDS
+            field_name: _SOURCE_CONFIDENCE["fallback"] for field_name in _INTENT_FIELDS
         }
     )
     confirmation_status: str = "inferred"
@@ -195,9 +193,7 @@ class DesignSettings:
                     field_name, ("config:design_intent",)
                 )
                 confidence[field_name] = 1.0
-            has_mapped_fields = any(
-                value == "mapped" for value in provenance.values()
-            )
+            has_mapped_fields = any(value == "mapped" for value in provenance.values())
             merged["source"] = (
                 "configured+inferred"
                 if explicit_fields and has_mapped_fields
@@ -224,8 +220,7 @@ def infer_design_intent(
             scope=target,
             provenance={field_name: "fallback" for field_name in _INTENT_FIELDS},
             evidence={
-                field_name: (f"fallback:{field_name}",)
-                for field_name in _INTENT_FIELDS
+                field_name: (f"fallback:{field_name}",) for field_name in _INTENT_FIELDS
             },
             confidence={
                 field_name: _SOURCE_CONFIDENCE["fallback"]
@@ -322,9 +317,7 @@ def merge_explicit_design_intent(
     values["evidence"] = evidence
     values["confidence"] = confidence
     values["confirmation_status"] = _confirmation_status(provenance)
-    values["confirmed_at"] = (
-        confirmed_at if changed else existing_intent.confirmed_at
-    )
+    values["confirmed_at"] = confirmed_at if changed else existing_intent.confirmed_at
     return DesignIntent.from_dict(values).to_dict()
 
 
@@ -397,8 +390,7 @@ def _intent_evidence(value: Any) -> dict[str, tuple[str, ...]]:
     return {
         field_name: evidence
         for field_name, raw_evidence in value.items()
-        if field_name in _INTENT_FIELDS
-        and (evidence := _strings(raw_evidence))
+        if field_name in _INTENT_FIELDS and (evidence := _strings(raw_evidence))
     }
 
 
@@ -420,8 +412,7 @@ def _intent_confidence(value: Any) -> dict[str, float]:
 
 def _confirmation_status(provenance: Mapping[str, str]) -> str:
     explicit_count = sum(
-        provenance.get(field_name) == "explicit"
-        for field_name in _CONFIRMATION_FIELDS
+        provenance.get(field_name) == "explicit" for field_name in _CONFIRMATION_FIELDS
     )
     if explicit_count == len(_CONFIRMATION_FIELDS):
         return "confirmed"

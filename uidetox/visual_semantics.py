@@ -117,9 +117,8 @@ def _relevant_contracts(
     name = element.name.lower()
     for contract in frontend_map.contracts.must_preserve:
         lowered = contract.lower()
-        if (
-            (tag == "nav" or role == "navigation")
-            and ("route" in lowered or "navigation" in lowered)
+        if (tag == "nav" or role == "navigation") and (
+            "route" in lowered or "navigation" in lowered
         ):
             contracts.append(contract)
         elif element.kind == "action" and (
@@ -240,9 +239,7 @@ def project_visual_evidence_status(
     if not isinstance(visual_config, Mapping):
         visual_config = {}
     is_required = (
-        bool(visual_config.get("required", False))
-        if required is None
-        else required
+        bool(visual_config.get("required", False)) if required is None else required
     )
     configured_path = manifest_path or visual_config.get("manifest_path")
     resolved_manifest = (
@@ -252,15 +249,9 @@ def project_visual_evidence_status(
     )
     try:
         expected_parameters = {
-            "threshold": int(
-                visual_config.get("threshold", DEFAULT_PIXEL_THRESHOLD)
-            ),
-            "max_pixels": int(
-                visual_config.get("max_pixels", DEFAULT_MAX_PIXELS)
-            ),
-            "dimension_policy": str(
-                visual_config.get("dimension_policy", "strict")
-            ),
+            "threshold": int(visual_config.get("threshold", DEFAULT_PIXEL_THRESHOLD)),
+            "max_pixels": int(visual_config.get("max_pixels", DEFAULT_MAX_PIXELS)),
+            "dimension_policy": str(visual_config.get("dimension_policy", "strict")),
             "color_policy": str(visual_config.get("color_policy", "native")),
         }
     except (TypeError, ValueError) as error:
@@ -310,14 +301,8 @@ def explicit_ignore_regions(
             continue
         bounds = value.get("bounds")
         reason = str(value.get("reason", "")).strip()
-        if (
-            not isinstance(bounds, (list, tuple))
-            or len(bounds) != 4
-            or not reason
-        ):
-            raise ValueError(
-                f"ignore region {index} requires bounds and a reason"
-            )
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 4 or not reason:
+            raise ValueError(f"ignore region {index} requires bounds and a reason")
         regions.append(
             VisualRegion(
                 region_id=str(value.get("id", f"ignore-{index}")),

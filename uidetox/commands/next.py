@@ -736,7 +736,9 @@ def _select_batch(issues: list[dict]) -> tuple[str, list[dict], list[str], str]:
         if str(Path(issue.get("file", "")).parent) == target_dir
     ][:15]
     batch_files = list(dict.fromkeys(issue.get("file", "") for issue in batch))
-    component = target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
+    component = (
+        target_dir.replace("\\", "/").split("/")[-1] if target_dir != "." else "root"
+    )
     return target_dir, batch, batch_files, component
 
 
@@ -787,16 +789,20 @@ def run(args: argparse.Namespace):
 
     for idx, iss in enumerate(batch):
         print(f"  Repository issue {idx + 1}:")
-        print(render_untrusted_data({
-            "id": iss.get("id", "UNKNOWN"),
-            "tier": iss.get("tier", "?"),
-            "file": iss.get("file"),
-            "line": iss.get("line"),
-            "column": iss.get("column", 1),
-            "snippet": iss.get("snippet"),
-            "issue": iss["issue"],
-            "command": iss.get("command", "manual fix"),
-        }))
+        print(
+            render_untrusted_data(
+                {
+                    "id": iss.get("id", "UNKNOWN"),
+                    "tier": iss.get("tier", "?"),
+                    "file": iss.get("file"),
+                    "line": iss.get("line"),
+                    "column": iss.get("column", 1),
+                    "snippet": iss.get("snippet"),
+                    "issue": iss["issue"],
+                    "command": iss.get("command", "manual fix"),
+                }
+            )
+        )
         print()
 
     print("  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
@@ -824,16 +830,16 @@ def run(args: argparse.Namespace):
                 print(f"    {ref}")
             print()
 
-    # Inject semantic memory context based on current issues
+    # Inject relevant local project memory based on current issues
     try:
-        from uidetox.subagent import _build_memory_block # type: ignore
+        from uidetox.subagent import _build_memory_block  # type: ignore
+
         query_text = " ".join(
-            issue.get("issue", "") + " " + issue.get("command", "")
-            for issue in batch
+            issue.get("issue", "") + " " + issue.get("command", "") for issue in batch
         )
         memory_block = _build_memory_block(query=query_text)
         if memory_block:
-            print("  ━━━ PERSISTENT AGENT MEMORY (semantically matched) ━━━")
+            print("  ━━━ PERSISTENT AGENT MEMORY (relevance matched) ━━━")
             for line in memory_block.split("\n"):
                 if line.strip():
                     print(f"  {line}")
@@ -851,18 +857,26 @@ def run(args: argparse.Namespace):
     tiers = _count_tiers(issues)
 
     print(f"  Queue : {remaining} remaining after this batch")
-    print(f"  Stats : {tiers['T1']}xT1, {tiers['T2']}xT2, {tiers['T3']}xT3, {tiers['T4']}xT4 | {resolved_count} resolved so far")
+    print(
+        f"  Stats : {tiers['T1']}xT1, {tiers['T2']}xT2, {tiers['T3']}xT3, {tiers['T4']}xT4 | {resolved_count} resolved so far"
+    )
     print()
     # Auto-commit awareness
     auto_commit = config.get("auto_commit", False)
 
     print("[AGENT INSTRUCTION]")
-    print("1. Read all files listed in the repository data block below that have issues:")
+    print(
+        "1. Read all files listed in the repository data block below that have issues:"
+    )
     print(render_untrusted_data({"files": batch_files}))
     if skill_path:
-        print(f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues.")
+        print(
+            f"2. Read SKILL.md at {skill_path} for the full design rules relevant to these issues."
+        )
     step = 3 if skill_path else 2
-    print(f"{step}. Fix ALL {len(batch)} issue(s) listed above in ONE pass, following SKILL.md rules.")
+    print(
+        f"{step}. Fix ALL {len(batch)} issue(s) listed above in ONE pass, following SKILL.md rules."
+    )
     step += 1
     print(f"{step}. Verify fixes don't break functionality.")
     step += 1
@@ -870,8 +884,12 @@ def run(args: argparse.Namespace):
     print("     uidetox check --fix")
     step += 1
     print(f"{step}. Batch-resolve all issues with a single coherent commit:")
-    print('     uidetox batch-resolve <IDs from issue data> --note "describe what you changed"')
+    print(
+        '     uidetox batch-resolve <IDs from issue data> --note "describe what you changed"'
+    )
     if auto_commit:
-        print("     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit.")
+        print(
+            "     AUTO-COMMIT is ON — batch-resolve will create a single coherent commit."
+        )
     step += 1
     print(f"{step}. Then immediately run: uidetox next")

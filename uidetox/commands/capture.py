@@ -7,7 +7,9 @@ import shutil
 import sys
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from uidetox.capabilities import capture_install_guidance
 from uidetox.frontend_map import FRONTEND_MAP_FILE
 from uidetox.runtime_observer import (
     RuntimeObservation,
@@ -37,10 +39,7 @@ from uidetox.visual_semantics import (
 )
 
 
-_CAPTURE_INSTALL_GUIDANCE = (
-    "Install capture support with: pip install 'uidetox[capture]'\n"
-    "Install Chromium with: python -m playwright install chromium"
-)
+_CAPTURE_INSTALL_GUIDANCE = capture_install_guidance()
 _RESPONSIVE_VIEWPORTS = (
     ("mobile", 375, 812),
     ("tablet", 768, 1024),
@@ -66,7 +65,15 @@ def _missing_browser_executable(error: Exception) -> bool:
 def _server_is_reachable(url: str) -> bool:
     """Return True if the URL responds within 3 seconds."""
     try:
-        urllib.request.urlopen(url, timeout=3)  # noqa: S310
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        # The parsed URL is restricted to HTTP(S) with a hostname above.
+        response = urllib.request.urlopen(  # nosec B310
+            url,
+            timeout=3,
+        )
+        response.close()
         return True
     except Exception:
         return False
@@ -79,8 +86,9 @@ def _snapshots_dir() -> Path:
     return d
 
 
-def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
-                         viewport: dict | None = None) -> bool:
+def _capture_screenshot(
+    url: str, out_path: Path, full_page: bool = True, viewport: dict | None = None
+) -> bool:
     """Capture one screenshot through the shared runtime observer.
 
     Returns True on success, False on failure.
@@ -103,8 +111,7 @@ def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
     return bool(
         observation is not None
         and any(
-            page.screenshot == str(out_path.resolve())
-            for page in observation.pages
+            page.screenshot == str(out_path.resolve()) for page in observation.pages
         )
     )
 
@@ -131,9 +138,7 @@ def _capture_multi_viewport(url: str, prefix: str) -> list[Path]:
     for viewport, out_file in destinations:
         if out_file.resolve() in captured:
             ordered.append(out_file)
-            print(
-                f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})"
-            )
+            print(f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})")
     return ordered
 
 
@@ -148,9 +153,7 @@ def _observe_capture(
     roots = {path.parent.resolve() for _, path in destinations}
     if len(roots) != 1:
         raise ValueError("Capture destinations must share one output directory.")
-    names = {
-        viewport.name: path.name for viewport, path in destinations
-    }
+    names = {viewport.name: path.name for viewport, path in destinations}
     try:
         observation = observe_frontend(
             url,
@@ -163,9 +166,7 @@ def _observe_capture(
         )
     except RuntimeError as error:
         print(f"❌ Failed to capture screenshot: {error}", file=sys.stderr)
-        if _missing_browser_executable(error) or "Playwright unavailable" in str(
-            error
-        ):
+        if _missing_browser_executable(error) or "Playwright unavailable" in str(error):
             print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
         return None
     for error in observation.errors:
@@ -203,15 +204,11 @@ def _capture_named_stage(
         for page in observation.pages
         if page.screenshot is not None
     }
-    captured = [
-        path for _, path in destinations if path.resolve() in captured_set
-    ]
+    captured = [path for _, path in destinations if path.resolve() in captured_set]
     if responsive:
         for viewport, path in destinations:
             if path in captured:
-                print(
-                    f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})"
-                )
+                print(f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})")
     if captured:
         _atomic_write_json(
             snapshots / f"runtime_{prefix}.json",
@@ -330,9 +327,7 @@ def _build_capture_evidence(
         page = pages.get(case_id)
         try:
             ignore_regions = (
-                explicit_ignore_regions(active_config, page)
-                if page is not None
-                else ()
+                explicit_ignore_regions(active_config, page) if page is not None else ()
             )
         except ValueError as error:
             raise VisualEvidenceError(
@@ -541,7 +536,10 @@ def run(args: argparse.Namespace):
 
     if not _server_is_reachable(url):
         print(f"❌ Cannot reach {url}", file=sys.stderr)
-        print("   ⚠️  uidetox does NOT start your dev server — you must start it first.", file=sys.stderr)
+        print(
+            "   ⚠️  uidetox does NOT start your dev server — you must start it first.",
+            file=sys.stderr,
+        )
         print(
             "   Start your dev server (e.g. npm run dev / pnpm dev), then re-run capture.",
             file=sys.stderr,
@@ -574,10 +572,11 @@ def run(args: argparse.Namespace):
             "after",
             responsive=responsive,
         )
-        runtime_pages = {
-            page.viewport.name: page
-            for page in observation.pages
-        } if observation is not None else {}
+        runtime_pages = (
+            {page.viewport.name: page for page in observation.pages}
+            if observation is not None
+            else {}
+        )
         if responsive:
             if captured:
                 print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")
@@ -603,7 +602,9 @@ def run(args: argparse.Namespace):
                             print(f"  ⚠️  {error}")
                             diffs = []
                         else:
-                            print(f"❌ Visual evidence failed: {error}", file=sys.stderr)
+                            print(
+                                f"❌ Visual evidence failed: {error}", file=sys.stderr
+                            )
                             sys.exit(1)
                     for diff in diffs:
                         vp_name = str(diff["viewport"])
@@ -653,17 +654,16 @@ def run(args: argparse.Namespace):
                 diff = diffs[0] if diffs else {}
                 change_pct = diff.get("change_percentage", "?")
                 coverage_band = diff.get("coverage_band", "unknown")
-                print(
-                    f"   Changed-pixel coverage: {change_pct}% "
-                    f"({coverage_band})"
-                )
+                print(f"   Changed-pixel coverage: {change_pct}% ({coverage_band})")
                 if diff.get("diff_image"):
                     print(f"   Diff image: {diff['diff_image']}")
 
                 if diff:
                     _atomic_write_json(snapshots / "diff_meta.json", diff)
             else:
-                print("   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first.")
+                print(
+                    "   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first."
+                )
 
         # Copy to latest for review command
         latest = snapshots / "latest.png"

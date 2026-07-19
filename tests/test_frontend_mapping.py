@@ -137,7 +137,9 @@ def test_map_frontend_builds_semantic_graph_and_contracts(tmp_path):
     }
     assert {node.name for node in nodes if node.kind == "route"} == {"/dashboard"}
     assert {node.name for node in nodes if node.kind == "data"} == {"/api/items"}
-    assert next(node for node in nodes if node.kind == "data").metadata["method"] == "GET"
+    assert (
+        next(node for node in nodes if node.kind == "data").metadata["method"] == "GET"
+    )
     assert {node.name for node in nodes if node.kind == "state"} == {"loading"}
     assert {node.name for node in nodes if node.kind == "token"} == {
         "--color-accent",
@@ -316,8 +318,7 @@ def items():
     refreshed = map_frontend(tmp_path, "src")
     assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
     assert {
-        operation["method"]
-        for operation in refreshed.project_map["backend_operations"]
+        operation["method"] for operation in refreshed.project_map["backend_operations"]
     } == {"POST"}
 
 

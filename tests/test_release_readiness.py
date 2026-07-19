@@ -19,7 +19,10 @@ def test_publish_workflow_validates_tag_and_distributions() -> None:
     assert "python -m pytest -q -W error" in workflow
     assert 'python-version: "3.13"' in workflow
     assert "Verify release commit belongs to default branch" in workflow
-    assert 'git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${DEFAULT_BRANCH}"' in workflow
+    assert (
+        'git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${DEFAULT_BRANCH}"'
+        in workflow
+    )
     assert "Verify release tag matches package version" in workflow
     assert 'EXPECTED_TAG="v${PACKAGE_VERSION}"' in workflow
     assert "python -m twine check dist/*" in workflow

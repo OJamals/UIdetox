@@ -7,10 +7,10 @@ from uidetox.state import load_state
 
 # ANSI color codes for terminal output
 _COLORS = {
-    "T1": "\033[92m",   # Green — quick fix
-    "T2": "\033[93m",   # Yellow — targeted refactor
-    "T3": "\033[91m",   # Red — design judgment
-    "T4": "\033[95m",   # Magenta — major redesign
+    "T1": "\033[92m",  # Green — quick fix
+    "T2": "\033[93m",  # Yellow — targeted refactor
+    "T3": "\033[91m",  # Red — design judgment
+    "T4": "\033[95m",  # Magenta — major redesign
     "reset": "\033[0m",
     "dim": "\033[2m",
     "bold": "\033[1m",
@@ -45,7 +45,8 @@ def run(args: argparse.Namespace):
 
     # Filter by pattern: match against issue ID, file path, or tier
     matches = [
-        i for i in issues
+        i
+        for i in issues
         if pattern.lower() in i.get("id", "").lower()
         or pattern.lower() in i.get("file", "").lower()
         or pattern.upper() == i.get("tier", "").upper()
@@ -80,7 +81,9 @@ def _render_grouped(issues: list[dict]):
         for t, c in sorted(tiers.items())
     )
 
-    print(f"\n  {_COLORS['bold']}UIdetox Issue Queue{_COLORS['reset']}  ({len(issues)} issues across {len(sorted_files)} files)")
+    print(
+        f"\n  {_COLORS['bold']}UIdetox Issue Queue{_COLORS['reset']}  ({len(issues)} issues across {len(sorted_files)} files)"
+    )
     print(f"  {tier_summary}")
     print()
 
@@ -92,9 +95,16 @@ def _render_grouped(issues: list[dict]):
             file_tiers[i.get("tier") or "T4"] += 1
         tier_str = " ".join(f"{t}:{c}" for t, c in sorted(file_tiers.items()))
 
-        print(f"  {_COLORS['bold']}{short_path}{_COLORS['reset']}  ({len(file_issues)} issues: {tier_str})")
+        print(
+            f"  {_COLORS['bold']}{short_path}{_COLORS['reset']}  ({len(file_issues)} issues: {tier_str})"
+        )
 
-        for i in sorted(file_issues, key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(x.get("tier", "T4"), 4)):
+        for i in sorted(
+            file_issues,
+            key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(
+                x.get("tier", "T4"), 4
+            ),
+        ):
             tier = i.get("tier", "T4")
             color = _COLORS.get(tier, "")
             reset = _COLORS["reset"]
@@ -106,11 +116,15 @@ def _render_grouped(issues: list[dict]):
             loc = ""
             if i.get("line"):
                 loc = f" {dim}@{i.get('line')}:{i.get('column', 1)}{reset}"
-            print(f"    {color}[{tier}]{reset} {i.get('id', '?'):<14}{loc} {issue_text}")
+            print(
+                f"    {color}[{tier}]{reset} {i.get('id', '?'):<14}{loc} {issue_text}"
+            )
 
         print()
 
-    print(f"  {_COLORS['dim']}Use: uidetox show <ID> for detail | uidetox show <T1-T4> to filter by tier{_COLORS['reset']}")
+    print(
+        f"  {_COLORS['dim']}Use: uidetox show <ID> for detail | uidetox show <T1-T4> to filter by tier{_COLORS['reset']}"
+    )
 
 
 def _render_detailed(issues: list[dict]):
@@ -136,7 +150,17 @@ def _shorten_path(filepath: str) -> str:
     parts = p.parts
     # Find a meaningful starting point
     for i, part in enumerate(parts):
-        if part in ("src", "app", "pages", "components", "features", "lib", "modules", "views", "layouts"):
+        if part in (
+            "src",
+            "app",
+            "pages",
+            "components",
+            "features",
+            "lib",
+            "modules",
+            "views",
+            "layouts",
+        ):
             return str(Path(*parts[i:]))
     # If path is long, show last 3 segments
     if len(parts) > 4:

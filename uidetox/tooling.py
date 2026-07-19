@@ -116,6 +116,7 @@ _PYTHON_DATABASE_IMPORT_TO_TOOL = {
 @dataclass
 class ToolInfo:
     """A detected tool with its run command."""
+
     name: str
     config_file: str
     run_cmd: str
@@ -125,6 +126,7 @@ class ToolInfo:
 @dataclass
 class ProjectProfile:
     """Everything we know about the project's tooling."""
+
     root: str = "."
     package_manager: str | None = None
     typescript: ToolInfo | None = None
@@ -139,18 +141,18 @@ class ProjectProfile:
         d: dict = {}
         d["root"] = str(self.root) if self.root else None
         d["package_manager"] = self.package_manager
-        
+
         ts = self.typescript
         ln = self.linter
         fm = self.formatter
-        
-        d["typescript"] = asdict(ts) if ts is not None else None # type: ignore
-        d["linter"] = asdict(ln) if ln is not None else None # type: ignore
-        d["formatter"] = asdict(fm) if fm is not None else None # type: ignore
-        d["frontend"] = [asdict(t) for t in self.frontend] # type: ignore
-        d["backend"] = [asdict(t) for t in self.backend] # type: ignore
-        d["database"] = [asdict(t) for t in self.database] # type: ignore
-        d["api"] = [asdict(t) for t in self.api] # type: ignore
+
+        d["typescript"] = asdict(ts) if ts is not None else None  # type: ignore
+        d["linter"] = asdict(ln) if ln is not None else None  # type: ignore
+        d["formatter"] = asdict(fm) if fm is not None else None  # type: ignore
+        d["frontend"] = [asdict(t) for t in self.frontend]  # type: ignore
+        d["backend"] = [asdict(t) for t in self.backend]  # type: ignore
+        d["database"] = [asdict(t) for t in self.database]  # type: ignore
+        d["api"] = [asdict(t) for t in self.api]  # type: ignore
         return d
 
 
@@ -158,7 +160,7 @@ def _find_any(root: Path, names: list[str]) -> str | None:
     """Return the first matching filename found in root."""
     for name in names:
         if name.endswith("*"):
-            prefix = name[:-1] # type: ignore
+            prefix = name[:-1]  # type: ignore
             for f in root.iterdir():
                 if f.name.startswith(prefix) and f.is_file():
                     return f.name
@@ -315,9 +317,7 @@ def _python_database_candidate_files(
 
     for directory, child_directories, file_names in os.walk(root):
         child_directories[:] = sorted(
-            name
-            for name in child_directories
-            if name not in _PYTHON_BACKEND_SKIP_DIRS
+            name for name in child_directories if name not in _PYTHON_BACKEND_SKIP_DIRS
         )
         current = Path(directory)
         for file_name in sorted(file_names):
@@ -349,7 +349,7 @@ def _read_python_import_names(source_path: Path) -> set[str]:
 
 def _python_tool_check(import_name: str) -> str:
     return (
-        "python -c \"import importlib.util; "
+        'python -c "import importlib.util; '
         f"assert importlib.util.find_spec('{import_name}')\""
     )
 
@@ -383,9 +383,8 @@ def _detect_python_databases(root: Path) -> list[ToolInfo]:
     for source_path in sources:
         for imported_name in _read_python_import_names(source_path):
             for import_prefix, tool in _PYTHON_DATABASE_IMPORT_TO_TOOL.items():
-                if (
-                    imported_name != import_prefix
-                    and not imported_name.startswith(f"{import_prefix}.")
+                if imported_name != import_prefix and not imported_name.startswith(
+                    f"{import_prefix}."
                 ):
                     continue
                 tool_name, import_name = tool
@@ -480,10 +479,20 @@ def detect_linter(root: Path) -> ToolInfo | None:
             fix_cmd=_npx_or_local(root, "biome check --write ."),
         )
 
-    eslint_cfg = _find_any(root, [
-        "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts",
-        ".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml",
-    ])
+    eslint_cfg = _find_any(
+        root,
+        [
+            "eslint.config.js",
+            "eslint.config.mjs",
+            "eslint.config.cjs",
+            "eslint.config.ts",
+            ".eslintrc",
+            ".eslintrc.js",
+            ".eslintrc.json",
+            ".eslintrc.yml",
+            ".eslintrc.yaml",
+        ],
+    )
     if eslint_cfg or _has_dep(root, "eslint"):
         return ToolInfo(
             name="eslint",
@@ -506,11 +515,20 @@ def detect_formatter(root: Path) -> ToolInfo | None:
             fix_cmd=_npx_or_local(root, "biome format --write ."),
         )
 
-    prettier_cfg = _find_any(root, [
-        ".prettierrc", ".prettierrc.js", ".prettierrc.json", ".prettierrc.yml",
-        ".prettierrc.yaml", ".prettierrc.toml", "prettier.config.js",
-        "prettier.config.mjs", "prettier.config.cjs",
-    ])
+    prettier_cfg = _find_any(
+        root,
+        [
+            ".prettierrc",
+            ".prettierrc.js",
+            ".prettierrc.json",
+            ".prettierrc.yml",
+            ".prettierrc.yaml",
+            ".prettierrc.toml",
+            "prettier.config.js",
+            "prettier.config.mjs",
+            "prettier.config.cjs",
+        ],
+    )
     if prettier_cfg or _has_dep(root, "prettier"):
         return ToolInfo(
             name="prettier",
@@ -526,24 +544,64 @@ def detect_frontend(root: Path) -> list[ToolInfo]:
     found = []
     if _has_dep(root, "next"):
         cfg = _find_any(root, ["next.config.js", "next.config.mjs", "next.config.ts"])
-        found.append(ToolInfo(name="next.js", config_file=cfg or "package.json", run_cmd="npx next build"))
+        found.append(
+            ToolInfo(
+                name="next.js",
+                config_file=cfg or "package.json",
+                run_cmd="npx next build",
+            )
+        )
     elif _has_dep(root, "nuxt"):
-        found.append(ToolInfo(name="nuxt", config_file="nuxt.config.ts", run_cmd="npx nuxt build"))
+        found.append(
+            ToolInfo(
+                name="nuxt", config_file="nuxt.config.ts", run_cmd="npx nuxt build"
+            )
+        )
     elif _has_dep(root, "@sveltejs/kit"):
-        found.append(ToolInfo(name="sveltekit", config_file="svelte.config.js", run_cmd="npx vite build"))
+        found.append(
+            ToolInfo(
+                name="sveltekit",
+                config_file="svelte.config.js",
+                run_cmd="npx vite build",
+            )
+        )
     elif _has_dep(root, "@remix-run/react"):
-        found.append(ToolInfo(name="remix", config_file="remix.config.js", run_cmd="npx remix build"))
+        found.append(
+            ToolInfo(
+                name="remix", config_file="remix.config.js", run_cmd="npx remix build"
+            )
+        )
     elif _has_dep(root, "astro"):
-        cfg = _find_any(root, ["astro.config.mjs", "astro.config.js", "astro.config.ts"])
-        found.append(ToolInfo(name="astro", config_file=cfg or "package.json", run_cmd="npx astro check"))
-        
+        cfg = _find_any(
+            root, ["astro.config.mjs", "astro.config.js", "astro.config.ts"]
+        )
+        found.append(
+            ToolInfo(
+                name="astro",
+                config_file=cfg or "package.json",
+                run_cmd="npx astro check",
+            )
+        )
+
     if _has_dep(root, "tailwindcss"):
-        cfg = _find_any(root, ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"])
-        found.append(ToolInfo(name="tailwindcss", config_file=cfg or "package.json", run_cmd="npx tailwindcss build"))
+        cfg = _find_any(
+            root, ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"]
+        )
+        found.append(
+            ToolInfo(
+                name="tailwindcss",
+                config_file=cfg or "package.json",
+                run_cmd="npx tailwindcss build",
+            )
+        )
     if _has_dep(root, "vite"):
         cfg = _find_any(root, ["vite.config.js", "vite.config.ts"])
-        found.append(ToolInfo(name="vite", config_file=cfg or "package.json", run_cmd="npx vite build"))
-        
+        found.append(
+            ToolInfo(
+                name="vite", config_file=cfg or "package.json", run_cmd="npx vite build"
+            )
+        )
+
     return found
 
 
@@ -551,21 +609,49 @@ def detect_backend(root: Path) -> list[ToolInfo]:
     """Detect backend frameworks."""
     found = []
     if _has_dep(root, "@nestjs/core"):
-        found.append(ToolInfo(name="nestjs", config_file="nest-cli.json", run_cmd=_npx_or_local(root, "nest build")))
-    elif _has_dep(root, "express") or _has_dep(root, "fastify") or _has_dep(root, "koa"):
-        found.append(ToolInfo(name="node.js", config_file="package.json", run_cmd="node -e \"process.exit(0)\""))
+        found.append(
+            ToolInfo(
+                name="nestjs",
+                config_file="nest-cli.json",
+                run_cmd=_npx_or_local(root, "nest build"),
+            )
+        )
+    elif (
+        _has_dep(root, "express") or _has_dep(root, "fastify") or _has_dep(root, "koa")
+    ):
+        found.append(
+            ToolInfo(
+                name="node.js",
+                config_file="package.json",
+                run_cmd='node -e "process.exit(0)"',
+            )
+        )
 
     python_backend_config = _detect_python_backend_config(root)
     if python_backend_config:
-        found.append(ToolInfo(name="python", config_file=python_backend_config, run_cmd="python -m pytest"))
+        found.append(
+            ToolInfo(
+                name="python",
+                config_file=python_backend_config,
+                run_cmd="python -m pytest",
+            )
+        )
     if (root / "go.mod").exists():
         found.append(ToolInfo(name="go", config_file="go.mod", run_cmd="go vet ./..."))
     if (root / "Cargo.toml").exists():
-        found.append(ToolInfo(name="rust", config_file="Cargo.toml", run_cmd="cargo check"))
+        found.append(
+            ToolInfo(name="rust", config_file="Cargo.toml", run_cmd="cargo check")
+        )
     if (root / "pom.xml").exists():
-        found.append(ToolInfo(name="java-maven", config_file="pom.xml", run_cmd="mvn compile"))
+        found.append(
+            ToolInfo(name="java-maven", config_file="pom.xml", run_cmd="mvn compile")
+        )
     if (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
-        found.append(ToolInfo(name="java-gradle", config_file="build.gradle", run_cmd="gradle build"))
+        found.append(
+            ToolInfo(
+                name="java-gradle", config_file="build.gradle", run_cmd="gradle build"
+            )
+        )
     return found
 
 
@@ -574,18 +660,46 @@ def detect_database(root: Path) -> list[ToolInfo]:
     found = []
     prisma = root / "prisma" / "schema.prisma"
     if prisma.exists():
-        found.append(ToolInfo(name="prisma", config_file="prisma/schema.prisma",
-                              run_cmd=_npx_or_local(root, "prisma validate")))
+        found.append(
+            ToolInfo(
+                name="prisma",
+                config_file="prisma/schema.prisma",
+                run_cmd=_npx_or_local(root, "prisma validate"),
+            )
+        )
     drizzle = _find_any(root, ["drizzle.config.ts", "drizzle.config.js"])
     if drizzle:
-        found.append(ToolInfo(name="drizzle", config_file=drizzle,
-                              run_cmd=_npx_or_local(root, "drizzle-kit check")))
+        found.append(
+            ToolInfo(
+                name="drizzle",
+                config_file=drizzle,
+                run_cmd=_npx_or_local(root, "drizzle-kit check"),
+            )
+        )
     if _has_dep(root, "knex"):
-        found.append(ToolInfo(name="knex", config_file="knexfile.js", run_cmd="npx knex migrate:status"))
+        found.append(
+            ToolInfo(
+                name="knex",
+                config_file="knexfile.js",
+                run_cmd="npx knex migrate:status",
+            )
+        )
     if _has_dep(root, "typeorm"):
-        found.append(ToolInfo(name="typeorm", config_file="ormconfig.json", run_cmd="npx typeorm query"))
+        found.append(
+            ToolInfo(
+                name="typeorm",
+                config_file="ormconfig.json",
+                run_cmd="npx typeorm query",
+            )
+        )
     if _has_dep(root, "sequelize"):
-        found.append(ToolInfo(name="sequelize", config_file=".sequelizerc", run_cmd="npx sequelize db:migrate:status"))
+        found.append(
+            ToolInfo(
+                name="sequelize",
+                config_file=".sequelizerc",
+                run_cmd="npx sequelize db:migrate:status",
+            )
+        )
     found.extend(_detect_python_databases(root))
     return found
 
@@ -593,15 +707,40 @@ def detect_database(root: Path) -> list[ToolInfo]:
 def detect_api(root: Path) -> list[ToolInfo]:
     """Detect API layer tools."""
     found = []
-    openapi = _find_any(root, ["openapi.yaml", "openapi.yml", "openapi.json",
-                                 "swagger.yaml", "swagger.yml", "swagger.json"])
+    openapi = _find_any(
+        root,
+        [
+            "openapi.yaml",
+            "openapi.yml",
+            "openapi.json",
+            "swagger.yaml",
+            "swagger.yml",
+            "swagger.json",
+        ],
+    )
     if openapi:
-        found.append(ToolInfo(name="openapi", config_file=openapi, run_cmd=f"npx @redocly/cli lint {openapi}"))
+        found.append(
+            ToolInfo(
+                name="openapi",
+                config_file=openapi,
+                run_cmd=f"npx @redocly/cli lint {openapi}",
+            )
+        )
     graphql_files = list(root.glob("**/*.graphql"))
     if graphql_files and len(graphql_files) < 50:
-        found.append(ToolInfo(name="graphql", config_file=str(graphql_files[0]), run_cmd="npx graphql-inspector validate"))
+        found.append(
+            ToolInfo(
+                name="graphql",
+                config_file=str(graphql_files[0]),
+                run_cmd="npx graphql-inspector validate",
+            )
+        )
     if _has_dep(root, "@trpc/server") or _has_dep(root, "@trpc/client"):
-        found.append(ToolInfo(name="trpc", config_file="package.json", run_cmd="npx tsc --noEmit"))
+        found.append(
+            ToolInfo(
+                name="trpc", config_file="package.json", run_cmd="npx tsc --noEmit"
+            )
+        )
     return found
 
 

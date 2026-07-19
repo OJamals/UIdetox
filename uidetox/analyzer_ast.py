@@ -8,9 +8,6 @@ from pathlib import Path
 from uidetox import source_facts as _source_facts
 from uidetox.source_facts import (
     SourceFacts,
-    _extract_usestate_binding,
-    _identifier_tokens,
-    _is_animation_state_identifier,
     extract_source_facts,
 )
 
@@ -21,6 +18,9 @@ _CORE_AST_ERROR = _source_facts._CORE_AST_ERROR
 _AST_LANGUAGES = _source_facts._AST_LANGUAGES
 AST_CAPABILITIES = _source_facts.AST_CAPABILITIES
 HAS_AST = _source_facts.HAS_AST
+_extract_usestate_binding = _source_facts._extract_usestate_binding
+_identifier_tokens = _source_facts._identifier_tokens
+_is_animation_state_identifier = _source_facts._is_animation_state_identifier
 
 
 def _load_grammar(
