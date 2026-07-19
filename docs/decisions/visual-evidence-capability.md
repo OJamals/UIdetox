@@ -1,6 +1,6 @@
 # ADR: Pillow visual-evidence boundary
 
-Status: Accepted  
+Status: Accepted
 Date: 2026-07-19
 
 ## Decision
