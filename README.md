@@ -45,6 +45,26 @@ uvx --from . uidetox --version
 `uvx` creates a temporary isolated environment. A cold cache still downloads
 runtime dependencies; use `--offline` only after those dependencies are cached.
 
+### First-run guided setup
+
+Run `uvx uidetox` with no subcommand in an interactive terminal to start the
+resumable setup. Progress is saved in `.uidetox/onboarding.json`; rerun the same
+command to continue from the next incomplete step.
+
+The wizard:
+
+1. explains the workflow and detects supported coding agents,
+2. asks before installing namespaced UIdetox skills and instructions,
+3. detects optional codebase-memory, Pillow, Playwright, and Chromium support,
+4. asks for the website/app purpose, audience, primary job, tone, preserved
+   contracts, and constraints, and
+5. appends a redacted intent-provenance event and writes a copy-ready agent
+   prompt to `.uidetox/agent-handoff.md`.
+
+No optional installer runs without confirmation. Codebase-memory setup remains
+guidance-only because its installer restarts agent MCP processes. Noninteractive
+no-command runs, `--help`, and `--version` keep their normal read-only behavior.
+
 Install UIdetox when running a multi-command workflow:
 
 ```bash
