@@ -57,4 +57,3 @@ export const api = {
   getRecommendations: () =>
     request<Array<{ title: string; score: number }>>("/api/recommendations"),
 };
-

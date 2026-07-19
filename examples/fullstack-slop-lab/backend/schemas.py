@@ -37,4 +37,3 @@ class SettingsUpdate(BaseModel):
     weekly_digest: bool
     dark_mode: bool
     default_view: str
-

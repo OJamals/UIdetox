@@ -15,4 +15,3 @@ export function Toast({ message, onClose }: Props) {
     </div>
   );
 }
-

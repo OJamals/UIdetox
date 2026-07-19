@@ -80,4 +80,3 @@ def test_backend_only_audit_endpoint() -> None:
     response = client.get("/api/internal/audit-log")
     assert response.status_code == 200
     assert "entries" in response.json()
-

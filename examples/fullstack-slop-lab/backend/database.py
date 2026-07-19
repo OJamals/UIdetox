@@ -162,4 +162,3 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> int:
 
 
 init_database()
-

@@ -55,4 +55,3 @@ export function ProjectTable({ projects, onDelete }: Props) {
     </div>
   );
 }
-

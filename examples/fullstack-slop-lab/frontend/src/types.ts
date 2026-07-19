@@ -44,4 +44,3 @@ export type WorkspaceSettings = {
   dark_mode: boolean;
   default_view: string;
 };
-

@@ -18,4 +18,3 @@ export function ActivityFeed({ items }: { items: Activity[] }) {
     </div>
   );
 }
-

@@ -18,4 +18,3 @@ export function MetricCard({ icon, label, value, trend, tone = "purple" }: Props
     </article>
   );
 }
-

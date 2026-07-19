@@ -19,4 +19,3 @@ UIDETOX_BIN="${UIDETOX_BIN:-uidetox}"
   --preserve "Deliberate operation mismatches listed in beta-expectations.json" \
   --constraint "Keep the fixture runnable while redesign proposals replace visual structure" \
   --constraint "Do not silently repair deliberate beta findings before recording a baseline"
-
