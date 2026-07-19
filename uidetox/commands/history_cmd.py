@@ -99,4 +99,11 @@ def run(args: argparse.Namespace):
             print(f"      Scans run      : {_safe_int(run.get('scans_run'))}")
             print(f"      Issue entries  : {_safe_count(run.get('issues'))}")
             print(f"      Resolved entries: {_safe_count(run.get('resolved'))}")
+            visual = run.get("visual_evidence")
+            visual_state = (
+                _safe_text(visual.get("state"), "unknown")
+                if isinstance(visual, dict)
+                else "unknown"
+            )
+            print(f"      Visual evidence: {visual_state}")
             print()

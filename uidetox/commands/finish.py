@@ -1,6 +1,10 @@
 import subprocess
 import sys
 
+from uidetox.state import load_config
+from uidetox.visual_semantics import project_visual_evidence_status
+
+
 def _detect_main_branch() -> str:
     """Detect the primary branch (main, master, develop) reliably.
 
@@ -70,6 +74,19 @@ def run(args):
     if not current_branch.startswith("uidetox-session-"):
         print(f"⚠️  Not currently on a UIdetox session branch. (Current branch: {current_branch})")
         print("Run 'uidetox finish' only when you are on a branch created by 'uidetox loop'.")
+        sys.exit(1)
+
+    visual_status = project_visual_evidence_status(
+        load_config(),
+        required=(
+            True if getattr(args, "require_visual_evidence", False) else None
+        ),
+        manifest_path=getattr(args, "visual_evidence_file", None),
+    )
+    if visual_status.required and not visual_status.ready:
+        print(f"❌ Visual evidence is {visual_status.state}.")
+        for reason in visual_status.reasons:
+            print(f"   - {reason}")
         sys.exit(1)
 
     target_branch = _detect_main_branch()

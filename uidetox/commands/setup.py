@@ -164,6 +164,26 @@ def run(args: argparse.Namespace):
     if isinstance(dev_server, str) and dev_server.strip():
         config["dev_server"] = dev_server.strip()
 
+    visual_config = config.get("visual_evidence", {})
+    if not isinstance(visual_config, dict):
+        visual_config = {}
+    visual_threshold = getattr(args, "visual_threshold", None)
+    if visual_threshold is not None:
+        visual_config["threshold"] = visual_threshold
+    visual_max_pixels = getattr(args, "visual_max_pixels", None)
+    if visual_max_pixels is not None:
+        if visual_max_pixels <= 0:
+            raise SystemExit("--visual-max-pixels must be greater than zero")
+        visual_config["max_pixels"] = visual_max_pixels
+    visual_evidence_file = getattr(args, "visual_evidence_file", None)
+    if isinstance(visual_evidence_file, str) and visual_evidence_file.strip():
+        visual_config["manifest_path"] = visual_evidence_file.strip()
+    require_visual_evidence = getattr(args, "require_visual_evidence", None)
+    if require_visual_evidence is not None:
+        visual_config["required"] = require_visual_evidence
+    if visual_config:
+        config["visual_evidence"] = visual_config
+
     auto_commit = getattr(args, "auto_commit", None)
     print(f"\nCurrent auto_commit status: {config.get('auto_commit', False)}")
 
@@ -199,6 +219,11 @@ def run(args: argparse.Namespace):
     print(f"  AUTO_COMMIT:      {config.get('auto_commit', False)}")
     if config.get("dev_server"):
         print(f"  DEV_SERVER:       {config['dev_server']}")
+    if visual_config:
+        print(
+            "  VISUAL_EVIDENCE:  "
+            f"{'required' if visual_config.get('required') else 'optional'}"
+        )
     print(f"  PRODUCT_GOAL:     {settings.intent.product_goal}")
     print(f"  AUDIENCE:         {settings.intent.audience}")
     print(f"  PRIMARY_JOB:      {settings.intent.primary_job}")

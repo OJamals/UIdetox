@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import builtins
 import json
-import sys
-import types
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +12,11 @@ import pytest
 from PIL import Image
 
 from uidetox.commands import capture
+from uidetox.runtime_observer import (
+    RuntimeObservation,
+    RuntimePage,
+    RuntimeViewport,
+)
 
 
 def _save_changed_image(path: Path, size: tuple[int, int], changed: int) -> None:
@@ -22,6 +25,30 @@ def _save_changed_image(path: Path, size: tuple[int, int], changed: int) -> None
     for index in range(changed):
         pixels[index % size[0], index // size[0]] = (31, 0, 0)
     image.save(path)
+
+
+def _observation(
+    url: str,
+    screenshots: list[tuple[str, Path]],
+    *,
+    errors: tuple[str, ...] = (),
+) -> RuntimeObservation:
+    pages = tuple(
+        RuntimePage(
+            url=url,
+            title=name,
+            viewport=RuntimeViewport(name, 1280, 800),
+            elements=(),
+            screenshot=str(path.resolve()),
+        )
+        for name, path in screenshots
+    )
+    return RuntimeObservation(
+        generated_at="2026-07-19T00:00:00Z",
+        requested_urls=(url,),
+        pages=pages,
+        errors=errors,
+    )
 
 
 @pytest.mark.parametrize(
@@ -114,108 +141,6 @@ def test_visual_diff_rejects_mismatched_dimensions(tmp_path: Path) -> None:
     assert "1x2" in result["error"]
 
 
-class _FakePage:
-    def __init__(
-        self,
-        events: list[tuple],
-        fail_navigation: bool = False,
-        fail_screenshot: bool = False,
-    ) -> None:
-        self.events = events
-        self.fail_navigation = fail_navigation
-        self.fail_screenshot = fail_screenshot
-
-    def goto(self, url: str, **kwargs: object) -> None:
-        self.events.append(("goto", url, kwargs))
-        if self.fail_navigation:
-            raise RuntimeError("navigation failed")
-
-    def wait_for_timeout(self, timeout: int) -> None:
-        self.events.append(("wait_for_timeout", timeout))
-
-    def screenshot(self, **kwargs: object) -> None:
-        self.events.append(("screenshot", kwargs))
-        Path(str(kwargs["path"])).write_bytes(b"partial")
-        if self.fail_screenshot:
-            raise RuntimeError("screenshot failed")
-
-
-class _FakeBrowser:
-    def __init__(
-        self,
-        events: list[tuple],
-        fail_navigation: bool = False,
-        fail_screenshot: bool = False,
-    ) -> None:
-        self.events = events
-        self.page = _FakePage(events, fail_navigation, fail_screenshot)
-
-    def new_page(self, **kwargs: object) -> _FakePage:
-        self.events.append(("new_page", kwargs))
-        return self.page
-
-    def close(self) -> None:
-        self.events.append(("close",))
-
-
-class _FakeChromium:
-    def __init__(
-        self,
-        events: list[tuple],
-        *,
-        launch_error: Exception | None = None,
-        fail_navigation: bool = False,
-        fail_screenshot: bool = False,
-    ) -> None:
-        self.events = events
-        self.launch_error = launch_error
-        self.fail_navigation = fail_navigation
-        self.fail_screenshot = fail_screenshot
-
-    def launch(self, **kwargs: object) -> _FakeBrowser:
-        self.events.append(("launch", kwargs))
-        if self.launch_error:
-            raise self.launch_error
-        return _FakeBrowser(
-            self.events,
-            self.fail_navigation,
-            self.fail_screenshot,
-        )
-
-
-class _FakePlaywrightContext:
-    def __init__(self, chromium: _FakeChromium) -> None:
-        self.chromium = chromium
-
-    def __enter__(self) -> SimpleNamespace:
-        return SimpleNamespace(chromium=self.chromium)
-
-    def __exit__(self, *args: object) -> None:
-        return None
-
-
-def _install_fake_playwright(
-    monkeypatch: pytest.MonkeyPatch,
-    events: list[tuple],
-    *,
-    launch_error: Exception | None = None,
-    fail_navigation: bool = False,
-    fail_screenshot: bool = False,
-) -> None:
-    chromium = _FakeChromium(
-        events,
-        launch_error=launch_error,
-        fail_navigation=fail_navigation,
-        fail_screenshot=fail_screenshot,
-    )
-    sync_api = types.ModuleType("playwright.sync_api")
-    sync_api.sync_playwright = lambda: _FakePlaywrightContext(chromium)  # type: ignore[attr-defined]
-    package = types.ModuleType("playwright")
-    package.__path__ = []  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "playwright", package)
-    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
-
-
 def test_capture_screenshot_missing_package_is_actionable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -233,7 +158,7 @@ def test_capture_screenshot_missing_package_is_actionable(
 
     assert capture._capture_screenshot("https://example.invalid", out_path) is False
     stderr = capsys.readouterr().err
-    assert "Playwright Python package is not installed" in stderr
+    assert "Playwright unavailable" in stderr
     assert "pip install 'uidetox[capture]'" in stderr
     assert "python -m playwright install chromium" in stderr
     assert not out_path.exists()
@@ -244,9 +169,12 @@ def test_capture_screenshot_missing_chromium_is_actionable(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    events: list[tuple] = []
     error = RuntimeError("Executable doesn't exist at /tmp/chromium")
-    _install_fake_playwright(monkeypatch, events, launch_error=error)
+    monkeypatch.setattr(
+        capture,
+        "observe_frontend",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
     out_path = tmp_path / "missing-browser.png"
 
     assert capture._capture_screenshot("https://example.invalid", out_path) is False
@@ -254,7 +182,6 @@ def test_capture_screenshot_missing_chromium_is_actionable(
     assert "Failed to capture screenshot: Executable doesn't exist at /tmp/chromium" in stderr
     assert "pip install 'uidetox[capture]'" in stderr
     assert "python -m playwright install chromium" in stderr
-    assert events == [("launch", {"headless": True})]
     assert not out_path.exists()
 
 
@@ -263,15 +190,21 @@ def test_capture_screenshot_navigation_failure_returns_false(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    events: list[tuple] = []
-    _install_fake_playwright(monkeypatch, events, fail_navigation=True)
     out_path = tmp_path / "navigation-failure.png"
+    monkeypatch.setattr(
+        capture,
+        "observe_frontend",
+        lambda *_args, **_kwargs: _observation(
+            "https://example.invalid",
+            [],
+            errors=("desktop: navigation failed",),
+        ),
+    )
 
     assert capture._capture_screenshot("https://example.invalid", out_path) is False
     stderr = capsys.readouterr().err
-    assert "Failed to capture screenshot: navigation failed" in stderr
+    assert "Failed to capture screenshot: desktop: navigation failed" in stderr
     assert "uidetox[capture]" not in stderr
-    assert not any(event[0] == "screenshot" for event in events)
     assert not out_path.exists()
 
 
@@ -279,15 +212,18 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    events: list[tuple] = []
-    _install_fake_playwright(monkeypatch, events)
-    monkeypatch.setattr(
-        capture,
-        "uuid4",
-        lambda: SimpleNamespace(hex="atomic"),
-    )
     out_path = tmp_path / "success.png"
     viewport = {"width": 375, "height": 812}
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_observe(*args: object, **kwargs: object) -> RuntimeObservation:
+        calls.append((args, kwargs))
+        return _observation(
+            "https://example.invalid/page",
+            [("desktop", out_path)],
+        )
+
+    monkeypatch.setattr(capture, "observe_frontend", fake_observe)
 
     assert capture._capture_screenshot(
         "https://example.invalid/page",
@@ -295,50 +231,13 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
         full_page=False,
         viewport=viewport,
     ) is True
-    assert events == [
-        ("launch", {"headless": True}),
-        ("new_page", {"viewport": viewport}),
-        (
-            "goto",
-            "https://example.invalid/page",
-            {"wait_until": "networkidle", "timeout": 15000},
-        ),
-        ("wait_for_timeout", 1000),
-        (
-            "screenshot",
-            {
-                "path": str(tmp_path / ".success.png.atomic.tmp"),
-                "full_page": False,
-                "type": "png",
-            },
-        ),
-        ("close",),
-    ]
-    assert out_path.read_bytes() == b"partial"
-    assert not list(tmp_path.glob(".*.tmp"))
-
-
-def test_capture_screenshot_failure_preserves_existing_baseline_atomically(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[tuple] = []
-    _install_fake_playwright(monkeypatch, events, fail_screenshot=True)
-    monkeypatch.setattr(
-        capture,
-        "uuid4",
-        lambda: SimpleNamespace(hex="atomic"),
+    assert len(calls) == 1
+    assert calls[0][0] == ("https://example.invalid/page",)
+    assert calls[0][1]["viewports"] == (
+        RuntimeViewport("desktop", 375, 812),
     )
-    out_path = tmp_path / "before.png"
-    out_path.write_bytes(b"known-good")
-
-    assert capture._capture_screenshot(
-        "https://example.invalid",
-        out_path,
-    ) is False
-
-    assert out_path.read_bytes() == b"known-good"
-    assert not list(tmp_path.glob(".*.tmp"))
+    assert calls[0][1]["screenshots_dir"] == tmp_path.resolve()
+    assert calls[0][1]["full_page"] is False
 
 
 def test_capture_multi_viewport_returns_only_successes(
@@ -347,25 +246,30 @@ def test_capture_multi_viewport_returns_only_successes(
 ) -> None:
     snapshots = tmp_path / "snapshots"
     snapshots.mkdir()
-    calls: list[tuple[str, Path, dict[str, int]]] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def fake_capture(url: str, path: Path, **kwargs: object) -> bool:
-        viewport = kwargs["viewport"]
-        assert isinstance(viewport, dict)
-        calls.append((url, path, viewport))
-        return path.stem in {"before_mobile", "before_desktop"}
+    def fake_observe(*args: object, **kwargs: object) -> RuntimeObservation:
+        calls.append((args, kwargs))
+        return _observation(
+            "https://example.invalid",
+            [
+                ("mobile", snapshots / "before_mobile.png"),
+                ("desktop", snapshots / "before_desktop.png"),
+            ],
+        )
 
     monkeypatch.setattr(capture, "_snapshots_dir", lambda: snapshots)
-    monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
+    monkeypatch.setattr(capture, "observe_frontend", fake_observe)
 
     result = capture._capture_multi_viewport("https://example.invalid", "before")
 
     assert result == [snapshots / "before_mobile.png", snapshots / "before_desktop.png"]
-    assert calls == [
-        ("https://example.invalid", snapshots / "before_mobile.png", {"width": 375, "height": 812}),
-        ("https://example.invalid", snapshots / "before_tablet.png", {"width": 768, "height": 1024}),
-        ("https://example.invalid", snapshots / "before_desktop.png", {"width": 1280, "height": 800}),
-        ("https://example.invalid", snapshots / "before_wide.png", {"width": 1920, "height": 1080}),
+    assert len(calls) == 1
+    assert [viewport.name for viewport in calls[0][1]["viewports"]] == [
+        "mobile",
+        "tablet",
+        "desktop",
+        "wide",
     ]
     assert list(snapshots.iterdir()) == []
 
@@ -395,18 +299,24 @@ def test_run_before_capture_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     snapshots = _isolate_run(tmp_path, monkeypatch)
-    calls: list[tuple[str, Path]] = []
+    calls: list[tuple[str, str, bool]] = []
 
-    def fake_capture(url: str, path: Path, **_kwargs: object) -> bool:
-        calls.append((url, path))
+    def fake_stage(
+        url: str,
+        prefix: str,
+        *,
+        responsive: bool,
+    ) -> tuple[list[Path], RuntimeObservation]:
+        calls.append((url, prefix, responsive))
+        path = snapshots / "before.png"
         path.write_bytes(b"before")
-        return True
+        return [path], _observation(url, [("desktop", path)])
 
-    monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
+    monkeypatch.setattr(capture, "_capture_named_stage", fake_stage)
 
     capture.run(_args("before"))
 
-    assert calls == [("https://example.invalid", snapshots / "before.png")]
+    assert calls == [("https://example.invalid", "before", False)]
     assert (snapshots / "before.png").read_bytes() == b"before"
     assert sorted(path.name for path in snapshots.iterdir()) == ["before.png"]
 
@@ -430,18 +340,26 @@ def test_run_after_with_baseline_writes_metadata_and_latest(
     }
     diff_calls: list[tuple[list[tuple[str, Path, Path]], Path]] = []
 
-    def fake_capture(_url: str, path: Path, **_kwargs: object) -> bool:
+    def fake_stage(
+        url: str,
+        _prefix: str,
+        *,
+        responsive: bool,
+    ) -> tuple[list[Path], RuntimeObservation]:
+        assert not responsive
+        path = snapshots / "after.png"
         path.write_bytes(b"after")
-        return True
+        return [path], _observation(url, [("desktop", path)])
 
     def fake_evidence(
         comparisons: list[tuple[str, Path, Path]],
         output_dir: Path,
+        **_kwargs: object,
     ) -> list[dict]:
         diff_calls.append((comparisons, output_dir))
         return [diff_result]
 
-    monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
+    monkeypatch.setattr(capture, "_capture_named_stage", fake_stage)
     monkeypatch.setattr(capture, "_build_capture_evidence", fake_evidence)
 
     capture.run(_args("after"))
@@ -460,14 +378,21 @@ def test_run_after_without_baseline_skips_diff_and_writes_latest(
 ) -> None:
     snapshots = _isolate_run(tmp_path, monkeypatch)
 
-    def fake_capture(_url: str, path: Path, **_kwargs: object) -> bool:
+    def fake_stage(
+        url: str,
+        _prefix: str,
+        *,
+        responsive: bool,
+    ) -> tuple[list[Path], RuntimeObservation]:
+        assert not responsive
+        path = snapshots / "after.png"
         path.write_bytes(b"after")
-        return True
+        return [path], _observation(url, [("desktop", path)])
 
     def unexpected_diff(*_args: object) -> list[dict]:
         pytest.fail("visual diff must not run without baseline")
 
-    monkeypatch.setattr(capture, "_capture_screenshot", fake_capture)
+    monkeypatch.setattr(capture, "_capture_named_stage", fake_stage)
     monkeypatch.setattr(capture, "_build_capture_evidence", unexpected_diff)
 
     capture.run(_args("after"))
@@ -486,19 +411,25 @@ def test_run_responsive_after_accepts_partial_viewport_success(
     before_mobile = snapshots / "before_mobile.png"
     after_mobile = snapshots / "after_mobile.png"
     before_mobile.write_bytes(b"before")
-    after_mobile.write_bytes(b"after")
     (snapshots / "after_desktop.png").write_bytes(b"stale-desktop")
     (snapshots / "latest.png").write_bytes(b"stale-latest")
-    multi_calls: list[tuple[str, str]] = []
+    multi_calls: list[tuple[str, str, bool]] = []
     diff_calls: list[tuple[list[tuple[str, Path, Path]], Path]] = []
 
-    def fake_multi(url: str, prefix: str) -> list[Path]:
-        multi_calls.append((url, prefix))
-        return [after_mobile]
+    def fake_stage(
+        url: str,
+        prefix: str,
+        *,
+        responsive: bool,
+    ) -> tuple[list[Path], RuntimeObservation]:
+        multi_calls.append((url, prefix, responsive))
+        after_mobile.write_bytes(b"after")
+        return [after_mobile], _observation(url, [("mobile", after_mobile)])
 
     def fake_evidence(
         comparisons: list[tuple[str, Path, Path]],
         output_dir: Path,
+        **_kwargs: object,
     ) -> list[dict]:
         diff_calls.append((comparisons, output_dir))
         return [
@@ -509,12 +440,12 @@ def test_run_responsive_after_accepts_partial_viewport_success(
             }
         ]
 
-    monkeypatch.setattr(capture, "_capture_multi_viewport", fake_multi)
+    monkeypatch.setattr(capture, "_capture_named_stage", fake_stage)
     monkeypatch.setattr(capture, "_build_capture_evidence", fake_evidence)
 
     capture.run(_args("after", responsive=True))
 
-    assert multi_calls == [("https://example.invalid", "after")]
+    assert multi_calls == [("https://example.invalid", "after", True)]
     assert diff_calls == [
         ([("mobile", before_mobile, after_mobile)], snapshots)
     ]
@@ -552,16 +483,22 @@ def test_run_failure_branches_exit_one_without_files(
 ) -> None:
     snapshots = _isolate_run(tmp_path, monkeypatch)
     monkeypatch.setattr(capture, "_server_is_reachable", lambda _url: reachable)
-    monkeypatch.setattr(
-        capture,
-        "_capture_screenshot",
-        lambda *_args, **_kwargs: capture_result,
-    )
-    monkeypatch.setattr(
-        capture,
-        "_capture_multi_viewport",
-        lambda *_args, **_kwargs: multi_result,
-    )
+    def fake_stage(
+        url: str,
+        _prefix: str,
+        *,
+        responsive: bool,
+    ) -> tuple[list[Path], RuntimeObservation]:
+        captured = multi_result if responsive else (
+            [snapshots / "captured.png"] if capture_result else []
+        )
+        pages = [
+            ("mobile" if responsive else "desktop", path)
+            for path in captured
+        ]
+        return captured, _observation(url, pages)
+
+    monkeypatch.setattr(capture, "_capture_named_stage", fake_stage)
 
     with pytest.raises(SystemExit) as exc_info:
         capture.run(_args(stage, responsive=responsive))

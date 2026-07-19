@@ -29,6 +29,7 @@ from uidetox.redesign import (
 )
 from uidetox.state import get_uidetox_dir, load_config, load_state
 from uidetox.utils import compute_design_score, now_iso
+from uidetox.visual_semantics import project_visual_evidence_status
 
 
 WORKFLOW_STATE_FILE = "workflow-state.json"
@@ -126,6 +127,8 @@ class WorkflowInputs:
     proposal_id: str | None = None
     subjective_score: int | None = None
     verification_fresh: bool = True
+    visual_evidence_state: str = "missing"
+    visual_evidence_required: bool = False
 
     def value(self, key: str) -> Any:
         values = {
@@ -586,6 +589,8 @@ def build_workflow_inputs(
     target_score: int,
     proposal_id: str | None,
     subjective_score: int | None,
+    require_visual_evidence: bool | None = None,
+    visual_evidence_file: str | Path | None = None,
 ) -> WorkflowInputs:
     root_path = Path(root).expanduser().resolve()
     config = load_config()
@@ -608,6 +613,14 @@ def build_workflow_inputs(
             "runtime_status": runtime_status,
             "generated_at": frontend_map.generated_at,
         }
+    visual_status = project_visual_evidence_status(
+        config,
+        required=require_visual_evidence,
+        manifest_path=visual_evidence_file,
+    )
+    verification_payload["visual_evidence"] = visual_status.to_dict()
+    if visual_status.required:
+        verification_fresh = verification_fresh and visual_status.ready
     return WorkflowInputs(
         source_fingerprint=source_fingerprint,
         queue_fingerprint=_stable_hash(queue_payload),
@@ -624,6 +637,8 @@ def build_workflow_inputs(
         proposal_id=proposal_id,
         subjective_score=subjective_score,
         verification_fresh=verification_fresh,
+        visual_evidence_state=visual_status.state,
+        visual_evidence_required=visual_status.required,
     )
 
 
@@ -755,6 +770,10 @@ def in_process_adapters() -> WorkflowAdapters:
             signals={
                 "blended_score": scores["blended_score"],
                 "issues_pending": pending,
+                "visual_evidence_state": context.inputs.visual_evidence_state,
+                "visual_evidence_required": (
+                    context.inputs.visual_evidence_required
+                ),
             },
         )
 
@@ -789,6 +808,8 @@ def run_executable_workflow(
     target_score: int = 95,
     proposal_id: str | None = None,
     subjective_score: int | None = None,
+    require_visual_evidence: bool | None = None,
+    visual_evidence_file: str | Path | None = None,
     adapters: WorkflowAdapters | None = None,
     inputs: WorkflowInputs | None = None,
     state_path: str | Path | None = None,
@@ -798,6 +819,8 @@ def run_executable_workflow(
         target_score=target_score,
         proposal_id=proposal_id,
         subjective_score=subjective_score,
+        require_visual_evidence=require_visual_evidence,
+        visual_evidence_file=visual_evidence_file,
     )
     return WorkflowEngine(
         root,

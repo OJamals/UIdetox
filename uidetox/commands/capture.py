@@ -7,15 +7,30 @@ import shutil
 import sys
 import urllib.request
 from pathlib import Path
-from uuid import uuid4
 
-from uidetox.state import ensure_uidetox_dir, load_config
+from uidetox.frontend_map import FRONTEND_MAP_FILE
+from uidetox.runtime_observer import (
+    RuntimeObservation,
+    RuntimePage,
+    RuntimeViewport,
+    observe_frontend,
+)
+from uidetox.state import (
+    ensure_uidetox_dir,
+    get_uidetox_dir,
+    load_config,
+)
 from uidetox.utils import now_iso
 from uidetox.visual_evidence import (
     VisualEvidenceCase,
     VisualEvidenceError,
     VisualEvidenceRequest,
     build_visual_evidence,
+)
+from uidetox.visual_semantics import (
+    explicit_ignore_regions,
+    load_project_visual_context,
+    semantic_regions_from_runtime,
 )
 
 
@@ -63,59 +78,143 @@ def _snapshots_dir() -> Path:
 
 def _capture_screenshot(url: str, out_path: Path, full_page: bool = True,
                          viewport: dict | None = None) -> bool:
-    """Capture a screenshot using Playwright headless browser.
+    """Capture one screenshot through the shared runtime observer.
 
     Returns True on success, False on failure.
     """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("❌ Playwright Python package is not installed.", file=sys.stderr)
-        print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
-        return False
-
     vp = viewport or {"width": 1280, "height": 800}
-    temporary = out_path.with_name(f".{out_path.name}.{uuid4().hex}.tmp")
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                page = browser.new_page(viewport=vp)
-                page.goto(url, wait_until="networkidle", timeout=15000)
-                # Wait for animations to settle
-                page.wait_for_timeout(1000)
-                page.screenshot(
-                    path=str(temporary),
-                    full_page=full_page,
-                    type="png",
-                )
-                os.replace(temporary, out_path)
-            finally:
-                browser.close()
-        return True
-    except Exception as e:
-        print(f"❌ Failed to capture screenshot: {e}", file=sys.stderr)
-        if _missing_browser_executable(e):
-            print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
-        return False
-    finally:
-        temporary.unlink(missing_ok=True)
+    observation = _observe_capture(
+        url,
+        (
+            (
+                RuntimeViewport(
+                    "desktop",
+                    int(vp["width"]),
+                    int(vp["height"]),
+                ),
+                out_path,
+            ),
+        ),
+        full_page=full_page,
+    )
+    return bool(
+        observation is not None
+        and any(
+            page.screenshot == str(out_path.resolve())
+            for page in observation.pages
+        )
+    )
 
 
 def _capture_multi_viewport(url: str, prefix: str) -> list[Path]:
     """Capture screenshots at multiple viewport widths for responsive validation."""
     snapshots = _snapshots_dir()
-    captured = []
+    destinations = tuple(
+        (
+            RuntimeViewport(name, width, height),
+            snapshots / f"{prefix}_{name}.png",
+        )
+        for name, width, height in _RESPONSIVE_VIEWPORTS
+    )
+    observation = _observe_capture(url, destinations)
+    if observation is None:
+        return []
+    captured = {
+        Path(page.screenshot)
+        for page in observation.pages
+        if page.screenshot is not None
+    }
+    ordered: list[Path] = []
+    for viewport, out_file in destinations:
+        if out_file.resolve() in captured:
+            ordered.append(out_file)
+            print(
+                f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})"
+            )
+    return ordered
 
-    for name, width, height in _RESPONSIVE_VIEWPORTS:
-        out_file = snapshots / f"{prefix}_{name}.png"
-        vp_config = {"width": width, "height": height}
-        if _capture_screenshot(url, out_file, viewport=vp_config):
-            captured.append(out_file)
-            print(f"  ✓ {name} ({width}x{height})")
 
-    return captured
+def _observe_capture(
+    url: str,
+    destinations: tuple[tuple[RuntimeViewport, Path], ...],
+    *,
+    full_page: bool = True,
+) -> RuntimeObservation | None:
+    if not destinations:
+        return RuntimeObservation(now_iso(), (url,), ())
+    roots = {path.parent.resolve() for _, path in destinations}
+    if len(roots) != 1:
+        raise ValueError("Capture destinations must share one output directory.")
+    names = {
+        viewport.name: path.name for viewport, path in destinations
+    }
+    try:
+        observation = observe_frontend(
+            url,
+            viewports=tuple(viewport for viewport, _ in destinations),
+            screenshots_dir=next(iter(roots)),
+            screenshot_namer=lambda _url, viewport: names[viewport.name],
+            timeout_ms=15_000,
+            full_page=full_page,
+            settle_ms=1_000,
+        )
+    except RuntimeError as error:
+        print(f"❌ Failed to capture screenshot: {error}", file=sys.stderr)
+        if _missing_browser_executable(error) or "Playwright unavailable" in str(
+            error
+        ):
+            print(_CAPTURE_INSTALL_GUIDANCE, file=sys.stderr)
+        return None
+    for error in observation.errors:
+        print(f"❌ Failed to capture screenshot: {error}", file=sys.stderr)
+    return observation
+
+
+def _capture_named_stage(
+    url: str,
+    prefix: str,
+    *,
+    responsive: bool,
+) -> tuple[list[Path], RuntimeObservation | None]:
+    snapshots = _snapshots_dir()
+    if responsive:
+        destinations = tuple(
+            (
+                RuntimeViewport(name, width, height),
+                snapshots / f"{prefix}_{name}.png",
+            )
+            for name, width, height in _RESPONSIVE_VIEWPORTS
+        )
+    else:
+        destinations = (
+            (
+                RuntimeViewport("desktop", 1280, 800),
+                snapshots / f"{prefix}.png",
+            ),
+        )
+    observation = _observe_capture(url, destinations)
+    if observation is None:
+        return [], None
+    captured_set = {
+        Path(page.screenshot)
+        for page in observation.pages
+        if page.screenshot is not None
+    }
+    captured = [
+        path for _, path in destinations if path.resolve() in captured_set
+    ]
+    if responsive:
+        for viewport, path in destinations:
+            if path in captured:
+                print(
+                    f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})"
+                )
+    if captured:
+        _atomic_write_json(
+            snapshots / f"runtime_{prefix}.json",
+            observation.to_dict(),
+        )
+    return captured, observation
 
 
 def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
@@ -200,22 +299,66 @@ def _viewport_for_case(case_id: str) -> tuple[int, int] | None:
 def _build_capture_evidence(
     comparisons: list[tuple[str, Path, Path]],
     snapshots: Path,
+    *,
+    runtime_pages: dict[str, RuntimePage] | None = None,
+    config: dict | None = None,
+    manifest_path: Path | None = None,
+    threshold: int = 30,
+    max_pixels: int = 40_000_000,
+    dimension_policy: str = "strict",
+    color_policy: str = "native",
 ) -> list[dict]:
     """Build and persist typed evidence, returning legacy summaries for output."""
 
+    active_config = config or {}
+    frontend_map, intent, context_hashes, context = load_project_visual_context(
+        active_config,
+        get_uidetox_dir() / FRONTEND_MAP_FILE,
+    )
+    pages = runtime_pages or {}
+    cases: list[VisualEvidenceCase] = []
+    for case_id, before_path, after_path in comparisons:
+        page = pages.get(case_id)
+        try:
+            ignore_regions = (
+                explicit_ignore_regions(active_config, page)
+                if page is not None
+                else ()
+            )
+        except ValueError as error:
+            raise VisualEvidenceError(
+                "invalid_request",
+                f"Invalid visual-evidence ignore configuration: {error}",
+            ) from error
+        cases.append(
+            VisualEvidenceCase(
+                case_id=case_id,
+                before_path=before_path,
+                after_path=after_path,
+                viewport=_viewport_for_case(case_id),
+                semantic_regions=(
+                    semantic_regions_from_runtime(
+                        page,
+                        frontend_map=frontend_map,
+                        intent=intent,
+                    )
+                    if page is not None
+                    else ()
+                ),
+                ignore_regions=ignore_regions,
+            )
+        )
     manifest = build_visual_evidence(
         VisualEvidenceRequest(
-            comparisons=tuple(
-                VisualEvidenceCase(
-                    case_id=case_id,
-                    before_path=before_path,
-                    after_path=after_path,
-                    viewport=_viewport_for_case(case_id),
-                )
-                for case_id, before_path, after_path in comparisons
-            ),
+            comparisons=tuple(cases),
             output_dir=snapshots,
-            manifest_path=snapshots / "visual-evidence.json",
+            manifest_path=manifest_path or snapshots / "visual-evidence.json",
+            threshold=threshold,
+            max_pixels=max_pixels,
+            dimension_policy=dimension_policy,
+            color_policy=color_policy,
+            context_sha256s=context_hashes,
+            context=context,
         )
     )
     summaries: list[dict] = []
@@ -236,6 +379,45 @@ def _build_capture_evidence(
     return summaries
 
 
+def _visual_options(
+    args: argparse.Namespace,
+    config: dict,
+    snapshots: Path,
+) -> dict:
+    configured = config.get("visual_evidence", {})
+    if not isinstance(configured, dict):
+        configured = {}
+    evidence_file = getattr(args, "evidence_file", None) or configured.get(
+        "manifest_path"
+    )
+    manifest_path = (
+        Path(str(evidence_file)).expanduser().resolve()
+        if evidence_file
+        else snapshots / "visual-evidence.json"
+    )
+    return {
+        "threshold": (
+            getattr(args, "threshold", None)
+            if getattr(args, "threshold", None) is not None
+            else int(configured.get("threshold", 30))
+        ),
+        "max_pixels": (
+            getattr(args, "max_pixels", None)
+            if getattr(args, "max_pixels", None) is not None
+            else int(configured.get("max_pixels", 40_000_000))
+        ),
+        "dimension_policy": (
+            getattr(args, "dimension_policy", None)
+            or str(configured.get("dimension_policy", "strict"))
+        ),
+        "color_policy": (
+            getattr(args, "color_policy", None)
+            or str(configured.get("color_policy", "native"))
+        ),
+        "manifest_path": manifest_path,
+    }
+
+
 def run(args: argparse.Namespace):
     url = getattr(args, "url", None)
     config = load_config()
@@ -246,6 +428,7 @@ def run(args: argparse.Namespace):
     responsive = getattr(args, "responsive", False)
 
     snapshots = _snapshots_dir()
+    visual_options = _visual_options(args, config, snapshots)
 
     if not _server_is_reachable(url):
         print(f"❌ Cannot reach {url}", file=sys.stderr)
@@ -260,24 +443,33 @@ def run(args: argparse.Namespace):
         # ── Capture BEFORE screenshot (pre-fix baseline) ──
         print(f"📸 Capturing BEFORE screenshot of {url}...")
 
+        captured, _observation = _capture_named_stage(
+            url,
+            "before",
+            responsive=responsive,
+        )
+        if not captured:
+            sys.exit(1)
         if responsive:
-            captured = _capture_multi_viewport(url, "before")
-            if captured:
-                print(f"\n✅ {len(captured)} responsive BEFORE screenshots saved.")
-            else:
-                sys.exit(1)
+            print(f"\n✅ {len(captured)} responsive BEFORE screenshots saved.")
         else:
-            out_file = snapshots / "before.png"
-            if not _capture_screenshot(url, out_file):
-                sys.exit(1)
+            out_file = captured[0]
             print(f"✅ BEFORE screenshot saved to {out_file}")
 
     elif stage == "after":
         # ── Capture AFTER screenshot and generate diff ──
         print(f"📸 Capturing AFTER screenshot of {url}...")
 
+        captured, observation = _capture_named_stage(
+            url,
+            "after",
+            responsive=responsive,
+        )
+        runtime_pages = {
+            page.viewport.name: page
+            for page in observation.pages
+        } if observation is not None else {}
         if responsive:
-            captured = _capture_multi_viewport(url, "after")
             if captured:
                 print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")
 
@@ -290,7 +482,13 @@ def run(args: argparse.Namespace):
                 if pairs:
                     print("\n🔍 Generating visual diffs...")
                     try:
-                        diffs = _build_capture_evidence(pairs, snapshots)
+                        diffs = _build_capture_evidence(
+                            pairs,
+                            snapshots,
+                            runtime_pages=runtime_pages,
+                            config=config,
+                            **visual_options,
+                        )
                     except VisualEvidenceError as error:
                         if error.code == "missing_dependency":
                             print(f"  ⚠️  {error}")
@@ -313,9 +511,9 @@ def run(args: argparse.Namespace):
             else:
                 sys.exit(1)
         else:
-            out_file = snapshots / "after.png"
-            if not _capture_screenshot(url, out_file):
+            if not captured:
                 sys.exit(1)
+            out_file = captured[0]
             print(f"✅ AFTER screenshot saved to {out_file}")
 
             # Generate diff if before exists
@@ -326,6 +524,9 @@ def run(args: argparse.Namespace):
                     diffs = _build_capture_evidence(
                         [("desktop", before_file, out_file)],
                         snapshots,
+                        runtime_pages=runtime_pages,
+                        config=config,
+                        **visual_options,
                     )
                 except VisualEvidenceError as error:
                     if error.code == "missing_dependency":

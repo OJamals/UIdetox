@@ -4,8 +4,10 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+import uidetox.workflow as workflow_module
 from uidetox.cli import parse_args
 from uidetox.commands import loop as loop_command
+from uidetox.visual_evidence import VisualEvidenceStatus
 from uidetox.workflow import (
     AdapterResult,
     PHASES,
@@ -431,3 +433,39 @@ def test_workflow_inputs_track_backend_source_and_design_dials(
 
     assert first.source_fingerprint != second.source_fingerprint
     assert second.design_fingerprint != third.design_fingerprint
+
+
+def test_required_visual_evidence_controls_verification_freshness(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(workflow_module, "load_config", lambda: {})
+    monkeypatch.setattr(
+        workflow_module,
+        "load_state",
+        lambda: {"issues": [], "resolved": []},
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "project_visual_evidence_status",
+        lambda *_args, **_kwargs: VisualEvidenceStatus(
+            state="missing",
+            ready=False,
+            required=True,
+            manifest_path=tmp_path / ".uidetox" / "visual-evidence.json",
+            reasons=("visual evidence manifest is missing",),
+        ),
+    )
+
+    inputs = build_workflow_inputs(
+        tmp_path,
+        target_score=95,
+        proposal_id=None,
+        subjective_score=100,
+        require_visual_evidence=True,
+    )
+
+    assert inputs.verification_fresh is False
+    assert inputs.visual_evidence_state == "missing"
+    assert inputs.visual_evidence_required is True

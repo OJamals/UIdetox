@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import warnings
@@ -41,6 +42,20 @@ class VisualEvidenceError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class VisualRegion:
+    """One explicit semantic or ignored rectangle and its evidence links."""
+
+    region_id: str
+    bounds: tuple[float, float, float, float]
+    kind: str
+    provenance: str
+    reason: str = ""
+    source_targets: tuple[str, ...] = ()
+    intent_fields: tuple[str, ...] = ()
+    preserve_contracts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class VisualEvidenceCase:
     """One before/after comparison within a visual-evidence request."""
 
@@ -48,6 +63,8 @@ class VisualEvidenceCase:
     before_path: Path
     after_path: Path
     viewport: tuple[int, int] | None = None
+    semantic_regions: tuple[VisualRegion, ...] = ()
+    ignore_regions: tuple[VisualRegion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,6 +78,10 @@ class VisualEvidenceRequest:
     max_pixels: int = DEFAULT_MAX_PIXELS
     amplification: int = DEFAULT_DIFF_AMPLIFICATION
     alpha_background: tuple[int, int, int] = (255, 255, 255)
+    dimension_policy: str = "strict"
+    color_policy: str = "native"
+    context_sha256s: dict[str, str] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -116,6 +137,9 @@ class VisualMetrics:
     """Exact comparison measurements; these are not aesthetic quality scores."""
 
     threshold: int
+    raw_pixels_changed: int
+    ignored_changed_pixels: int
+    ignored_ratio: float
     pixels_changed: int
     total_pixels: int
     change_percentage: float
@@ -132,6 +156,9 @@ class VisualMetrics:
     def to_dict(self) -> dict[str, Any]:
         return {
             "threshold": self.threshold,
+            "raw_pixels_changed": self.raw_pixels_changed,
+            "ignored_changed_pixels": self.ignored_changed_pixels,
+            "ignored_ratio": self.ignored_ratio,
             "pixels_changed": self.pixels_changed,
             "total_pixels": self.total_pixels,
             "change_percentage": self.change_percentage,
@@ -158,6 +185,8 @@ class VisualComparison:
     before: ImageEvidence
     after: ImageEvidence
     metrics: VisualMetrics
+    regions: tuple["RegionEvidence", ...]
+    ignored_regions: tuple["RegionEvidence", ...]
     artifacts: tuple[ArtifactEvidence, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -167,7 +196,45 @@ class VisualComparison:
             "before": self.before.to_dict(),
             "after": self.after.to_dict(),
             "metrics": self.metrics.to_dict(),
+            "regions": [region.to_dict() for region in self.regions],
+            "ignored_regions": [
+                region.to_dict() for region in self.ignored_regions
+            ],
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+        }
+
+
+@dataclass(frozen=True)
+class RegionEvidence:
+    """Measured changed pixels within one clipped explicit region."""
+
+    region_id: str
+    kind: str
+    requested_bounds: tuple[float, float, float, float]
+    bounds: tuple[int, int, int, int]
+    pixels_changed: int
+    total_pixels: int
+    changed_ratio: float
+    reason: str
+    provenance: str
+    source_targets: tuple[str, ...]
+    intent_fields: tuple[str, ...]
+    preserve_contracts: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "region_id": self.region_id,
+            "kind": self.kind,
+            "requested_bounds": list(self.requested_bounds),
+            "bounds": list(self.bounds),
+            "pixels_changed": self.pixels_changed,
+            "total_pixels": self.total_pixels,
+            "changed_ratio": self.changed_ratio,
+            "reason": self.reason,
+            "provenance": self.provenance,
+            "source_targets": list(self.source_targets),
+            "intent_fields": list(self.intent_fields),
+            "preserve_contracts": list(self.preserve_contracts),
         }
 
 
@@ -177,11 +244,13 @@ class FreshnessEvidence:
 
     request_sha256: str
     source_sha256s: tuple[str, ...]
+    context_sha256s: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "request_sha256": self.request_sha256,
             "source_sha256s": list(self.source_sha256s),
+            "context_sha256s": dict(sorted(self.context_sha256s.items())),
         }
 
 
@@ -195,6 +264,7 @@ class VisualEvidenceManifest:
     parameters: dict[str, Any]
     comparisons: tuple[VisualComparison, ...]
     freshness: FreshnessEvidence
+    context: dict[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
@@ -207,7 +277,32 @@ class VisualEvidenceManifest:
                 comparison.to_dict() for comparison in self.comparisons
             ],
             "freshness": self.freshness.to_dict(),
+            "context": self.context,
             "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class VisualEvidenceStatus:
+    """Freshness/gate result safe for CLI, workflow, and history consumers."""
+
+    state: str
+    ready: bool
+    required: bool
+    manifest_path: Path
+    reasons: tuple[str, ...] = ()
+    comparisons: int = 0
+    generated_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "ready": self.ready,
+            "required": self.required,
+            "manifest_path": str(self.manifest_path),
+            "reasons": list(self.reasons),
+            "comparisons": self.comparisons,
+            "generated_at": self.generated_at,
         }
 
 
@@ -427,6 +522,16 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             "invalid_request",
             "Visual-evidence amplification must be between 1 and 16.",
         )
+    if request.dimension_policy != "strict":
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Only the strict visual-evidence dimension policy is supported.",
+        )
+    if request.color_policy != "native":
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Only the native visual-evidence color policy is supported.",
+        )
     if (
         not isinstance(request.alpha_background, (tuple, list))
         or len(request.alpha_background) != 3
@@ -450,6 +555,117 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             "invalid_request",
             "Visual-evidence comparison case_ids must be unique.",
         )
+    for case in request.comparisons:
+        for region in (*case.semantic_regions, *case.ignore_regions):
+            expected_kind = (
+                "semantic" if region in case.semantic_regions else "ignore"
+            )
+            if region.kind != expected_kind:
+                raise VisualEvidenceError(
+                    "invalid_region",
+                    (
+                        f"Region {region.region_id!r} must use kind "
+                        f"{expected_kind!r} in this collection."
+                    ),
+                )
+            if (
+                len(region.bounds) != 4
+                or any(
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not math.isfinite(float(value))
+                    for value in region.bounds
+                )
+                or float(region.bounds[2]) <= 0
+                or float(region.bounds[3]) <= 0
+            ):
+                raise VisualEvidenceError(
+                    "invalid_region",
+                    (
+                        f"Region {region.region_id!r} requires finite "
+                        "(x, y, width, height) bounds with positive size."
+                    ),
+                )
+            if not region.region_id.strip() or not region.provenance.strip():
+                raise VisualEvidenceError(
+                    "invalid_region",
+                    "Visual regions require non-empty id and provenance.",
+                )
+            if region.kind == "ignore" and not region.reason.strip():
+                raise VisualEvidenceError(
+                    "invalid_region",
+                    f"Ignore region {region.region_id!r} requires a reason.",
+                )
+    if any(
+        not isinstance(key, str)
+        or not key
+        or not isinstance(value, str)
+        or not value
+        for key, value in request.context_sha256s.items()
+    ):
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Visual-evidence context hashes require non-empty string keys and values.",
+        )
+
+
+def _clip_region(
+    region: VisualRegion,
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    x, y, region_width, region_height = region.bounds
+    left = max(0, min(width, math.floor(x)))
+    top = max(0, min(height, math.floor(y)))
+    right = max(0, min(width, math.ceil(x + region_width)))
+    bottom = max(0, min(height, math.ceil(y + region_height)))
+    return (left, top, max(left, right), max(top, bottom))
+
+
+def _rectangle_mask(
+    image_module: Any,
+    image_draw: Any,
+    size: tuple[int, int],
+    bounds: tuple[int, int, int, int],
+) -> Any:
+    mask = image_module.new("L", size, 0)
+    left, top, right, bottom = bounds
+    if right > left and bottom > top:
+        image_draw.Draw(mask).rectangle(
+            (left, top, right - 1, bottom - 1),
+            fill=255,
+        )
+    return mask
+
+
+def _mask_count(mask: Any) -> int:
+    return int(mask.histogram()[255])
+
+
+def _region_evidence(
+    region: VisualRegion,
+    *,
+    bounds: tuple[int, int, int, int],
+    changed_mask: Any,
+    eligible_mask: Any,
+    image_chops: Any,
+) -> RegionEvidence:
+    changed = _mask_count(image_chops.multiply(changed_mask, eligible_mask))
+    total = _mask_count(eligible_mask)
+    return RegionEvidence(
+        region_id=region.region_id,
+        kind=region.kind,
+        requested_bounds=tuple(float(value) for value in region.bounds),
+        bounds=bounds,
+        pixels_changed=changed,
+        total_pixels=total,
+        changed_ratio=round(changed / total if total else 0.0, 8),
+        reason=region.reason,
+        provenance=region.provenance,
+        source_targets=region.source_targets,
+        intent_fields=region.intent_fields,
+        preserve_contracts=region.preserve_contracts,
+    )
 
 
 def _compare_images(
@@ -459,7 +675,7 @@ def _compare_images(
     request: VisualEvidenceRequest,
 ) -> VisualComparison:
     try:
-        from PIL import ImageChops, ImageStat
+        from PIL import Image, ImageChops, ImageDraw, ImageStat
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
@@ -487,24 +703,42 @@ def _compare_images(
         255 if value > request.threshold else 0 for value in range(256)
     ]
     changed_mask = channel_sum.point(threshold_lut, mode="L")
-    histogram = changed_mask.histogram()
-    pixels_changed = int(histogram[255])
+    raw_pixels_changed = _mask_count(changed_mask)
     total_pixels = before.evidence.width * before.evidence.height
+    image_size = (before.evidence.width, before.evidence.height)
+    ignore_mask = Image.new("L", image_size, 0)
+    clipped_ignore_regions: list[
+        tuple[VisualRegion, tuple[int, int, int, int], Any]
+    ] = []
+    for region in case.ignore_regions:
+        bounds = _clip_region(region, *image_size)
+        mask = _rectangle_mask(Image, ImageDraw, image_size, bounds)
+        ignore_mask = ImageChops.lighter(ignore_mask, mask)
+        clipped_ignore_regions.append((region, bounds, mask))
+    eligible_mask = ImageChops.invert(ignore_mask)
+    effective_changed_mask = ImageChops.multiply(changed_mask, eligible_mask)
+    pixels_changed = _mask_count(effective_changed_mask)
+    ignored_changed_pixels = raw_pixels_changed - pixels_changed
     changed_ratio = pixels_changed / total_pixels if total_pixels else 0.0
     raw_percentage = (
         changed_ratio * 100 if total_pixels else 0.0
     )
-    changed_bounds = changed_mask.getbbox()
+    changed_bounds = effective_changed_mask.getbbox()
     changed_bounds_area = (
         (changed_bounds[2] - changed_bounds[0])
         * (changed_bounds[3] - changed_bounds[1])
         if changed_bounds is not None
         else 0
     )
-    statistics = ImageStat.Stat(diff)
-    mean_delta = tuple(round(float(value), 4) for value in statistics.mean)
-    rms_delta = tuple(round(float(value), 4) for value in statistics.rms)
-    stddev_delta = tuple(round(float(value), 4) for value in statistics.stddev)
+    if _mask_count(eligible_mask):
+        statistics = ImageStat.Stat(diff, mask=eligible_mask)
+        mean_delta = tuple(round(float(value), 4) for value in statistics.mean)
+        rms_delta = tuple(round(float(value), 4) for value in statistics.rms)
+        stddev_delta = tuple(
+            round(float(value), 4) for value in statistics.stddev
+        )
+    else:
+        mean_delta = rms_delta = stddev_delta = (0.0, 0.0, 0.0)
     extrema = tuple(
         (int(bounds[0]), int(bounds[1])) for bounds in diff.getextrema()
     )
@@ -522,6 +756,30 @@ def _compare_images(
         width=visible_diff.width,
         height=visible_diff.height,
     )
+    regions: list[RegionEvidence] = []
+    for region in case.semantic_regions:
+        bounds = _clip_region(region, *image_size)
+        region_mask = _rectangle_mask(Image, ImageDraw, image_size, bounds)
+        region_eligible_mask = ImageChops.multiply(region_mask, eligible_mask)
+        regions.append(
+            _region_evidence(
+                region,
+                bounds=bounds,
+                changed_mask=effective_changed_mask,
+                eligible_mask=region_eligible_mask,
+                image_chops=ImageChops,
+            )
+        )
+    ignored_regions = tuple(
+        _region_evidence(
+            region,
+            bounds=bounds,
+            changed_mask=changed_mask,
+            eligible_mask=mask,
+            image_chops=ImageChops,
+        )
+        for region, bounds, mask in clipped_ignore_regions
+    )
     return VisualComparison(
         case_id=case.case_id,
         viewport=case.viewport,
@@ -529,6 +787,14 @@ def _compare_images(
         after=after.evidence,
         metrics=VisualMetrics(
             threshold=request.threshold,
+            raw_pixels_changed=raw_pixels_changed,
+            ignored_changed_pixels=ignored_changed_pixels,
+            ignored_ratio=round(
+                ignored_changed_pixels / raw_pixels_changed
+                if raw_pixels_changed
+                else 0.0,
+                8,
+            ),
             pixels_changed=pixels_changed,
             total_pixels=total_pixels,
             change_percentage=round(raw_percentage, 2),
@@ -545,6 +811,8 @@ def _compare_images(
             stddev_channel_delta=stddev_delta,  # type: ignore[arg-type]
             extrema=extrema,  # type: ignore[arg-type]
         ),
+        regions=tuple(regions),
+        ignored_regions=ignored_regions,
         artifacts=(artifact,),
     )
 
@@ -588,16 +856,27 @@ def build_visual_evidence(
         "max_pixels": request.max_pixels,
         "amplification": request.amplification,
         "alpha_background": list(request.alpha_background),
+        "dimension_policy": request.dimension_policy,
+        "color_policy": request.color_policy,
     }
     freshness_payload = {
         "schema_version": VISUAL_EVIDENCE_SCHEMA_VERSION,
         "parameters": parameters,
+        "context_sha256s": dict(sorted(request.context_sha256s.items())),
         "comparisons": [
             {
                 "case_id": comparison.case_id,
                 "viewport": comparison.viewport,
                 "before_sha256": comparison.before.sha256,
                 "after_sha256": comparison.after.sha256,
+                "regions": [
+                    _region_request_payload(region.to_dict())
+                    for region in comparison.regions
+                ],
+                "ignored_regions": [
+                    _region_request_payload(region.to_dict())
+                    for region in comparison.ignored_regions
+                ],
             }
             for comparison in comparisons
         ],
@@ -611,7 +890,9 @@ def build_visual_evidence(
         freshness=FreshnessEvidence(
             request_sha256=_canonical_sha256(freshness_payload),
             source_sha256s=source_sha256s,
+            context_sha256s=dict(sorted(request.context_sha256s.items())),
         ),
+        context=request.context,
     )
     if request.manifest_path is not None:
         _atomic_write_json(request.manifest_path, manifest.to_dict())
@@ -625,3 +906,201 @@ def write_visual_evidence_manifest(
     """Persist an existing manifest atomically."""
 
     _atomic_write_json(path, manifest.to_dict())
+
+
+def _request_hash_from_payload(payload: dict[str, Any]) -> str:
+    comparisons = payload.get("comparisons")
+    freshness = payload.get("freshness")
+    if not isinstance(comparisons, list) or not isinstance(freshness, dict):
+        raise ValueError("missing comparisons or freshness object")
+    request_payload = {
+        "schema_version": payload.get("schema_version"),
+        "parameters": payload.get("parameters"),
+        "context_sha256s": freshness.get("context_sha256s", {}),
+        "comparisons": [
+            {
+                "case_id": comparison.get("case_id"),
+                "viewport": comparison.get("viewport"),
+                "before_sha256": dict(comparison.get("before", {})).get("sha256"),
+                "after_sha256": dict(comparison.get("after", {})).get("sha256"),
+                "regions": [
+                    _region_request_payload(region)
+                    for region in comparison.get("regions", [])
+                    if isinstance(region, dict)
+                ],
+                "ignored_regions": [
+                    _region_request_payload(region)
+                    for region in comparison.get("ignored_regions", [])
+                    if isinstance(region, dict)
+                ],
+            }
+            for comparison in comparisons
+            if isinstance(comparison, dict)
+        ],
+    }
+    return _canonical_sha256(request_payload)
+
+
+def _region_request_payload(region: dict[str, Any]) -> dict[str, Any]:
+    """Select immutable region inputs while excluding measured output fields."""
+
+    return {
+        "region_id": region.get("region_id"),
+        "kind": region.get("kind"),
+        "requested_bounds": region.get(
+            "requested_bounds",
+            region.get("bounds"),
+        ),
+        "reason": region.get("reason"),
+        "provenance": region.get("provenance"),
+        "source_targets": region.get("source_targets", []),
+        "intent_fields": region.get("intent_fields", []),
+        "preserve_contracts": region.get("preserve_contracts", []),
+    }
+
+
+def inspect_visual_evidence(
+    manifest_path: Path,
+    *,
+    required: bool = False,
+    expected_parameters: dict[str, Any] | None = None,
+    expected_context_sha256s: dict[str, str] | None = None,
+) -> VisualEvidenceStatus:
+    """Validate manifest integrity and freshness without importing Pillow."""
+
+    resolved = manifest_path.expanduser().resolve()
+    if not resolved.is_file():
+        return VisualEvidenceStatus(
+            state="missing",
+            ready=not required,
+            required=required,
+            manifest_path=resolved,
+            reasons=("visual evidence manifest is missing",),
+        )
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return VisualEvidenceStatus(
+            state="blocked",
+            ready=False,
+            required=required,
+            manifest_path=resolved,
+            reasons=(f"visual evidence manifest is unreadable: {error}",),
+        )
+    if not isinstance(payload, dict):
+        return VisualEvidenceStatus(
+            state="blocked",
+            ready=False,
+            required=required,
+            manifest_path=resolved,
+            reasons=("visual evidence manifest root must be an object",),
+        )
+
+    blocking: list[str] = []
+    stale: list[str] = []
+    if payload.get("schema_version") != VISUAL_EVIDENCE_SCHEMA_VERSION:
+        blocking.append(
+            (
+                f"unsupported visual evidence schema "
+                f"{payload.get('schema_version')!r}"
+            )
+        )
+    if payload.get("status") != "complete":
+        blocking.append("visual evidence manifest is not complete")
+    comparisons = payload.get("comparisons")
+    if not isinstance(comparisons, list) or not comparisons:
+        blocking.append("visual evidence manifest has no comparisons")
+        comparisons = []
+    freshness = payload.get("freshness")
+    if not isinstance(freshness, dict):
+        blocking.append("visual evidence freshness object is missing")
+        freshness = {}
+    try:
+        actual_request_hash = _request_hash_from_payload(payload)
+    except (TypeError, ValueError) as error:
+        blocking.append(f"visual evidence request hash cannot be validated: {error}")
+    else:
+        if freshness.get("request_sha256") != actual_request_hash:
+            blocking.append("visual evidence request hash does not match manifest")
+
+    parameters = payload.get("parameters")
+    if expected_parameters:
+        if not isinstance(parameters, dict):
+            blocking.append("visual evidence parameters object is missing")
+        else:
+            for key, expected in expected_parameters.items():
+                if parameters.get(key) != expected:
+                    stale.append(
+                        f"visual evidence parameter {key!r} changed"
+                    )
+    stored_context = freshness.get("context_sha256s", {})
+    if not isinstance(stored_context, dict):
+        blocking.append("visual evidence context hashes are malformed")
+        stored_context = {}
+    expected_context = expected_context_sha256s or {}
+    if expected_context_sha256s is not None:
+        missing_current_keys = sorted(set(stored_context) - set(expected_context))
+        for key in missing_current_keys:
+            stale.append(
+                f"visual evidence context {key!r} is no longer available"
+            )
+    for key, expected in expected_context.items():
+        if stored_context.get(key) != expected:
+            stale.append(f"visual evidence context {key!r} changed")
+
+    for comparison in comparisons:
+        if not isinstance(comparison, dict):
+            blocking.append("visual evidence comparison is malformed")
+            continue
+        for role in ("before", "after"):
+            image = comparison.get(role)
+            if not isinstance(image, dict):
+                blocking.append(f"visual evidence {role} image record is missing")
+                continue
+            path = Path(str(image.get("path", ""))).expanduser()
+            if not path.is_file():
+                stale.append(f"visual evidence {role} source is missing: {path}")
+            else:
+                try:
+                    actual_hash = _sha256_file(path)
+                except OSError as error:
+                    stale.append(
+                        f"visual evidence {role} source cannot be read: {error}"
+                    )
+                else:
+                    if actual_hash != image.get("sha256"):
+                        stale.append(
+                            f"visual evidence {role} source hash changed: {path}"
+                        )
+        artifacts = comparison.get("artifacts", [])
+        if not isinstance(artifacts, list):
+            blocking.append("visual evidence artifacts record is malformed")
+            continue
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                blocking.append("visual evidence artifact is malformed")
+                continue
+            path = Path(str(artifact.get("path", ""))).expanduser()
+            if not path.is_file():
+                stale.append(f"visual evidence artifact is missing: {path}")
+            elif _sha256_file(path) != artifact.get("sha256"):
+                stale.append(f"visual evidence artifact hash changed: {path}")
+
+    if blocking:
+        state = "blocked"
+        reasons = tuple(dict.fromkeys((*blocking, *stale)))
+    elif stale:
+        state = "stale"
+        reasons = tuple(dict.fromkeys(stale))
+    else:
+        state = "fresh"
+        reasons = ()
+    return VisualEvidenceStatus(
+        state=state,
+        ready=state == "fresh" or (state == "missing" and not required),
+        required=required,
+        manifest_path=resolved,
+        reasons=reasons,
+        comparisons=len(comparisons),
+        generated_at=str(payload.get("generated_at", "")),
+    )

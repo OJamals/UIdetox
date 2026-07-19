@@ -2,9 +2,11 @@
 
 import argparse
 import json
+import sys
 from uidetox.state import load_state, load_config
 from uidetox.utils import compute_design_score
 from uidetox.memory import get_session
+from uidetox.visual_semantics import project_visual_evidence_status
 
 
 # Recommended fix order hints per category
@@ -27,6 +29,13 @@ _CATEGORY_HINTS = {
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
+    visual_status = project_visual_evidence_status(
+        config,
+        required=(
+            True if getattr(args, "require_visual_evidence", False) else None
+        ),
+        manifest_path=getattr(args, "visual_evidence_file", None),
+    )
     issues = state.get("issues", [])
     resolved = state.get("resolved", [])
     stats = state.get("stats", {})
@@ -88,8 +97,11 @@ def run(args: argparse.Namespace):
             "tiers": tiers,
             "scans_run": scans_run,
             "last_scan": state.get("last_scan"),
+            "visual_evidence": visual_status.to_dict(),
         }
         print(json.dumps(payload, indent=2))
+        if visual_status.required and not visual_status.ready:
+            sys.exit(1)
         return
 
     print("╔══════════════════════════════╗")
@@ -131,6 +143,13 @@ def run(args: argparse.Namespace):
     print(f"  VISUAL_DENSITY   : {config.get('VISUAL_DENSITY', 4)}")
     auto_commit = config.get('auto_commit', False)
     print(f"  AUTO_COMMIT      : {'enabled' if auto_commit else 'disabled'}")
+    print(
+        "  VISUAL_EVIDENCE  : "
+        f"{visual_status.state}"
+        f"{' (required)' if visual_status.required else ' (optional)'}"
+    )
+    for reason in visual_status.reasons:
+        print(f"    - {reason}")
 
     # ---- Velocity & Progression ----
     subjective_history = state.get("subjective", {}).get("history", [])
@@ -204,3 +223,6 @@ def run(args: argparse.Namespace):
         print(f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design.")
     else:
         print(f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue.")
+
+    if visual_status.required and not visual_status.ready:
+        sys.exit(1)

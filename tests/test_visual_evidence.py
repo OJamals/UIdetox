@@ -13,7 +13,9 @@ from uidetox.visual_evidence import (
     VisualEvidenceCase,
     VisualEvidenceError,
     VisualEvidenceRequest,
+    VisualRegion,
     build_visual_evidence,
+    inspect_visual_evidence,
 )
 
 
@@ -262,3 +264,222 @@ def test_multiple_viewports_persist_one_atomic_manifest(tmp_path: Path) -> None:
     ]
     assert (tmp_path / "evidence" / "manifest.json").is_file()
     assert len(list((tmp_path / "evidence").glob("diff_*.png"))) == 2
+
+
+def test_semantic_and_explicit_ignore_regions_are_measured_with_provenance(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (4, 2), (0, 0, 0)).save(before)
+    Image.new("RGB", (4, 2), (31, 0, 0)).save(after)
+    case = VisualEvidenceCase(
+        case_id="desktop",
+        before_path=before,
+        after_path=after,
+        semantic_regions=(
+            VisualRegion(
+                region_id="navigation",
+                bounds=(0, 0, 2, 2),
+                kind="semantic",
+                provenance="runtime:nav",
+                source_targets=("frontend/src/components/Sidebar.tsx",),
+                intent_fields=("primary_job",),
+                preserve_contracts=("Route remains reachable: /projects",),
+            ),
+            VisualRegion(
+                region_id="content",
+                bounds=(2, 0, 2, 2),
+                kind="semantic",
+                provenance="runtime:main",
+            ),
+        ),
+        ignore_regions=(
+            VisualRegion(
+                region_id="animated-content",
+                bounds=(2, 0, 2, 2),
+                kind="ignore",
+                reason="fixture animation",
+                provenance="config:visual_evidence.ignore_regions[0]",
+            ),
+        ),
+    )
+
+    manifest = build_visual_evidence(
+        VisualEvidenceRequest(
+            comparisons=(case,),
+            output_dir=tmp_path / "evidence",
+            manifest_path=tmp_path / "evidence" / "manifest.json",
+        )
+    )
+
+    comparison = manifest.comparisons[0]
+    assert comparison.metrics.raw_pixels_changed == 8
+    assert comparison.metrics.ignored_changed_pixels == 4
+    assert comparison.metrics.pixels_changed == 4
+    assert comparison.metrics.ignored_ratio == 0.5
+    assert comparison.regions[0].region_id == "navigation"
+    assert comparison.regions[0].pixels_changed == 4
+    assert comparison.regions[0].changed_ratio == 1.0
+    assert comparison.regions[0].source_targets == (
+        "frontend/src/components/Sidebar.tsx",
+    )
+    assert comparison.regions[1].pixels_changed == 0
+    assert comparison.ignored_regions[0].reason == "fixture animation"
+    assert comparison.ignored_regions[0].provenance.startswith("config:")
+    payload = json.loads((tmp_path / "evidence" / "manifest.json").read_text())
+    assert payload["comparisons"][0]["ignored_regions"][0]["reason"] == (
+        "fixture animation"
+    )
+
+
+def test_region_bounds_are_clipped_and_invalid_rectangles_rejected(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (3, 3), (0, 0, 0)).save(before)
+    Image.new("RGB", (3, 3), (31, 0, 0)).save(after)
+    clipped = VisualRegion(
+        region_id="clipped",
+        bounds=(-2.0, -1.0, 4.0, 3.0),
+        kind="semantic",
+        provenance="runtime:test",
+    )
+
+    manifest = build_visual_evidence(
+        VisualEvidenceRequest(
+            comparisons=(
+                VisualEvidenceCase(
+                    case_id="desktop",
+                    before_path=before,
+                    after_path=after,
+                    semantic_regions=(clipped,),
+                ),
+            ),
+            output_dir=tmp_path / "evidence",
+        )
+    )
+
+    assert manifest.comparisons[0].regions[0].bounds == (0, 0, 2, 2)
+    assert manifest.comparisons[0].regions[0].pixels_changed == 4
+
+    with pytest.raises(VisualEvidenceError) as error:
+        build_visual_evidence(
+            VisualEvidenceRequest(
+                comparisons=(
+                    VisualEvidenceCase(
+                        case_id="bad",
+                        before_path=before,
+                        after_path=after,
+                        semantic_regions=(
+                            VisualRegion(
+                                region_id="bad",
+                                bounds=(0, 0, 0, 1),
+                                kind="semantic",
+                                provenance="test",
+                            ),
+                        ),
+                    ),
+                ),
+                output_dir=tmp_path / "bad-evidence",
+            )
+        )
+    assert error.value.code == "invalid_region"
+
+
+def test_manifest_freshness_detects_source_context_and_tampering(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    manifest_path = tmp_path / "evidence" / "manifest.json"
+    Image.new("RGB", (2, 2), (0, 0, 0)).save(before)
+    Image.new("RGB", (2, 2), (31, 0, 0)).save(after)
+    build_visual_evidence(
+        VisualEvidenceRequest(
+            comparisons=(
+                VisualEvidenceCase(
+                    case_id="desktop",
+                    before_path=before,
+                    after_path=after,
+                    semantic_regions=(
+                        VisualRegion(
+                            region_id="primary",
+                            bounds=(0.0, 0.0, 2.0, 2.0),
+                            kind="semantic",
+                            provenance="runtime:desktop",
+                            source_targets=("src/App.tsx",),
+                            intent_fields=("primary_job",),
+                            preserve_contracts=("Keep navigation",),
+                        ),
+                    ),
+                ),
+            ),
+            output_dir=manifest_path.parent,
+            manifest_path=manifest_path,
+            context_sha256s={"frontend_map": "map-v1"},
+        )
+    )
+
+    fresh = inspect_visual_evidence(
+        manifest_path,
+        required=True,
+        expected_context_sha256s={"frontend_map": "map-v1"},
+    )
+    assert fresh.state == "fresh"
+    assert fresh.ready is True
+    assert fresh.comparisons == 1
+
+    context_stale = inspect_visual_evidence(
+        manifest_path,
+        required=True,
+        expected_context_sha256s={"frontend_map": "map-v2"},
+    )
+    assert context_stale.state == "stale"
+    assert any("frontend_map" in reason for reason in context_stale.reasons)
+
+    context_missing = inspect_visual_evidence(
+        manifest_path,
+        required=True,
+        expected_context_sha256s={},
+    )
+    assert context_missing.state == "stale"
+    assert any(
+        "no longer available" in reason
+        for reason in context_missing.reasons
+    )
+
+    original_payload = json.loads(manifest_path.read_text())
+    region_tampered_payload = json.loads(manifest_path.read_text())
+    region_tampered_payload["comparisons"][0]["regions"][0][
+        "provenance"
+    ] = "runtime:tampered"
+    manifest_path.write_text(json.dumps(region_tampered_payload))
+    region_tampered = inspect_visual_evidence(manifest_path, required=True)
+    assert region_tampered.state == "blocked"
+    assert any("request hash" in reason for reason in region_tampered.reasons)
+    manifest_path.write_text(json.dumps(original_payload))
+
+    Image.new("RGB", (2, 2), (32, 0, 0)).save(after)
+    source_stale = inspect_visual_evidence(manifest_path, required=True)
+    assert source_stale.state == "stale"
+    assert any("source hash changed" in reason for reason in source_stale.reasons)
+
+    payload = json.loads(manifest_path.read_text())
+    payload["parameters"]["threshold"] = 12
+    manifest_path.write_text(json.dumps(payload))
+    tampered = inspect_visual_evidence(manifest_path, required=True)
+    assert tampered.state == "blocked"
+    assert any("request hash" in reason for reason in tampered.reasons)
+
+
+def test_missing_visual_evidence_is_optional_or_a_failed_gate(tmp_path: Path) -> None:
+    path = tmp_path / "missing.json"
+
+    optional = inspect_visual_evidence(path, required=False)
+    required = inspect_visual_evidence(path, required=True)
+
+    assert optional.state == required.state == "missing"
+    assert optional.ready is True
+    assert required.ready is False

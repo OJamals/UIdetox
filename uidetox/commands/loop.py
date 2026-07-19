@@ -41,6 +41,16 @@ def run(args: argparse.Namespace):
             target_score=target,
             proposal_id=getattr(args, "proposal_id", None),
             subjective_score=getattr(args, "review_score", None),
+            require_visual_evidence=(
+                True
+                if getattr(args, "require_visual_evidence", False)
+                else None
+            ),
+            visual_evidence_file=getattr(
+                args,
+                "visual_evidence_file",
+                None,
+            ),
         )
         print("UIdetox executable workflow")
         print(f"  Status: {result.status}")

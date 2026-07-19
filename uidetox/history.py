@@ -5,8 +5,9 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from .state import get_uidetox_dir, ensure_uidetox_dir, load_state
+from .state import get_uidetox_dir, ensure_uidetox_dir, load_config, load_state
 from .utils import compute_design_score
+from .visual_semantics import project_visual_evidence_status
 
 
 def _history_dir() -> Path:
@@ -39,6 +40,7 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
         Path to the saved snapshot file.
     """
     state = load_state()
+    visual_status = project_visual_evidence_status(load_config())
     stamp = _stamp()
     scores = compute_design_score(state)
     snapshot = {
@@ -53,6 +55,7 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
         "scans_run": state.get("stats", {}).get("scans_run", 0),
         "issues": state.get("issues", []),
         "resolved": state.get("resolved", []),
+        "visual_evidence": visual_status.to_dict(),
     }
     target = _history_dir() / f"run_{stamp}.json"
     fd, tmp_path = tempfile.mkstemp(dir=_history_dir(), prefix="run_", suffix=".tmp")
@@ -92,6 +95,14 @@ def compare_runs() -> list[dict]:
             "score": _coerce_history_int(r.get("design_score")),
             "pending": _coerce_history_int(r.get("pending_issues")),
             "resolved": _coerce_history_int(r.get("resolved_issues")),
+            "visual_evidence_state": _coerce_history_text(
+                (
+                    r.get("visual_evidence", {}).get("state")
+                    if isinstance(r.get("visual_evidence"), dict)
+                    else ""
+                ),
+                "",
+            ),
         }
         for r in runs
     ]

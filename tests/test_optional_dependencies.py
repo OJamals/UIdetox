@@ -5,7 +5,6 @@ from __future__ import annotations
 import builtins
 import subprocess
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -37,26 +36,6 @@ def _block_imports(monkeypatch: pytest.MonkeyPatch, blocked: set[str]) -> None:
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-
-
-def _install_fake_playwright(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
-    class Chromium:
-        def launch(self, *, headless: bool):
-            raise error
-
-    class PlaywrightContext:
-        def __enter__(self):
-            return types.SimpleNamespace(chromium=Chromium())
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-    package = types.ModuleType("playwright")
-    package.__path__ = []
-    sync_api = types.ModuleType("playwright.sync_api")
-    sync_api.sync_playwright = PlaywrightContext
-    monkeypatch.setitem(sys.modules, "playwright", package)
-    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
 
 
 def test_optional_dependency_metadata_keeps_core_minimal() -> None:
@@ -207,7 +186,13 @@ def test_missing_browser_executable_preserves_error_and_explains_setup(
     tmp_path: Path,
 ) -> None:
     original_error = "Executable doesn't exist at /tmp/chromium"
-    _install_fake_playwright(monkeypatch, RuntimeError(original_error))
+    monkeypatch.setattr(
+        capture,
+        "observe_frontend",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError(original_error)
+        ),
+    )
 
     assert not capture._capture_screenshot("http://localhost", tmp_path / "shot.png")
     error = capsys.readouterr().err
@@ -222,7 +207,13 @@ def test_unrelated_capture_failure_preserves_error_without_install_advice(
     tmp_path: Path,
 ) -> None:
     original_error = "page navigation failed"
-    _install_fake_playwright(monkeypatch, RuntimeError(original_error))
+    monkeypatch.setattr(
+        capture,
+        "observe_frontend",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError(original_error)
+        ),
+    )
 
     assert not capture._capture_screenshot("http://localhost", tmp_path / "shot.png")
     error = capsys.readouterr().err

@@ -85,6 +85,13 @@ def parse_args(args_list=None):
     setup_parser.add_argument("--preserve", action="append", default=None, help="Contract to preserve; repeatable")
     setup_parser.add_argument("--constraint", action="append", default=None, help="Design constraint; repeatable")
     setup_parser.add_argument("--dev-server", type=str, help="Persist the default preview URL used by capture (e.g. http://localhost:5173)")
+    setup_parser.add_argument("--visual-threshold", type=int, choices=range(0, 255), help="Persist the per-channel visual change threshold (0-254)")
+    setup_parser.add_argument("--visual-max-pixels", type=int, help="Persist the maximum decoded pixels per visual input")
+    setup_parser.add_argument("--visual-evidence-file", help="Persist the visual evidence manifest path")
+    visual_gate_group = setup_parser.add_mutually_exclusive_group()
+    visual_gate_group.add_argument("--require-visual-evidence", dest="require_visual_evidence", action="store_true", help="Require fresh visual evidence at workflow/release gates")
+    visual_gate_group.add_argument("--no-require-visual-evidence", dest="require_visual_evidence", action="store_false", help="Keep visual evidence optional")
+    setup_parser.set_defaults(require_visual_evidence=None)
     setup_parser.add_argument("--no-intent-prompt", action="store_true", help="Skip the interactive website/app intent interview")
 
     # Command: intent
@@ -156,12 +163,19 @@ def parse_args(args_list=None):
     # Command: review
     review_parser = subparsers.add_parser("review", help="Subjective UX review of the latest changes")
     review_parser.add_argument("--score", type=int, help="Store an LLM-assigned subjective design score (0-100)")
+    review_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
+    review_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
 
     # Command: capture
     capture_parser = subparsers.add_parser("capture", help="Capture visual regression screenshots via Playwright")
     capture_parser.add_argument("--url", type=str, help="URL of the local dev server (default: http://localhost:3000)")
     capture_parser.add_argument("--stage", choices=["before", "after"], help="Capture baseline (before) or post-fix (after) screenshot")
     capture_parser.add_argument("--responsive", action="store_true", help="Capture at multiple viewports (mobile, tablet, desktop, wide)")
+    capture_parser.add_argument("--threshold", type=int, choices=range(0, 255), help="Per-channel visual change threshold (0-254)")
+    capture_parser.add_argument("--max-pixels", type=int, help="Maximum decoded pixels per visual input")
+    capture_parser.add_argument("--dimension-policy", choices=["strict"], help="Image dimension mismatch policy")
+    capture_parser.add_argument("--color-policy", choices=["native"], help="Image color normalization policy")
+    capture_parser.add_argument("--evidence-file", help="Visual evidence manifest output path")
 
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
@@ -170,6 +184,8 @@ def parse_args(args_list=None):
     # Command: status
     status_parser = subparsers.add_parser("status", help="Show project health dashboard with design score")
     status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    status_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
+    status_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
 
     # Command: show
     show_parser = subparsers.add_parser("show", help="Show details of issues, filter by file/tier/ID")
@@ -201,9 +217,13 @@ def parse_args(args_list=None):
     loop_parser.add_argument("--execute", action="store_true", help="Execute resumable phases in process (preview remains the default)")
     loop_parser.add_argument("--proposal-id", help="Explicit redesign proposal selected for prototype generation")
     loop_parser.add_argument("--review-score", type=int, choices=range(0, 101), help="Human/LLM subjective review score used to resume the review gate")
+    loop_parser.add_argument("--require-visual-evidence", action="store_true", help="Require fresh visual evidence before verification can pass")
+    loop_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
 
     # Command: finish
-    subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
+    finish_parser = subparsers.add_parser("finish", help="Squash-merge and commit an active UIdetox session branch")
+    finish_parser.add_argument("--require-visual-evidence", action="store_true", help="Exit unless current visual evidence is fresh")
+    finish_parser.add_argument("--visual-evidence-file", help="Visual evidence manifest to inspect")
 
     # Command: subagent
     sub_parser = subparsers.add_parser("subagent", help="Manage sub-agent sessions and generate stage prompts")

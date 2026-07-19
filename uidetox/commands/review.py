@@ -4,9 +4,28 @@ import argparse
 import json
 import sys
 from uidetox.state import load_config, load_state, save_state, ensure_uidetox_dir
+from uidetox.visual_semantics import project_visual_evidence_status
 
 
 def run(args: argparse.Namespace):
+    config = load_config()
+    required_override = (
+        True if getattr(args, "require_visual_evidence", False) else None
+    )
+    visual_status = project_visual_evidence_status(
+        config,
+        required=required_override,
+        manifest_path=getattr(args, "visual_evidence_file", None),
+    )
+    if visual_status.required and not visual_status.ready:
+        print(
+            f"Error: visual evidence is {visual_status.state}.",
+            file=sys.stderr,
+        )
+        for reason in visual_status.reasons:
+            print(f"  - {reason}", file=sys.stderr)
+        sys.exit(1)
+
     score = getattr(args, "score", None)
 
     if score is not None:
@@ -17,7 +36,6 @@ def run(args: argparse.Namespace):
         _store_subjective_score(score)
         return
 
-    config = load_config()
     tooling = config.get("tooling", {})
     has_fullstack = bool(
         tooling.get("backend") or tooling.get("database") or tooling.get("api")
@@ -125,9 +143,25 @@ def run(args: argparse.Namespace):
     diff_meta_path = get_uidetox_dir() / "snapshots" / "diff_meta.json"
     before_path = get_uidetox_dir() / "snapshots" / "before.png"
     after_path = get_uidetox_dir() / "snapshots" / "after.png"
-    has_visual_diff = diff_meta_path.exists()
+    has_visual_manifest = visual_status.state != "missing"
+    has_visual_diff = visual_status.comparisons > 0 or diff_meta_path.exists()
 
-    if has_visual_diff:
+    if has_visual_manifest:
+        print("=" * 60)
+        print("🔍 VISUAL EVIDENCE MANIFEST")
+        print("=" * 60)
+        print(f"   Manifest: {visual_status.manifest_path}")
+        print(f"   State:    {visual_status.state}")
+        print(f"   Cases:    {visual_status.comparisons}")
+        if visual_status.generated_at:
+            print(f"   Captured: {visual_status.generated_at}")
+        for reason in visual_status.reasons:
+            print(f"   ⚠️  {reason}")
+        print()
+        print("   Review semantic-region metrics, source ownership, intent links,")
+        print("   preserved contracts, and explicit ignored-region reasons.")
+        print()
+    elif has_visual_diff:
         try:
             diff_meta = json.loads(diff_meta_path.read_text())
             print("=" * 60)

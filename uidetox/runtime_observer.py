@@ -8,11 +8,13 @@ returned value is plain, serializable evidence that can be merged into a
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from uidetox.utils import now_iso
 
@@ -123,6 +125,9 @@ def observe_frontend(
     viewports: Iterable[RuntimeViewport] = DEFAULT_VIEWPORTS,
     screenshots_dir: str | Path | None = None,
     timeout_ms: int = 15_000,
+    screenshot_namer: Callable[[str, RuntimeViewport], str] | None = None,
+    full_page: bool = True,
+    settle_ms: int = 250,
 ) -> RuntimeObservation:
     """Observe initial rendered state for each URL and viewport.
 
@@ -137,6 +142,8 @@ def observe_frontend(
         raise ValueError("At least one runtime viewport is required.")
     if timeout_ms <= 0:
         raise ValueError("timeout_ms must be greater than zero.")
+    if settle_ms < 0:
+        raise ValueError("settle_ms must be zero or greater.")
 
     screenshot_root = None
     if screenshots_dir is not None:
@@ -174,15 +181,25 @@ def observe_frontend(
                                 )
                             except PlaywrightTimeoutError:
                                 pass
-                            page.wait_for_timeout(250)
+                            page.wait_for_timeout(settle_ms)
                             payload = page.evaluate(_RUNTIME_EVALUATE_SCRIPT)
                             elements = _elements_from_payload(payload)
                             screenshot = None
                             if screenshot_root is not None:
-                                screenshot_path = screenshot_root / _screenshot_name(
-                                    page.url, viewport
+                                screenshot_name = (
+                                    screenshot_namer(page.url, viewport)
+                                    if screenshot_namer is not None
+                                    else _screenshot_name(page.url, viewport)
                                 )
-                                page.screenshot(path=str(screenshot_path), full_page=True)
+                                screenshot_path = _safe_screenshot_path(
+                                    screenshot_root,
+                                    screenshot_name,
+                                )
+                                _capture_screenshot_atomically(
+                                    page,
+                                    screenshot_path,
+                                    full_page=full_page,
+                                )
                                 screenshot = str(screenshot_path)
                             pages.append(
                                 RuntimePage(
@@ -213,6 +230,40 @@ def observe_frontend(
         pages=tuple(pages),
         errors=tuple(errors),
     )
+
+
+def _safe_screenshot_path(root: Path, name: str) -> Path:
+    relative = Path(name)
+    if (
+        not name
+        or relative.is_absolute()
+        or len(relative.parts) != 1
+        or relative.suffix.lower() != ".png"
+    ):
+        raise ValueError(
+            "Runtime screenshot names must be plain PNG filenames."
+        )
+    return root / relative
+
+
+def _capture_screenshot_atomically(
+    page: Any,
+    destination: Path,
+    *,
+    full_page: bool,
+) -> None:
+    temporary = destination.with_name(
+        f".{destination.name}.{uuid4().hex}.tmp"
+    )
+    try:
+        page.screenshot(
+            path=str(temporary),
+            full_page=full_page,
+            type="png",
+        )
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _normalize_urls(urls: str | Iterable[str]) -> tuple[str, ...]:

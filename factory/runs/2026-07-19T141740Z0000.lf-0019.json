@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat /Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0019.implement.codex.md)"
+  ],
+  "created_at": "2026-07-19T14:17:40+00:00",
+  "id": "lf-0019",
+  "prompt_path": "/Users/omar/Documents/Projects/UIdetox/factory/prompts/lf-0019.implement.codex.md",
+  "spec_path": "/Users/omar/Documents/Projects/UIdetox/factory/specs/active/lf-0019-semantic-visual-integration.md",
+  "spec_sha256": "e009b7c29e4ebf6c848251421e5ea5a2aa813c22aaa15db0960e3cba36f640d8",
+  "status": "planned",
+  "title": "Connect visual evidence to runtime semantics and workflow gates"
+}
