@@ -13,17 +13,27 @@ def test_capture_cli_accepts_visual_evidence_controls() -> None:
             "--dimension-policy",
             "strict",
             "--color-policy",
-            "native",
+            "srgb",
             "--evidence-file",
             "evidence.json",
+            "--reviewer-artifacts",
+            "--crop-padding",
+            "24",
+            "--png-compress-level",
+            "9",
+            "--png-optimize",
         ]
     )
 
     assert args.threshold == 12
     assert args.max_pixels == 1000
     assert args.dimension_policy == "strict"
-    assert args.color_policy == "native"
+    assert args.color_policy == "srgb"
     assert args.evidence_file == "evidence.json"
+    assert args.reviewer_artifacts is True
+    assert args.crop_padding == 24
+    assert args.png_compress_level == 9
+    assert args.png_optimize is True
 
 
 def test_visual_evidence_gate_flags_are_registered() -> None:

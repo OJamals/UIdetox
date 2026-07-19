@@ -174,8 +174,12 @@ def parse_args(args_list=None):
     capture_parser.add_argument("--threshold", type=int, choices=range(0, 255), help="Per-channel visual change threshold (0-254)")
     capture_parser.add_argument("--max-pixels", type=int, help="Maximum decoded pixels per visual input")
     capture_parser.add_argument("--dimension-policy", choices=["strict"], help="Image dimension mismatch policy")
-    capture_parser.add_argument("--color-policy", choices=["native"], help="Image color normalization policy")
+    capture_parser.add_argument("--color-policy", choices=["native", "srgb"], help="Image color normalization policy")
     capture_parser.add_argument("--evidence-file", help="Visual evidence manifest output path")
+    capture_parser.add_argument("--reviewer-artifacts", action="store_true", help="Generate overlays, changed crops, blends, and a contact sheet")
+    capture_parser.add_argument("--crop-padding", type=int, help="Padding around reviewer changed-area crops")
+    capture_parser.add_argument("--png-compress-level", type=int, choices=range(0, 10), help="Lossless PNG compression level (0-9)")
+    capture_parser.add_argument("--png-optimize", action="store_true", help="Use slower lossless PNG optimization for archival artifacts")
 
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")

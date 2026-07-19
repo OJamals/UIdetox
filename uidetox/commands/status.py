@@ -150,6 +150,36 @@ def run(args: argparse.Namespace):
     )
     for reason in visual_status.reasons:
         print(f"    - {reason}")
+    if visual_status.incomplete_viewports:
+        print(
+            "    incomplete: "
+            + ", ".join(visual_status.incomplete_viewports)
+        )
+    generated_artifacts = [
+        artifact
+        for artifact in visual_status.reviewer_artifacts
+        if artifact.get("status") == "generated"
+        and artifact.get("kind") != "amplified_diff"
+    ]
+    omitted_artifacts = [
+        artifact
+        for artifact in visual_status.reviewer_artifacts
+        if artifact.get("status") == "omitted"
+    ]
+    if generated_artifacts or omitted_artifacts:
+        print(
+            "    reviewer artifacts: "
+            f"{len(generated_artifacts)} generated, "
+            f"{len(omitted_artifacts)} omitted"
+        )
+    for region in visual_status.top_changed_regions[:3]:
+        print(
+            "    changed region: "
+            f"{region.get('case_id')}/{region.get('region_id')} "
+            f"({region.get('pixels_changed', 0)} px)"
+        )
+    for warning in visual_status.warnings:
+        print(f"    warning: {warning}")
 
     # ---- Velocity & Progression ----
     subjective_history = state.get("subjective", {}).get("history", [])

@@ -157,6 +157,34 @@ def run(args: argparse.Namespace):
             print(f"   Captured: {visual_status.generated_at}")
         for reason in visual_status.reasons:
             print(f"   ⚠️  {reason}")
+        if visual_status.incomplete_viewports:
+            print(
+                "   Incomplete viewports: "
+                + ", ".join(visual_status.incomplete_viewports)
+            )
+        generated_artifacts = [
+            artifact
+            for artifact in visual_status.reviewer_artifacts
+            if artifact.get("status") == "generated"
+            and artifact.get("kind") != "amplified_diff"
+        ]
+        if generated_artifacts:
+            print("   Reviewer artifacts:")
+            for artifact in generated_artifacts:
+                print(
+                    f"     - {artifact.get('kind')}: "
+                    f"{artifact.get('path')}"
+                )
+        if visual_status.top_changed_regions:
+            print("   Top changed semantic regions:")
+            for region in visual_status.top_changed_regions[:5]:
+                print(
+                    f"     - {region.get('case_id')}/"
+                    f"{region.get('region_id')}: "
+                    f"{region.get('pixels_changed', 0)} px"
+                )
+        for warning in visual_status.warnings:
+            print(f"   ⚠️  {warning}")
         print()
         print("   Review semantic-region metrics, source ownership, intent links,")
         print("   preserved contracts, and explicit ignored-region reasons.")
@@ -170,8 +198,11 @@ def run(args: argparse.Namespace):
             print(f"   Before: {before_path}")
             print(f"   After:  {after_path}")
             change_pct = diff_meta.get("change_percentage", "?")
-            severity = diff_meta.get("severity", "unknown")
-            print(f"   Pixel change: {change_pct}% ({severity})")
+            coverage_band = diff_meta.get("coverage_band", "unclassified")
+            print(
+                f"   Changed-pixel coverage: {change_pct}% "
+                f"({coverage_band})"
+            )
             if diff_meta.get("diff_image"):
                 print(f"   Diff image: {diff_meta['diff_image']}")
             print()
@@ -181,10 +212,10 @@ def run(args: argparse.Namespace):
             print("   3. Check for regressions: layout shifts, missing elements, broken alignment")
             print("   4. Factor visual diff into your subjective score")
             print()
-            if severity in ("major", "complete_redesign"):
-                print("   ⚠️  LARGE visual change detected — verify this is intentional!")
-            elif severity == "none":
-                print("   ℹ️  Minimal visual change — fixes may be code-only or subtle.")
+            print(
+                "   Coverage describes pixel area only; judge design quality "
+                "from the evidence."
+            )
             print()
         except (json.JSONDecodeError, OSError):
             pass

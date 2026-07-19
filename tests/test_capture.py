@@ -52,24 +52,24 @@ def _observation(
 
 
 @pytest.mark.parametrize(
-    ("changed", "percentage", "severity"),
+    ("changed", "percentage", "coverage_band"),
     [
-        (1, 0.05, "none"),
-        (2, 0.1, "minor"),
-        (99, 4.95, "minor"),
-        (100, 5.0, "moderate"),
-        (399, 19.95, "moderate"),
-        (400, 20.0, "major"),
-        (999, 49.95, "major"),
-        (1000, 50.0, "complete_redesign"),
+        (1, 0.05, "trace"),
+        (2, 0.1, "localized"),
+        (99, 4.95, "localized"),
+        (100, 5.0, "noticeable"),
+        (399, 19.95, "noticeable"),
+        (400, 20.0, "broad"),
+        (999, 49.95, "broad"),
+        (1000, 50.0, "extensive"),
     ],
 )
-def test_visual_diff_severity_boundaries(
+def test_visual_diff_coverage_band_boundaries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     changed: int,
     percentage: float,
-    severity: str,
+    coverage_band: str,
 ) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
@@ -87,7 +87,7 @@ def test_visual_diff_severity_boundaries(
         "change_percentage": percentage,
         "pixels_changed": changed,
         "total_pixels": 2000,
-        "severity": severity,
+        "coverage_band": coverage_band,
     }
     assert Path(result["diff_image"]).is_file()
 
@@ -107,7 +107,7 @@ def test_visual_diff_identical_images_and_amplified_output(tmp_path: Path) -> No
 
     assert result["change_percentage"] == 0
     assert result["pixels_changed"] == 0
-    assert result["severity"] == "none"
+    assert result["coverage_band"] == "trace"
 
     assert changed_result["change_percentage"] == 50.0
     assert changed_result["pixels_changed"] == 1
@@ -335,7 +335,7 @@ def test_run_after_with_baseline_writes_metadata_and_latest(
         "after": str(snapshots / "after.png"),
         "diff_image": str(diff_path),
         "change_percentage": 5.0,
-        "severity": "moderate",
+        "coverage_band": "noticeable",
         "viewport": "desktop",
     }
     diff_calls: list[tuple[list[tuple[str, Path, Path]], Path]] = []
@@ -435,7 +435,7 @@ def test_run_responsive_after_accepts_partial_viewport_success(
         return [
             {
                 "change_percentage": 1.0,
-                "severity": "minor",
+                "coverage_band": "localized",
                 "viewport": "mobile",
             }
         ]
@@ -455,7 +455,7 @@ def test_run_responsive_after_accepts_partial_viewport_success(
         "comparisons": [
             {
                 "change_percentage": 1.0,
-                "severity": "minor",
+                "coverage_band": "localized",
                 "viewport": "mobile",
             }
         ],

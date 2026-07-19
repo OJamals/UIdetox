@@ -27,6 +27,25 @@ def test_status_json_exposes_visual_evidence(
         required=False,
         manifest_path=tmp_path / "visual-evidence.json",
         comparisons=4,
+        reviewer_artifacts=(
+            {
+                "case_id": "desktop",
+                "kind": "heat_overlay",
+                "status": "generated",
+                "path": str(tmp_path / "heat.png"),
+                "reason": "",
+            },
+        ),
+        top_changed_regions=(
+            {
+                "case_id": "desktop",
+                "region_id": "primary",
+                "pixels_changed": 25,
+                "changed_ratio": 0.25,
+            },
+        ),
+        incomplete_viewports=("mobile",),
+        warnings=("ICC profile fallback",),
     )
     monkeypatch.setattr(status, "load_state", _state)
     monkeypatch.setattr(status, "load_config", lambda: {})
@@ -42,6 +61,10 @@ def test_status_json_exposes_visual_evidence(
     payload = json.loads(capsys.readouterr().out)
     assert payload["visual_evidence"]["state"] == "fresh"
     assert payload["visual_evidence"]["comparisons"] == 4
+    assert payload["visual_evidence"]["incomplete_viewports"] == ["mobile"]
+    assert payload["visual_evidence"]["top_changed_regions"][0][
+        "region_id"
+    ] == "primary"
 
 
 def test_status_required_visual_evidence_gate_exits_nonzero(

@@ -13,6 +13,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -27,6 +28,8 @@ DEFAULT_DIFF_AMPLIFICATION = 8
 _PNG_FORMAT = "PNG"
 _NORMALIZED_MODE = "RGB"
 _CASE_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
+_ICC_TRANSFORM_CACHE: dict[str, Any] = {}
+_SRGB_PROFILE: Any | None = None
 _CAPTURE_INSTALL_GUIDANCE = (
     "Install capture support with: pip install 'uidetox[capture]'"
 )
@@ -80,6 +83,11 @@ class VisualEvidenceRequest:
     alpha_background: tuple[int, int, int] = (255, 255, 255)
     dimension_policy: str = "strict"
     color_policy: str = "native"
+    reviewer_artifacts: bool = False
+    crop_padding: int = 16
+    expected_viewports: tuple[str, ...] = ()
+    png_compress_level: int = 6
+    png_optimize: bool = False
     context_sha256s: dict[str, str] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
 
@@ -97,6 +105,9 @@ class ImageEvidence:
     source_mode: str
     normalized_mode: str
     frames: int
+    icc_profile_present: bool = False
+    color_conversion: str = "native"
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +120,9 @@ class ImageEvidence:
             "source_mode": self.source_mode,
             "normalized_mode": self.normalized_mode,
             "frames": self.frames,
+            "icc_profile_present": self.icc_profile_present,
+            "color_conversion": self.color_conversion,
+            "warnings": list(self.warnings),
         }
 
 
@@ -117,18 +131,22 @@ class ArtifactEvidence:
     """One persisted image artifact."""
 
     kind: str
-    path: Path
+    path: Path | None
     sha256: str
     width: int
     height: int
+    status: str = "generated"
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
-            "path": str(self.path),
+            "path": str(self.path) if self.path is not None else None,
             "sha256": self.sha256,
             "width": self.width,
             "height": self.height,
+            "status": self.status,
+            "reason": self.reason,
         }
 
 
@@ -144,7 +162,7 @@ class VisualMetrics:
     total_pixels: int
     change_percentage: float
     changed_ratio: float
-    severity: str
+    coverage_band: str
     changed_bounds: tuple[int, int, int, int] | None
     changed_bounds_ratio: float
     exact_match: bool
@@ -163,7 +181,7 @@ class VisualMetrics:
             "total_pixels": self.total_pixels,
             "change_percentage": self.change_percentage,
             "changed_ratio": self.changed_ratio,
-            "severity": self.severity,
+            "coverage_band": self.coverage_band,
             "changed_bounds": (
                 list(self.changed_bounds) if self.changed_bounds is not None else None
             ),
@@ -265,6 +283,8 @@ class VisualEvidenceManifest:
     comparisons: tuple[VisualComparison, ...]
     freshness: FreshnessEvidence
     context: dict[str, Any] = field(default_factory=dict)
+    artifacts: tuple[ArtifactEvidence, ...] = field(default_factory=tuple)
+    incomplete_viewports: tuple[str, ...] = field(default_factory=tuple)
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
@@ -278,6 +298,8 @@ class VisualEvidenceManifest:
             ],
             "freshness": self.freshness.to_dict(),
             "context": self.context,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "incomplete_viewports": list(self.incomplete_viewports),
             "warnings": list(self.warnings),
         }
 
@@ -293,6 +315,10 @@ class VisualEvidenceStatus:
     reasons: tuple[str, ...] = ()
     comparisons: int = 0
     generated_at: str = ""
+    reviewer_artifacts: tuple[dict[str, Any], ...] = ()
+    top_changed_regions: tuple[dict[str, Any], ...] = ()
+    incomplete_viewports: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -303,6 +329,10 @@ class VisualEvidenceStatus:
             "reasons": list(self.reasons),
             "comparisons": self.comparisons,
             "generated_at": self.generated_at,
+            "reviewer_artifacts": list(self.reviewer_artifacts),
+            "top_changed_regions": list(self.top_changed_regions),
+            "incomplete_viewports": list(self.incomplete_viewports),
+            "warnings": list(self.warnings),
         }
 
 
@@ -312,6 +342,7 @@ class _LoadedImage:
 
     image: Any
     evidence: ImageEvidence
+    warnings: tuple[str, ...] = ()
 
 
 def _sha256_file(path: Path) -> str:
@@ -364,11 +395,22 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _atomic_save_png(image: Any, path: Path) -> None:
+def _atomic_save_png(
+    image: Any,
+    path: Path,
+    *,
+    compress_level: int = 6,
+    optimize: bool = False,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
-        image.save(temporary, format=_PNG_FORMAT)
+        image.save(
+            temporary,
+            format=_PNG_FORMAT,
+            compress_level=compress_level,
+            optimize=optimize,
+        )
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -383,11 +425,66 @@ def _normalize_image(image: Any, image_module: Any, background: tuple[int, int, 
     return image_module.alpha_composite(backdrop, rgba).convert(_NORMALIZED_MODE)
 
 
+def _convert_rgb_to_srgb(
+    image: Any,
+    icc_profile: object,
+) -> tuple[Any, str, tuple[str, ...]]:
+    """Convert embedded ICC RGB to sRGB with cached transforms."""
+
+    if not icc_profile:
+        return (
+            image,
+            "assumed_srgb",
+            ("sRGB conversion requested but no embedded ICC profile; assumed sRGB.",),
+        )
+    if not isinstance(icc_profile, bytes):
+        return (
+            image,
+            "native_fallback",
+            ("sRGB conversion requested with an invalid ICC profile; used native pixels.",),
+        )
+    try:
+        from PIL import ImageCms
+    except ImportError:
+        return (
+            image,
+            "native_fallback",
+            ("sRGB conversion requested but ImageCms is unavailable; used native pixels.",),
+        )
+    try:
+        global _SRGB_PROFILE
+        if _SRGB_PROFILE is None:
+            _SRGB_PROFILE = ImageCms.createProfile("sRGB")
+        profile_hash = hashlib.sha256(icc_profile).hexdigest()
+        transform = _ICC_TRANSFORM_CACHE.get(profile_hash)
+        if transform is None:
+            source_profile = ImageCms.ImageCmsProfile(BytesIO(icc_profile))
+            transform = ImageCms.buildTransformFromOpenProfiles(
+                source_profile,
+                _SRGB_PROFILE,
+                "RGB",
+                "RGB",
+            )
+            _ICC_TRANSFORM_CACHE[profile_hash] = transform
+        converted = ImageCms.applyTransform(image, transform)
+    except (ImageCms.PyCMSError, OSError, TypeError, ValueError) as error:
+        return (
+            image,
+            "native_fallback",
+            (
+                "sRGB conversion requested with an invalid ICC profile; "
+                f"used native pixels ({error}).",
+            ),
+        )
+    return converted, "icc_to_srgb", ()
+
+
 def _load_png(
     path: Path,
     *,
     max_pixels: int,
     alpha_background: tuple[int, int, int],
+    color_policy: str,
 ) -> _LoadedImage:
     try:
         from PIL import Image, UnidentifiedImageError
@@ -445,11 +542,21 @@ def _load_png(
 
             with Image.open(resolved) as decoded:
                 decoded.load()
+                icc_profile = decoded.info.get("icc_profile")
                 normalized = _normalize_image(
                     decoded,
                     Image,
                     alpha_background,
-                ).copy()
+                )
+                color_conversion = "native"
+                color_warnings: tuple[str, ...] = ()
+                if color_policy == "srgb":
+                    (
+                        normalized,
+                        color_conversion,
+                        color_warnings,
+                    ) = _convert_rgb_to_srgb(normalized, icc_profile)
+                normalized = normalized.copy()
     except VisualEvidenceError:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
@@ -475,20 +582,29 @@ def _load_png(
         source_mode=source_mode,
         normalized_mode=_NORMALIZED_MODE,
         frames=frames,
+        icc_profile_present=bool(icc_profile),
+        color_conversion=color_conversion,
+        warnings=tuple(
+            f"{resolved}: {warning}" for warning in color_warnings
+        ),
     )
-    return _LoadedImage(image=normalized, evidence=evidence)
+    return _LoadedImage(
+        image=normalized,
+        evidence=evidence,
+        warnings=evidence.warnings,
+    )
 
 
-def _severity(change_percentage: float) -> str:
+def _coverage_band(change_percentage: float) -> str:
     if change_percentage < 0.1:
-        return "none"
+        return "trace"
     if change_percentage < 5:
-        return "minor"
+        return "localized"
     if change_percentage < 20:
-        return "moderate"
+        return "noticeable"
     if change_percentage < 50:
-        return "major"
-    return "complete_redesign"
+        return "broad"
+    return "extensive"
 
 
 def _safe_case_id(case_id: str) -> str:
@@ -527,10 +643,30 @@ def _validate_request(request: VisualEvidenceRequest) -> None:
             "invalid_request",
             "Only the strict visual-evidence dimension policy is supported.",
         )
-    if request.color_policy != "native":
+    if request.color_policy not in {"native", "srgb"}:
         raise VisualEvidenceError(
             "invalid_request",
-            "Only the native visual-evidence color policy is supported.",
+            "Visual-evidence color policy must be 'native' or 'srgb'.",
+        )
+    if not 0 <= request.crop_padding <= 256:
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Visual-evidence crop padding must be between 0 and 256.",
+        )
+    if not 0 <= request.png_compress_level <= 9:
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Visual-evidence PNG compression level must be between 0 and 9.",
+        )
+    if any(
+        not isinstance(viewport, str) or not viewport.strip()
+        for viewport in request.expected_viewports
+    ) or len(request.expected_viewports) != len(
+        set(request.expected_viewports)
+    ):
+        raise VisualEvidenceError(
+            "invalid_request",
+            "Expected viewport names must be non-empty and unique.",
         )
     if (
         not isinstance(request.alpha_background, (tuple, list))
@@ -668,6 +804,184 @@ def _region_evidence(
     )
 
 
+def _saved_artifact(
+    *,
+    kind: str,
+    image: Any,
+    path: Path,
+    request: VisualEvidenceRequest,
+) -> ArtifactEvidence:
+    _atomic_save_png(
+        image,
+        path,
+        compress_level=request.png_compress_level,
+        optimize=request.png_optimize,
+    )
+    return ArtifactEvidence(
+        kind=kind,
+        path=path,
+        sha256=_sha256_file(path),
+        width=image.width,
+        height=image.height,
+    )
+
+
+def _omitted_artifact(kind: str, reason: str) -> ArtifactEvidence:
+    return ArtifactEvidence(
+        kind=kind,
+        path=None,
+        sha256="",
+        width=0,
+        height=0,
+        status="omitted",
+        reason=reason,
+    )
+
+
+def _reviewer_case_artifacts(
+    *,
+    case: VisualEvidenceCase,
+    before: Any,
+    after: Any,
+    changed_mask: Any,
+    changed_bounds: tuple[int, int, int, int] | None,
+    request: VisualEvidenceRequest,
+) -> tuple[ArtifactEvidence, ...]:
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise VisualEvidenceError(
+            "missing_dependency",
+            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+        ) from error
+
+    safe_case_id = _safe_case_id(case.case_id)
+    blend = Image.blend(before, after, 0.5)
+    blend_artifact = _saved_artifact(
+        kind="before_after_blend",
+        image=blend,
+        path=request.output_dir.resolve()
+        / f"blend_{safe_case_id}.png",
+        request=request,
+    )
+    if changed_bounds is None:
+        for stale_name in (
+            f"heat_{safe_case_id}.png",
+            f"crop_{safe_case_id}.png",
+        ):
+            (request.output_dir.resolve() / stale_name).unlink(
+                missing_ok=True
+            )
+        reason = "Omitted because no changed pixels exceeded the threshold."
+        return (
+            _omitted_artifact("heat_overlay", reason),
+            _omitted_artifact("changed_crop", reason),
+            blend_artifact,
+        )
+
+    heat = Image.new("RGBA", after.size, (255, 72, 32, 0))
+    heat.putalpha(changed_mask.point([160 if value else 0 for value in range(256)]))
+    overlay = Image.alpha_composite(after.convert("RGBA"), heat).convert("RGB")
+    overlay_artifact = _saved_artifact(
+        kind="heat_overlay",
+        image=overlay,
+        path=request.output_dir.resolve()
+        / f"heat_{safe_case_id}.png",
+        request=request,
+    )
+    left, top, right, bottom = changed_bounds
+    crop_bounds = (
+        max(0, left - request.crop_padding),
+        max(0, top - request.crop_padding),
+        min(after.width, right + request.crop_padding),
+        min(after.height, bottom + request.crop_padding),
+    )
+    crop = overlay.crop(crop_bounds)
+    crop_artifact = _saved_artifact(
+        kind="changed_crop",
+        image=crop,
+        path=request.output_dir.resolve()
+        / f"crop_{safe_case_id}.png",
+        request=request,
+    )
+    return (overlay_artifact, crop_artifact, blend_artifact)
+
+
+def _build_contact_sheet(
+    loaded: list[tuple[VisualEvidenceCase, _LoadedImage, _LoadedImage]],
+    request: VisualEvidenceRequest,
+) -> ArtifactEvidence:
+    try:
+        from PIL import Image, ImageDraw, ImageOps
+    except ImportError as error:
+        raise VisualEvidenceError(
+            "missing_dependency",
+            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+        ) from error
+
+    padding = 16
+    gap = 12
+    label_height = 30
+    cell_width = 420
+    cell_height = 420
+    row_height = label_height + cell_height + gap
+    width = padding * 2 + cell_width * 2 + gap
+    height = padding * 2 + label_height + len(loaded) * row_height
+    sheet = Image.new("RGB", (width, height), (246, 244, 239))
+    draw = ImageDraw.Draw(sheet)
+    draw.text((padding, padding), "BEFORE", fill=(28, 28, 28))
+    draw.text(
+        (padding + cell_width + gap, padding),
+        "AFTER",
+        fill=(28, 28, 28),
+    )
+    y = padding + label_height
+    for case, before, after in loaded:
+        viewport = (
+            f"{case.viewport[0]}x{case.viewport[1]}"
+            if case.viewport is not None
+            else f"{before.evidence.width}x{before.evidence.height}"
+        )
+        label = f"{case.case_id} · {viewport}"
+        draw.rectangle(
+            (padding, y, width - padding, y + label_height),
+            fill=(28, 28, 28),
+        )
+        draw.text(
+            (padding + 8, y + 8),
+            label,
+            fill=(246, 244, 239),
+        )
+        image_y = y + label_height
+        for column, source in enumerate((before.image, after.image)):
+            preview = source
+            if case.viewport is not None:
+                preview = source.crop(
+                    (
+                        0,
+                        0,
+                        min(source.width, case.viewport[0]),
+                        min(source.height, case.viewport[1]),
+                    )
+                )
+            thumb = ImageOps.contain(
+                preview,
+                (cell_width, cell_height),
+                method=Image.Resampling.LANCZOS,
+            )
+            cell_x = padding + column * (cell_width + gap)
+            paste_x = cell_x + (cell_width - thumb.width) // 2
+            paste_y = image_y + (cell_height - thumb.height) // 2
+            sheet.paste(thumb, (paste_x, paste_y))
+        y += row_height
+    return _saved_artifact(
+        kind="contact_sheet",
+        image=sheet,
+        path=request.output_dir.resolve() / "contact_sheet.png",
+        request=request,
+    )
+
+
 def _compare_images(
     case: VisualEvidenceCase,
     before: _LoadedImage,
@@ -748,13 +1062,11 @@ def _compare_images(
     )
     safe_case_id = _safe_case_id(case.case_id)
     artifact_path = request.output_dir.resolve() / f"diff_{safe_case_id}.png"
-    _atomic_save_png(visible_diff, artifact_path)
-    artifact = ArtifactEvidence(
+    artifact = _saved_artifact(
         kind="amplified_diff",
+        image=visible_diff,
         path=artifact_path,
-        sha256=_sha256_file(artifact_path),
-        width=visible_diff.width,
-        height=visible_diff.height,
+        request=request,
     )
     regions: list[RegionEvidence] = []
     for region in case.semantic_regions:
@@ -780,6 +1092,18 @@ def _compare_images(
         )
         for region, bounds, mask in clipped_ignore_regions
     )
+    artifacts = [artifact]
+    if request.reviewer_artifacts:
+        artifacts.extend(
+            _reviewer_case_artifacts(
+                case=case,
+                before=before.image,
+                after=after.image,
+                changed_mask=effective_changed_mask,
+                changed_bounds=changed_bounds,
+                request=request,
+            )
+        )
     return VisualComparison(
         case_id=case.case_id,
         viewport=case.viewport,
@@ -799,7 +1123,7 @@ def _compare_images(
             total_pixels=total_pixels,
             change_percentage=round(raw_percentage, 2),
             changed_ratio=round(changed_ratio, 8),
-            severity=_severity(raw_percentage),
+            coverage_band=_coverage_band(raw_percentage),
             changed_bounds=changed_bounds,
             changed_bounds_ratio=round(
                 changed_bounds_area / total_pixels if total_pixels else 0.0,
@@ -813,7 +1137,7 @@ def _compare_images(
         ),
         regions=tuple(regions),
         ignored_regions=ignored_regions,
-        artifacts=(artifact,),
+        artifacts=tuple(artifacts),
     )
 
 
@@ -832,11 +1156,13 @@ def build_visual_evidence(
             case.before_path,
             max_pixels=request.max_pixels,
             alpha_background=request.alpha_background,
+            color_policy=request.color_policy,
         )
         after = _load_png(
             case.after_path,
             max_pixels=request.max_pixels,
             alpha_background=request.alpha_background,
+            color_policy=request.color_policy,
         )
         loaded.append((case, before, after))
 
@@ -849,6 +1175,24 @@ def build_visual_evidence(
         for comparison in comparisons
         for image in (comparison.before, comparison.after)
     )
+    manifest_artifacts = (
+        (_build_contact_sheet(loaded, request),)
+        if request.reviewer_artifacts
+        else ()
+    )
+    completed_viewports = {case.case_id for case in request.comparisons}
+    incomplete_viewports = tuple(
+        viewport
+        for viewport in request.expected_viewports
+        if viewport not in completed_viewports
+    )
+    manifest_warnings = tuple(
+        dict.fromkeys(
+            warning
+            for _, before, after in loaded
+            for warning in (*before.warnings, *after.warnings)
+        )
+    )
     parameters: dict[str, Any] = {
         "algorithm": "rgb-sum-v1",
         "pillow_version": pillow_version,
@@ -858,6 +1202,11 @@ def build_visual_evidence(
         "alpha_background": list(request.alpha_background),
         "dimension_policy": request.dimension_policy,
         "color_policy": request.color_policy,
+        "reviewer_artifacts": request.reviewer_artifacts,
+        "crop_padding": request.crop_padding,
+        "expected_viewports": list(request.expected_viewports),
+        "png_compress_level": request.png_compress_level,
+        "png_optimize": request.png_optimize,
     }
     freshness_payload = {
         "schema_version": VISUAL_EVIDENCE_SCHEMA_VERSION,
@@ -893,6 +1242,9 @@ def build_visual_evidence(
             context_sha256s=dict(sorted(request.context_sha256s.items())),
         ),
         context=request.context,
+        artifacts=manifest_artifacts,
+        incomplete_viewports=incomplete_viewports,
+        warnings=manifest_warnings,
     )
     if request.manifest_path is not None:
         _atomic_write_json(request.manifest_path, manifest.to_dict())
@@ -1048,10 +1400,55 @@ def inspect_visual_evidence(
         if stored_context.get(key) != expected:
             stale.append(f"visual evidence context {key!r} changed")
 
+    reviewer_artifacts: list[dict[str, Any]] = []
+    changed_regions: list[dict[str, Any]] = []
+
+    def inspect_artifact_record(
+        artifact: object,
+        *,
+        case_id: str | None,
+    ) -> None:
+        if not isinstance(artifact, dict):
+            blocking.append("visual evidence artifact is malformed")
+            return
+        kind = str(artifact.get("kind", ""))
+        status = str(artifact.get("status", "generated"))
+        summary = {
+            "case_id": case_id,
+            "kind": kind,
+            "status": status,
+            "path": artifact.get("path"),
+            "reason": str(artifact.get("reason", "")),
+        }
+        reviewer_artifacts.append(summary)
+        if status == "omitted":
+            if not summary["reason"]:
+                blocking.append(
+                    f"omitted visual evidence artifact {kind!r} lacks a reason"
+                )
+            return
+        if status != "generated":
+            blocking.append(
+                f"visual evidence artifact {kind!r} has invalid status {status!r}"
+            )
+            return
+        path_value = artifact.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            blocking.append(
+                f"visual evidence artifact {kind!r} has no path"
+            )
+            return
+        path = Path(path_value).expanduser()
+        if not path.is_file():
+            stale.append(f"visual evidence artifact is missing: {path}")
+        elif _sha256_file(path) != artifact.get("sha256"):
+            stale.append(f"visual evidence artifact hash changed: {path}")
+
     for comparison in comparisons:
         if not isinstance(comparison, dict):
             blocking.append("visual evidence comparison is malformed")
             continue
+        case_id = str(comparison.get("case_id", ""))
         for role in ("before", "after"):
             image = comparison.get(role)
             if not isinstance(image, dict):
@@ -1077,14 +1474,67 @@ def inspect_visual_evidence(
             blocking.append("visual evidence artifacts record is malformed")
             continue
         for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                blocking.append("visual evidence artifact is malformed")
-                continue
-            path = Path(str(artifact.get("path", ""))).expanduser()
-            if not path.is_file():
-                stale.append(f"visual evidence artifact is missing: {path}")
-            elif _sha256_file(path) != artifact.get("sha256"):
-                stale.append(f"visual evidence artifact hash changed: {path}")
+            inspect_artifact_record(artifact, case_id=case_id)
+        regions = comparison.get("regions", [])
+        if isinstance(regions, list):
+            for region in regions:
+                if not isinstance(region, dict):
+                    continue
+                pixels_changed = region.get("pixels_changed", 0)
+                changed_ratio = region.get("changed_ratio", 0.0)
+                if not isinstance(pixels_changed, (int, float)):
+                    pixels_changed = 0
+                if not isinstance(changed_ratio, (int, float)):
+                    changed_ratio = 0.0
+                changed_regions.append(
+                    {
+                        "case_id": case_id,
+                        "region_id": str(region.get("region_id", "")),
+                        "pixels_changed": int(pixels_changed),
+                        "changed_ratio": float(changed_ratio),
+                        "source_targets": list(
+                            region.get("source_targets", [])
+                        ),
+                        "intent_fields": list(
+                            region.get("intent_fields", [])
+                        ),
+                        "preserve_contracts": list(
+                            region.get("preserve_contracts", [])
+                        ),
+                    }
+                )
+
+    manifest_artifacts = payload.get("artifacts", [])
+    if not isinstance(manifest_artifacts, list):
+        blocking.append("visual evidence manifest artifacts are malformed")
+    else:
+        for artifact in manifest_artifacts:
+            inspect_artifact_record(artifact, case_id=None)
+    incomplete_viewports = payload.get("incomplete_viewports", [])
+    if (
+        not isinstance(incomplete_viewports, list)
+        or any(not isinstance(item, str) for item in incomplete_viewports)
+    ):
+        blocking.append("visual evidence incomplete viewport list is malformed")
+        incomplete_viewports = []
+    manifest_warnings = payload.get("warnings", [])
+    if (
+        not isinstance(manifest_warnings, list)
+        or any(not isinstance(item, str) for item in manifest_warnings)
+    ):
+        blocking.append("visual evidence warning list is malformed")
+        manifest_warnings = []
+    top_changed_regions = tuple(
+        sorted(
+            changed_regions,
+            key=lambda region: (
+                -region["pixels_changed"],
+                -region["changed_ratio"],
+                region["case_id"],
+                region["region_id"],
+            ),
+        )[:5]
+    )
 
     if blocking:
         state = "blocked"
@@ -1103,4 +1553,8 @@ def inspect_visual_evidence(
         reasons=reasons,
         comparisons=len(comparisons),
         generated_at=str(payload.get("generated_at", "")),
+        reviewer_artifacts=tuple(reviewer_artifacts),
+        top_changed_regions=top_changed_regions,
+        incomplete_viewports=tuple(incomplete_viewports),
+        warnings=tuple(manifest_warnings),
     )

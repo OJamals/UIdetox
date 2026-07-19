@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageCms
 
 from uidetox.visual_evidence import (
     VISUAL_EVIDENCE_SCHEMA_VERSION,
@@ -483,3 +483,234 @@ def test_missing_visual_evidence_is_optional_or_a_failed_gate(tmp_path: Path) ->
     assert optional.state == required.state == "missing"
     assert optional.ready is True
     assert required.ready is False
+
+
+def test_reviewer_artifacts_are_deterministic_and_localized(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (100, 60), "black").save(before)
+    changed = Image.new("RGB", (100, 60), "black")
+    changed.paste("white", (20, 10, 40, 30))
+    changed.save(after)
+    request = _request(
+        tmp_path,
+        before,
+        after,
+        reviewer_artifacts=True,
+        crop_padding=5,
+        expected_viewports=("desktop",),
+        comparisons=(
+            VisualEvidenceCase(
+                case_id="desktop",
+                before_path=before,
+                after_path=after,
+                viewport=(100, 60),
+                semantic_regions=(
+                    VisualRegion(
+                        region_id="alpha-region",
+                        bounds=(20, 10, 20, 20),
+                        kind="semantic",
+                        provenance="runtime:alpha",
+                    ),
+                    VisualRegion(
+                        region_id="changed-panel",
+                        bounds=(20, 10, 20, 20),
+                        kind="semantic",
+                        provenance="runtime:panel",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    first = build_visual_evidence(request)
+    comparison_artifacts = {
+        artifact.kind: artifact
+        for artifact in first.comparisons[0].artifacts
+    }
+    assert set(comparison_artifacts) == {
+        "amplified_diff",
+        "heat_overlay",
+        "changed_crop",
+        "before_after_blend",
+    }
+    assert comparison_artifacts["heat_overlay"].status == "generated"
+    assert comparison_artifacts["heat_overlay"].path is not None
+    assert comparison_artifacts["changed_crop"].width == 30
+    assert comparison_artifacts["changed_crop"].height == 30
+    assert first.artifacts[0].kind == "contact_sheet"
+    assert first.incomplete_viewports == ()
+    first_hashes = {
+        artifact.kind: artifact.sha256
+        for artifact in (*first.comparisons[0].artifacts, *first.artifacts)
+    }
+
+    second = build_visual_evidence(request)
+    second_hashes = {
+        artifact.kind: artifact.sha256
+        for artifact in (*second.comparisons[0].artifacts, *second.artifacts)
+    }
+    assert second_hashes == first_hashes
+    status = inspect_visual_evidence(request.manifest_path, required=True)
+    assert status.incomplete_viewports == ()
+    assert any(
+        artifact["kind"] == "contact_sheet"
+        for artifact in status.reviewer_artifacts
+    )
+    assert [
+        region["region_id"] for region in status.top_changed_regions[:2]
+    ] == ["alpha-region", "changed-panel"]
+
+
+def test_empty_diff_records_reviewer_artifact_omissions(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (20, 20), "black").save(before)
+    Image.new("RGB", (20, 20), "white").save(after)
+    request = _request(
+        tmp_path,
+        before,
+        after,
+        reviewer_artifacts=True,
+    )
+    changed_manifest = build_visual_evidence(request)
+    changed_artifacts = {
+        artifact.kind: artifact
+        for artifact in changed_manifest.comparisons[0].artifacts
+    }
+    old_heat = changed_artifacts["heat_overlay"].path
+    old_crop = changed_artifacts["changed_crop"].path
+    assert old_heat is not None and old_heat.is_file()
+    assert old_crop is not None and old_crop.is_file()
+    Image.new("RGB", (20, 20), "black").save(after)
+
+    manifest = build_visual_evidence(request)
+    artifacts = {
+        artifact.kind: artifact
+        for artifact in manifest.comparisons[0].artifacts
+    }
+
+    assert artifacts["heat_overlay"].status == "omitted"
+    assert artifacts["heat_overlay"].path is None
+    assert artifacts["changed_crop"].status == "omitted"
+    assert "no changed pixels" in artifacts["changed_crop"].reason
+    assert artifacts["before_after_blend"].status == "generated"
+    assert not old_heat.exists()
+    assert not old_crop.exists()
+
+
+def test_expected_viewports_and_srgb_fallback_warnings_are_explicit(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (10, 10), "black").save(before)
+    Image.new("RGB", (10, 10), "white").save(after)
+
+    manifest = build_visual_evidence(
+        _request(
+            tmp_path,
+            before,
+            after,
+            color_policy="srgb",
+            expected_viewports=("mobile", "desktop"),
+        )
+    )
+
+    assert manifest.incomplete_viewports == ("mobile",)
+    assert any("no embedded ICC profile" in item for item in manifest.warnings)
+    assert manifest.comparisons[0].before.color_conversion == "assumed_srgb"
+
+
+def test_invalid_icc_profile_warns_and_falls_back_to_native_pixels(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (10, 10), "black").save(
+        before,
+        icc_profile=b"not-a-valid-icc-profile",
+    )
+    Image.new("RGB", (10, 10), "white").save(after)
+
+    manifest = build_visual_evidence(
+        _request(tmp_path, before, after, color_policy="srgb")
+    )
+
+    assert any("invalid ICC profile" in item for item in manifest.warnings)
+    assert manifest.comparisons[0].before.color_conversion == (
+        "native_fallback"
+    )
+
+
+def test_valid_icc_profile_converts_to_srgb_without_warning(
+    tmp_path: Path,
+) -> None:
+    profile = ImageCms.ImageCmsProfile(
+        ImageCms.createProfile("sRGB")
+    ).tobytes()
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (10, 10), (10, 20, 30)).save(
+        before,
+        icc_profile=profile,
+    )
+    Image.new("RGB", (10, 10), (30, 20, 10)).save(
+        after,
+        icc_profile=profile,
+    )
+
+    manifest = build_visual_evidence(
+        _request(tmp_path, before, after, color_policy="srgb")
+    )
+
+    assert manifest.warnings == ()
+    assert manifest.comparisons[0].before.color_conversion == "icc_to_srgb"
+    assert manifest.comparisons[0].after.color_conversion == "icc_to_srgb"
+
+
+def test_png_archival_controls_do_not_change_comparison_pixels(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.new("RGB", (30, 30), "black").save(before)
+    Image.new("RGB", (30, 30), "white").save(after)
+    fast_dir = tmp_path / "fast"
+    archive_dir = tmp_path / "archive"
+
+    fast = build_visual_evidence(
+        _request(
+            tmp_path,
+            before,
+            after,
+            output_dir=fast_dir,
+            manifest_path=fast_dir / "manifest.json",
+            png_compress_level=0,
+        )
+    )
+    archival = build_visual_evidence(
+        _request(
+            tmp_path,
+            before,
+            after,
+            output_dir=archive_dir,
+            manifest_path=archive_dir / "manifest.json",
+            png_compress_level=9,
+            png_optimize=True,
+        )
+    )
+
+    assert fast.comparisons[0].metrics == archival.comparisons[0].metrics
+    fast_path = fast.comparisons[0].artifacts[0].path
+    archive_path = archival.comparisons[0].artifacts[0].path
+    assert fast_path is not None
+    assert archive_path is not None
+    with Image.open(fast_path) as fast_image, Image.open(
+        archive_path
+    ) as archive_image:
+        assert fast_image.tobytes() == archive_image.tobytes()
