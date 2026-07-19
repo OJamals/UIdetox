@@ -443,8 +443,7 @@ def map_frontend(
             ]
         )
         endpoints = {
-            (endpoint, method): line
-            for endpoint, line, method in endpoint_occurrences
+            (endpoint, method): line for endpoint, line, method in endpoint_occurrences
         }
         endpoint_path_counts = Counter(endpoint for endpoint, _method in endpoints)
         for (endpoint, method), line in endpoints.items():
@@ -689,9 +688,7 @@ def retain_runtime_evidence(
     previous_status = str(previous.evidence.get("runtime_status", "current"))
     same_source = previous_manifest == refreshed_manifest
     runtime_status = (
-        "current"
-        if same_source and previous_status == "current"
-        else "stale"
+        "current" if same_source and previous_status == "current" else "stale"
     )
     evidence = dict(refreshed.evidence)
     for key, value in previous.evidence.items():
@@ -762,10 +759,9 @@ def frontend_map_is_fresh(
     )
     if expected.get("target") != target_label:
         return False
-    return (
-        expected["files"] == _build_source_manifest(root_path, scope)
-        and expected["project_files"] == project_source_manifest(root_path)
-    )
+    return expected["files"] == _build_source_manifest(root_path, scope) and expected[
+        "project_files"
+    ] == project_source_manifest(root_path)
 
 
 def _resolve_scope(root: Path, target: str | Path | None) -> Path:
@@ -960,12 +956,10 @@ def _resolve_local_import(
         candidates.append(base)
         if not base.suffix:
             candidates.extend(
-                base.with_suffix(extension)
-                for extension in sorted(SOURCE_EXTENSIONS)
+                base.with_suffix(extension) for extension in sorted(SOURCE_EXTENSIONS)
             )
             candidates.extend(
-                base / f"index{extension}"
-                for extension in sorted(SOURCE_EXTENSIONS)
+                base / f"index{extension}" for extension in sorted(SOURCE_EXTENSIONS)
             )
     for candidate in candidates:
         if candidate.is_file():
@@ -1325,7 +1319,7 @@ def _runtime_route(url: str) -> str:
 
 def _node_id(kind: str, file_path: str, name: str, ordinal: int = 0) -> str:
     raw = f"{kind}\0{file_path}\0{name}\0{ordinal}".encode("utf-8")
-    return f"{kind}:{hashlib.sha1(raw).hexdigest()[:12]}"
+    return f"{kind}:{hashlib.sha1(raw, usedforsecurity=False).hexdigest()[:12]}"
 
 
 def _line_number(content: str, offset: int) -> int:

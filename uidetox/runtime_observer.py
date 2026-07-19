@@ -171,12 +171,17 @@ def observe_frontend(
                 for url in normalized_urls:
                     for viewport in normalized_viewports:
                         context = browser.new_context(
-                            viewport={"width": viewport.width, "height": viewport.height},
+                            viewport={
+                                "width": viewport.width,
+                                "height": viewport.height,
+                            },
                             reduced_motion="no-preference",
                         )
                         page = context.new_page()
                         try:
-                            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                            page.goto(
+                                url, wait_until="domcontentloaded", timeout=timeout_ms
+                            )
                             try:
                                 page.wait_for_load_state(
                                     "networkidle",
@@ -244,9 +249,7 @@ def _safe_screenshot_path(root: Path, name: str) -> Path:
         or len(relative.parts) != 1
         or relative.suffix.lower() != ".png"
     ):
-        raise ValueError(
-            "Runtime screenshot names must be plain PNG filenames."
-        )
+        raise ValueError("Runtime screenshot names must be plain PNG filenames.")
     return root / relative
 
 
@@ -256,9 +259,7 @@ def _capture_screenshot_atomically(
     *,
     full_page: bool,
 ) -> None:
-    temporary = destination.with_name(
-        f".{destination.name}.{uuid4().hex}.tmp"
-    )
+    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
     try:
         page.screenshot(
             path=str(temporary),
@@ -289,20 +290,24 @@ def _elements_from_payload(payload: Any) -> tuple[RuntimeElement, ...]:
     if not isinstance(payload, list):
         raise ValueError("Runtime DOM observer returned a non-list payload.")
     return tuple(
-        RuntimeElement.from_dict(item)
-        for item in payload
-        if isinstance(item, dict)
+        RuntimeElement.from_dict(item) for item in payload if isinstance(item, dict)
     )
 
 
 def _screenshot_name(url: str, viewport: RuntimeViewport) -> str:
     parsed = urlsplit(url)
-    readable = re.sub(
-        r"[^A-Za-z0-9]+",
-        "-",
-        f"{parsed.netloc}{parsed.path}",
-    ).strip("-")[:60] or "page"
-    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
+    readable = (
+        re.sub(
+            r"[^A-Za-z0-9]+",
+            "-",
+            f"{parsed.netloc}{parsed.path}",
+        ).strip("-")[:60]
+        or "page"
+    )
+    digest = hashlib.sha1(
+        url.encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()[:8]
     return f"{readable}-{digest}-{viewport.name}.png"
 
 
