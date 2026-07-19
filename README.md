@@ -32,7 +32,26 @@ This is not just linting. It is a structured quality system for frontend output.
 
 ## Quick Start
 
+Run a one-off command without a persistent installation:
+
 ```bash
+# Published release
+uvx uidetox --version
+
+# Current local checkout
+uvx --from . uidetox --version
+```
+
+`uvx` creates a temporary isolated environment. A cold cache still downloads
+runtime dependencies; use `--offline` only after those dependencies are cached.
+
+Install UIdetox when running a multi-command workflow:
+
+```bash
+# With uv
+uv tool install uidetox
+
+# Or with pip
 pip install uidetox
 
 # Install agent-specific skill assets
@@ -82,7 +101,7 @@ dependencies in an isolated environment, then run the canonical verification gat
 
 ```bash
 python -m pip install -e '.[dev]'
-python -m pytest -q
+python -m pytest -q -W error
 ```
 
 The test command should finish with an all-green result and no failures or errors.

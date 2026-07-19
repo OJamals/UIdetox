@@ -127,7 +127,12 @@ def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
         diff_img = ImageChops.difference(before_img.convert("RGB"), after_img.convert("RGB"))
 
         # Calculate change percentage
-        diff_pixels = sum(1 for px in diff_img.getdata() if sum(px) > 30)
+        pixel_data = (
+            diff_img.get_flattened_data()
+            if hasattr(diff_img, "get_flattened_data")
+            else diff_img.getdata()
+        )
+        diff_pixels = sum(1 for px in pixel_data if sum(px) > 30)
         total_pixels = diff_img.width * diff_img.height
         change_pct = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0
 

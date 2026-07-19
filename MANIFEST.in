@@ -1,4 +1,5 @@
 include README.md
+include CHANGELOG.md
 include SKILL.md
 include AGENTS.md
 include LICENSE

@@ -68,7 +68,7 @@ def test_optional_dependency_metadata_keeps_core_minimal() -> None:
     assert extras["memory"] == {"chromadb>=0.4.24"}
     assert extras["capture"] == {"Pillow>=10.0.0", "playwright>=1.42.0"}
     assert extras["all"] == extras["memory"] | extras["capture"]
-    assert extras["dev"] == {"pytest>=8.0,<9.0"}
+    assert extras["dev"] == {"pytest>=8.0,<9.0", "Pillow>=10.0.0"}
     assert not base & extras["all"]
     assert {
         "PyYAML>=6.0",

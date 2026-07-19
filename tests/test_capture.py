@@ -6,6 +6,7 @@ import builtins
 import json
 import sys
 import types
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -72,12 +73,15 @@ def test_visual_diff_identical_images_and_amplified_output(tmp_path: Path) -> No
     changed.putpixel((1, 0), (20, 20, 0))
     changed.save(after)
 
-    result = capture._generate_visual_diff(before, before)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        result = capture._generate_visual_diff(before, before)
+        changed_result = capture._generate_visual_diff(before, after)
+
     assert result["change_percentage"] == 0
     assert result["pixels_changed"] == 0
     assert result["severity"] == "none"
 
-    changed_result = capture._generate_visual_diff(before, after)
     assert changed_result["change_percentage"] == 50.0
     assert changed_result["pixels_changed"] == 1
     with Image.open(changed_result["diff_image"]) as diff:
