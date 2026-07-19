@@ -1,0 +1,135 @@
+openapi: 3.1.0
+info:
+  title: NexusFlow AI API
+  version: 0.1.0
+paths:
+  /api/projects:
+    get:
+      operationId: listProjects
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreate"
+      responses:
+        "201":
+          description: Created project
+  /api/projects/{project_id}:
+    parameters:
+      - in: path
+        name: project_id
+        required: true
+        schema:
+          type: integer
+    get:
+      operationId: getProject
+      responses:
+        "200":
+          description: Project detail
+    patch:
+      operationId: updateProject
+      responses:
+        "200":
+          description: Updated project
+    delete:
+      operationId: deleteProject
+      responses:
+        "204":
+          description: Deleted project
+  /api/metrics:
+    get:
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Dashboard metrics
+  /api/activity:
+    get:
+      operationId: getActivity
+      responses:
+        "200":
+          description: Recent activity
+  /api/team:
+    get:
+      operationId: getTeam
+      responses:
+        "200":
+          description: Team list
+  /api/team/invite:
+    post:
+      operationId: inviteTeamMember
+      responses:
+        "201":
+          description: Invited member
+  /api/team/{member_id}:
+    patch:
+      operationId: updateTeamMember
+      parameters:
+        - in: path
+          name: member_id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated member
+  /api/settings:
+    get:
+      operationId: getSettings
+      responses:
+        "200":
+          description: Workspace settings
+    put:
+      operationId: saveSettings
+      responses:
+        "200":
+          description: Saved settings
+  /api/internal/audit-log:
+    get:
+      operationId: internalAuditLog
+      responses:
+        "200":
+          description: Internal-only audit data
+components:
+  schemas:
+    Project:
+      type: object
+      required: [id, name, status, progress]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        progress:
+          type: integer
+        budget:
+          type: number
+        owner_name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    ProjectCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+

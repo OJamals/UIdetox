@@ -35,7 +35,6 @@ Thumbs.db
 # Generated
 treemap.html
 /.codebase-memory/
-/examples/
 
 # Test artifacts
 production_test_audit/
@@ -45,6 +44,8 @@ production_test_audit/
 .cursor/
 .windsurfrules
 GEMINI.md
+.agents/
 slop-harness/
 test-slop-app/
 tmp_scan_probe/
+plans/

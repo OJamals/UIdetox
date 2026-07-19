@@ -1,0 +1,62 @@
+{
+  "fixture": "NexusFlow AI",
+  "purpose": "Exercise UIdetox against a runnable, intentionally poor full-stack product.",
+  "intent": {
+    "audience": "UIdetox maintainers and beta testers",
+    "primary_job": "Inspect semantic mapping, provenance, redesign planning, and verification",
+    "tone": "maximal stereotypical AI SaaS slop",
+    "genre": "operational workspace",
+    "page_kind": "page",
+    "brand": "NexusFlow AI"
+  },
+  "expected_frontend_routes": [
+    "/",
+    "/projects",
+    "/projects/:projectId",
+    "/analytics",
+    "/team",
+    "/settings"
+  ],
+  "deliberate_operation_findings": {
+    "frontend_only": ["GET /api/recommendations"],
+    "backend_only": ["GET /api/internal/audit-log"],
+    "method_mismatch": ["DELETE frontend vs PATCH backend /api/team/{member_id}"]
+  },
+  "expected_parity_counts": {
+    "frontend_only": 1,
+    "backend_only": 1,
+    "method_mismatch": 1,
+    "unresolved": 0
+  },
+  "semantic_probe_file": "frontend/src/api/semantic-contract-probes.ts",
+  "redesign_oracle": {
+    "variants": 3,
+    "minimum_pairwise_distance": 60
+  },
+  "deliberate_slop_families": [
+    "purple-blue-pink gradients",
+    "Inter everywhere",
+    "glassmorphism",
+    "gradient headings",
+    "uniform metric and team-card grids",
+    "card-in-card nesting",
+    "emoji icon tiles",
+    "side-stripe cards",
+    "pure black and white",
+    "oversized shadows",
+    "pill-shaped everything",
+    "transition-all behavior",
+    "bouncy and infinite motion",
+    "removed focus outlines",
+    "placeholder-as-label forms",
+    "confirmation modal for reversible delete",
+    "celebratory success toasts",
+    "desktop-first fixed breakpoints",
+    "fabricated metrics",
+    "generic startup copy",
+    "AI nav and footer",
+    "frontend/backend DTO duplication",
+    "global SQLite connection",
+    "generic error messages"
+  ]
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.venv/
+.uidetox/
+.hallmark/
+data/*.db
+__pycache__/
+*.pyc
