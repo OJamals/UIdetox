@@ -10,6 +10,10 @@ import pytest
 
 from uidetox import cli
 from uidetox import onboarding
+from uidetox.agent_integration import (
+    AgentProvisioningResult,
+    ProvisioningStatus,
+)
 from uidetox.onboarding import (
     ONBOARDING_STEPS,
     OnboardingEnvironment,
@@ -58,7 +62,10 @@ def test_interactive_first_run_persists_intro_and_pending_order(tmp_path: Path) 
         assert step in rendered
 
 
-def test_interactive_first_run_resumes_without_replaying_intro(tmp_path: Path) -> None:
+def test_interactive_first_run_resumes_without_replaying_intro(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     state_path = tmp_path / ".uidetox" / "onboarding.json"
     state_path.parent.mkdir()
     state_path.write_text(
@@ -74,6 +81,14 @@ def test_interactive_first_run_resumes_without_replaying_intro(tmp_path: Path) -
         encoding="utf-8",
     )
     output: list[str] = []
+    monkeypatch.setattr(
+        "uidetox.agent_integration.provision_agent_integration",
+        lambda _environment: AgentProvisioningResult(
+            status=ProvisioningStatus.INCOMPLETE,
+            candidates=(),
+            results=(),
+        ),
+    )
 
     handled = run_first_run(
         _environment(
@@ -199,7 +214,9 @@ def test_cli_no_command_uses_onboarding_when_it_handles_first_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
-    monkeypatch.setattr("uidetox.onboarding.run_first_run", lambda: calls.append(1) or True)
+    monkeypatch.setattr(
+        "uidetox.onboarding.run_first_run", lambda: calls.append(1) or True
+    )
     monkeypatch.setattr(cli.sys, "argv", ["uidetox"])
 
     cli.main()

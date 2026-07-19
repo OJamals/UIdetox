@@ -186,7 +186,8 @@ def run_first_run(environment: OnboardingEnvironment | None = None) -> bool:
         _save_state(environment.state_path, state)
         return False
 
-    if state.status == "not_started":
+    starting_now = state.status == "not_started"
+    if starting_now:
         environment.output_fn("UIdetox guided setup")
         environment.output_fn(
             "Configure your agent, optional analysis tools, website intent, "
@@ -200,6 +201,23 @@ def run_first_run(environment: OnboardingEnvironment | None = None) -> bool:
     else:
         _save_state(environment.state_path, state)
         environment.output_fn("Resuming UIdetox guided setup")
+
+    if not starting_now and state.next_step == "agent":
+        from uidetox.agent_integration import (
+            AgentIntegrationEnvironment,
+            provision_agent_integration,
+        )
+
+        agent_result = provision_agent_integration(
+            AgentIntegrationEnvironment.from_system(
+                interactive=environment.interactive,
+                input_fn=environment.input_fn,
+                output_fn=environment.output_fn,
+            )
+        )
+        if agent_result.complete:
+            state = state.complete("agent", environment.now_fn())
+            _save_state(environment.state_path, state)
 
     if state.next_step == "capabilities":
         from uidetox.capabilities import (

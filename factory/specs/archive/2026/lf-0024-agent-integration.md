@@ -1,0 +1,52 @@
+---
+id: lf-0024
+title: Deepen agent skill and instruction installation
+agent: codex
+risk: medium
+grill: completed
+verification:
+  - .venv/bin/python -m pytest -q tests/test_agent_integration.py tests/test_update_skill.py
+  - .venv/bin/python -m pytest -q
+  - .venv/bin/python -m compileall -q uidetox
+---
+
+# Grill Gate
+
+- Owner: UIdetox maintainers and users installing bundled guidance for their coding agent.
+- Problem: six provider Adapters exist, but reusable installation behavior is trapped behind terminal output and `sys.exit`, so onboarding cannot safely inspect, install, or verify agent guidance.
+- Out of scope: changing bundled design guidance, deleting provider-specific exceptions, or installing unsupported agents.
+- Review failure: unrelated provider files are overwritten, global/project destinations change unexpectedly, command output regresses, onboarding depends on private installer functions, installation cannot be verified, or existing tests fail.
+- Riskiest assumption: common provider metadata can replace duplication without flattening real Cursor and Codex exceptions.
+- Smallest acceptable: one deep agent-integration Module returns structured detection/install/verification results; the existing `update-skill` command becomes a thin Adapter and onboarding uses the same Interface.
+
+# Context
+
+`commands/update_skill.py` has real Adapters for Claude, Cursor, Gemini, Codex, Windsurf, and Copilot. Common namespaced merge behavior already has value, but validation, guide rendering, printed output, and process exits are mixed into the command runner. The Module should retain the existing six-Adapter Seam while hiding bundled-data checks, destination resolution, non-destructive merge, and verification.
+
+# Acceptance Criteria
+
+- A new agent-integration Module represents supported agents, detected candidates, destinations, and structured install/verification results.
+- Common provider facts are data-driven; provider-specific behavior remains in Adapters only where destinations or required companion files differ.
+- Existing namespaced merges preserve unrelated root, sibling, and existing namespaced files.
+- Codex global installation and project-local providers retain their current destinations.
+- Detection proposes installed/recognizable agents but requires user confirmation before writing.
+- Installation is idempotent and verifies required bundled files after writing.
+- Missing bundled data and permission/write failures return structured errors without calling `sys.exit`.
+- `uidetox update-skill <agent>` preserves its observable success/error guidance while delegating to the Module.
+- Onboarding performs the agent step before capability provisioning and records explicit skip as a completed step.
+- Tests cover all providers, candidate detection, user confirmation, idempotency, preservation, missing assets, write failure, Codex home isolation, and command compatibility.
+
+# Constraints
+
+- Do not overwrite unrelated files or delete user-authored content.
+- Do not invent support for agents outside the current six.
+- Do not expose filesystem copy helpers as the Module Interface.
+- Do not duplicate provider metadata between CLI parsing and the Module.
+- Preserve the existing dirty worktree and stage only spec-owned paths.
+
+# Review Notes
+
+- Apply the deletion test to the Module and retain the existing real six-Adapter Seam.
+- Check that tests assert installed state, not internal helper call sequences.
+- Review global-path handling carefully; tests must never write to the real home directory.
+- Confirm the command remains usable independently of first-run onboarding.

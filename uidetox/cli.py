@@ -2,6 +2,8 @@
 
 import argparse
 import sys
+
+from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 from importlib import import_module
 from pathlib import Path
 
@@ -288,7 +290,11 @@ def parse_args(args_list=None):
 
     # Command: update-skill
     update_parser = subparsers.add_parser("update-skill", help="Installs UIdetox rules into your agent's configuration")
-    update_parser.add_argument("agent", choices=["claude", "cursor", "gemini", "codex", "windsurf", "copilot"], help="Target AI agent")
+    update_parser.add_argument(
+        "agent",
+        choices=SUPPORTED_AGENT_NAMES,
+        help="Target AI agent",
+    )
 
     # Command: status
     status_parser = subparsers.add_parser("status", help="Show project health dashboard with design score")
