@@ -12,12 +12,19 @@ import pytest
 from uidetox import memory
 from uidetox import subagent
 from uidetox.commands import capture
+from uidetox.visual_evidence import (
+    VisualEvidenceCase,
+    VisualEvidenceError,
+    VisualEvidenceRequest,
+    build_visual_evidence,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_EXTRA_COMMAND = "pip install 'uidetox[capture]'"
 CHROMIUM_COMMAND = "python -m playwright install chromium"
 MEMORY_EXTRA_COMMAND = "pip install 'uidetox[memory]'"
+VISUAL_EXTRA_COMMAND = "pip install 'uidetox[visual]'"
 
 
 def _project_metadata() -> dict:
@@ -179,6 +186,29 @@ def test_missing_pillow_explains_capture_setup(
 
     assert CAPTURE_EXTRA_COMMAND in result["note"]
     assert CHROMIUM_COMMAND in result["note"]
+
+
+def test_missing_pillow_explains_visual_extra(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _block_imports(monkeypatch, {"PIL"})
+    request = VisualEvidenceRequest(
+        comparisons=(
+            VisualEvidenceCase(
+                case_id="missing-pillow",
+                before_path=tmp_path / "before.png",
+                after_path=tmp_path / "after.png",
+            ),
+        ),
+        output_dir=tmp_path,
+    )
+
+    with pytest.raises(VisualEvidenceError) as captured:
+        build_visual_evidence(request)
+
+    assert captured.value.code == "missing_dependency"
+    assert VISUAL_EXTRA_COMMAND in str(captured.value)
 
 
 def test_missing_browser_executable_preserves_error_and_explains_setup(

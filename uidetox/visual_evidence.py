@@ -30,8 +30,9 @@ _NORMALIZED_MODE = "RGB"
 _CASE_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
 _ICC_TRANSFORM_CACHE: dict[str, Any] = {}
 _SRGB_PROFILE: Any | None = None
-_CAPTURE_INSTALL_GUIDANCE = (
-    "Install capture support with: pip install 'uidetox[capture]'"
+_VISUAL_INSTALL_GUIDANCE = (
+    "Install visual evidence support with: pip install 'uidetox[visual]' "
+    "(or 'uidetox[capture]' for browser screenshots)."
 )
 
 
@@ -377,7 +378,7 @@ def _pillow_version() -> str:
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
-            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+            f"Pillow is required for visual evidence. {_VISUAL_INSTALL_GUIDANCE}",
         ) from error
     return str(pillow_version)
 
@@ -491,7 +492,7 @@ def _load_png(
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
-            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+            f"Pillow is required for visual evidence. {_VISUAL_INSTALL_GUIDANCE}",
         ) from error
 
     resolved = path.expanduser().resolve()
@@ -898,7 +899,7 @@ def _reviewer_case_artifacts(
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
-            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+            f"Pillow is required for visual evidence. {_VISUAL_INSTALL_GUIDANCE}",
         ) from error
 
     safe_case_id = _safe_case_id(case.case_id)
@@ -962,7 +963,7 @@ def _build_contact_sheet(
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
-            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+            f"Pillow is required for visual evidence. {_VISUAL_INSTALL_GUIDANCE}",
         ) from error
 
     padding = 16
@@ -1039,7 +1040,7 @@ def _compare_images(
     except ImportError as error:
         raise VisualEvidenceError(
             "missing_dependency",
-            f"Pillow is required for visual evidence. {_CAPTURE_INSTALL_GUIDANCE}",
+            f"Pillow is required for visual evidence. {_VISUAL_INSTALL_GUIDANCE}",
         ) from error
 
     before_size = (before.evidence.width, before.evidence.height)
