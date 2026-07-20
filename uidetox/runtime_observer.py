@@ -76,9 +76,7 @@ class RuntimeElement:
             bounds={str(key): float(item) for key, item in dict(bounds).items()},
             styles={str(key): str(item) for key, item in dict(styles).items()},
             states=dict(states),
-            measurements=(
-                dict(measurements) if isinstance(measurements, dict) else {}
-            ),
+            measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
             findings=tuple(
                 RuntimeFinding.from_dict(dict(item))
                 for item in value.get("findings", [])

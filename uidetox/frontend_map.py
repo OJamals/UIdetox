@@ -609,9 +609,7 @@ def map_frontend(
         for element in page.elements
         for finding in element.findings
     ]
-    runtime_finding_counts = Counter(
-        finding["code"] for finding in runtime_findings
-    )
+    runtime_finding_counts = Counter(finding["code"] for finding in runtime_findings)
     project_map = build_project_map(root_path, nodes)
 
     return FrontendMap(
@@ -648,9 +646,7 @@ def map_frontend(
             "runtime_viewports": runtime_viewports,
             "runtime_screenshots": runtime_screenshots,
             "runtime_finding_count": len(runtime_findings),
-            "runtime_finding_counts": dict(
-                sorted(runtime_finding_counts.items())
-            ),
+            "runtime_finding_counts": dict(sorted(runtime_finding_counts.items())),
             "runtime_findings": runtime_findings,
             "runtime_errors": list(runtime.errors) if runtime is not None else [],
         },
@@ -1055,9 +1051,7 @@ def _merge_runtime_evidence(
     for page in runtime.pages:
         page_key = f"{page.url}@{page.viewport.name}"
         page_id = _node_id("runtime_page", "", page_key)
-        page_finding_count = sum(
-            len(element.findings) for element in page.elements
-        )
+        page_finding_count = sum(len(element.findings) for element in page.elements)
         nodes.append(
             FrontendNode(
                 id=page_id,
@@ -1109,9 +1103,7 @@ def _merge_runtime_evidence(
                         "styles": element.styles,
                         "states": element.states,
                         "measurements": element.measurements,
-                        "findings": [
-                            asdict(finding) for finding in element.findings
-                        ],
+                        "findings": [asdict(finding) for finding in element.findings],
                     },
                 )
             )

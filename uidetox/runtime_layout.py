@@ -64,9 +64,7 @@ def _alignment_findings(
             )
         )
 
-    baseline_deviation = _measurement_float(
-        measurements, "fontBaselineDeviation"
-    )
+    baseline_deviation = _measurement_float(measurements, "fontBaselineDeviation")
     font_mismatch = measurements.get("fontMismatch") is True
     if baseline_deviation > 3 or font_mismatch:
         metrics: dict[str, Any] = {}
@@ -76,9 +74,7 @@ def _alignment_findings(
             reasons.append(f"baseline differs by {baseline_deviation:.1f}px")
         if font_mismatch:
             actual_font = str(measurements.get("fontFamily", "")).strip()
-            expected_font = str(
-                measurements.get("expectedFontFamily", "")
-            ).strip()
+            expected_font = str(measurements.get("expectedFontFamily", "")).strip()
             if actual_font:
                 metrics["font_family"] = actual_font
             if expected_font:
@@ -128,18 +124,10 @@ def _clipping_findings(
             axes.append("an ancestor clipping boundary")
         intentional = measurements.get("intentionalTruncation") is True
         metrics: dict[str, Any] = {
-            "client_width_px": _measurement_float(
-                measurements, "clientWidth"
-            ),
-            "scroll_width_px": _measurement_float(
-                measurements, "scrollWidth"
-            ),
-            "client_height_px": _measurement_float(
-                measurements, "clientHeight"
-            ),
-            "scroll_height_px": _measurement_float(
-                measurements, "scrollHeight"
-            ),
+            "client_width_px": _measurement_float(measurements, "clientWidth"),
+            "scroll_width_px": _measurement_float(measurements, "scrollWidth"),
+            "client_height_px": _measurement_float(measurements, "clientHeight"),
+            "scroll_height_px": _measurement_float(measurements, "scrollHeight"),
         }
         clipping_ancestor = str(
             measurements.get("clippingAncestorSelector", "")
@@ -156,16 +144,12 @@ def _clipping_findings(
                 measurements, f"ancestorClipOverflow{logical_side}"
             )
             if value is not None:
-                metrics[f"ancestor_overflow_{_snake_case(logical_side)}_px"] = (
-                    value
-                )
+                metrics[f"ancestor_overflow_{_snake_case(logical_side)}_px"] = value
         location = " and ".join(axes) if axes else "the rendered boundary"
         findings.append(
             RuntimeFinding(
                 code=(
-                    "runtime-text-truncated"
-                    if intentional
-                    else "runtime-text-clipped"
+                    "runtime-text-truncated" if intentional else "runtime-text-clipped"
                 ),
                 category="overflow",
                 severity="info" if intentional else "error",
@@ -198,9 +182,7 @@ def _spacing_findings(
     findings: list[RuntimeFinding] = []
     has_text = measurements.get("hasText") is True
     is_control = measurements.get("isControl") is True
-    is_container = (
-        is_control or measurements.get("isVisualContainer") is True
-    )
+    is_container = is_control or measurements.get("isVisualContainer") is True
     insets = _logical_values(
         measurements,
         ("textInsetInlineStart", "textInsetInlineEnd"),
@@ -231,9 +213,7 @@ def _spacing_findings(
     )
     if is_container and horizontal_padding is not None:
         minimum = 8.0
-        if min(horizontal_padding) < minimum or _padding_is_uneven(
-            horizontal_padding
-        ):
+        if min(horizontal_padding) < minimum or _padding_is_uneven(horizontal_padding):
             findings.append(
                 RuntimeFinding(
                     code="runtime-horizontal-padding",
@@ -255,9 +235,7 @@ def _spacing_findings(
     )
     if is_container and vertical_padding is not None:
         minimum = 6.0 if is_control else 8.0
-        if min(vertical_padding) < minimum or _padding_is_uneven(
-            vertical_padding
-        ):
+        if min(vertical_padding) < minimum or _padding_is_uneven(vertical_padding):
             findings.append(
                 RuntimeFinding(
                     code="runtime-vertical-padding",
@@ -280,13 +258,9 @@ def _line_spacing_findings(
     measurements = element.measurements
     font_size = _measurement_float(measurements, "fontSize")
     line_height = _measurement_float(measurements, "lineHeight")
-    minimum_line_gap = _measurement_optional_float(
-        measurements, "minimumLineGap"
-    )
+    minimum_line_gap = _measurement_optional_float(measurements, "minimumLineGap")
     minimum_ratio = (
-        1.05
-        if element.tag.lower() in {"h1", "h2", "h3", "h4", "h5", "h6"}
-        else 1.2
+        1.05 if element.tag.lower() in {"h1", "h2", "h3", "h4", "h5", "h6"} else 1.2
     )
     if not (
         measurements.get("hasText") is True
@@ -322,9 +296,7 @@ def _line_spacing_findings(
     )
 
 
-def _measurement_optional_float(
-    measurements: dict[str, Any], key: str
-) -> float | None:
+def _measurement_optional_float(measurements: dict[str, Any], key: str) -> float | None:
     value = measurements.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -341,16 +313,10 @@ def _padding_pair(
     *,
     fallback: tuple[str, str],
 ) -> tuple[float, float] | None:
-    first_value = _measurement_optional_float(
-        measurements, f"padding{logical[0]}"
-    )
-    second_value = _measurement_optional_float(
-        measurements, f"padding{logical[1]}"
-    )
+    first_value = _measurement_optional_float(measurements, f"padding{logical[0]}")
+    second_value = _measurement_optional_float(measurements, f"padding{logical[1]}")
     if first_value is None or second_value is None:
-        first_value = _measurement_optional_float(
-            measurements, f"padding{fallback[0]}"
-        )
+        first_value = _measurement_optional_float(measurements, f"padding{fallback[0]}")
         second_value = _measurement_optional_float(
             measurements, f"padding{fallback[1]}"
         )
@@ -369,16 +335,10 @@ def _logical_values(
     fallback_keys: tuple[str, ...],
 ) -> list[float | None]:
     logical_keys = [key for pair in logical_pairs for key in pair]
-    values = [
-        _measurement_optional_float(measurements, key)
-        for key in logical_keys
-    ]
+    values = [_measurement_optional_float(measurements, key) for key in logical_keys]
     if all(value is not None for value in values):
         return values
-    return [
-        _measurement_optional_float(measurements, key)
-        for key in fallback_keys
-    ]
+    return [_measurement_optional_float(measurements, key) for key in fallback_keys]
 
 
 def _snake_case(value: str) -> str:

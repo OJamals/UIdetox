@@ -396,10 +396,9 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
         Path(page.screenshot or "").read_bytes() == b"partial-png"
         for page in observation.pages
     )
-    assert {
-        finding.code
-        for finding in observation.pages[0].elements[0].findings
-    } == {"runtime-line-spacing"}
+    assert {finding.code for finding in observation.pages[0].elements[0].findings} == {
+        "runtime-line-spacing"
+    }
     assert not list(tmp_path.glob(".*.tmp"))
 
 
@@ -510,19 +509,14 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         if element.findings
     }
     elements_by_selector = {
-        element.selector: element
-        for element in observation.pages[0].elements
+        element.selector: element for element in observation.pages[0].elements
     }
 
     assert "runtime-layout-misalignment" in findings_by_selector["#misaligned"]
     assert "runtime-font-misalignment" in findings_by_selector["#misaligned"]
-    assert "runtime-layout-misalignment" in findings_by_selector[
-        "#grid-misaligned"
-    ]
+    assert "runtime-layout-misalignment" in findings_by_selector["#grid-misaligned"]
     assert "runtime-font-misalignment" in findings_by_selector["#font-only"]
-    assert "runtime-layout-misalignment" not in findings_by_selector[
-        "#font-only"
-    ]
+    assert "runtime-layout-misalignment" not in findings_by_selector["#font-only"]
     assert "runtime-text-clipped" in findings_by_selector["#truncated"]
     assert "runtime-text-truncated" in findings_by_selector["#ellipsis"]
     assert "runtime-text-clipped" not in findings_by_selector["#ellipsis"]
@@ -531,9 +525,7 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     assert "runtime-vertical-padding" in findings_by_selector["#card"]
     assert "runtime-line-spacing" in findings_by_selector["#tight"]
     assert "runtime-component-clipped" in findings_by_selector["#clip"]
-    assert "runtime-text-clipped" in findings_by_selector[
-        "#ancestor-clipped-text"
-    ]
+    assert "runtime-text-clipped" in findings_by_selector["#ancestor-clipped-text"]
     assert "#badge" not in findings_by_selector
     assert elements_by_selector["#tight"].measurements["fontStatus"] == "loaded"
     assert elements_by_selector["#tight"].measurements["fontReady"] is True
@@ -543,20 +535,21 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         (int, float),
     )
     assert isinstance(
-        elements_by_selector["#misaligned"].measurements[
-            "fontBaselineProxy"
-        ],
+        elements_by_selector["#misaligned"].measurements["fontBaselineProxy"],
         (int, float),
     )
-    assert elements_by_selector["#misaligned"].measurements[
-        "layoutPeerProvenance"
-    ] == "flex-row"
-    assert elements_by_selector["#card"].measurements[
-        "paddingInlineStart"
-    ] == 2
-    assert elements_by_selector["#ancestor-clipped-text"].measurements[
-        "clippedByAncestor"
-    ] is True
-    assert elements_by_selector["#ancestor-clipped-text"].measurements[
-        "clippingAncestorSelector"
-    ] == "#ancestor-clip"
+    assert (
+        elements_by_selector["#misaligned"].measurements["layoutPeerProvenance"]
+        == "flex-row"
+    )
+    assert elements_by_selector["#card"].measurements["paddingInlineStart"] == 2
+    assert (
+        elements_by_selector["#ancestor-clipped-text"].measurements["clippedByAncestor"]
+        is True
+    )
+    assert (
+        elements_by_selector["#ancestor-clipped-text"].measurements[
+            "clippingAncestorSelector"
+        ]
+        == "#ancestor-clip"
+    )

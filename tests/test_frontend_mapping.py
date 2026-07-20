@@ -193,8 +193,7 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
         "runtime-text-clipped": 2
     }
     assert {
-        finding["viewport"]
-        for finding in frontend_map.evidence["runtime_findings"]
+        finding["viewport"] for finding in frontend_map.evidence["runtime_findings"]
     } == {"desktop", "mobile"}
     assert {node.kind for node in runtime_nodes} == {
         "runtime_page",
