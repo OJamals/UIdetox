@@ -382,6 +382,11 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
     )
 
     assert sum(event[0] == "launch" for event in events) == 1
+    assert all(
+        event[1]["reduced_motion"] == "reduce"
+        for event in events
+        if event[0] == "context"
+    )
     assert len(observation.pages) == 2
     assert [Path(page.screenshot or "").name for page in observation.pages] == [
         "after_mobile.png",
@@ -436,11 +441,25 @@ def test_observer_detects_rendered_layout_and_typography_defects(
   .row { display: flex; align-items: flex-start; gap: 8px; }
   .peer { width: 100px; height: 36px; padding: 8px 12px; }
   #misaligned { transform: translateY(7px); font-family: serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, 100px); gap: 8px; }
+  #grid-misaligned { transform: translateY(7px); }
   #truncated { width: 70px; overflow: hidden; white-space: nowrap; }
+  #ellipsis {
+    width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   #card { width: 180px; padding: 2px; border: 1px solid black; }
   #tight { width: 110px; font-size: 16px; line-height: 17px; }
   #clip { width: 80px; height: 30px; overflow: clip; }
   #clip > div { width: 140px; height: 50px; }
+  #ancestor-clip { width: 90px; overflow: hidden; white-space: nowrap; }
+  #ancestor-clipped-text {
+    display: inline-block;
+    margin-left: 70px;
+    width: 100px;
+  }
   #badge { background: #eee; }
 </style>
 <main>
@@ -449,10 +468,19 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     <button class="peer">Second</button>
     <button class="peer" id="misaligned">Third</button>
   </div>
+  <div class="grid">
+    <button class="peer">Alpha</button>
+    <button class="peer">Beta</button>
+    <button class="peer" id="grid-misaligned">Gamma</button>
+  </div>
   <button id="truncated">This label is deliberately too long</button>
+  <button id="ellipsis">This label is intentionally shortened</button>
   <article id="card"><p>Card text</p></article>
   <p id="tight">Tight multiline text needs more leading.</p>
   <section id="clip"><div>Oversized child component</div></section>
+  <div id="ancestor-clip">
+    <span id="ancestor-clipped-text">Clipped by ancestor</span>
+  </div>
   <span id="badge">New</span>
 </main>
 """.strip(),
@@ -476,13 +504,50 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         for element in observation.pages[0].elements
         if element.findings
     }
+    elements_by_selector = {
+        element.selector: element
+        for element in observation.pages[0].elements
+    }
 
     assert "runtime-layout-misalignment" in findings_by_selector["#misaligned"]
     assert "runtime-font-misalignment" in findings_by_selector["#misaligned"]
+    assert "runtime-layout-misalignment" in findings_by_selector[
+        "#grid-misaligned"
+    ]
     assert "runtime-text-clipped" in findings_by_selector["#truncated"]
+    assert "runtime-text-truncated" in findings_by_selector["#ellipsis"]
+    assert "runtime-text-clipped" not in findings_by_selector["#ellipsis"]
     assert "runtime-text-edge-contact" in findings_by_selector["#card"]
     assert "runtime-horizontal-padding" in findings_by_selector["#card"]
     assert "runtime-vertical-padding" in findings_by_selector["#card"]
     assert "runtime-line-spacing" in findings_by_selector["#tight"]
     assert "runtime-component-clipped" in findings_by_selector["#clip"]
+    assert "runtime-text-clipped" in findings_by_selector[
+        "#ancestor-clipped-text"
+    ]
     assert "#badge" not in findings_by_selector
+    assert elements_by_selector["#tight"].measurements["fontStatus"] == "loaded"
+    assert elements_by_selector["#tight"].measurements["fontReady"] is True
+    assert elements_by_selector["#tight"].measurements["isTextFlow"] is True
+    assert isinstance(
+        elements_by_selector["#tight"].measurements["minimumLineGap"],
+        (int, float),
+    )
+    assert isinstance(
+        elements_by_selector["#misaligned"].measurements[
+            "fontBaselineProxy"
+        ],
+        (int, float),
+    )
+    assert elements_by_selector["#misaligned"].measurements[
+        "layoutPeerProvenance"
+    ] == "flex-row"
+    assert elements_by_selector["#card"].measurements[
+        "paddingInlineStart"
+    ] == 2
+    assert elements_by_selector["#ancestor-clipped-text"].measurements[
+        "clippedByAncestor"
+    ] is True
+    assert elements_by_selector["#ancestor-clipped-text"].measurements[
+        "clippingAncestorSelector"
+    ] == "#ancestor-clip"
