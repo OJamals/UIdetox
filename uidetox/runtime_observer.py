@@ -500,11 +500,11 @@ async () => {
     const bottom = Math.max(...rects.map(item => item.bottom));
     const lines = [];
     for (const item of [...rects].sort((a, b) => a.top - b.top)) {
-      const line = lines.find(value => Math.abs(value.top - item.top) <= 1);
-      if (line) {
-        line.left = Math.min(line.left, item.left);
-        line.right = Math.max(line.right, item.right);
-        line.bottom = Math.max(line.bottom, item.bottom);
+      const currentLine = lines[lines.length - 1];
+      if (currentLine && Math.abs(currentLine.top - item.top) <= 1) {
+        currentLine.left = Math.min(currentLine.left, item.left);
+        currentLine.right = Math.max(currentLine.right, item.right);
+        currentLine.bottom = Math.max(currentLine.bottom, item.bottom);
       } else {
         lines.push({
           top: item.top,
@@ -819,21 +819,25 @@ async () => {
       const deviations = anchors
         .map(values => clusteredPeerDeviation(values, index))
         .filter(value => value > 0);
-      if (deviations.length) {
-        candidates.push({
-          ...group,
-          deviation: Math.min(...deviations)
-        });
-      }
+      candidates.push({
+        ...group,
+        deviation: deviations.length ? Math.min(...deviations) : 0
+      });
     }
     if (!candidates.length) return;
-    const peerGroup = candidates.sort(
+    const misalignedGroups = candidates.filter(item => item.deviation > 0);
+    const peerGroup = (misalignedGroups.length
+      ? misalignedGroups
+      : candidates
+    ).sort(
       (first, second) => first.deviation - second.deviation
     )[0];
-    measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
-    measurements.layoutDeviation = round(peerGroup.deviation);
     measurements.layoutPeerProvenance = peerGroup.provenance;
     measurements.layoutPeerSelectors = peerGroup.members.map(selectorFor);
+    if (peerGroup.deviation > 0) {
+      measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
+      measurements.layoutDeviation = round(peerGroup.deviation);
+    }
 
     const index = peerGroup.members.indexOf(element);
     const textPeers = peerGroup.members.map(item => baseMeasurement(item));

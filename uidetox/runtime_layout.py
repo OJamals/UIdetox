@@ -119,8 +119,8 @@ def _clipping_findings(
         axes = [
             axis
             for axis, clipped in (
-                ("horizontal", clipped_x),
-                ("vertical", clipped_y),
+                ("the horizontal axis", clipped_x),
+                ("the vertical axis", clipped_y),
             )
             if clipped
         ]
@@ -159,6 +159,7 @@ def _clipping_findings(
                 metrics[f"ancestor_overflow_{_snake_case(logical_side)}_px"] = (
                     value
                 )
+        location = " and ".join(axes) if axes else "the rendered boundary"
         findings.append(
             RuntimeFinding(
                 code=(
@@ -169,14 +170,9 @@ def _clipping_findings(
                 category="overflow",
                 severity="info" if intentional else "error",
                 message=(
-                    "Text uses an intentional truncation treatment on the "
+                    f"Text uses an intentional truncation treatment at {location}."
                     if intentional
-                    else "Text is truncated or clipped on the "
-                )
-                + (
-                    f"{' and '.join(axes)} axis."
-                    if axes
-                    else "rendered boundary."
+                    else f"Text is truncated or clipped at {location}."
                 ),
                 metrics=metrics,
             )

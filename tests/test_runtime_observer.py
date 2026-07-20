@@ -473,6 +473,11 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     <button class="peer">Beta</button>
     <button class="peer" id="grid-misaligned">Gamma</button>
   </div>
+  <div class="row">
+    <button class="peer">North</button>
+    <button class="peer">South</button>
+    <button class="peer" id="font-only" style="font-family: serif">West</button>
+  </div>
   <button id="truncated">This label is deliberately too long</button>
   <button id="ellipsis">This label is intentionally shortened</button>
   <article id="card"><p>Card text</p></article>
@@ -513,6 +518,10 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     assert "runtime-font-misalignment" in findings_by_selector["#misaligned"]
     assert "runtime-layout-misalignment" in findings_by_selector[
         "#grid-misaligned"
+    ]
+    assert "runtime-font-misalignment" in findings_by_selector["#font-only"]
+    assert "runtime-layout-misalignment" not in findings_by_selector[
+        "#font-only"
     ]
     assert "runtime-text-clipped" in findings_by_selector["#truncated"]
     assert "runtime-text-truncated" in findings_by_selector["#ellipsis"]
