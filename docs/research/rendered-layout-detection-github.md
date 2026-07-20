@@ -64,8 +64,8 @@ date.
 
 ### 1. Playwright: retain as the measurement and capture engine
 
-Repository: [microsoft/playwright](https://github.com/microsoft/playwright)  
-License: Apache-2.0  
+Repository: [microsoft/playwright](https://github.com/microsoft/playwright)
+License: Apache-2.0
 Status: active; repository activity was current on 2026-07-19
 
 Playwright already gives UIdetox the correct execution context: the final DOM,
@@ -86,8 +86,8 @@ Verdict: **use directly and deepen**.
 
 ### 2. Galen Framework: borrow the relational rule model
 
-Repository: [galenframework/galen](https://github.com/galenframework/galen)  
-License: Apache-2.0  
+Repository: [galenframework/galen](https://github.com/galenframework/galen)
+License: Apache-2.0
 Status: not archived, but the last repository push was in 2022 and the latest
 GitHub release shown was from 2019
 
@@ -114,8 +114,8 @@ Verdict: **borrow the rule semantics; do not add the runtime dependency**.
 
 ### 3. Pretext: useful text-fit and line-layout algorithms
 
-Repository: [chenglou/pretext](https://github.com/chenglou/pretext)  
-License: MIT  
+Repository: [chenglou/pretext](https://github.com/chenglou/pretext)
+License: MIT
 Status: active; repository activity was current in June 2026
 
 Pretext is a TypeScript multiline text measurement and layout engine. It uses
@@ -147,8 +147,8 @@ Verdict: **borrow now; prototype before adopting**.
 
 ### 4. Pixelmatch: best small visual corroboration source
 
-Repository: [mapbox/pixelmatch](https://github.com/mapbox/pixelmatch)  
-License: ISC  
+Repository: [mapbox/pixelmatch](https://github.com/mapbox/pixelmatch)
+License: ISC
 Status: active; repository activity was current in July 2026
 
 Pixelmatch is a small dependency-free pixel comparison library with perceptual
@@ -171,8 +171,8 @@ Verdict: **best algorithm to borrow or expose through a small adapter**.
 
 ### 5. ODiff: optional high-throughput screenshot adapter
 
-Repository: [dmtrKovalenko/odiff](https://github.com/dmtrKovalenko/odiff)  
-License: MIT  
+Repository: [dmtrKovalenko/odiff](https://github.com/dmtrKovalenko/odiff)
+License: MIT
 Status: active; release 4.3.8 was published in April 2026
 
 ODiff is a native Zig/SIMD image comparison tool with a CLI, Node binding, and
@@ -188,7 +188,7 @@ Verdict: **optional adapter after the semantic DOM layer is mature**.
 
 ### 6. LooksSame: useful diff clustering
 
-Repository: [gemini-testing/looks-same](https://github.com/gemini-testing/looks-same)  
+Repository: [gemini-testing/looks-same](https://github.com/gemini-testing/looks-same)
 License: MIT
 
 LooksSame supplies perceptual comparison, anti-alias and caret handling, diff
@@ -204,8 +204,8 @@ Verdict: **borrow clustering ideas; no immediate dependency**.
 ### 7. Visual Regression Tracker: optional evidence management
 
 Repository:
-[Visual-Regression-Tracker/Visual-Regression-Tracker](https://github.com/Visual-Regression-Tracker/Visual-Regression-Tracker)  
-License: Apache-2.0  
+[Visual-Regression-Tracker/Visual-Regression-Tracker](https://github.com/Visual-Regression-Tracker/Visual-Regression-Tracker)
+License: Apache-2.0
 Status: active; repository activity was current in July 2026
 
 Visual Regression Tracker is a self-hosted service for storing baselines,
