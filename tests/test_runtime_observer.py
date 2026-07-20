@@ -3,14 +3,155 @@
 from __future__ import annotations
 
 import sys
+import threading
 import types
+from contextlib import contextmanager
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Iterator
 
 import pytest
 
 from uidetox import runtime_observer
-from uidetox.runtime_observer import RuntimeViewport, observe_frontend
+from uidetox.runtime_observer import (
+    RuntimeElement,
+    RuntimeViewport,
+    detect_runtime_findings,
+    observe_frontend,
+)
+
+
+def _measured_element(**measurements: object) -> RuntimeElement:
+    return RuntimeElement(
+        kind="action",
+        tag="button",
+        role="button",
+        name="Save changes",
+        selector="#save",
+        order=0,
+        bounds={"x": 10, "y": 10, "width": 120, "height": 36},
+        styles={"fontSize": "16px", "lineHeight": "16px"},
+        measurements=measurements,
+    )
+
+
+def _finding_codes(element: RuntimeElement) -> set[str]:
+    return {finding.code for finding in detect_runtime_findings(element)}
+
+
+@contextmanager
+def _serve_directory(directory: Path) -> Iterator[str]:
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, _format: str, *_args: object) -> None:
+            return None
+
+    handler = lambda *args, **kwargs: QuietHandler(  # noqa: E731
+        *args, directory=str(directory), **kwargs
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_detect_runtime_findings_reports_layout_and_font_misalignment() -> None:
+    element = _measured_element(
+        layoutAxis="vertical",
+        layoutDeviation=6.0,
+        fontBaselineDeviation=5.0,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-layout-misalignment" in codes
+    assert "runtime-font-misalignment" in codes
+
+
+def test_detect_runtime_findings_reports_text_and_component_clipping() -> None:
+    element = _measured_element(
+        hasText=True,
+        clientWidth=120.0,
+        scrollWidth=156.0,
+        clientHeight=36.0,
+        scrollHeight=52.0,
+        overflowX="hidden",
+        overflowY="clip",
+        descendantClipped=True,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-text-clipped" in codes
+    assert "runtime-component-clipped" in codes
+
+
+def test_detect_runtime_findings_reports_text_edge_contact_and_padding() -> None:
+    element = _measured_element(
+        hasText=True,
+        isControl=True,
+        isVisualContainer=True,
+        textInsetTop=2.0,
+        textInsetRight=1.0,
+        textInsetBottom=2.0,
+        textInsetLeft=1.0,
+        paddingTop=2.0,
+        paddingRight=4.0,
+        paddingBottom=2.0,
+        paddingLeft=4.0,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-text-edge-contact" in codes
+    assert "runtime-horizontal-padding" in codes
+    assert "runtime-vertical-padding" in codes
+
+
+def test_detect_runtime_findings_reports_inadequate_multiline_spacing() -> None:
+    element = _measured_element(
+        hasText=True,
+        isMultiline=True,
+        fontSize=16.0,
+        lineHeight=17.0,
+    )
+
+    assert "runtime-line-spacing" in _finding_codes(element)
+
+
+def test_detect_runtime_findings_ignores_healthy_geometry() -> None:
+    element = _measured_element(
+        hasText=True,
+        isMultiline=True,
+        isControl=True,
+        isVisualContainer=True,
+        fontSize=16.0,
+        lineHeight=24.0,
+        clientWidth=120.0,
+        scrollWidth=120.0,
+        clientHeight=48.0,
+        scrollHeight=48.0,
+        overflowX="visible",
+        overflowY="visible",
+        textInsetTop=10.0,
+        textInsetRight=12.0,
+        textInsetBottom=10.0,
+        textInsetLeft=12.0,
+        paddingTop=10.0,
+        paddingRight=12.0,
+        paddingBottom=10.0,
+        paddingLeft=12.0,
+        layoutDeviation=1.0,
+        fontBaselineDeviation=1.0,
+    )
+
+    assert detect_runtime_findings(element) == ()
 
 
 class _Page:
@@ -41,6 +182,12 @@ class _Page:
                 "bounds": {"x": 0, "y": 0, "width": 100, "height": 80},
                 "styles": {},
                 "states": {},
+                "measurements": {
+                    "hasText": True,
+                    "isMultiline": True,
+                    "fontSize": 16.0,
+                    "lineHeight": 17.0,
+                },
             }
         ]
 
@@ -155,6 +302,10 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
         Path(page.screenshot or "").read_bytes() == b"partial-png"
         for page in observation.pages
     )
+    assert {
+        finding.code
+        for finding in observation.pages[0].elements[0].findings
+    } == {"runtime-line-spacing"}
     assert not list(tmp_path.glob(".*.tmp"))
 
 
@@ -183,3 +334,66 @@ def test_observer_screenshot_failure_preserves_existing_file(
     assert observation.errors
     assert existing.read_bytes() == b"known-good"
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_observer_detects_rendered_layout_and_typography_defects(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "layout-defects.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  .row { display: flex; align-items: flex-start; gap: 8px; }
+  .peer { width: 100px; height: 36px; padding: 8px 12px; }
+  #misaligned { transform: translateY(7px); font-family: serif; }
+  #truncated { width: 70px; overflow: hidden; white-space: nowrap; }
+  #card { width: 180px; padding: 2px; border: 1px solid black; }
+  #tight { width: 110px; font-size: 16px; line-height: 17px; }
+  #clip { width: 80px; height: 30px; overflow: clip; }
+  #clip > div { width: 140px; height: 50px; }
+  #badge { background: #eee; }
+</style>
+<main>
+  <div class="row">
+    <button class="peer">First</button>
+    <button class="peer">Second</button>
+    <button class="peer" id="misaligned">Third</button>
+  </div>
+  <button id="truncated">This label is deliberately too long</button>
+  <article id="card"><p>Card text</p></article>
+  <p id="tight">Tight multiline text needs more leading.</p>
+  <section id="clip"><div>Oversized child component</div></section>
+  <span id="badge">New</span>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with _serve_directory(tmp_path) as origin:
+        try:
+            observation = observe_frontend(
+                f"{origin}/{fixture.name}",
+                viewports=(RuntimeViewport("desktop", 1280, 800),),
+                settle_ms=0,
+            )
+        except RuntimeError as exc:
+            if "playwright install chromium" in str(exc).lower():
+                pytest.skip("Chromium is not installed for runtime integration tests.")
+            raise
+
+    findings_by_selector = {
+        element.selector: {finding.code for finding in element.findings}
+        for element in observation.pages[0].elements
+        if element.findings
+    }
+
+    assert "runtime-layout-misalignment" in findings_by_selector["#misaligned"]
+    assert "runtime-font-misalignment" in findings_by_selector["#misaligned"]
+    assert "runtime-text-clipped" in findings_by_selector["#truncated"]
+    assert "runtime-text-edge-contact" in findings_by_selector["#card"]
+    assert "runtime-horizontal-padding" in findings_by_selector["#card"]
+    assert "runtime-vertical-padding" in findings_by_selector["#card"]
+    assert "runtime-line-spacing" in findings_by_selector["#tight"]
+    assert "runtime-component-clipped" in findings_by_selector["#clip"]
+    assert "#badge" not in findings_by_selector

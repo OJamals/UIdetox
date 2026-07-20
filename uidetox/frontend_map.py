@@ -597,6 +597,21 @@ def map_frontend(
     runtime_screenshots = [
         page.screenshot for page in runtime_pages if page.screenshot is not None
     ]
+    runtime_findings = [
+        {
+            "url": page.url,
+            "viewport": page.viewport.name,
+            "selector": element.selector,
+            "element": element.name or element.role or element.tag,
+            **asdict(finding),
+        }
+        for page in runtime_pages
+        for element in page.elements
+        for finding in element.findings
+    ]
+    runtime_finding_counts = Counter(
+        finding["code"] for finding in runtime_findings
+    )
     project_map = build_project_map(root_path, nodes)
 
     return FrontendMap(
@@ -632,6 +647,11 @@ def map_frontend(
             "runtime_urls": runtime_urls,
             "runtime_viewports": runtime_viewports,
             "runtime_screenshots": runtime_screenshots,
+            "runtime_finding_count": len(runtime_findings),
+            "runtime_finding_counts": dict(
+                sorted(runtime_finding_counts.items())
+            ),
+            "runtime_findings": runtime_findings,
             "runtime_errors": list(runtime.errors) if runtime is not None else [],
         },
         project_map=project_map.to_dict(),
@@ -1035,6 +1055,9 @@ def _merge_runtime_evidence(
     for page in runtime.pages:
         page_key = f"{page.url}@{page.viewport.name}"
         page_id = _node_id("runtime_page", "", page_key)
+        page_finding_count = sum(
+            len(element.findings) for element in page.elements
+        )
         nodes.append(
             FrontendNode(
                 id=page_id,
@@ -1050,13 +1073,17 @@ def _merge_runtime_evidence(
                         "height": page.viewport.height,
                     },
                     "screenshot": page.screenshot,
+                    "finding_count": page_finding_count,
                 },
             )
         )
         for element in page.elements:
-            node_kind = (
-                "runtime_action" if element.kind == "action" else "runtime_region"
-            )
+            if element.kind == "action":
+                node_kind = "runtime_action"
+            elif element.kind == "text":
+                node_kind = "runtime_text"
+            else:
+                node_kind = "runtime_region"
             element_key = element.selector or f"{element.tag}:{element.order}"
             element_id = _node_id(
                 node_kind,
@@ -1081,6 +1108,10 @@ def _merge_runtime_evidence(
                         "bounds": element.bounds,
                         "styles": element.styles,
                         "states": element.states,
+                        "measurements": element.measurements,
+                        "findings": [
+                            asdict(finding) for finding in element.findings
+                        ],
                     },
                 )
             )

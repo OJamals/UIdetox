@@ -273,7 +273,10 @@ def parse_args(args_list=None):
     map_parser.add_argument(
         "--runtime",
         action="store_true",
-        help="Observe rendered DOM evidence at mobile, tablet, and desktop viewports",
+        help=(
+            "Detect rendered layout, clipping, typography, and spacing defects "
+            "at mobile, tablet, and desktop viewports"
+        ),
     )
     map_parser.add_argument(
         "--url",

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
@@ -20,6 +20,7 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
+from uidetox.runtime_layout import RuntimeFinding, detect_runtime_findings
 from uidetox.utils import now_iso
 
 
@@ -56,12 +57,15 @@ class RuntimeElement:
     bounds: dict[str, float]
     styles: dict[str, str]
     states: dict[str, Any] = field(default_factory=dict)
+    measurements: dict[str, Any] = field(default_factory=dict)
+    findings: tuple[RuntimeFinding, ...] = ()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeElement":
         bounds = value.get("bounds", {})
         styles = value.get("styles", {})
         states = value.get("states", {})
+        measurements = value.get("measurements", {})
         return cls(
             kind=str(value.get("kind", "region")),
             tag=str(value.get("tag", "div")),
@@ -72,7 +76,24 @@ class RuntimeElement:
             bounds={str(key): float(item) for key, item in dict(bounds).items()},
             styles={str(key): str(item) for key, item in dict(styles).items()},
             states=dict(states),
+            measurements=(
+                dict(measurements) if isinstance(measurements, dict) else {}
+            ),
+            findings=tuple(
+                RuntimeFinding.from_dict(dict(item))
+                for item in value.get("findings", [])
+                if isinstance(item, dict)
+            ),
         )
+
+
+def _attach_runtime_findings(
+    elements: tuple[RuntimeElement, ...],
+) -> tuple[RuntimeElement, ...]:
+    return tuple(
+        replace(element, findings=detect_runtime_findings(element))
+        for element in elements
+    )
 
 
 @dataclass(frozen=True)
@@ -191,7 +212,9 @@ def observe_frontend(
                                 pass
                             page.wait_for_timeout(settle_ms)
                             payload = page.evaluate(_RUNTIME_EVALUATE_SCRIPT)
-                            elements = _elements_from_payload(payload)
+                            elements = _attach_runtime_findings(
+                                _elements_from_payload(payload)
+                            )
                             screenshot = None
                             if screenshot_root is not None:
                                 screenshot_name = (
@@ -313,11 +336,18 @@ def _screenshot_name(url: str, viewport: RuntimeViewport) -> str:
 
 _RUNTIME_EVALUATE_SCRIPT = r"""
 () => {
-  const candidates = Array.from(document.querySelectorAll([
+  const structuralCandidates = Array.from(document.querySelectorAll([
     "header", "nav", "main", "aside", "section", "article", "footer",
     "form", "table", "dialog", "button", "a[href]", "input", "select",
     "textarea", "[role]", "[tabindex]"
   ].join(",")));
+  const allElements = Array.from(document.body?.querySelectorAll("*") || [])
+    .slice(0, 3000);
+  const round = value => Math.round(value * 100) / 100;
+  const pixels = value => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
   const implicitRole = (element) => {
     const tag = element.tagName.toLowerCase();
@@ -380,21 +410,276 @@ _RUNTIME_EVALUATE_SCRIPT = r"""
     "menuitem", "option", "slider", "spinbutton", "switch", "tab"
   ]);
 
-  return candidates.map((element, order) => {
+  const isVisible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    if (
+    return !(
       style.display === "none" ||
       style.visibility === "hidden" ||
+      Number(style.opacity) === 0 ||
       rect.width <= 0 ||
       rect.height <= 0
-    ) return null;
+    );
+  };
+
+  const textGeometry = (element, style, rect) => {
+    const text = (element.innerText || element.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) return null;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const rects = Array.from(range.getClientRects()).filter(
+      item => item.width > 0 && item.height > 0
+    );
+    if (!rects.length) return null;
+    const left = Math.min(...rects.map(item => item.left));
+    const right = Math.max(...rects.map(item => item.right));
+    const top = Math.min(...rects.map(item => item.top));
+    const bottom = Math.max(...rects.map(item => item.bottom));
+    const lineTops = [];
+    for (const item of [...rects].sort((a, b) => a.top - b.top)) {
+      if (!lineTops.some(value => Math.abs(value - item.top) <= 1)) {
+        lineTops.push(item.top);
+      }
+    }
+    const fontSize = pixels(style.fontSize);
+    return {
+      text,
+      bounds: {left, right, top, bottom},
+      lineCount: lineTops.length,
+      fontSize,
+      lineHeight: style.lineHeight === "normal"
+        ? fontSize * 1.2
+        : pixels(style.lineHeight),
+      insets: {
+        top: top - rect.top,
+        right: rect.right - right,
+        bottom: rect.bottom - bottom,
+        left: left - rect.left
+      }
+    };
+  };
+
+  const isControl = (element, role) => (
+    interactiveRoles.has(role) ||
+    element.matches("button,a[href],input,select,textarea,[tabindex]")
+  );
+
+  const isVisualContainer = (element, style) => {
+    const tag = element.tagName.toLowerCase();
+    const parentBackground = element.parentElement
+      ? getComputedStyle(element.parentElement).backgroundColor
+      : "";
+    const hasBorder = [
+      style.borderTopWidth,
+      style.borderRightWidth,
+      style.borderBottomWidth,
+      style.borderLeftWidth
+    ].some(value => pixels(value) > 0);
+    const hasDistinctBackground = (
+      style.backgroundColor !== "rgba(0, 0, 0, 0)" &&
+      style.backgroundColor !== "transparent" &&
+      style.backgroundColor !== parentBackground
+    );
+    const hasContainerName = /(?:card|panel|tile|surface)/i.test(
+      `${element.id} ${element.className || ""}`
+    );
+    return (
+      ["article", "dialog"].includes(tag) ||
+      hasContainerName ||
+      (element.children.length > 0 && (hasBorder || hasDistinctBackground))
+    );
+  };
+
+  const measurementCache = new Map();
+  const baseMeasurement = (element) => {
+    if (measurementCache.has(element)) return measurementCache.get(element);
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const role = element.getAttribute("role") || implicitRole(element);
+    const text = textGeometry(element, style, rect);
+    const control = isControl(element, role);
+    const visualContainer = isVisualContainer(element, style);
+    const clipsX = ["clip", "hidden"].includes(style.overflowX);
+    const clipsY = ["clip", "hidden"].includes(style.overflowY);
+    let descendantClipped = false;
+    if ((clipsX || clipsY) && element.children.length) {
+      const contentLeft = rect.left + pixels(style.borderLeftWidth);
+      const contentRight = rect.right - pixels(style.borderRightWidth);
+      const contentTop = rect.top + pixels(style.borderTopWidth);
+      const contentBottom = rect.bottom - pixels(style.borderBottomWidth);
+      descendantClipped = Array.from(element.querySelectorAll("*")).some(child => {
+        if (!isVisible(child)) return false;
+        const childRect = child.getBoundingClientRect();
+        return (
+          (clipsX && (
+            childRect.left < contentLeft - 1 ||
+            childRect.right > contentRight + 1
+          )) ||
+          (clipsY && (
+            childRect.top < contentTop - 1 ||
+            childRect.bottom > contentBottom + 1
+          ))
+        );
+      });
+    }
+    const measurements = {
+      hasText: Boolean(text),
+      isMultiline: Boolean(text && text.lineCount > 1),
+      lineCount: text?.lineCount || 0,
+      fontSize: round(text?.fontSize || pixels(style.fontSize)),
+      lineHeight: round(text?.lineHeight || pixels(style.lineHeight)),
+      fontFamily: style.fontFamily,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      overflowX: style.overflowX,
+      overflowY: style.overflowY,
+      descendantClipped,
+      isControl: control,
+      isVisualContainer: visualContainer,
+      paddingTop: round(pixels(style.paddingTop)),
+      paddingRight: round(pixels(style.paddingRight)),
+      paddingBottom: round(pixels(style.paddingBottom)),
+      paddingLeft: round(pixels(style.paddingLeft))
+    };
+    if (text) {
+      measurements.textInsetTop = round(text.insets.top);
+      measurements.textInsetRight = round(text.insets.right);
+      measurements.textInsetBottom = round(text.insets.bottom);
+      measurements.textInsetLeft = round(text.insets.left);
+      measurements.textBaseline = round(text.bounds.bottom);
+    }
+    const result = {style, rect, role, text, measurements};
+    measurementCache.set(element, result);
+    return result;
+  };
+
+  const median = values => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[middle]
+      : (sorted[middle - 1] + sorted[middle]) / 2;
+  };
+
+  const clusteredPeerDeviation = (values, index) => {
+    const peers = values.filter((_value, peerIndex) => peerIndex !== index);
+    if (peers.length < 2 || Math.max(...peers) - Math.min(...peers) > 2) {
+      return 0;
+    }
+    return Math.abs(values[index] - median(peers));
+  };
+
+  const enrichPeerMeasurements = (element, measurements) => {
+    const parent = element.parentElement;
+    if (!parent) return;
+    const parentStyle = getComputedStyle(parent);
+    if (parentStyle.display !== "flex") return;
+    const siblings = Array.from(parent.children)
+      .filter(isVisible)
+      .slice(0, 20);
+    if (siblings.length < 3 || !siblings.includes(element)) return;
+    const index = siblings.indexOf(element);
+    const row = !parentStyle.flexDirection.startsWith("column");
+    const anchors = row
+      ? [
+          siblings.map(item => baseMeasurement(item).rect.top),
+          siblings.map(item => {
+            const rect = baseMeasurement(item).rect;
+            return rect.top + rect.height / 2;
+          }),
+          siblings.map(item => baseMeasurement(item).rect.bottom)
+        ]
+      : [
+          siblings.map(item => baseMeasurement(item).rect.left),
+          siblings.map(item => {
+            const rect = baseMeasurement(item).rect;
+            return rect.left + rect.width / 2;
+          }),
+          siblings.map(item => baseMeasurement(item).rect.right)
+        ];
+    const deviations = anchors
+      .map(values => clusteredPeerDeviation(values, index))
+      .filter(value => value > 0);
+    if (deviations.length) {
+      measurements.layoutAxis = row ? "vertical" : "horizontal";
+      measurements.layoutDeviation = round(Math.min(...deviations));
+    }
+
+    const textPeers = siblings.map(item => baseMeasurement(item));
+    const semanticKeys = textPeers.map((item, peerIndex) => (
+      `${siblings[peerIndex].tagName.toLowerCase()}:${item.role}`
+    ));
+    const equivalentPeers = semanticKeys.every(
+      value => value === semanticKeys[0]
+    );
+    if (equivalentPeers && textPeers.every(item => item.text)) {
+      const peerSizes = textPeers
+        .filter((_item, peerIndex) => peerIndex !== index)
+        .map(item => item.text.fontSize);
+      if (Math.max(...peerSizes) - Math.min(...peerSizes) <= 1) {
+        const baselines = textPeers.map(item => item.text.bounds.bottom);
+        measurements.fontBaselineDeviation = round(
+          clusteredPeerDeviation(baselines, index)
+        );
+      }
+      const peerFonts = textPeers
+        .filter((_item, peerIndex) => peerIndex !== index)
+        .map(item => item.style.fontFamily);
+      const expectedFont = peerFonts[0];
+      if (
+        peerFonts.every(value => value === expectedFont) &&
+        textPeers[index].style.fontFamily !== expectedFont
+      ) {
+        measurements.fontMismatch = true;
+        measurements.expectedFontFamily = expectedFont;
+      }
+    }
+  };
+
+  const candidateSet = new Set(structuralCandidates);
+  const textElementPattern = /^(?:h[1-6]|p|li|label|legend|blockquote|figcaption|td|th|dt|dd|span|small|strong|em)$/;
+  for (const element of allElements) {
+    if (!isVisible(element)) continue;
+    const style = getComputedStyle(element);
+    const role = element.getAttribute("role") || implicitRole(element);
+    const tag = element.tagName.toLowerCase();
+    const hasText = Boolean((element.textContent || "").trim());
+    const parentDisplay = element.parentElement
+      ? getComputedStyle(element.parentElement).display
+      : "";
+    if (
+      isControl(element, role) ||
+      isVisualContainer(element, style) ||
+      (hasText && (textElementPattern.test(tag) || element.children.length === 0)) ||
+      parentDisplay === "flex"
+    ) {
+      candidateSet.add(element);
+    }
+  }
+
+  const documentOrder = new Map(
+    allElements.map((element, index) => [element, index])
+  );
+  return Array.from(candidateSet)
+    .filter(isVisible)
+    .sort((first, second) => (
+      (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
+    ))
+    .slice(0, 1500)
+    .map((element, candidateOrder) => {
+    const {style, rect, role, measurements} = baseMeasurement(element);
+    enrichPeerMeasurements(element, measurements);
 
     const tag = element.tagName.toLowerCase();
-    const role = element.getAttribute("role") || implicitRole(element);
-    const kind = interactiveRoles.has(role) || element.matches("button,a[href],input,select,textarea,[tabindex]")
+    const kind = isControl(element, role)
       ? "action"
-      : "region";
+      : textElementPattern.test(tag)
+        ? "text"
+        : "region";
     const states = {};
     for (const attribute of ["aria-expanded", "aria-checked", "aria-selected", "aria-pressed", "aria-current", "aria-invalid"]) {
       if (element.hasAttribute(attribute)) states[attribute] = element.getAttribute(attribute);
@@ -408,12 +693,12 @@ _RUNTIME_EVALUATE_SCRIPT = r"""
       role,
       name: nameFor(element),
       selector: selectorFor(element),
-      order,
+      order: documentOrder.get(element) ?? candidateOrder,
       bounds: {
-        x: Math.round(rect.x * 100) / 100,
-        y: Math.round(rect.y * 100) / 100,
-        width: Math.round(rect.width * 100) / 100,
-        height: Math.round(rect.height * 100) / 100
+        x: round(rect.x),
+        y: round(rect.y),
+        width: round(rect.width),
+        height: round(rect.height)
       },
       styles: {
         display: style.display,
@@ -423,11 +708,22 @@ _RUNTIME_EVALUATE_SCRIPT = r"""
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
         fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        textAlign: style.textAlign,
+        overflowX: style.overflowX,
+        overflowY: style.overflowY,
+        paddingTop: style.paddingTop,
+        paddingRight: style.paddingRight,
+        paddingBottom: style.paddingBottom,
+        paddingLeft: style.paddingLeft,
+        alignItems: style.alignItems,
+        flexDirection: style.flexDirection,
         gap: style.gap,
         gridTemplateColumns: style.gridTemplateColumns
       },
-      states
+      states,
+      measurements
     };
-  }).filter(Boolean).slice(0, 1000);
+  });
 }
 """

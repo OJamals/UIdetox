@@ -77,7 +77,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox setup` | Interactively capture website/app intent and initialize typed design dials (`--product-goal`, `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`, `--no-intent-prompt`) plus preview/commit settings |
 | `uidetox intent` | Inspect effective field-level intent provenance, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`) |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → frontend/backend operation parity → design review |
-| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, backend/API operation parity, provenance/confidence, source hashes, plus optional rendered DOM/a11y/layout evidence (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
+| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, backend/API operation parity, provenance/confidence, source hashes, plus optional rendered DOM/a11y evidence and deterministic misalignment, clipping, padding, edge-contact, and line-spacing findings (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
 | `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
 | `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
 | `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
@@ -201,6 +201,7 @@ UIdetox/
 │   ├── project_map.py            # Backend/API discovery + operation parity
 │   ├── redesign.py              # Source-aware divergent redesign planning
 │   ├── runtime_observer.py      # Playwright DOM/a11y/layout evidence adapter
+│   ├── runtime_layout.py        # Typed rendered-layout finding policy
 │   ├── prototype.py             # Disposable agent-ready prototype brief generation
 │   ├── workflow.py              # Durable executable loop state machine
 │   ├── history.py                # Run snapshot storage and progression tracking

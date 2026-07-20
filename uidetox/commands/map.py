@@ -67,6 +67,13 @@ def run(args: argparse.Namespace) -> None:
         print(
             f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} page/view(s) ({viewports})"
         )
+        runtime_finding_count = frontend_map.evidence.get(
+            "runtime_finding_count", 0
+        )
+        if runtime_finding_count:
+            print(
+                f"  Findings    : {runtime_finding_count} rendered layout issue(s)"
+            )
         runtime_errors = frontend_map.evidence.get("runtime_errors", [])
         if runtime_errors:
             print(
