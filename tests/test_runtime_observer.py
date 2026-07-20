@@ -92,6 +92,45 @@ def test_detect_runtime_findings_reports_text_and_component_clipping() -> None:
     assert "runtime-component-clipped" in codes
 
 
+def test_detect_runtime_findings_reports_text_clipped_by_ancestor() -> None:
+    element = _measured_element(
+        hasText=True,
+        clientWidth=120.0,
+        scrollWidth=120.0,
+        clientHeight=36.0,
+        scrollHeight=36.0,
+        overflowX="visible",
+        overflowY="visible",
+        clippedByAncestor=True,
+        ancestorClipOverflowInlineEnd=9.0,
+        clippingAncestorSelector="#card",
+    )
+
+    findings = detect_runtime_findings(element)
+
+    assert _finding_codes(element) == {"runtime-text-clipped"}
+    assert findings[0].metrics["clipping_ancestor"] == "#card"
+
+
+def test_detect_runtime_findings_distinguishes_intentional_truncation() -> None:
+    element = _measured_element(
+        hasText=True,
+        clientWidth=120.0,
+        scrollWidth=156.0,
+        clientHeight=36.0,
+        scrollHeight=36.0,
+        overflowX="hidden",
+        overflowY="visible",
+        intentionalTruncation=True,
+        textOverflow="ellipsis",
+    )
+
+    findings = detect_runtime_findings(element)
+
+    assert _finding_codes(element) == {"runtime-text-truncated"}
+    assert findings[0].severity == "info"
+
+
 def test_detect_runtime_findings_reports_text_edge_contact_and_padding() -> None:
     element = _measured_element(
         hasText=True,
@@ -114,6 +153,27 @@ def test_detect_runtime_findings_reports_text_edge_contact_and_padding() -> None
     assert "runtime-vertical-padding" in codes
 
 
+def test_detect_runtime_findings_prefers_logical_axis_padding() -> None:
+    element = _measured_element(
+        hasText=True,
+        isControl=True,
+        isVisualContainer=True,
+        textInsetInlineStart=10.0,
+        textInsetInlineEnd=10.0,
+        textInsetBlockStart=10.0,
+        textInsetBlockEnd=10.0,
+        paddingInlineStart=3.0,
+        paddingInlineEnd=12.0,
+        paddingBlockStart=2.0,
+        paddingBlockEnd=8.0,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-horizontal-padding" in codes
+    assert "runtime-vertical-padding" in codes
+
+
 def test_detect_runtime_findings_reports_inadequate_multiline_spacing() -> None:
     element = _measured_element(
         hasText=True,
@@ -123,6 +183,35 @@ def test_detect_runtime_findings_reports_inadequate_multiline_spacing() -> None:
     )
 
     assert "runtime-line-spacing" in _finding_codes(element)
+
+
+def test_detect_runtime_findings_reports_overlapping_lines_as_error() -> None:
+    element = _measured_element(
+        hasText=True,
+        isMultiline=True,
+        isTextFlow=True,
+        fontSize=16.0,
+        lineHeight=24.0,
+        minimumLineGap=-2.0,
+    )
+
+    findings = detect_runtime_findings(element)
+
+    assert _finding_codes(element) == {"runtime-line-spacing"}
+    assert findings[0].severity == "error"
+    assert findings[0].metrics["minimum_line_gap_px"] == -2.0
+
+
+def test_detect_runtime_findings_ignores_multiple_nested_text_flows() -> None:
+    element = _measured_element(
+        hasText=True,
+        isMultiline=True,
+        isTextFlow=False,
+        fontSize=16.0,
+        lineHeight=17.0,
+    )
+
+    assert "runtime-line-spacing" not in _finding_codes(element)
 
 
 def test_detect_runtime_findings_ignores_healthy_geometry() -> None:
