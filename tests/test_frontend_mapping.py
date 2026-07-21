@@ -22,6 +22,7 @@ from uidetox.redesign import (
 )
 from uidetox.runtime_observer import (
     RuntimeElement,
+    RuntimeFinding,
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,
@@ -110,6 +111,18 @@ def _runtime_observation() -> RuntimeObservation:
                         bounds={"x": 16, "y": 80, "width": 120, "height": 44},
                         styles={"display": "block", "position": "static"},
                         states={"disabled": False, "tabIndex": 0},
+                        findings=(
+                            RuntimeFinding(
+                                code="runtime-text-clipped",
+                                category="overflow",
+                                severity="error",
+                                message="Text is truncated horizontally.",
+                                metrics={
+                                    "client_width_px": 120.0,
+                                    "scroll_width_px": 156.0,
+                                },
+                            ),
+                        ),
                     ),
                 ),
                 screenshot=f"/tmp/dashboard-{viewport.name}.png",
@@ -175,6 +188,13 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
     assert frontend_map.evidence["runtime_observed"] is True
     assert frontend_map.evidence["runtime_pages"] == 2
     assert frontend_map.evidence["runtime_viewports"] == ["desktop", "mobile"]
+    assert frontend_map.evidence["runtime_finding_count"] == 2
+    assert frontend_map.evidence["runtime_finding_counts"] == {
+        "runtime-text-clipped": 2
+    }
+    assert {
+        finding["viewport"] for finding in frontend_map.evidence["runtime_findings"]
+    } == {"desktop", "mobile"}
     assert {node.kind for node in runtime_nodes} == {
         "runtime_page",
         "runtime_region",
@@ -184,6 +204,7 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
         node.kind == "runtime_action"
         and node.name == "Save"
         and node.metadata["role"] == "button"
+        and node.metadata["findings"][0]["code"] == "runtime-text-clipped"
         for node in runtime_nodes
     )
     assert (
@@ -535,7 +556,9 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     assert captured["urls"] == ["http://localhost:3000/dashboard?view=all"]
     assert captured["screenshots_dir"] == tmp_path / ".uidetox" / "runtime-screenshots"
     assert captured["timeout_ms"] == 2500
-    assert "Runtime     : 2 page/view(s) (desktop, mobile)" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Runtime     : 2 page/view(s) (desktop, mobile)" in output
+    assert "Findings    : 2 rendered layout issue(s)" in output
 
 
 def test_compare_and_prototype_commands_consume_redesign_artifact(
