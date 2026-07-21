@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.9.0] - 2026-07-19
+## [1.9.0] - 2026-07-21
 
 ### Added
 
@@ -12,6 +12,9 @@
   confirmation state, and map-derived fallback evidence.
 - Source-aware redesign planning, structural proposal comparison, disposable
   prototype briefs, and runtime DOM/accessibility/layout evidence.
+- Deterministic rendered findings for layout and font misalignment, clipped or
+  intentionally truncated text and components, text edge contact, logical-axis
+  padding imbalance, and inadequate line spacing across responsive viewports.
 - Durable executable scan-to-redesign workflow state with freshness and blocker
   gates.
 
