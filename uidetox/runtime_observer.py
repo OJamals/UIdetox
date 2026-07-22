@@ -189,60 +189,21 @@ def observe_frontend(
             try:
                 for url in normalized_urls:
                     for viewport in normalized_viewports:
-                        context = browser.new_context(
-                            viewport={
-                                "width": viewport.width,
-                                "height": viewport.height,
-                            },
-                            reduced_motion="reduce",
+                        runtime_page, error = _observe_page(
+                            browser,
+                            url,
+                            viewport,
+                            timeout_ms=timeout_ms,
+                            settle_ms=settle_ms,
+                            screenshot_root=screenshot_root,
+                            screenshot_namer=screenshot_namer,
+                            full_page=full_page,
+                            playwright_timeout_error=PlaywrightTimeoutError,
                         )
-                        page = context.new_page()
-                        try:
-                            page.goto(
-                                url, wait_until="domcontentloaded", timeout=timeout_ms
-                            )
-                            try:
-                                page.wait_for_load_state(
-                                    "networkidle",
-                                    timeout=min(3_000, timeout_ms),
-                                )
-                            except PlaywrightTimeoutError:
-                                pass
-                            page.wait_for_timeout(settle_ms)
-                            payload = page.evaluate(_RUNTIME_EVALUATE_SCRIPT)
-                            elements = _attach_runtime_findings(
-                                _elements_from_payload(payload)
-                            )
-                            screenshot = None
-                            if screenshot_root is not None:
-                                screenshot_name = (
-                                    screenshot_namer(page.url, viewport)
-                                    if screenshot_namer is not None
-                                    else _screenshot_name(page.url, viewport)
-                                )
-                                screenshot_path = _safe_screenshot_path(
-                                    screenshot_root,
-                                    screenshot_name,
-                                )
-                                _capture_screenshot_atomically(
-                                    page,
-                                    screenshot_path,
-                                    full_page=full_page,
-                                )
-                                screenshot = str(screenshot_path)
-                            pages.append(
-                                RuntimePage(
-                                    url=page.url,
-                                    title=page.title(),
-                                    viewport=viewport,
-                                    elements=elements,
-                                    screenshot=screenshot,
-                                )
-                            )
-                        except Exception as exc:
-                            errors.append(f"{url} [{viewport.name}]: {exc}")
-                        finally:
-                            context.close()
+                        if runtime_page is not None:
+                            pages.append(runtime_page)
+                        if error is not None:
+                            errors.append(error)
             finally:
                 browser.close()
     except RuntimeError:
@@ -260,6 +221,80 @@ def observe_frontend(
         pages=tuple(pages),
         errors=tuple(errors),
     )
+
+
+def _observe_page(
+    browser: Any,
+    url: str,
+    viewport: RuntimeViewport,
+    *,
+    timeout_ms: int,
+    settle_ms: int,
+    screenshot_root: Path | None,
+    screenshot_namer: Callable[[str, RuntimeViewport], str] | None,
+    full_page: bool,
+    playwright_timeout_error: type[BaseException],
+) -> tuple[RuntimePage | None, str | None]:
+    context = browser.new_context(
+        viewport={"width": viewport.width, "height": viewport.height},
+        reduced_motion="reduce",
+    )
+    page = context.new_page()
+    try:
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            try:
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=min(3_000, timeout_ms),
+                )
+            except playwright_timeout_error:
+                pass
+            page.wait_for_timeout(settle_ms)
+            elements = _attach_runtime_findings(
+                _elements_from_payload(page.evaluate(_RUNTIME_EVALUATE_SCRIPT))
+            )
+            screenshot = _capture_runtime_screenshot(
+                page,
+                viewport,
+                screenshot_root=screenshot_root,
+                screenshot_namer=screenshot_namer,
+                full_page=full_page,
+            )
+            return (
+                RuntimePage(
+                    url=page.url,
+                    title=page.title(),
+                    viewport=viewport,
+                    elements=elements,
+                    screenshot=screenshot,
+                ),
+                None,
+            )
+        except Exception as exc:
+            return None, f"{url} [{viewport.name}]: {exc}"
+    finally:
+        context.close()
+
+
+def _capture_runtime_screenshot(
+    page: Any,
+    viewport: RuntimeViewport,
+    *,
+    screenshot_root: Path | None,
+    screenshot_namer: Callable[[str, RuntimeViewport], str] | None,
+    full_page: bool,
+) -> str | None:
+    if screenshot_root is None:
+        return None
+    screenshot_name = (
+        screenshot_namer(page.url, viewport)
+        if screenshot_namer is not None
+        else _screenshot_name(page.url, viewport)
+    )
+    screenshot_path = _safe_screenshot_path(screenshot_root, screenshot_name)
+    _capture_screenshot_atomically(page, screenshot_path, full_page=full_page)
+    return str(screenshot_path)
 
 
 def _safe_screenshot_path(root: Path, name: str) -> Path:
