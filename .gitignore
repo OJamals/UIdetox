@@ -35,6 +35,8 @@ Thumbs.db
 # Generated
 treemap.html
 /.codebase-memory/
+/examples/*
+!/examples/fullstack-slop-lab/
 
 # Test artifacts
 production_test_audit/

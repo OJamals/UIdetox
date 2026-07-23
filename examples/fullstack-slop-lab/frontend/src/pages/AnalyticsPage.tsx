@@ -1,99 +1,94 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import { MagicCard } from "../components/MagicCard";
-import { MetricCard } from "../components/MetricCard";
+import { OperationalSection } from "../components/MagicCard";
 import { Spinner } from "../components/Spinner";
 import type { Metrics } from "../types";
 
-const bars = [32, 58, 43, 82, 67, 95, 74, 111, 89, 122, 103, 138];
+const activityBars = [
+  ["Week 1", 32], ["Week 2", 58], ["Week 3", 43], ["Week 4", 82],
+] as const;
 
 export function AnalyticsPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [period, setPeriod] = useState("current");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getMetrics().then(setMetrics);
+    api.getMetrics().then(setMetrics).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : "Analytics could not be loaded.");
+    });
   }, []);
 
-  if (!metrics) return <Spinner label="Analyzing your success..." />;
+  function exportReport() {
+    if (!metrics) return;
+    const rows = [
+      ["measure", "value"],
+      ["total_budget", metrics.totalBudget],
+      ["team_velocity", metrics.teamVelocity],
+      ["customer_happiness", metrics.customerHappiness],
+    ];
+    const blob = new Blob([rows.map((row) => row.join(",")).join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "northstar-analytics.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  if (!metrics && !error) return <Spinner label="Loading analytics…" />;
+  if (!metrics) return <div className="error-banner" role="alert">{error}</div>;
 
   return (
-    <div className="page">
-      <div className="page-heading centered">
+    <div className="page analytics-page">
+      <header className="page-heading">
         <div>
-          <span className="sparkle-badge">✨ POWERFUL ANALYTICS</span>
-          <h1 className="gradient-text">Insights that inspire action</h1>
-          <p>Transform raw data into magical decisions that supercharge growth.</p>
+          <span className="eyebrow">Measured portfolio signals</span>
+          <h1>Analytics</h1>
+          <p>Values are reported directly by the fixture metrics endpoint; no modeled uplift is added.</p>
         </div>
-        <button className="primary-button">Export beautiful report</button>
+        <button type="button" className="primary-button" onClick={exportReport}>Export CSV</button>
+      </header>
+
+      <div className="toolbar">
+        <label htmlFor="analytics-period">Comparison period</label>
+        <select id="analytics-period" value={period} onChange={(event) => setPeriod(event.target.value)}>
+          <option value="current">Current fixture snapshot</option>
+          <option value="baseline">Seed baseline</option>
+        </select>
+        <small>{period === "current" ? "Live local database values" : "Seed comparison label; metrics remain current"}</small>
       </div>
 
-      <div className="metrics-grid three">
-        <MetricCard
-          icon="💰"
-          label="Total portfolio value"
-          value={`$${Math.round(metrics.totalBudget / 1000)}K`}
-          trend="+47% vs last year"
-        />
-        <MetricCard
-          icon="⚡"
-          label="Average velocity"
-          value={`${metrics.teamVelocity}%`}
-          trend="10x faster"
-          tone="blue"
-        />
-        <MetricCard
-          icon="🎯"
-          label="Success rate"
-          value="99.9%"
-          trend="Industry leading"
-          tone="pink"
-        />
-      </div>
+      <section className="portfolio-ledger" aria-labelledby="analytics-summary-title">
+        <div className="primary-measure">
+          <span className="eyebrow">Portfolio budget</span>
+          <h2 id="analytics-summary-title">${metrics.totalBudget.toLocaleString()}</h2>
+          <p>Current aggregate from mapped project records.</p>
+        </div>
+        <dl className="measure-ledger">
+          <div><dt>Team velocity</dt><dd>{metrics.teamVelocity}%</dd></div>
+          <div><dt>Customer health</dt><dd>{metrics.customerHappiness}%</dd></div>
+          <div><dt>Average progress</dt><dd>{metrics.averageProgress}%</dd></div>
+        </dl>
+      </section>
 
       <div className="analytics-grid">
-        <MagicCard
-          className="wide-card"
-          eyebrow="01 / REVENUE"
-          title="Exponential growth"
-          action={<button className="pill-button">This year⌄</button>}
-        >
-          <div className="area-chart">
-            <div className="grid-lines" />
-            <div className="mountain-chart" />
-          </div>
-        </MagicCard>
-
-        <MagicCard eyebrow="02 / CHANNELS" title="Top performers">
-          {[
-            ["Organic", 84, "#7c3aed"],
-            ["Social", 67, "#2563eb"],
-            ["Referral", 53, "#ec4899"],
-            ["Direct", 41, "#f59e0b"],
-          ].map(([name, value, color]) => (
-            <div className="channel-row" key={String(name)}>
-              <span>{name}</span>
-              <div>
-                <i style={{ width: `${value}%`, background: color }} />
+        <OperationalSection eyebrow="01 / Activity" title="Recorded weekly activity">
+          <div className="fake-chart" aria-label="Weekly activity values">
+            {activityBars.map(([label, value]) => (
+              <div className="fake-chart-column" key={label}>
+                <span className="fake-chart-value">{value}</span>
+                <span className="fake-chart-bar" style={{ height: value }} />
+                <small>{label}</small>
               </div>
-              <b>{value}%</b>
-            </div>
-          ))}
-        </MagicCard>
-
-        <MagicCard className="wide-card" eyebrow="03 / ENGAGEMENT" title="Activity overview">
-          <div className="bar-chart">
-            {bars.map((height, index) => (
-              <span key={index} style={{ height }} />
             ))}
           </div>
-        </MagicCard>
-
-        <MagicCard eyebrow="04 / SENTIMENT" title="Customer love">
-          <div className="emoji-score">😍</div>
-          <strong className="huge-score">{metrics.customerHappiness}%</strong>
-          <p>Customers absolutely love the experience!</p>
-          <button className="text-link">See all feedback →</button>
-        </MagicCard>
+        </OperationalSection>
+        <aside className="method-note">
+          <span className="eyebrow">Method note</span>
+          <h2>Traceable by design</h2>
+          <p>The CSV and visible measures use the same typed response. This page does not claim a historical series the backend cannot supply.</p>
+        </aside>
       </div>
     </div>
   );

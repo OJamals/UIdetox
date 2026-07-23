@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from uidetox.project_map import (
     OperationEvidence,
@@ -73,6 +74,11 @@ def test_route_normalization_preserves_identity_but_compares_shapes() -> None:
     ]
     assert (
         normalize_route_path("https://example.test/api/items?page=1")[0] == "/api/items"
+    )
+    assert normalize_route_path("/experiments/${experiment.key}") == (
+        "/experiments/{}",
+        ("experiment.key",),
+        False,
     )
 
 
@@ -282,6 +288,21 @@ def test_unknown_route_syntax_is_unresolved_not_false_match(tmp_path) -> None:
     assert project.backend_operations[0].dynamic is True
     assert project.counts["unresolved"] == 1
     assert project.counts["frontend_only"] == 1
+
+
+def test_backend_discovery_ignores_route_syntax_in_test_sources(tmp_path) -> None:
+    browser_test = tmp_path / "frontend" / "tests" / "app.spec.ts"
+    browser_test.parent.mkdir(parents=True)
+    browser_test.write_text(
+        'test("contract", async ({ page }) => { await page.route("**/api/items", handler); });',
+        encoding="utf-8",
+    )
+
+    project = build_project_map(tmp_path)
+
+    assert project.backend_operations == ()
+    assert project.evidence["backend_files_scanned"] == 0
+    assert project.evidence["unknown_backend_evidence"] == 0
 
 
 def test_unknown_router_receivers_are_not_guessed_as_supported_frameworks(
@@ -541,6 +562,24 @@ app.get("/api/users/:id", handler);
         "fingerprint",
         "evidence",
     }
+
+
+def test_fullstack_fixture_reconciles_without_duplicate_probe_manifest() -> None:
+    fixture = (
+        Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
+    )
+
+    frontend_map = map_frontend(fixture, ".")
+    project = ProjectMap.from_dict(frontend_map.project_map)
+
+    assert project.counts == {
+        "frontend_only": 0,
+        "backend_only": 0,
+        "method_mismatch": 0,
+        "unresolved": 0,
+    }
+    assert project.evidence["unknown_backend_evidence"] == 0
+    assert len(project.frontend_operations) == 28
 
 
 def test_frontend_map_preserves_same_path_requests_by_method(tmp_path) -> None:

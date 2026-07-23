@@ -1,7 +1,7 @@
-export function Spinner({ label = "Loading..." }: { label?: string }) {
+export function Spinner({ label = "Loading workspace data…" }: { label?: string }) {
   return (
-    <div className="loading-state">
-      <span className="spinner">✨</span>
+    <div aria-live="polite" className="loading-state" role="status">
+      <span aria-hidden="true" className="spinner" />
       <p>{label}</p>
     </div>
   );

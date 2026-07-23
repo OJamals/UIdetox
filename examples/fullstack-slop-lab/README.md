@@ -1,31 +1,50 @@
-# NexusFlow AI — Full-stack slop lab
+# NexusFlow — Full-stack remediation lab
 
-Runnable beta fixture for UIdetox. It is deliberately bad.
+Runnable synthetic qualification fixture for UIdetox. It retains a reproducible
+record of its deliberately poor baseline and contains no production customer data.
 
 The app combines a React/Vite frontend, FastAPI backend, REST API, OpenAPI document,
-and SQLite database. Six product routes and reusable components create enough
+and SQLite database. Fifteen product route patterns and reusable components create enough
 structure for AST parsing, import/ownership mapping, runtime observation, intent
 provenance, full-stack operation reconciliation, source-aware redesign planning,
 proposal comparison, and disposable prototype briefs.
 
-## Deliberate defects
+## Baseline and remediation evidence
 
-This fixture is not an example to copy. `beta-expectations.json` is the contract.
-It records intentional visual, interaction, accessibility, architecture, DTO, copy,
-and API-parity defects. Important examples:
+This fixture is not a production product recommendation. `beta-expectations.json`
+is the current qualification contract and `fixture-intent.json` retains the original
+baseline counts. The baseline included:
 
 - purple/blue/pink gradients, glass cards, Inter everywhere, giant shadows and pills
 - repeated cards, centred hero, emoji icons, gradient text, AI nav/footer
 - `transition: all`, bounce loops, removed focus outlines, weak responsive behavior
 - placeholder-only forms, celebratory toasts, low-value confirmation dialogs
 - duplicated frontend/backend models and a process-global SQLite connection
-- one frontend-only API operation, one backend-only operation, one method mismatch
+- ten frontend-only operations, eight backend-only operations, one method mismatch,
+  and 212 deterministic analyzer findings
+- storage-shaped account/connector payloads cast into incompatible frontend DTOs
+- fixed-height customer records, connector cards, route walls, and provenance panels
+- approval and journey contracts split across incompatible route vocabularies and DTOs
+- fixed-width governance queues and journey canvases that clip on narrow screens
 
-The app must remain functional. UIdetox should report the defects, preserve route/API
-contracts, and create redesign plans whose `source_targets` cover affected components.
-The generic runtime API wrapper is deliberately opaque to static transport extraction;
-`frontend/src/api/semantic-contract-probes.ts` supplies uncalled literal operation
-evidence so parity reconciliation has a stable, explicit beta oracle.
+The remediated target is zero operation-parity findings and zero deterministic analyzer
+findings while every route and backed action remains functional. The generic runtime API
+wrapper is the canonical transport boundary. UIdetox resolves its literal call sites
+through the local wrapper into concrete method/path operations, so parity evidence comes
+from executable application code rather than a duplicate probe manifest.
+
+## Intent and provenance
+
+`fixture-intent.json` is the canonical product-intent and provenance manifest. It
+records the fixture's product goal, audience, primary job, tone, genre, design dials,
+preservation contract, constraints, anti-goals, route surface, lineage, source policy,
+and explicit no-production-data guarantee. `scripts/prepare_uidetox.sh` installs that
+same intent into UIdetox, while `/fixture-provenance` makes it visible inside the app.
+
+The fixture is synthetic. Its original copy and layouts reproduced recurring
+AI-generated SaaS habits; the current interface records the result of a UIdetox-guided
+editorial operations redesign. Organizations, people, metrics, URLs, invoices,
+notifications, and events are fictional seed data.
 
 ## Install
 
@@ -57,6 +76,8 @@ Open `http://127.0.0.1:4173`.
 ```bash
 npm run build
 .venv/bin/python -m pytest -q tests
+.venv/bin/playwright install chromium
+npm run test:e2e
 ```
 
 ## Exercise UIdetox

@@ -218,6 +218,7 @@ def extract_source_facts(
 
     nodes = tuple(_walk(tree.root_node))
     imports, aliases = _extract_imports(nodes)
+    http_wrapper_names = _http_wrapper_names(nodes)
     alias_map = {item.local: item.imported for item in aliases}
     react_aliases = tuple(item for item in aliases if item.source == "react")
     use_state_names = {
@@ -241,6 +242,7 @@ def extract_source_facts(
         _collect_semantic_node(
             node,
             alias_map=alias_map,
+            http_wrapper_names=http_wrapper_names,
             use_state_names=use_state_names,
             components=components,
             rendered_modules=rendered_modules,
@@ -368,6 +370,7 @@ def _collect_semantic_node(
     node,
     *,
     alias_map: dict[str, str],
+    http_wrapper_names: set[str],
     use_state_names: set[str],
     components: list[SourceOccurrence],
     rendered_modules: list[str],
@@ -423,7 +426,7 @@ def _collect_semantic_node(
                 if route_match:
                     routes.append(SourceOccurrence(route_match.group(1), _line(child)))
     elif node.type == "call_expression":
-        endpoint = _extract_endpoint(node)
+        endpoint = _extract_endpoint(node, http_wrapper_names=http_wrapper_names)
         if endpoint is not None:
             endpoints.append(endpoint)
     elif node.type == "pair":
@@ -493,9 +496,73 @@ def _collect_analyzer_node(node, state: _MutableAnalyzerState) -> None:
             )
 
 
-def _extract_endpoint(node) -> EndpointFact | None:
+def _http_wrapper_names(nodes: tuple) -> set[str]:
+    wrappers: set[str] = set()
+    for node in nodes:
+        if node.type == "function_declaration":
+            name = _text(node.child_by_field_name("name"))
+            parameters = node.child_by_field_name("parameters")
+            body = node.child_by_field_name("body")
+        elif node.type == "variable_declarator":
+            name = _text(node.child_by_field_name("name"))
+            value = node.child_by_field_name("value")
+            parameters = (
+                value.child_by_field_name("parameters")
+                if value is not None
+                else None
+            )
+            body = (
+                value
+                if value is not None
+                and value.type in {"arrow_function", "function_expression"}
+                else None
+            )
+        else:
+            continue
+        if not name or body is None:
+            continue
+        parameter_names = {
+            _text(descendant)
+            for descendant in _walk(parameters)
+            if descendant.type == "identifier"
+        } if parameters is not None else set()
+        if any(
+            descendant.type == "call_expression"
+            and _text(descendant.child_by_field_name("function")) == "fetch"
+            and (
+                (
+                    arguments := descendant.child_by_field_name("arguments")
+                ) is not None
+                and arguments.named_children
+                and _text(arguments.named_children[0]) in parameter_names
+            )
+            for descendant in _walk(body)
+        ):
+            wrappers.add(name)
+    return wrappers
+
+
+def _containing_callable_name(node) -> str:
+    parent = node.parent
+    while parent is not None:
+        if parent.type == "function_declaration":
+            return _text(parent.child_by_field_name("name"))
+        if parent.type in {"arrow_function", "function_expression"}:
+            declarator = parent.parent
+            if declarator is not None and declarator.type == "variable_declarator":
+                return _text(declarator.child_by_field_name("name"))
+        parent = parent.parent
+    return ""
+
+
+def _extract_endpoint(
+    node,
+    *,
+    http_wrapper_names: set[str] | None = None,
+) -> EndpointFact | None:
     call_name = _text(node.child_by_field_name("function"))
     lowered = call_name.lower()
+    wrappers = http_wrapper_names or set()
     axios_methods = {
         "axios.get": "GET",
         "axios.post": "POST",
@@ -503,39 +570,39 @@ def _extract_endpoint(node) -> EndpointFact | None:
         "axios.patch": "PATCH",
         "axios.delete": "DELETE",
     }
-    if call_name != "fetch" and lowered not in axios_methods:
+    if call_name == "fetch" and _containing_callable_name(node) in wrappers:
+        return None
+    if call_name != "fetch" and lowered not in axios_methods and call_name not in wrappers:
         return None
 
     arguments = node.child_by_field_name("arguments")
     values = list(arguments.named_children) if arguments is not None else []
     url = _literal(values[0]) if values else ""
-    if "${" in url:
-        url = ""
     method: str | None = axios_methods.get(lowered)
-    if call_name == "fetch":
+    if call_name == "fetch" or call_name in wrappers:
         method = _fetch_method(values)
     return EndpointFact(
         url=url or None,
         line=_line(node),
         method=method,
-        dynamic=not bool(url),
+        dynamic=not bool(url) or "${" in url,
     )
 
 
 def _fetch_method(arguments: list[object]) -> str | None:
     if len(arguments) < 2:
         return "GET"
-    options = arguments[1]
-    if options.type != "object":
-        return None
-    for child in options.named_children:
-        if child.type != "pair":
+    for options in arguments[1:]:
+        if options.type != "object":
             continue
-        key = _text(child.child_by_field_name("key")).strip("\"'")
-        if key != "method":
-            continue
-        method = _literal(child.child_by_field_name("value")).upper()
-        return method if method in _HTTP_METHODS else None
+        for child in options.named_children:
+            if child.type != "pair":
+                continue
+            key = _text(child.child_by_field_name("key")).strip("\"'")
+            if key != "method":
+                continue
+            method = _literal(child.child_by_field_name("value")).upper()
+            return method if method in _HTTP_METHODS else None
     return "GET"
 
 

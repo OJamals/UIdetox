@@ -4,6 +4,10 @@ import re
 from pathlib import Path
 
 from uidetox.analyzer_ast import has_ast_for
+from uidetox.analyzer_interactions import (
+    class_list_has_interaction_state,
+    is_development_proxy_url,
+)
 
 
 _REDUCED_MOTION_MEDIA = re.compile(
@@ -20,7 +24,6 @@ _REDUCED_MOTION_OVERRIDE_PROPERTIES = {
     "transition-delay",
     "transition-duration",
 }
-
 
 def _issue_for_match(
     rule: dict,
@@ -153,7 +156,8 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     # ── Heuristic 3: Pricing Table Cliché ──
     pricing_signals = len(
         re.findall(
-            r"(?:\$\d+|/mo(?:nth)?|/yr|/year|popular|recommended|enterprise|pro|starter|basic|premium)",
+            r"(?:\$\d+|/mo(?:nth)?\b|/yr\b|/year\b|"
+            r"\b(?:free|popular|recommended|enterprise|pro|starter|basic|premium)\b)",
             content,
             re.IGNORECASE,
         )
@@ -165,7 +169,10 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
             re.IGNORECASE,
         )
     )
-    if pricing_signals >= 6 or pricing_cards >= 3:
+    pricing_context = bool(
+        re.search(r"\b(?:pricing|price|plan|tier|subscription)\b", content, re.IGNORECASE)
+    )
+    if (pricing_context and pricing_signals >= 3) or pricing_cards >= 3:
         issues.append(
             {
                 "id": "PRICING_TABLE_SLOP",
@@ -212,12 +219,12 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
     # ── Heuristic 6: Testimonial Grid Slop ──
     testimonial_signals = len(
         re.findall(
-            r"(?:testimonial|review|quote|avatar.*?(?:name|title)|rating|stars?.*?(?:5|five))",
+            r"(?:testimonial|<blockquote\b|\bquote=|\brating=|\bstars?=|avatar.*?(?:name|title))",
             content,
             re.IGNORECASE,
         )
     )
-    if testimonial_signals >= 6:
+    if testimonial_signals >= 3:
         issues.append(
             {
                 "id": "TESTIMONIAL_GRID_SLOP",
@@ -303,7 +310,9 @@ def _analyze_interaction_custom_rule(
             r'<button[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE
         ):
             classes = m.group(1)
-            if "hover:" not in classes:
+            if not class_list_has_interaction_state(
+                classes, filepath, "hover", "button"
+            ):
                 issues.append(
                     {
                         "id": rule["id"],
@@ -319,10 +328,15 @@ def _analyze_interaction_custom_rule(
     # Custom check: missing_focus — interactive elements without focus: class
     if custom == "missing_focus":
         for m in re.finditer(
-            r'<(?:button|a)\s[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE
+            r'<(button|a)\s[^>]*className=["\']([^"\']*)["\']',
+            content,
+            re.IGNORECASE,
         ):
-            classes = m.group(1)
-            if "focus:" not in classes:
+            tag = m.group(1).lower()
+            classes = m.group(2)
+            if not class_list_has_interaction_state(
+                classes, filepath, "focus", tag
+            ):
                 issues.append(
                     {
                         "id": rule["id"],
@@ -469,6 +483,8 @@ def _extract_import_names(match: re.Match) -> list[str]:
             continue
         for part in group.split(","):
             part = part.strip()
+            if part.startswith("type "):
+                part = part.removeprefix("type ").strip()
             if " as " in part:
                 part = part.split(" as ")[-1].strip()
             if part and part != "type":
@@ -808,7 +824,9 @@ def _analyze_css_custom_rule(
             r"position:\s*sticky[^}]*", content, re.IGNORECASE | re.DOTALL
         ):
             block = block_m.group(0)
-            if not re.search(r"\btop\s*:", block, re.IGNORECASE):
+            if not re.search(
+                r"(?:\btop|inset-block-start|inset)\s*:", block, re.IGNORECASE
+            ):
                 issues.append(
                     {
                         "id": rule["id"],
@@ -1066,7 +1084,13 @@ def _analyze_html_custom_rule(
                 if ext in {".jsx", ".tsx"}
                 else re.search(r"\bfor\s*=", tag, re.IGNORECASE) is not None
             )
-            if not has_association:
+            closing = content.find("</label>", match.end())
+            nested_control = closing >= 0 and re.search(
+                r"<(?:input|select|textarea)\b",
+                content[match.end() : closing],
+                re.IGNORECASE,
+            )
+            if not has_association and not nested_control:
                 issues.append(_issue_for_match(rule, filepath, content, match))
                 break
         return issues
@@ -1339,14 +1363,118 @@ def _analyze_react_custom_rule(
         return issues
 
     if custom == "missing_key_prop":
-        # .map() that returns JSX but none of the returned elements have key=
+        # Inspect the complete balanced .map(...) call rather than an arbitrary
+        # character window; multiline JSX props regularly exceed 500 chars.
         for m_map in re.finditer(r"\.map\s*\(", content):
-            start = m_map.end()
-            # Grab up to 500 chars of context
-            chunk = content[start : start + 500]
+            start = m_map.end() - 1
+            depth = 0
+            end = len(content)
+            for index in range(start, len(content)):
+                character = content[index]
+                if character == "(":
+                    depth += 1
+                elif character == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = index + 1
+                        break
+            chunk = content[start:end]
             if re.search(r"<[A-Z][a-zA-Z]*\b|<[a-z][a-z-]+\b", chunk) and not re.search(
                 r"\bkey=", chunk
             ):
+                issues.append(
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                    }
+                )
+                break
+        return issues
+
+    if custom == "useeffect_empty_deps":
+        imported = {
+            name
+            for import_match in _IMPORT_PATTERN.finditer(content)
+            for name in _extract_import_names(import_match)
+        }
+        setters = set(
+            re.findall(
+                r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content
+            )
+        )
+        stable = imported | setters | {
+            "String",
+            "Number",
+            "Boolean",
+            "Date",
+            "Math",
+            "JSON",
+            "Promise",
+            "Error",
+            "Object",
+            "Array",
+            "console",
+            "document",
+            "window",
+            "undefined",
+            "null",
+            "true",
+            "false",
+        }
+        effect_pattern = re.compile(
+            r"useEffect\s*\(\s*\(\s*\)\s*=>\s*\{(?P<body>.*?)\}\s*,\s*\[\s*\]\s*\)",
+            re.DOTALL,
+        )
+        keywords = {
+            "if",
+            "else",
+            "return",
+            "const",
+            "let",
+            "var",
+            "function",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "new",
+            "typeof",
+            "instanceof",
+            "void",
+        }
+        for match in effect_pattern.finditer(content):
+            body = match.group("body")
+            if len(body.strip()) < 30:
+                continue
+            locally_declared = set(
+                re.findall(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)", body)
+            )
+            callback_params = set(
+                re.findall(r"(?:\(|,)\s*([A-Za-z_$][\w$]*)\s*(?:\)|,)\s*=>", body)
+            )
+            for destructured in re.findall(
+                r"\(\s*[\[{]([^\]}]+)[\]}]\s*\)\s*=>", body
+            ):
+                callback_params.update(
+                    re.findall(r"\b[A-Za-z_$][\w$]*\b", destructured)
+                )
+            strings_removed = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "", body)
+            identifiers = set(re.findall(r"\b[A-Za-z_$][\w$]*\b", strings_removed))
+            property_names = set(re.findall(r"\.\s*([A-Za-z_$][\w$]*)", strings_removed))
+            external = (
+                identifiers
+                - property_names
+                - locally_declared
+                - callback_params
+                - stable
+                - keywords
+            )
+            if external:
                 issues.append(
                     {
                         "id": rule["id"],
@@ -1482,8 +1610,16 @@ def _analyze_control_custom_rule(
         return issues
 
     if custom == "modal_no_aria":
-        if re.search(r"(?:modal|Modal)", content) and not re.search(
-            r'role=["\']dialog["\']', content, re.IGNORECASE
+        has_native_dialog = re.search(r"<dialog\b", content, re.IGNORECASE)
+        has_dialog_role = re.search(r'role=["\']dialog["\']', content, re.IGNORECASE)
+        has_modal_container = re.search(
+            r'<(?:div|section|aside)\b[^>]*(?:className|class)=["\']'
+            r'[^"\']*(?<![\w-])modal(?![\w-])',
+            content,
+            re.IGNORECASE,
+        )
+        if has_modal_container and not (
+            has_native_dialog or has_dialog_role
         ):
             issues.append(
                 {
@@ -1528,6 +1664,23 @@ def _analyze_runtime_custom_rule(
     """Run React runtime-state heuristics."""
     issues = []
     custom = rule.get("_custom_check")
+    if custom == "hardcoded_dev_url":
+        matches = tuple(rule["pattern"].finditer(content))
+        if any(
+            not is_development_proxy_url(filepath, content, match)
+            for match in matches
+        ):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
+        return issues
+
     if custom == "next_image_raw":
         if re.search(r"from ['\"]next/", content) and re.search(
             r"<img\b", content, re.IGNORECASE
@@ -1586,6 +1739,42 @@ def _analyze_design_pattern_custom_rule(
     """Run repeated design-pattern heuristics."""
     issues = []
     custom = rule.get("_custom_check")
+    if custom == "card_nesting":
+        stack: list[tuple[str, bool]] = []
+        void_tags = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+        for match in re.finditer(
+            r"<(\/)?([A-Za-z][\w.]*)\b([^>]*)>", content, re.DOTALL
+        ):
+            closing, tag, attributes = match.groups()
+            tag_key = tag.lower()
+            if closing:
+                while stack:
+                    opened, _ = stack.pop()
+                    if opened == tag_key:
+                        break
+                continue
+            class_match = re.search(
+                r'class(?:Name)?=["\']([^"\']*)["\']', attributes, re.IGNORECASE
+            )
+            classes = class_match.group(1).split() if class_match else []
+            is_card = tag_key.endswith("card") or any(
+                token.lower() == "card" or token.lower().endswith("-card")
+                for token in classes
+            )
+            if is_card and any(parent_is_card for _, parent_is_card in stack):
+                return [
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                    }
+                ]
+            if not attributes.rstrip().endswith("/") and tag_key not in void_tags:
+                stack.append((tag_key, is_card))
+        return []
+
     if custom == "three_equal_column":
         if re.search(r"grid-cols-3\b", content, re.IGNORECASE):
             # Flag if there are 3+ child elements with identical classNames (crude check)
@@ -1741,14 +1930,17 @@ _CUSTOM_CHECK_HANDLERS = {
     "localstorage_ssr": _analyze_browser_security_custom_rule,
     "window_object_ssr": _analyze_browser_security_custom_rule,
     "missing_key_prop": _analyze_react_custom_rule,
+    "useeffect_empty_deps": _analyze_react_custom_rule,
     "framer_no_reduced_motion": _analyze_react_custom_rule,
     "lazy_without_suspense": _analyze_react_custom_rule,
     "media_autoplay": _analyze_control_custom_rule,
     "select_no_label": _analyze_control_custom_rule,
     "icon_aria_missing": _analyze_control_custom_rule,
     "icon_only_button": _analyze_control_custom_rule,
+    "hardcoded_dev_url": _analyze_runtime_custom_rule,
     "next_image_raw": _analyze_runtime_custom_rule,
     "three_equal_column": _analyze_design_pattern_custom_rule,
+    "card_nesting": _analyze_design_pattern_custom_rule,
     "font_weight_extremes": _analyze_design_pattern_custom_rule,
     "missing_loading_state": _analyze_runtime_custom_rule,
     "missing_error_state": _analyze_runtime_custom_rule,

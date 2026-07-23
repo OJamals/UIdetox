@@ -141,7 +141,7 @@ def _analyze_ast(
             continue
         counts = Counter(children)
         for component_name, count in counts.items():
-            if count < 4:
+            if count < 4 or component_name == "Route":
                 continue
             issues.append(
                 {

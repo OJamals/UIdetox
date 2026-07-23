@@ -181,8 +181,46 @@ def _spacing_findings(
 ) -> tuple[RuntimeFinding, ...]:
     findings: list[RuntimeFinding] = []
     has_text = measurements.get("hasText") is True
-    is_control = measurements.get("isControl") is True
-    is_container = is_control or measurements.get("isVisualContainer") is True
+    is_box_control = measurements.get("isBoxControl") is True
+    is_visual_container = measurements.get("isVisualContainer") is True
+    is_container = is_box_control or is_visual_container
+    has_axis_scroll_evidence = any(
+        key in measurements
+        for key in (
+            "isScrollRegionX",
+            "isScrollRegionY",
+            "containsScrollRegionX",
+            "containsScrollRegionY",
+        )
+    )
+    legacy_scroll_boundary = (
+        not has_axis_scroll_evidence
+        and (
+            measurements.get("isScrollRegion") is True
+            or measurements.get("containsScrollRegion") is True
+        )
+    )
+    crosses_x_scroll_boundary = legacy_scroll_boundary or (
+        measurements.get("isScrollRegionX") is True
+        or measurements.get("containsScrollRegionX") is True
+    )
+    crosses_y_scroll_boundary = legacy_scroll_boundary or (
+        measurements.get("isScrollRegionY") is True
+        or measurements.get("containsScrollRegionY") is True
+    )
+    vertical_writing = str(measurements.get("writingMode", "")).startswith(
+        ("vertical", "sideways")
+    )
+    crosses_inline_scroll_boundary = (
+        crosses_y_scroll_boundary
+        if vertical_writing
+        else crosses_x_scroll_boundary
+    )
+    crosses_block_scroll_boundary = (
+        crosses_x_scroll_boundary
+        if vertical_writing
+        else crosses_y_scroll_boundary
+    )
     insets = _logical_values(
         measurements,
         ("textInsetInlineStart", "textInsetInlineEnd"),
@@ -194,15 +232,25 @@ def _spacing_findings(
             "textInsetLeft",
         ),
     )
-    present_insets = [value for value in insets if value is not None]
-    if has_text and is_container and present_insets and min(present_insets) < 4:
+    edge_insets = [
+        *([] if crosses_inline_scroll_boundary else insets[:2]),
+        *([] if crosses_block_scroll_boundary else insets[2:]),
+    ]
+    present_edge_insets = [value for value in edge_insets if value is not None]
+    if (
+        has_text
+        and is_container
+        and measurements.get("isTextFlow") is not False
+        and present_edge_insets
+        and min(present_edge_insets) < 4
+    ):
         findings.append(
             RuntimeFinding(
                 code="runtime-text-edge-contact",
                 category="spacing",
                 severity="warning",
                 message="Text sits too close to the edge of its card or control.",
-                metrics={"minimum_text_inset_px": min(present_insets)},
+                metrics={"minimum_text_inset_px": min(present_edge_insets)},
             )
         )
 
@@ -211,7 +259,17 @@ def _spacing_findings(
         ("InlineStart", "InlineEnd"),
         fallback=("Left", "Right"),
     )
-    if is_container and horizontal_padding is not None:
+    inline_insets = [value for value in insets[:2] if value is not None]
+    needs_visual_inline_padding = (
+        is_visual_container
+        and not crosses_inline_scroll_boundary
+        and bool(inline_insets)
+        and min(inline_insets) < 8.0
+    )
+    if (
+        (is_box_control or needs_visual_inline_padding)
+        and horizontal_padding is not None
+    ):
         minimum = 8.0
         if min(horizontal_padding) < minimum or _padding_is_uneven(horizontal_padding):
             findings.append(
@@ -233,8 +291,18 @@ def _spacing_findings(
         ("BlockStart", "BlockEnd"),
         fallback=("Top", "Bottom"),
     )
-    if is_container and vertical_padding is not None:
-        minimum = 6.0 if is_control else 8.0
+    block_insets = [value for value in insets[2:] if value is not None]
+    needs_visual_block_padding = (
+        is_visual_container
+        and not crosses_block_scroll_boundary
+        and bool(block_insets)
+        and min(block_insets) < 8.0
+    )
+    if (
+        (is_box_control or needs_visual_block_padding)
+        and vertical_padding is not None
+    ):
+        minimum = 6.0 if is_box_control else 8.0
         if min(vertical_padding) < minimum or _padding_is_uneven(vertical_padding):
             findings.append(
                 RuntimeFinding(

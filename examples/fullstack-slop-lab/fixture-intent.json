@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "fixture": "NexusFlow full-stack remediation lab",
+  "product_goal": "Provide a runnable B2B operations fixture that demonstrates UIdetox baseline-to-remediation work while preserving verified frontend, API, and database behavior.",
+  "audience": "UIdetox maintainers, beta testers, and agent-harness evaluators",
+  "primary_job": "Verify that UIdetox can map intent, correct structural and visual defects, preserve routes, and keep frontend operations aligned with API and database contracts.",
+  "tone": "Calm, precise operational confidence",
+  "genre": "Dense editorial operations ledger",
+  "page_kind": "application",
+  "brand": "NexusFlow",
+  "design_dials": {
+    "design_variance": 6,
+    "motion_intensity": 3,
+    "visual_density": 7
+  },
+  "preserve": [
+    "React route paths and navigation destinations",
+    "FastAPI endpoint paths and typed response contracts",
+    "SQLite seed behavior and synthetic record lineage",
+    "Recorded pre-remediation issue and parity evidence",
+    "Synthetic provenance and the no-production-data guarantee"
+  ],
+  "constraints": [
+    "The fixture must install, typecheck, build, and run locally",
+    "Every visible action must work or state its local-only boundary",
+    "Frontend operations must remain aligned with backend methods and DTOs",
+    "Responsive layouts must avoid clipping, accidental overflow, and inaccessible controls",
+    "No production customer records, credentials, or third-party copyrighted UI assets"
+  ],
+  "anti_goals": [
+    "Do not treat NexusFlow as a production product or source of real business metrics",
+    "Do not reintroduce unsupported controls, fabricated claims, or optimistic mutation drift",
+    "Do not erase the evidence lineage that makes before-and-after qualification reproducible"
+  ],
+  "expected_frontend_routes": [
+    "/",
+    "/projects",
+    "/projects/:projectId",
+    "/analytics",
+    "/automations",
+    "/inbox",
+    "/billing",
+    "/experiments",
+    "/customers",
+    "/data-hub",
+    "/approvals",
+    "/journeys",
+    "/team",
+    "/settings",
+    "/fixture-provenance"
+  ],
+  "remediation_evidence": {
+    "baseline_static_issues": 212,
+    "baseline_operation_parity": {
+      "frontend_only": 10,
+      "backend_only": 8,
+      "method_mismatch": 1,
+      "unresolved": 0
+    },
+    "target_operation_parity": {
+      "frontend_only": 0,
+      "backend_only": 0,
+      "method_mismatch": 0,
+      "unresolved": 0
+    }
+  },
+  "provenance": {
+    "origin": "synthetic test fixture",
+    "created_for": "UIdetox scan-map-redesign-verification development",
+    "created_on": "2026-07-17",
+    "expanded_on": "2026-07-22",
+    "remediated_on": "2026-07-22",
+    "lineage": [
+      "desloppify-inspired scan and remediation workflow",
+      "impeccable design-quality heuristics",
+      "taste-skill context and anti-slop dials",
+      "hallmark intent, scope, and macrostructure preflight"
+    ],
+    "visual_source_policy": "No external product UI was copied; the initial AI-SaaS baseline and current editorial operations design are synthetic.",
+    "data_source_policy": "All organizations, people, metrics, URLs, invoices, notifications, and events are fictional seed data.",
+    "contains_production_data": false,
+    "sources_of_truth": [
+      "fixture-intent.json",
+      "beta-expectations.json",
+      "openapi.yaml"
+    ]
+  }
+}

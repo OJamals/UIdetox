@@ -5,13 +5,12 @@ type Props = {
 
 export function Toast({ message, onClose }: Props) {
   return (
-    <div className="toast">
-      <span>🎉</span>
+    <div aria-live="polite" className="toast" role="status">
       <div>
-        <b>Success!</b>
+        <b>Operation complete</b>
         <p>{message}</p>
       </div>
-      <button onClick={onClose}>×</button>
+      <button aria-label="Dismiss notification" type="button" onClick={onClose}>×</button>
     </div>
   );
 }

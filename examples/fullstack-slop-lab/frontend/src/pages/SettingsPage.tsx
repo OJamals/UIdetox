@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api/client";
-import { MagicCard } from "../components/MagicCard";
+import { OperationalSection } from "../components/MagicCard";
 import { Spinner } from "../components/Spinner";
 import { Toast } from "../components/Toast";
 import type { WorkspaceSettings } from "../types";
@@ -8,100 +8,101 @@ import type { WorkspaceSettings } from "../types";
 export function SettingsPage() {
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getSettings().then(setSettings);
+    api.getSettings().then(setSettings).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : "Workspace settings could not be loaded.");
+    });
   }, []);
 
-  if (!settings) return <Spinner />;
-
-  const submit = async (event: FormEvent) => {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    const saved = await api.saveSettings(settings);
-    setSettings(saved);
-    setToast("Settings saved successfully!");
-  };
+    if (!settings) return;
+    try {
+      setError("");
+      setSettings(await api.saveSettings(settings));
+      setToast("Settings saved.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Workspace settings could not be saved.");
+    }
+  }
+
+  if (!settings && !error) return <Spinner />;
 
   return (
     <div className="page settings-page">
-      <div className="page-heading centered">
+      <header className="page-heading">
         <div>
-          <span className="eyebrow">PERSONALIZATION</span>
-          <h1>Make it yours</h1>
-          <p>Customize every detail to unlock your perfect workflow.</p>
+          <span className="eyebrow">Workspace policy</span>
+          <h1>Settings</h1>
+          <p>Configure the supported preferences exposed by the workspace API.</p>
         </div>
-      </div>
+      </header>
 
-      <form onSubmit={submit}>
-        <MagicCard eyebrow="01 / GENERAL" title="Workspace settings">
-          <div className="settings-form">
-            <input
-              value={settings.workspace_name}
-              onChange={(event) =>
-                setSettings({ ...settings, workspace_name: event.target.value })
-              }
-              placeholder="Workspace name"
-            />
-            <select
-              value={settings.default_view}
-              onChange={(event) =>
-                setSettings({ ...settings, default_view: event.target.value })
-              }
-            >
-              <option value="dashboard">Dashboard</option>
-              <option value="projects">Projects</option>
-              <option value="analytics">Analytics</option>
-            </select>
-          </div>
-        </MagicCard>
-
-        <MagicCard eyebrow="02 / PREFERENCES" title="Experience">
-          <label className="toggle-row">
-            <div>
-              <b>Weekly inspiration digest</b>
-              <small>Get magical ideas delivered every Friday.</small>
+      {error ? <div className="error-banner" role="alert">{error}</div> : null}
+      {settings ? (
+        <form onSubmit={submit}>
+          <OperationalSection eyebrow="01 / General" title="Workspace identity">
+            <div className="settings-form">
+              <label htmlFor="workspace-name">Workspace name</label>
+              <input
+                id="workspace-name"
+                type="text"
+                value={settings.workspace_name}
+                onChange={(event) => setSettings({ ...settings, workspace_name: event.target.value })}
+              />
+              <label htmlFor="default-view">Default view</label>
+              <select
+                id="default-view"
+                value={settings.default_view}
+                onChange={(event) => {
+                  const defaultView = event.target.value;
+                  if (
+                    defaultView === "dashboard" ||
+                    defaultView === "projects" ||
+                    defaultView === "analytics"
+                  ) {
+                    setSettings({ ...settings, default_view: defaultView });
+                  }
+                }}
+              >
+                <option value="dashboard">Dashboard</option>
+                <option value="projects">Projects</option>
+                <option value="analytics">Analytics</option>
+              </select>
             </div>
-            <input
-              type="checkbox"
-              checked={settings.weekly_digest}
-              onChange={(event) =>
-                setSettings({ ...settings, weekly_digest: event.target.checked })
-              }
-            />
-            <span className="fake-toggle" />
-          </label>
-          <label className="toggle-row">
-            <div>
-              <b>Beautiful dark mode</b>
-              <small>Transform your workspace into a stunning night experience.</small>
-            </div>
-            <input
-              type="checkbox"
-              checked={settings.dark_mode}
-              onChange={(event) =>
-                setSettings({ ...settings, dark_mode: event.target.checked })
-              }
-            />
-            <span className="fake-toggle" />
-          </label>
-        </MagicCard>
+          </OperationalSection>
 
-        <MagicCard className="danger-zone" eyebrow="03 / DANGER" title="Danger zone">
-          <div className="danger-row">
-            <div>
-              <b>Delete workspace</b>
-              <p>Permanently remove everything. This cannot be undone.</p>
-            </div>
-            <button type="button" className="danger-button">
-              Delete everything forever
-            </button>
-          </div>
-        </MagicCard>
+          <OperationalSection eyebrow="02 / Preferences" title="Notifications and display">
+            <label className="toggle-row" htmlFor="weekly-digest">
+              <span><b>Weekly digest</b><small>Receive a Friday workspace summary.</small></span>
+              <input
+                id="weekly-digest"
+                type="checkbox"
+                checked={settings.weekly_digest}
+                onChange={(event) => setSettings({ ...settings, weekly_digest: event.target.checked })}
+              />
+            </label>
+            <label className="toggle-row" htmlFor="dark-mode">
+              <span><b>Dark mode preference</b><small>Store the preference for compatible clients.</small></span>
+              <input
+                id="dark-mode"
+                type="checkbox"
+                checked={settings.dark_mode}
+                onChange={(event) => setSettings({ ...settings, dark_mode: event.target.checked })}
+              />
+            </label>
+          </OperationalSection>
 
-        <button className="primary-button save-settings">Save all changes</button>
-      </form>
+          <aside className="boundary-note">
+            Workspace deletion is intentionally absent: the fixture backend exposes no destructive workspace endpoint.
+          </aside>
+          <button type="submit" className="primary-button save-settings">Save settings</button>
+        </form>
+      ) : null}
 
-      {toast && <Toast message={toast} onClose={() => setToast("")} />}
+      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );
 }

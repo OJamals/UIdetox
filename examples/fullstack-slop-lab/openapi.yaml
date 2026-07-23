@@ -1,134 +1,1473 @@
 openapi: 3.1.0
 info:
   title: NexusFlow AI API
+  description: Intentionally awkward beta fixture for UIdetox.
   version: 0.1.0
 paths:
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
   /api/projects:
     get:
-      operationId: listProjects
+      summary: List Projects
+      operationId: list_projects_api_projects_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: search
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search
       responses:
-        "200":
-          description: Project list
+        '200':
+          description: Successful Response
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Project"
+                  $ref: '#/components/schemas/ProjectResponse'
+                title: Response List Projects Api Projects Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     post:
-      operationId: createProject
+      summary: Create Project
+      operationId: create_project_api_projects_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}:
+    get:
+      summary: Get Project
+      operationId: get_project_api_projects__project_id__get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      summary: Update Project
+      operationId: update_project_api_projects__project_id__patch
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Delete Project
+      operationId: delete_project_api_projects__project_id__delete
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Project Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/metrics:
+    get:
+      summary: Get Metrics
+      operationId: get_metrics_api_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+  /api/activity:
+    get:
+      summary: Get Activity
+      operationId: get_activity_api_activity_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ActivityResponse'
+                type: array
+                title: Response Get Activity Api Activity Get
+  /api/team:
+    get:
+      summary: Get Team
+      operationId: get_team_api_team_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/TeamMemberResponse'
+                type: array
+                title: Response Get Team Api Team Get
+  /api/team/invite:
+    post:
+      summary: Invite Team Member
+      operationId: invite_team_member_api_team_invite_post
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProjectCreate"
+              $ref: '#/components/schemas/TeamInvite'
+        required: true
       responses:
-        "201":
-          description: Created project
-  /api/projects/{project_id}:
-    parameters:
-      - in: path
-        name: project_id
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMemberResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/team/{member_id}:
+    delete:
+      summary: Delete Team Member
+      operationId: delete_team_member_api_team__member_id__delete
+      parameters:
+      - name: member_id
+        in: path
         required: true
         schema:
           type: integer
-    get:
-      operationId: getProject
+          title: Member Id
       responses:
-        "200":
-          description: Project detail
-    patch:
-      operationId: updateProject
-      responses:
-        "200":
-          description: Updated project
-    delete:
-      operationId: deleteProject
-      responses:
-        "204":
-          description: Deleted project
-  /api/metrics:
-    get:
-      operationId: getMetrics
-      responses:
-        "200":
-          description: Dashboard metrics
-  /api/activity:
-    get:
-      operationId: getActivity
-      responses:
-        "200":
-          description: Recent activity
-  /api/team:
-    get:
-      operationId: getTeam
-      responses:
-        "200":
-          description: Team list
-  /api/team/invite:
-    post:
-      operationId: inviteTeamMember
-      responses:
-        "201":
-          description: Invited member
-  /api/team/{member_id}:
-    patch:
-      operationId: updateTeamMember
-      parameters:
-        - in: path
-          name: member_id
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Updated member
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/settings:
     get:
-      operationId: getSettings
+      summary: Get Settings
+      operationId: get_settings_api_settings_get
       responses:
-        "200":
-          description: Workspace settings
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSettingsResponse'
     put:
-      operationId: saveSettings
+      summary: Save Settings
+      operationId: save_settings_api_settings_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsUpdate'
+        required: true
       responses:
-        "200":
-          description: Saved settings
-  /api/internal/audit-log:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSettingsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/recommendations:
     get:
-      operationId: internalAuditLog
+      summary: List Recommendations
+      operationId: list_recommendations_api_recommendations_get
       responses:
-        "200":
-          description: Internal-only audit data
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/RecommendationResponse'
+                type: array
+                title: Response List Recommendations Api Recommendations Get
+  /api/workflows:
+    get:
+      summary: List Workflows
+      operationId: list_workflows_api_workflows_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/AutomationResponse'
+                type: array
+                title: Response List Workflows Api Workflows Get
+  /api/workflows/{workflow_id}/pause:
+    post:
+      summary: Pause Workflow
+      operationId: pause_workflow_api_workflows__workflow_id__pause_post
+      parameters:
+      - name: workflow_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Workflow Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/billing/invoices:
+    get:
+      summary: List Invoices
+      operationId: list_invoices_api_billing_invoices_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/InvoiceResponse'
+                type: array
+                title: Response List Invoices Api Billing Invoices Get
+  /api/notifications:
+    get:
+      summary: List Notifications
+      operationId: list_notifications_api_notifications_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NotificationResponse'
+                type: array
+                title: Response List Notifications Api Notifications Get
+  /api/notifications/{notification_id}/seen:
+    post:
+      summary: Mark Notification Seen
+      operationId: mark_notification_seen_api_notifications__notification_id__seen_post
+      parameters:
+      - name: notification_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Notification Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/experiments:
+    get:
+      summary: List Experiments
+      operationId: list_experiments_api_experiments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ExperimentResponse'
+                type: array
+                title: Response List Experiments Api Experiments Get
+  /api/experiments/{experiment_key}:
+    put:
+      summary: Save Experiment
+      operationId: save_experiment_api_experiments__experiment_key__put
+      parameters:
+      - name: experiment_key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Experiment Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperimentUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperimentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/accounts:
+    get:
+      summary: List Accounts
+      operationId: list_accounts_api_accounts_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CustomerResponse'
+                type: array
+                title: Response List Accounts Api Accounts Get
+  /api/accounts/{account_id}:
+    patch:
+      summary: Update Account Health
+      operationId: update_account_health_api_accounts__account_id__patch
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Account Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountHealthUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/data-sources:
+    get:
+      summary: List Data Sources
+      operationId: list_data_sources_api_data_sources_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/DataSourceResponse'
+                type: array
+                title: Response List Data Sources Api Data Sources Get
+  /api/data-sources/{source_id}/sync:
+    post:
+      summary: Sync Data Source
+      operationId: sync_data_source_api_data_sources__source_id__sync_post
+      parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Source Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataSourceResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/governance/approvals:
+    get:
+      summary: List Governance Approvals
+      operationId: list_governance_approvals_api_governance_approvals_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+                type: array
+                title: Response List Governance Approvals Api Governance Approvals
+                  Get
+  /api/governance/approvals/{approval_id}/decision:
+    post:
+      summary: Decide Governance Approval
+      operationId: decide_governance_approval_api_governance_approvals__approval_id__decision_post
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/journeys:
+    get:
+      summary: List Journeys
+      operationId: list_journeys_api_journeys_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/JourneyResponse'
+                type: array
+                title: Response List Journeys Api Journeys Get
+  /api/journeys/{journey_id}/publish:
+    post:
+      summary: Publish Journey
+      operationId: publish_journey_api_journeys__journey_id__publish_post
+      parameters:
+      - name: journey_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Journey Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JourneyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    Project:
+    AccountHealthUpdate:
+      properties:
+        healthScore:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Healthscore
+      additionalProperties: false
       type: object
-      required: [id, name, status, progress]
+      required:
+      - healthScore
+      title: AccountHealthUpdate
+    ActivityResponse:
       properties:
         id:
           type: integer
-        name:
+          title: Id
+        project_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Project Id
+        actor:
           type: string
-        description:
+          title: Actor
+        action:
           type: string
+          title: Action
+        detail:
+          type: string
+          title: Detail
+        created_at:
+          type: string
+          title: Created At
+      type: object
+      required:
+      - id
+      - project_id
+      - actor
+      - action
+      - detail
+      - created_at
+      title: ActivityResponse
+    ApprovalResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        kind:
+          type: string
+          title: Kind
         status:
           type: string
-        progress:
-          type: integer
-        budget:
-          type: number
-        owner_name:
-          type: string
-        tags:
-          type: array
+          enum:
+          - pending
+          - approved
+          - rejected
+          - needs-info
+          title: Status
+        requestor:
+          $ref: '#/components/schemas/RequestorResponse'
+        reviewers:
           items:
-            type: string
-    ProjectCreate:
+            $ref: '#/components/schemas/ReviewerResponse'
+          type: array
+          title: Reviewers
+        riskScore:
+          type: integer
+          title: Riskscore
+        submittedAt:
+          type: string
+          title: Submittedat
+        context:
+          type: string
+          title: Context
       type: object
-      required: [name]
+      required:
+      - id
+      - title
+      - kind
+      - status
+      - requestor
+      - reviewers
+      - riskScore
+      - submittedAt
+      - context
+      title: ApprovalResponse
+    AutomationResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        trigger:
+          type: string
+          title: Trigger
+        schedule:
+          type: string
+          title: Schedule
+        enabled:
+          type: boolean
+          title: Enabled
+        lastRun:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lastrun
+        destination:
+          type: string
+          title: Destination
+      type: object
+      required:
+      - id
+      - name
+      - trigger
+      - schedule
+      - enabled
+      - lastRun
+      - destination
+      title: AutomationResponse
+    ContactResponse:
       properties:
         name:
           type: string
+          title: Name
+        email:
+          type: string
+          title: Email
+      type: object
+      required:
+      - name
+      - email
+      title: ContactResponse
+    CredentialResponse:
+      properties:
+        mode:
+          type: string
+          title: Mode
+        owner:
+          type: string
+          title: Owner
+      type: object
+      required:
+      - mode
+      - owner
+      title: CredentialResponse
+    CustomerResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        displayName:
+          type: string
+          title: Displayname
+        annualRevenueCents:
+          type: integer
+          title: Annualrevenuecents
+        lifecycleStage:
+          type: string
+          title: Lifecyclestage
+        healthScore:
+          type: integer
+          title: Healthscore
+        owner:
+          $ref: '#/components/schemas/OwnerResponse'
+        primaryContact:
+          $ref: '#/components/schemas/ContactResponse'
+        notes:
+          type: string
+          title: Notes
+        lastTouchAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lasttouchat
+      type: object
+      required:
+      - id
+      - displayName
+      - annualRevenueCents
+      - lifecycleStage
+      - healthScore
+      - owner
+      - primaryContact
+      - notes
+      - lastTouchAt
+      title: CustomerResponse
+    DataSourceResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        provider:
+          type: string
+          title: Provider
+        status:
+          type: string
+          enum:
+          - healthy
+          - warning
+          - failed
+          - syncing
+          title: Status
+        recordCount:
+          type: integer
+          title: Recordcount
+        lastSyncedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lastsyncedat
+        credentials:
+          $ref: '#/components/schemas/CredentialResponse'
+        destination:
+          type: string
+          title: Destination
+      type: object
+      required:
+      - id
+      - name
+      - provider
+      - status
+      - recordCount
+      - lastSyncedAt
+      - credentials
+      - destination
+      title: DataSourceResponse
+    DecisionUpdate:
+      properties:
+        decision:
+          type: string
+          enum:
+          - approved
+          - rejected
+          - needs-info
+          title: Decision
+      additionalProperties: false
+      type: object
+      required:
+      - decision
+      title: DecisionUpdate
+    ExperimentResponse:
+      properties:
+        key:
+          type: string
+          minLength: 2
+          title: Key
+        title:
+          type: string
+          minLength: 2
+          title: Title
         description:
           type: string
+          title: Description
+        rolloutPercent:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Rolloutpercent
+        enabled:
+          type: boolean
+          title: Enabled
+        audience:
+          items:
+            type: string
+          type: array
+          title: Audience
+      additionalProperties: false
+      type: object
+      required:
+      - key
+      - title
+      - description
+      - rolloutPercent
+      - enabled
+      - audience
+      title: ExperimentResponse
+    ExperimentUpdate:
+      properties:
+        key:
+          type: string
+          minLength: 2
+          title: Key
+        title:
+          type: string
+          minLength: 2
+          title: Title
+        description:
+          type: string
+          title: Description
+        rolloutPercent:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Rolloutpercent
+        enabled:
+          type: boolean
+          title: Enabled
+        audience:
+          items:
+            type: string
+          type: array
+          title: Audience
+      additionalProperties: false
+      type: object
+      required:
+      - key
+      - title
+      - description
+      - rolloutPercent
+      - enabled
+      - audience
+      title: ExperimentUpdate
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          const: ok
+          title: Status
+      type: object
+      required:
+      - status
+      title: HealthResponse
+    InvoiceResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        invoiceNo:
+          type: string
+          title: Invoiceno
+        accountName:
+          type: string
+          title: Accountname
+        amountCents:
+          type: integer
+          title: Amountcents
+        status:
+          type: string
+          enum:
+          - open
+          - paid
+          - overdue
+          title: Status
+        createdAt:
+          type: string
+          title: Createdat
+        dueAt:
+          type: string
+          title: Dueat
+      type: object
+      required:
+      - id
+      - invoiceNo
+      - accountName
+      - amountCents
+      - status
+      - createdAt
+      - dueAt
+      title: InvoiceResponse
+    JourneyOwnerResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        email:
+          type: string
+          title: Email
+      type: object
+      required:
+      - id
+      - name
+      - email
+      title: JourneyOwnerResponse
+    JourneyResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        entryTrigger:
+          type: string
+          title: Entrytrigger
+        stepCount:
+          type: integer
+          title: Stepcount
+        active:
+          type: boolean
+          title: Active
+        audienceSegments:
+          items:
+            type: string
+          type: array
+          title: Audiencesegments
+        publishedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Publishedat
+        owner:
+          $ref: '#/components/schemas/JourneyOwnerResponse'
+      type: object
+      required:
+      - id
+      - name
+      - entryTrigger
+      - stepCount
+      - active
+      - audienceSegments
+      - publishedAt
+      - owner
+      title: JourneyResponse
+    MetricsResponse:
+      properties:
+        activeProjects:
+          type: integer
+          title: Activeprojects
+        completedProjects:
+          type: integer
+          title: Completedprojects
+        averageProgress:
+          type: integer
+          title: Averageprogress
+        totalBudget:
+          type: number
+          title: Totalbudget
+        teamVelocity:
+          type: integer
+          title: Teamvelocity
+        customerHappiness:
+          type: integer
+          title: Customerhappiness
+      type: object
+      required:
+      - activeProjects
+      - completedProjects
+      - averageProgress
+      - totalBudget
+      - teamVelocity
+      - customerHappiness
+      title: MetricsResponse
+    NotificationResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        subject:
+          type: string
+          title: Subject
+        body:
+          type: string
+          title: Body
+        read:
+          type: boolean
+          title: Read
+        createdAt:
+          type: string
+          title: Createdat
+        sender:
+          $ref: '#/components/schemas/NotificationSenderResponse'
+      type: object
+      required:
+      - id
+      - subject
+      - body
+      - read
+      - createdAt
+      - sender
+      title: NotificationResponse
+    NotificationSenderResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        displayName:
+          type: string
+          title: Displayname
+      type: object
+      required:
+      - id
+      - displayName
+      title: NotificationSenderResponse
+    OwnerResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: OwnerResponse
+    ProjectCreate:
+      properties:
+        name:
+          type: string
+          minLength: 2
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        status:
+          type: string
+          enum:
+          - planning
+          - active
+          - at-risk
+          - completed
+          title: Status
+          default: planning
+        progress:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Progress
+          default: 0
+        budget:
+          type: number
+          minimum: 0.0
+          title: Budget
+          default: 0
+        due_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Due Date
+        owner_name:
+          type: string
+          title: Owner Name
+          default: Jane Doe
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: ProjectCreate
+    ProjectDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        status:
+          type: string
+          enum:
+          - planning
+          - active
+          - at-risk
+          - completed
+          title: Status
+        progress:
+          type: integer
+          title: Progress
+        budget:
+          type: number
+          title: Budget
+        due_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Due Date
+        owner_name:
+          type: string
+          title: Owner Name
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+        created_at:
+          type: string
+          title: Created At
+        activity:
+          items:
+            $ref: '#/components/schemas/ActivityResponse'
+          type: array
+          title: Activity
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - status
+      - progress
+      - budget
+      - due_date
+      - owner_name
+      - tags
+      - created_at
+      - activity
+      title: ProjectDetailResponse
+    ProjectResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        status:
+          type: string
+          enum:
+          - planning
+          - active
+          - at-risk
+          - completed
+          title: Status
+        progress:
+          type: integer
+          title: Progress
+        budget:
+          type: number
+          title: Budget
+        due_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Due Date
+        owner_name:
+          type: string
+          title: Owner Name
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+        created_at:
+          type: string
+          title: Created At
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - status
+      - progress
+      - budget
+      - due_date
+      - owner_name
+      - tags
+      - created_at
+      title: ProjectResponse
+    ProjectUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - planning
+            - active
+            - at-risk
+            - completed
+          - type: 'null'
+          title: Status
+        progress:
+          anyOf:
+          - type: integer
+            maximum: 100.0
+            minimum: 0.0
+          - type: 'null'
+          title: Progress
+        budget:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Budget
+        due_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Due Date
+      additionalProperties: false
+      type: object
+      title: ProjectUpdate
+    RecommendationResponse:
+      properties:
+        title:
+          type: string
+          title: Title
+        score:
+          type: integer
+          title: Score
+      type: object
+      required:
+      - title
+      - score
+      title: RecommendationResponse
+    RequestorResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        department:
+          type: string
+          title: Department
+      type: object
+      required:
+      - id
+      - name
+      - department
+      title: RequestorResponse
+    ReviewerResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: ReviewerResponse
+    SettingsUpdate:
+      properties:
+        workspace_name:
+          type: string
+          title: Workspace Name
+        weekly_digest:
+          type: boolean
+          title: Weekly Digest
+        dark_mode:
+          type: boolean
+          title: Dark Mode
+        default_view:
+          type: string
+          enum:
+          - dashboard
+          - projects
+          - analytics
+          title: Default View
+      additionalProperties: false
+      type: object
+      required:
+      - workspace_name
+      - weekly_digest
+      - dark_mode
+      - default_view
+      title: SettingsUpdate
+    TeamInvite:
+      properties:
+        email:
+          type: string
+          pattern: ^[^@\s]+@[^@\s]+\.[^@\s]+$
+          title: Email
+        role:
+          type: string
+          enum:
+          - Viewer
+          - Developer
+          title: Role
+          default: Viewer
+      additionalProperties: false
+      type: object
+      required:
+      - email
+      title: TeamInvite
+    TeamMemberResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        email:
+          type: string
+          title: Email
+        role:
+          type: string
+          title: Role
+        avatar:
+          type: string
+          title: Avatar
+        online:
+          type: boolean
+          title: Online
+      type: object
+      required:
+      - id
+      - name
+      - email
+      - role
+      - avatar
+      - online
+      title: TeamMemberResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkspaceSettingsResponse:
+      properties:
+        workspace_name:
+          type: string
+          title: Workspace Name
+        weekly_digest:
+          type: boolean
+          title: Weekly Digest
+        dark_mode:
+          type: boolean
+          title: Dark Mode
+        default_view:
+          type: string
+          enum:
+          - dashboard
+          - projects
+          - analytics
+          title: Default View
+        id:
+          type: integer
+          title: Id
+      additionalProperties: false
+      type: object
+      required:
+      - workspace_name
+      - weekly_digest
+      - dark_mode
+      - default_view
+      - id
+      title: WorkspaceSettingsResponse

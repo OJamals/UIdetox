@@ -1,62 +1,58 @@
 {
-  "fixture": "NexusFlow AI",
-  "purpose": "Exercise UIdetox against a runnable, intentionally poor full-stack product.",
+  "fixture": "NexusFlow",
+  "purpose": "Qualify UIdetox against a remediated full-stack fixture with retained baseline evidence.",
   "intent": {
-    "audience": "UIdetox maintainers and beta testers",
-    "primary_job": "Inspect semantic mapping, provenance, redesign planning, and verification",
-    "tone": "maximal stereotypical AI SaaS slop",
-    "genre": "operational workspace",
-    "page_kind": "page",
-    "brand": "NexusFlow AI"
+    "product_goal": "Provide a runnable B2B operations fixture that demonstrates UIdetox baseline-to-remediation work while preserving verified frontend, API, and database behavior.",
+    "audience": "UIdetox maintainers, beta testers, and agent-harness evaluators",
+    "primary_job": "Verify that UIdetox can map intent, correct structural and visual defects, preserve routes, and keep frontend operations aligned with API and database contracts.",
+    "tone": "Calm, precise operational confidence",
+    "genre": "Dense editorial operations ledger",
+    "page_kind": "application",
+    "brand": "NexusFlow"
   },
+  "provenance_manifest": "fixture-intent.json",
   "expected_frontend_routes": [
-    "/",
-    "/projects",
-    "/projects/:projectId",
-    "/analytics",
-    "/team",
-    "/settings"
+    "/", "/projects", "/projects/:projectId", "/analytics", "/automations",
+    "/inbox", "/billing", "/experiments", "/customers", "/data-hub",
+    "/approvals", "/journeys", "/team", "/settings", "/fixture-provenance"
   ],
   "deliberate_operation_findings": {
-    "frontend_only": ["GET /api/recommendations"],
-    "backend_only": ["GET /api/internal/audit-log"],
-    "method_mismatch": ["DELETE frontend vs PATCH backend /api/team/{member_id}"]
+    "frontend_only": [],
+    "backend_only": [],
+    "method_mismatch": [],
+    "unresolved": []
   },
   "expected_parity_counts": {
-    "frontend_only": 1,
-    "backend_only": 1,
+    "frontend_only": 0,
+    "backend_only": 0,
+    "method_mismatch": 0,
+    "unresolved": 0
+  },
+  "baseline_parity_counts": {
+    "frontend_only": 10,
+    "backend_only": 8,
     "method_mismatch": 1,
     "unresolved": 0
   },
-  "semantic_probe_file": "frontend/src/api/semantic-contract-probes.ts",
+  "operation_evidence": "Literal frontend/src/api/client.ts wrapper calls resolved by UIdetox source facts",
   "redesign_oracle": {
     "variants": 3,
     "minimum_pairwise_distance": 60
   },
-  "deliberate_slop_families": [
+  "baseline_slop_families": [
     "purple-blue-pink gradients",
-    "Inter everywhere",
-    "glassmorphism",
-    "gradient headings",
-    "uniform metric and team-card grids",
-    "card-in-card nesting",
-    "emoji icon tiles",
-    "side-stripe cards",
-    "pure black and white",
-    "oversized shadows",
-    "pill-shaped everything",
-    "transition-all behavior",
-    "bouncy and infinite motion",
-    "removed focus outlines",
-    "placeholder-as-label forms",
-    "confirmation modal for reversible delete",
-    "celebratory success toasts",
-    "desktop-first fixed breakpoints",
-    "fabricated metrics",
-    "generic startup copy",
-    "AI nav and footer",
-    "frontend/backend DTO duplication",
-    "global SQLite connection",
-    "generic error messages"
+    "glassmorphism and uniform card grids",
+    "emoji icon tiles and fabricated metrics",
+    "placeholder-as-label forms and unsupported controls",
+    "optimistic mutations that drift from persisted state",
+    "frontend, backend, and database operation mismatches",
+    "fixed-height records with clipped text and weak responsive behavior"
+  ],
+  "remediation_targets": [
+    "zero operation parity findings",
+    "zero deterministic analyzer findings",
+    "all visible actions verified against persisted API state",
+    "responsive and accessible route coverage",
+    "canonical intent and baseline evidence retained"
   ]
 }

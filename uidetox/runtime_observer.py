@@ -88,9 +88,34 @@ class RuntimeElement:
 def _attach_runtime_findings(
     elements: tuple[RuntimeElement, ...],
 ) -> tuple[RuntimeElement, ...]:
-    return tuple(
+    attached = tuple(
         replace(element, findings=detect_runtime_findings(element))
         for element in elements
+    )
+    clipping_containers = {
+        element.selector
+        for element in attached
+        if any(
+            finding.code == "runtime-component-clipped"
+            for finding in element.findings
+        )
+    }
+    if not clipping_containers:
+        return attached
+    return tuple(
+        replace(
+            element,
+            findings=tuple(
+                finding
+                for finding in element.findings
+                if not (
+                    finding.code == "runtime-text-clipped"
+                    and finding.metrics.get("clipping_ancestor")
+                    in clipping_containers
+                )
+            ),
+        )
+        for element in attached
     )
 
 
@@ -579,11 +604,12 @@ async () => {
 
   const isControl = (element, role) => (
     interactiveRoles.has(role) ||
-    element.matches("button,a[href],input,select,textarea,[tabindex]")
+    element.matches(
+      "button,a[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
+    )
   );
 
-  const isVisualContainer = (element, style) => {
-    const tag = element.tagName.toLowerCase();
+  const paintedSurface = (element, style) => {
     const parentBackground = element.parentElement
       ? getComputedStyle(element.parentElement).backgroundColor
       : "";
@@ -598,34 +624,107 @@ async () => {
       style.backgroundColor !== "transparent" &&
       style.backgroundColor !== parentBackground
     );
+    return {hasBorder, hasDistinctBackground};
+  };
+
+  const isVisualContainer = (element, style) => {
+    const tag = element.tagName.toLowerCase();
+    const {hasBorder, hasDistinctBackground} = paintedSurface(element, style);
     const hasContainerName = /(?:card|panel|tile|surface)/i.test(
       `${element.id} ${element.className || ""}`
     );
     return (
       ["article", "dialog"].includes(tag) ||
       hasContainerName ||
-      (element.children.length > 0 && (hasBorder || hasDistinctBackground))
+      (element.children.length > 0 && hasBorder && hasDistinctBackground)
     );
   };
 
-  const isSingleTextFlow = element => !Array.from(element.children).some(
-    child => {
-      if (!(child.textContent || "").trim()) return false;
-      const display = getComputedStyle(child).display;
-      return !["contents", "inline", "inline-block"].includes(display);
+  const isBoxControl = (element, role, style) => {
+    const tag = element.tagName.toLowerCase();
+    const inputType = tag === "input"
+      ? (element.getAttribute("type") || "text").toLowerCase()
+      : "";
+    const compactInput = [
+      "checkbox", "radio", "range", "color", "file", "hidden"
+    ].includes(inputType);
+    const boxedRole = new Set([
+      "button", "combobox", "listbox", "searchbox", "spinbutton", "textbox"
+    ]).has(role);
+    const namedAsControl = /(?:button|btn|cta|chip|pill|tab|nav-item)/i.test(
+      `${element.id} ${element.className || ""}`
+    );
+    const {hasBorder, hasDistinctBackground} = paintedSurface(element, style);
+    const semanticControl = isControl(element, role);
+    return (
+      ["button", "select", "textarea"].includes(tag) ||
+      (tag === "input" && !compactInput) ||
+      boxedRole ||
+      (semanticControl && namedAsControl) ||
+      (tag === "a" && (hasBorder || hasDistinctBackground))
+    );
+  };
+
+  const textFlowCount = (element, limit = 2) => {
+    const childrenWithText = Array.from(element.children).filter(
+      child => (child.textContent || "").trim()
+    );
+    const blockChildren = childrenWithText.filter(child => (
+      !["contents", "inline"].includes(getComputedStyle(child).display)
+    ));
+    const flowChildren = blockChildren.length
+      ? blockChildren
+      : childrenWithText.filter(
+          child => getComputedStyle(child).display === "contents"
+        );
+    if (!flowChildren.length) {
+      return (element.textContent || "").trim() ? 1 : 0;
     }
-  );
+    let count = 0;
+    for (const child of flowChildren) {
+      count += textFlowCount(child, limit - count);
+      if (count >= limit) return count;
+    }
+    return count;
+  };
+
+  const isSingleTextFlow = element => textFlowCount(element) <= 1;
+
+  const scrollAxesCache = new WeakMap();
+  const scrollAxesFor = (element) => {
+    if (scrollAxesCache.has(element)) return scrollAxesCache.get(element);
+    const style = getComputedStyle(element);
+    const axes = {
+      x: ["auto", "scroll"].includes(style.overflowX),
+      y: ["auto", "scroll"].includes(style.overflowY)
+    };
+    scrollAxesCache.set(element, axes);
+    return axes;
+  };
+
+  const isScrollRegion = element => {
+    const axes = scrollAxesFor(element);
+    return axes.x || axes.y;
+  };
 
   const clippingEvidence = (element, rect, style) => {
     const overflow = {top: 0, right: 0, bottom: 0, left: 0};
+    const subject = {
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left
+    };
     let clippingAncestorSelector = "";
     let ancestor = element.parentElement;
     while (ancestor) {
       const ancestorStyle = getComputedStyle(ancestor);
       const clipsX = ["clip", "hidden"].includes(ancestorStyle.overflowX);
       const clipsY = ["clip", "hidden"].includes(ancestorStyle.overflowY);
+      const scrollsX = ["auto", "scroll"].includes(ancestorStyle.overflowX);
+      const scrollsY = ["auto", "scroll"].includes(ancestorStyle.overflowY);
+      const ancestorRect = ancestor.getBoundingClientRect();
       if (clipsX || clipsY) {
-        const ancestorRect = ancestor.getBoundingClientRect();
         const inner = {
           top: ancestorRect.top + pixels(ancestorStyle.borderTopWidth),
           right: ancestorRect.right - pixels(ancestorStyle.borderRightWidth),
@@ -634,14 +733,17 @@ async () => {
         };
         const before = Math.max(...Object.values(overflow));
         if (clipsX) {
-          overflow.left = Math.max(overflow.left, inner.left - rect.left);
-          overflow.right = Math.max(overflow.right, rect.right - inner.right);
+          overflow.left = Math.max(overflow.left, inner.left - subject.left);
+          overflow.right = Math.max(
+            overflow.right,
+            subject.right - inner.right
+          );
         }
         if (clipsY) {
-          overflow.top = Math.max(overflow.top, inner.top - rect.top);
+          overflow.top = Math.max(overflow.top, inner.top - subject.top);
           overflow.bottom = Math.max(
             overflow.bottom,
-            rect.bottom - inner.bottom
+            subject.bottom - inner.bottom
           );
         }
         if (
@@ -650,6 +752,14 @@ async () => {
         ) {
           clippingAncestorSelector = selectorFor(ancestor);
         }
+      }
+      if (scrollsX) {
+        subject.left = ancestorRect.left;
+        subject.right = ancestorRect.right;
+      }
+      if (scrollsY) {
+        subject.top = ancestorRect.top;
+        subject.bottom = ancestorRect.bottom;
       }
       ancestor = ancestor.parentElement;
     }
@@ -671,6 +781,16 @@ async () => {
     const text = textGeometry(element, style, rect);
     const control = isControl(element, role);
     const visualContainer = isVisualContainer(element, style);
+    const boxControl = isBoxControl(element, role, style);
+    const scrollAxes = scrollAxesFor(element);
+    let containsScrollRegionX = false;
+    let containsScrollRegionY = false;
+    for (const descendant of Array.from(element.querySelectorAll("*"))) {
+      const descendantAxes = scrollAxesFor(descendant);
+      containsScrollRegionX ||= descendantAxes.x;
+      containsScrollRegionY ||= descendantAxes.y;
+      if (containsScrollRegionX && containsScrollRegionY) break;
+    }
     const clipEvidence = clippingEvidence(element, rect, style);
     const clipsX = ["clip", "hidden"].includes(style.overflowX);
     const clipsY = ["clip", "hidden"].includes(style.overflowY);
@@ -688,6 +808,11 @@ async () => {
       descendantClipped = Array.from(element.querySelectorAll("*")).some(child => {
         if (!isVisible(child)) return false;
         const childRect = child.getBoundingClientRect();
+        const childStyle = getComputedStyle(child);
+        const childClipping = clippingEvidence(child, childRect, childStyle);
+        if (childClipping.clippingAncestorSelector !== selectorFor(element)) {
+          return false;
+        }
         return (
           (clipsX && (
             childRect.left < contentLeft - 1 ||
@@ -735,7 +860,14 @@ async () => {
       ancestorClipOverflowBlockStart: round(clipEvidence.logical.blockStart),
       ancestorClipOverflowBlockEnd: round(clipEvidence.logical.blockEnd),
       isControl: control,
+      isBoxControl: boxControl,
       isVisualContainer: visualContainer,
+      isScrollRegion: scrollAxes.x || scrollAxes.y,
+      isScrollRegionX: scrollAxes.x,
+      isScrollRegionY: scrollAxes.y,
+      containsScrollRegion: containsScrollRegionX || containsScrollRegionY,
+      containsScrollRegionX,
+      containsScrollRegionY,
       writingMode: style.writingMode,
       direction: style.direction,
       paddingTop: round(pixels(style.paddingTop)),
@@ -865,21 +997,22 @@ async () => {
     ).sort(
       (first, second) => first.deviation - second.deviation
     )[0];
+    const semanticKeys = peerGroup.members.map(item => {
+      const measured = baseMeasurement(item);
+      return `${item.tagName.toLowerCase()}:${measured.role}`;
+    });
+    const equivalentPeers = semanticKeys.every(
+      value => value === semanticKeys[0]
+    );
     measurements.layoutPeerProvenance = peerGroup.provenance;
     measurements.layoutPeerSelectors = peerGroup.members.map(selectorFor);
-    if (peerGroup.deviation > 0) {
+    if (equivalentPeers && peerGroup.deviation > 0) {
       measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
       measurements.layoutDeviation = round(peerGroup.deviation);
     }
 
     const index = peerGroup.members.indexOf(element);
     const textPeers = peerGroup.members.map(item => baseMeasurement(item));
-    const semanticKeys = textPeers.map((item, peerIndex) => (
-      `${peerGroup.members[peerIndex].tagName.toLowerCase()}:${item.role}`
-    ));
-    const equivalentPeers = semanticKeys.every(
-      value => value === semanticKeys[0]
-    );
     if (equivalentPeers && textPeers.every(item => item.text)) {
       const peerSizes = textPeers
         .filter((_item, peerIndex) => peerIndex !== index)

@@ -58,7 +58,7 @@ createBrowserRouter(routes);
         EndpointFact("/api/items", 6, "POST", False),
         EndpointFact("/api/items/1", 7, "PATCH", False),
         EndpointFact(None, 8, "DELETE", True),
-        EndpointFact(None, 9, "GET", True),
+        EndpointFact("/api/items/${ready}", 9, "GET", True),
     )
     assert facts.routes == (
         SourceOccurrence("/settings", 10),
@@ -67,6 +67,79 @@ createBrowserRouter(routes);
     assert facts.extractor == "tree-sitter"
     assert facts.confidence == 1.0
     assert facts.parse_errors is False
+
+
+def test_source_facts_extract_local_fetch_wrapper_calls_without_probe_duplicates():
+    facts = _tsx_facts(
+        """
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(path, options);
+  return response.json() as Promise<T>;
+}
+function localRequest(path: string) {
+  return path;
+}
+export const api = {
+  list: () => request<Item[]>("/api/items"),
+  create: () => request<Item>("/api/items", { method: "POST" }),
+  ignore: () => localRequest("/not-http"),
+};
+""".strip()
+    )
+
+    assert facts.endpoints == (
+        EndpointFact("/api/items", 9, "GET", False),
+        EndpointFact("/api/items", 10, "POST", False),
+    )
+
+
+def test_source_facts_resolve_wrapper_guards_options_and_template_paths():
+    facts = _tsx_facts(
+        """
+async function request(path: string, guard: unknown): Promise<unknown>;
+async function request(path: string, guard: unknown, options: RequestInit): Promise<unknown>;
+async function request(path: string, guard: unknown, options?: RequestInit) {
+  return fetch(path, { headers: { Accept: "application/json" }, ...options });
+}
+export const api = {
+  list: () => request("/api/items", isItem),
+  create: () => request("/api/items", isItem, { method: "POST" }),
+  update: (itemId: number) =>
+    request(`/api/items/${itemId}`, isItem, { method: "PATCH" }),
+};
+""".strip()
+    )
+
+    assert facts.endpoints == (
+        EndpointFact("/api/items", 7, "GET", False),
+        EndpointFact("/api/items", 8, "POST", False),
+        EndpointFact("/api/items/${itemId}", 10, "PATCH", True),
+    )
+
+
+def test_fullstack_fixture_client_is_canonical_operation_evidence():
+    client = (
+        Path(__file__).parents[1]
+        / "examples"
+        / "fullstack-slop-lab"
+        / "frontend"
+        / "src"
+        / "api"
+        / "client.ts"
+    )
+    facts = extract_source_facts(client, client.read_text(encoding="utf-8"))
+    assert facts is not None
+    assert len(facts.endpoints) == 28
+    assert all(endpoint.method is not None for endpoint in facts.endpoints)
+    assert EndpointFact(
+        "/api/projects/${projectId}", 70, "GET", True
+    ) in facts.endpoints
+    assert EndpointFact(
+        "/api/governance/approvals/${approvalId}/decision",
+        132,
+        "POST",
+        True,
+    ) in facts.endpoints
 
 
 def test_source_facts_report_semantic_parse_errors_without_leaking_tree_nodes():

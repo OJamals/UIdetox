@@ -1620,6 +1620,20 @@ def test_modal_no_aria_skips_when_role_dialog_present():
     )
 
 
+def test_modal_no_aria_skips_composed_native_modal_component():
+    code = dedent("""\
+        import { ModalDialog } from "./ModalDialog";
+        export function ConfirmModal() {
+          return (
+            <ModalDialog open labelledBy="title" onClose={() => {}}>
+              <div className="modal-actions">content</div>
+            </ModalDialog>
+          );
+        }
+    """)
+    assert not _rule_fired(code, "MODAL_NO_ARIA_SLOP")
+
+
 def test_css_scroll_behavior_slop_fires_for_smooth_without_media(tmp_path):
     p = tmp_path / "base.css"
     p.write_text("html { scroll-behavior: smooth; color: #333; }", encoding="utf-8")
@@ -3567,6 +3581,12 @@ def test_missing_key_prop_slop_skips_with_key():
     assert not _rule_fired(code, "MISSING_KEY_PROP_SLOP")
 
 
+def test_missing_key_prop_slop_finds_key_beyond_arbitrary_context_window():
+    padding = " ".join(f'data-field-{index}={{item.value}}' for index in range(40))
+    code = f"const items = list.map(item => <ListItem {padding} key={{item.id}} />);"
+    assert not _rule_fired(code, "MISSING_KEY_PROP_SLOP")
+
+
 def test_missing_key_prop_slop_skips_no_map():
     code = "const el = <ListItem>Static item</ListItem>;"
     assert not _rule_fired(code, "MISSING_KEY_PROP_SLOP")
@@ -3586,6 +3606,39 @@ def test_useeffect_empty_deps_slop_fires_for_substantial_body():
 def test_useeffect_empty_deps_slop_skips_short_body():
     # Body shorter than 80 chars should not fire (too trivial to flag)
     code = "useEffect(() => { setMounted(true); }, []);"
+    assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
+
+
+def test_useeffect_empty_deps_skips_imported_api_and_state_setters():
+    code = dedent("""\
+        import { api } from "./api";
+        function Screen() {
+          const [data, setData] = useState([]);
+          const [error, setError] = useState("");
+          useEffect(() => {
+            api.projects().then(setData).catch((cause) => setError(String(cause)));
+          }, []);
+          return <main>{error || data.length}</main>;
+        }
+    """)
+    assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
+
+
+def test_useeffect_empty_deps_skips_destructured_promise_result():
+    code = dedent("""\
+        import { api } from "./api";
+        function Screen() {
+          const [metrics, setMetrics] = useState(null);
+          const [activity, setActivity] = useState([]);
+          useEffect(() => {
+            Promise.all([api.metrics(), api.activity()]).then(([nextMetrics, nextActivity]) => {
+              setMetrics(nextMetrics);
+              setActivity(nextActivity);
+            });
+          }, []);
+          return <main>{activity.length}</main>;
+        }
+    """)
     assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
 
 
@@ -3792,6 +3845,47 @@ def test_hardcoded_dev_url_slop_skips_production_url():
     assert not _rule_fired(code, "HARDCODED_DEV_URL_SLOP", ".ts")
 
 
+def test_hardcoded_dev_url_slop_skips_development_tool_config(tmp_path):
+    config = tmp_path / "vite.config.ts"
+    config.write_text(
+        'export default { server: { proxy: { "/api": "http://127.0.0.1:8765" } } };',
+        encoding="utf-8",
+    )
+    assert not any(
+        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        for issue in analyze_file(config)
+    )
+
+
+def test_hardcoded_dev_url_slop_fires_for_runtime_value_in_config(tmp_path):
+    config = tmp_path / "api.config.ts"
+    config.write_text(
+        'export const API_URL = "http://localhost:3000/api";',
+        encoding="utf-8",
+    )
+    assert any(
+        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        for issue in analyze_file(config)
+    )
+
+
+def test_hardcoded_dev_url_slop_skips_playwright_server_config(tmp_path):
+    config = tmp_path / "playwright.config.ts"
+    config.write_text(
+        """
+        export default defineConfig({
+          use: { baseURL: "http://127.0.0.1:4173" },
+          webServer: { url: "http://127.0.0.1:8765/health" },
+        });
+        """,
+        encoding="utf-8",
+    )
+    assert not any(
+        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        for issue in analyze_file(config)
+    )
+
+
 def test_empty_catch_slop_fires_for_empty_catch():
     code = dedent("""\
         try {
@@ -3824,6 +3918,11 @@ def test_input_autocomplete_missing_slop_fires_for_password_input():
 
 def test_input_autocomplete_missing_slop_skips_when_present():
     code = '<input type="email" autocomplete="email" id="email" />'
+    assert not _rule_fired(code, "INPUT_AUTOCOMPLETE_MISSING_SLOP")
+
+
+def test_input_autocomplete_missing_skips_jsx_attribute_before_type():
+    code = '<input autoComplete="email" id="email" type="email" />'
     assert not _rule_fired(code, "INPUT_AUTOCOMPLETE_MISSING_SLOP")
 
 
@@ -4297,12 +4396,30 @@ def test_center_bias_slop_skips_left_aligned():
 
 
 def test_card_nesting_slop_fires():
-    code = '<div className="outer-card product-card rounded-xl bg-white">content</div>'
+    code = (
+        '<div className="outer-card"><section className="product-card">'
+        "content</section></div>"
+    )
     assert _rule_fired(code, "CARD_NESTING_SLOP")
 
 
 def test_card_nesting_slop_skips_single_card():
     code = '<div className="card p-6"><h3>Just one card</h3></div>'
+    assert not _rule_fired(code, "CARD_NESTING_SLOP")
+
+
+def test_card_nesting_slop_skips_multiple_semantic_classes_on_one_element() -> None:
+    code = '<div className="outer-card product-card">content</div>'
+    assert not _rule_fired(code, "CARD_NESTING_SLOP")
+
+
+def test_card_nesting_slop_skips_sibling_cards() -> None:
+    code = '<div><article className="card">One</article><article className="card">Two</article></div>'
+    assert not _rule_fired(code, "CARD_NESTING_SLOP")
+
+
+def test_card_nesting_slop_skips_internal_card_element_classes() -> None:
+    code = '<article className="project-card"><header className="project-card-head">Title</header></article>'
     assert not _rule_fired(code, "CARD_NESTING_SLOP")
 
 
@@ -4545,6 +4662,35 @@ def test_unreachable_code_skips_normal_code():
     assert not _rule_fired(code, "UNREACHABLE_CODE", ".ts")
 
 
+def test_unreachable_code_skips_jsx_return_with_inner_handler_return():
+    code = dedent("""\
+        function Composer() {
+          return (
+            <form onSubmit={() => {
+              const value = input.trim();
+              if (!value) return;
+              send(value);
+            }} />
+          );
+        }
+    """)
+    assert not _rule_fired(code, "UNREACHABLE_CODE", ".tsx")
+
+
+def test_unreachable_code_skips_conditional_guard_return():
+    code = dedent("""\
+        function save(selected) {
+          if (!selected) return;
+          try {
+            persist(selected);
+          } catch (error) {
+            report(error);
+          }
+        }
+    """)
+    assert not _rule_fired(code, "UNREACHABLE_CODE", ".ts")
+
+
 def test_empty_handler_fires():
     assert _rule_fired("<button onClick={() => {}}>Submit</button>", "EMPTY_HANDLER")
 
@@ -4767,6 +4913,11 @@ def test_missing_hover_states_skips_with_hover():
     assert not _rule_fired(code, "MISSING_HOVER_STATES")
 
 
+def test_missing_hover_states_fires_for_unverified_semantic_css_class() -> None:
+    code = '<button className="primary-button">Save changes</button>'
+    assert _rule_fired(code, "MISSING_HOVER_STATES")
+
+
 def test_missing_focus_slop_fires_for_button_no_focus():
     code = '<button className="bg-blue-500 hover:bg-blue-600 text-white">Click</button>'
     assert _rule_fired(code, "MISSING_FOCUS_SLOP")
@@ -4775,6 +4926,55 @@ def test_missing_focus_slop_fires_for_button_no_focus():
 def test_missing_focus_slop_skips_with_focus_ring():
     code = '<button className="bg-blue-500 hover:bg-blue-600 focus:ring-2 text-white">Click</button>'
     assert not _rule_fired(code, "MISSING_FOCUS_SLOP")
+
+
+def test_missing_focus_slop_fires_for_unverified_semantic_css_class() -> None:
+    code = '<button className="primary-button">Save changes</button>'
+    assert _rule_fired(code, "MISSING_FOCUS_SLOP")
+
+
+def test_semantic_css_class_states_are_verified_from_project_stylesheet(tmp_path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    source = tmp_path / "src"
+    source.mkdir()
+    component = source / "Button.tsx"
+    component.write_text(
+        'export function Button() { return <button className="primary-button">Save</button>; }',
+        encoding="utf-8",
+    )
+    (source / "styles.css").write_text(
+        """
+        .primary-button:hover { background: navy; }
+        .primary-button:focus-visible { outline: 2px solid currentColor; }
+        """,
+        encoding="utf-8",
+    )
+
+    issue_ids = {issue.get("id") for issue in analyze_file(component)}
+    assert "MISSING_HOVER_STATES" not in issue_ids
+    assert "MISSING_FOCUS_SLOP" not in issue_ids
+
+
+def test_global_element_states_are_verified_from_project_stylesheet(tmp_path) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    source = tmp_path / "src"
+    source.mkdir()
+    component = source / "Button.tsx"
+    component.write_text(
+        'export function Button() { return <button className="danger-button">Delete</button>; }',
+        encoding="utf-8",
+    )
+    (source / "styles.css").write_text(
+        """
+        button:hover { filter: brightness(0.9); }
+        :where(button, a, input):focus-visible { outline: 2px solid currentColor; }
+        """,
+        encoding="utf-8",
+    )
+
+    issue_ids = {issue.get("id") for issue in analyze_file(component)}
+    assert "MISSING_HOVER_STATES" not in issue_ids
+    assert "MISSING_FOCUS_SLOP" not in issue_ids
 
 
 def test_div_soup_slop_fires_for_div_heavy_file():
@@ -4825,6 +5025,11 @@ def test_orphaned_label_slop_fires_for_label_without_htmlfor():
 
 def test_orphaned_label_slop_skips_with_htmlfor():
     code = '<label htmlFor="email" className="text-sm font-medium">Email</label>'
+    assert not _rule_fired(code, "ORPHANED_LABEL_SLOP")
+
+
+def test_orphaned_label_slop_skips_wrapped_form_control():
+    code = '<label>Email <input type="email" /></label>'
     assert not _rule_fired(code, "ORPHANED_LABEL_SLOP")
 
 
@@ -5054,6 +5259,18 @@ def test_unused_import_skips_used_default_alias_and_namespace_names():
         );
     """)
     assert not _rule_fired(code, "UNUSED_IMPORT")
+
+
+def test_unused_import_skips_used_type_only_named_imports():
+    code = dedent("""\
+        import { expect, test, type Page, type Locator as Target } from "@playwright/test";
+        function capture(page: Page, target: Target) {
+          expect(page);
+          test.info();
+          return target;
+        }
+    """)
+    assert not _rule_fired(code, "UNUSED_IMPORT", ".ts")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -5288,6 +5505,26 @@ def test_testimonial_grid_slop_skips_two_testimonials():
         "Absolutely incredible tool, our team loves using it for everything." — Mike Chen, CTO
     """)
     assert not _rule_fired(code, "TESTIMONIAL_GRID_SLOP")
+
+
+def test_component_layout_does_not_treat_governance_reviewers_as_testimonials(tmp_path):
+    from uidetox.analyzer import _analyze_component_layout
+
+    code = """
+    export function ApprovalQueue() {
+      const reviewers = requests.map((review) => review.reviewers);
+      return <section><h1>Review requests</h1>{reviewers.map((reviewer) => <span key={reviewer.id}>{reviewer.name}</span>)}</section>;
+    }
+    """
+    path = tmp_path / "Approvals.tsx"
+    path.write_text(code, encoding="utf-8")
+    issues = _analyze_component_layout(path, code, ".tsx")
+    assert not any(issue["id"] == "TESTIMONIAL_GRID_SLOP" for issue in issues)
+
+
+def test_modal_no_aria_slop_skips_native_dialog():
+    code = '<dialog aria-labelledby="modal-title"><h2 id="modal-title">Confirm</h2></dialog>'
+    assert not _rule_fired(code, "MODAL_NO_ARIA_SLOP")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -6287,6 +6524,11 @@ def test_sticky_without_top_slop_skips_sticky_with_top():
     assert not _rule_fired(code, "STICKY_WITHOUT_TOP_SLOP", ext=".css")
 
 
+def test_sticky_without_top_slop_skips_logical_block_offset():
+    code = ".header { position: sticky; inset-block-start: 0; background: white; }"
+    assert not _rule_fired(code, "STICKY_WITHOUT_TOP_SLOP", ext=".css")
+
+
 # ── Duplicate rule deduplication ─────────────────────────────────────────────
 
 
@@ -6579,6 +6821,20 @@ export default function Grid() {
         os.unlink(tmp)
 
 
+def test_analyze_ast_identical_siblings_skips_route_declarations(tmp_path):
+    from uidetox.analyzer import _analyze_ast
+
+    code = """
+    export function App() {
+      return <Routes><Route/><Route/><Route/><Route/></Routes>;
+    }
+    """
+    path = tmp_path / "App.tsx"
+    path.write_text(code, encoding="utf-8")
+    issues = _analyze_ast(path, code, ".tsx")
+    assert not any(issue["id"] == "IDENTICAL_SIBLINGS_SLOP" for issue in issues)
+
+
 # ── Component layout heuristic issues must have "id" field ───────────────────
 
 
@@ -6648,6 +6904,19 @@ export default function Pricing() {
         assert len(pricing_issues) >= 1
     finally:
         os.unlink(tmp)
+
+
+def test_analyze_component_layout_does_not_treat_project_copy_as_pricing() -> None:
+    from uidetox.analyzer import _analyze_component_layout
+
+    code = """
+export function Projects() {
+  const progress = projects.map((project) => project.progress);
+  return <section><h1>Projects</h1><p>Review project progress and priorities.</p></section>;
+}
+"""
+    issues = _analyze_component_layout(Path("Projects.tsx"), code, ".tsx")
+    assert not any(issue.get("id") == "PRICING_TABLE_SLOP" for issue in issues)
 
 
 def test_analyze_component_layout_testimonial_grid_id():
@@ -10070,7 +10339,7 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
         "FLEXBOX_PERCENTAGE_MATH_SLOP",
     ]
     assert _analyzer_catalog_fingerprint(RULES) == (
-        "358f1b39fedf087825647e6044fec2a61ddc377d13d473f23a7793da6307a697"
+        "389ca270d591e3182313deffc0f2fc21acab0cf2fc6f4458c0614d8bdaed336f"
     )
 
 

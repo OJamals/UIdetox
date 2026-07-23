@@ -1,164 +1,89 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { ActivityFeed } from "../components/ActivityFeed";
-import { MagicCard } from "../components/MagicCard";
-import { MetricCard } from "../components/MetricCard";
+import { OperationalSection } from "../components/MagicCard";
 import { Spinner } from "../components/Spinner";
 import type { Activity, Metrics } from "../types";
+
+const monthlyThroughput = [
+  ["Jan", 38], ["Feb", 62], ["Mar", 45], ["Apr", 78], ["May", 58], ["Jun", 88],
+] as const;
 
 export function DashboardPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
-  const [recommendations, setRecommendations] = useState<
-    Array<{ title: string; score: number }>
-  >([]);
+  const [recommendations, setRecommendations] = useState<Array<{ title: string; score: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([api.getMetrics(), api.getActivity()])
-      .then(([nextMetrics, nextActivity]) => {
+    Promise.all([api.getMetrics(), api.getActivity(), api.getRecommendations()])
+      .then(([nextMetrics, nextActivity, nextRecommendations]) => {
         setMetrics(nextMetrics);
         setActivity(nextActivity);
+        setRecommendations(nextRecommendations);
       })
-      .catch((reason) => {
-        console.log(reason);
-        setError("Oops! Something went wrong...");
-      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Workspace summary could not be loaded."))
       .finally(() => setLoading(false));
-
-    api
-      .getRecommendations()
-      .then(setRecommendations)
-      .catch(() => setRecommendations([]));
   }, []);
 
-  if (loading) return <Spinner label="Generating magical insights..." />;
+  if (loading) return <Spinner label="Loading workspace summary…" />;
 
   return (
     <div className="page dashboard-page">
-      <section className="hero-gradient glass-card">
-        <div className="aurora one" />
-        <div className="aurora two" />
-        <span className="sparkle-badge">✨ AI-POWERED WORKSPACE</span>
-        <h1>
-          Supercharge your <em>workflow</em>
-        </h1>
-        <p>
-          Unleash the power of next-generation collaboration and transform the way your
-          modern team works.
-        </p>
-        <div className="hero-actions">
-          <button className="primary-button">Get started for free</button>
-          <button className="secondary-button">Watch demo ▶</button>
+      <header className="page-heading dashboard-heading">
+        <div>
+          <span className="eyebrow">Operations ledger / current snapshot</span>
+          <h1>Northstar workspace</h1>
+          <p>Delivery state, recent changes, and model recommendations from the fixture API.</p>
         </div>
+        <Link className="primary-button" to="/projects">Open project register</Link>
+      </header>
+
+      {error ? <div className="error-banner" role="alert">{error}</div> : null}
+
+      <section className="portfolio-ledger" aria-labelledby="portfolio-summary-title">
+        <div className="primary-measure">
+          <span className="eyebrow">Average completion</span>
+          <h2 id="portfolio-summary-title">{metrics?.averageProgress ?? 0}%</h2>
+          <p>Across {metrics?.activeProjects ?? 0} active projects.</p>
+        </div>
+        <dl className="measure-ledger">
+          <div><dt>Completed projects</dt><dd>{metrics?.completedProjects ?? 0}</dd></div>
+          <div><dt>Team velocity</dt><dd>{metrics?.teamVelocity ?? 0}%</dd></div>
+          <div><dt>Customer health</dt><dd>{metrics?.customerHappiness ?? 0}%</dd></div>
+        </dl>
       </section>
 
-      {error && <div className="error-banner">{error}</div>}
-
-      <div className="metrics-grid">
-        <MetricCard
-          icon="🚀"
-          label="Active projects"
-          value={String(metrics?.activeProjects ?? 0)}
-          trend="+24% this month"
-        />
-        <MetricCard
-          icon="✅"
-          label="Completed"
-          value={String(metrics?.completedProjects ?? 0)}
-          trend="+18% this month"
-          tone="blue"
-        />
-        <MetricCard
-          icon="⚡"
-          label="Team velocity"
-          value={`${metrics?.teamVelocity ?? 0}%`}
-          trend="+12% this week"
-          tone="pink"
-        />
-        <MetricCard
-          icon="😍"
-          label="Happiness"
-          value={`${metrics?.customerHappiness ?? 0}%`}
-          trend="Best ever!"
-          tone="orange"
-        />
-      </div>
-
       <div className="dashboard-grid">
-        <MagicCard
-          className="chart-card"
-          eyebrow="01 / PERFORMANCE"
-          title="Your amazing growth"
-          action={<button className="pill-button">Last 30 days⌄</button>}
-        >
-          <div className="fake-chart">
-            {[38, 62, 45, 78, 58, 88, 72, 97, 84, 110, 92, 126].map(
-              (height, index) => (
-                <span key={index} style={{ height }} />
-              ),
-            )}
-          </div>
-          <div className="chart-labels">
-            <span>Jan</span>
-            <span>Feb</span>
-            <span>Mar</span>
-            <span>Apr</span>
-            <span>May</span>
-            <span>Jun</span>
-          </div>
-        </MagicCard>
-
-        <MagicCard eyebrow="02 / PROGRESS" title="Overall completion">
-          <div className="progress-ring">
-            <div>
-              <strong>{metrics?.averageProgress ?? 0}%</strong>
-              <small>Complete</small>
-            </div>
-          </div>
-          <div className="mini-stats">
-            <span>
-              <i className="dot purple" /> In progress <b>8</b>
-            </span>
-            <span>
-              <i className="dot blue" /> In review <b>3</b>
-            </span>
-            <span>
-              <i className="dot pink" /> Blocked <b>2</b>
-            </span>
-          </div>
-        </MagicCard>
-
-        <MagicCard
-          className="activity-card"
-          eyebrow="03 / ACTIVITY"
-          title="What's happening"
-          action={<button className="text-link">View all →</button>}
-        >
-          <ActivityFeed items={activity} />
-        </MagicCard>
-
-        <MagicCard eyebrow="04 / AI MAGIC" title="Smart recommendations">
-          {recommendations.length ? (
-            recommendations.map((item) => (
-              <div className="recommendation" key={item.title}>
-                <span>✨</span>
-                <div>
-                  <b>{item.title}</b>
-                  <small>{item.score}% confidence</small>
-                </div>
+        <OperationalSection eyebrow="01 / Throughput" title="Six-month delivery signal">
+          <div className="fake-chart" aria-label="Monthly delivery throughput">
+            {monthlyThroughput.map(([month, height]) => (
+              <div className="fake-chart-column" key={month}>
+                <span className="fake-chart-value">{height}</span>
+                <span className="fake-chart-bar" style={{ height }} />
+                <small>{month}</small>
               </div>
-            ))
-          ) : (
-            <div className="empty-magic">
-              <span>🪄</span>
-              <p>No insights yet</p>
-              <button>Generate now</button>
-            </div>
-          )}
-        </MagicCard>
+            ))}
+          </div>
+        </OperationalSection>
+
+        <OperationalSection eyebrow="02 / Activity" title="Recent workspace changes">
+          <ActivityFeed items={activity} />
+        </OperationalSection>
       </div>
+
+      <section className="recommendation-ledger" aria-labelledby="recommendations-title">
+        <header><span className="eyebrow">03 / Recommendations</span><h2 id="recommendations-title">Review queue</h2></header>
+        {recommendations.length ? (
+          <ol>
+            {recommendations.map((item) => (
+              <li key={item.title}><span>{item.title}</span><b>{item.score}% confidence</b></li>
+            ))}
+          </ol>
+        ) : <p>No recommendations are currently available.</p>}
+      </section>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { ActivityFeed } from "../components/ActivityFeed";
-import { MagicCard } from "../components/MagicCard";
+import { OperationalSection } from "../components/MagicCard";
 import { Spinner } from "../components/Spinner";
 import { Toast } from "../components/Toast";
 import type { Project } from "../types";
@@ -12,89 +12,86 @@ export function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [progress, setProgress] = useState(0);
   const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    setError("");
     api.getProject(projectId).then((nextProject) => {
       setProject(nextProject);
       setProgress(nextProject.progress);
+    }).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : "Project could not be loaded.");
     });
   }, [projectId]);
 
-  if (!project) return <Spinner label="Loading project magic..." />;
+  async function save() {
+    if (!project) return;
+    try {
+      const updated = await api.updateProject(project.id, { progress });
+      setProject(updated);
+      setToast("Project progress saved.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Project progress could not be saved.");
+    }
+  }
 
-  const save = async () => {
-    const updated = await api.updateProject(project.id, { progress });
-    setProject(updated);
-    setToast("Everything was saved successfully!");
-  };
+  if (!project && !error) return <Spinner label="Loading project…" />;
+  if (!project) return <div className="error-banner" role="alert">{error}</div>;
+
+  const health = progress >= 75 ? "On track" : progress >= 40 ? "Monitor" : "Needs attention";
 
   return (
     <div className="page">
-      <div className="breadcrumbs">
-        <Link to="/projects">Projects</Link>
-        <span>/</span>
-        <span>{project.name}</span>
-      </div>
+      <nav aria-label="Breadcrumb" className="breadcrumbs">
+        <Link to="/projects">Projects</Link><span aria-hidden="true">/</span><span>{project.name}</span>
+      </nav>
 
-      <section className="project-hero glass-card">
-        <div className="icon-tile massive">🚀</div>
+      <header className="project-hero">
         <div>
           <span className={`status-pill ${project.status}`}>{project.status}</span>
           <h1>{project.name}</h1>
           <p>{project.description}</p>
-          <div className="tag-row">
-            {project.tags.map((tag) => (
-              <span key={tag}>#{tag}</span>
-            ))}
-          </div>
+          <div className="tag-row">{project.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
         </div>
-        <button className="primary-button">Share project</button>
-      </section>
+      </header>
+
+      {error ? <div className="error-banner" role="alert">{error}</div> : null}
 
       <div className="three-column-grid">
-        <MagicCard eyebrow="01 / OVERVIEW" title="Project details">
+        <OperationalSection eyebrow="01 / Overview" title="Project details">
           <dl className="detail-list">
-            <div>
-              <dt>Owner</dt>
-              <dd>{project.owner_name}</dd>
-            </div>
-            <div>
-              <dt>Due date</dt>
-              <dd>{project.due_date || "No date"}</dd>
-            </div>
-            <div>
-              <dt>Budget</dt>
-              <dd>${project.budget.toLocaleString()}</dd>
-            </div>
+            <div><dt>Owner</dt><dd>{project.owner_name}</dd></div>
+            <div><dt>Due date</dt><dd>{project.due_date || "Not scheduled"}</dd></div>
+            <div><dt>Budget</dt><dd>${project.budget.toLocaleString()}</dd></div>
           </dl>
-        </MagicCard>
+        </OperationalSection>
 
-        <MagicCard eyebrow="02 / PROGRESS" title="Completion">
-          <div className="giant-percentage">{progress}%</div>
+        <OperationalSection eyebrow="02 / Delivery" title="Completion">
+          <output className="giant-percentage" htmlFor="project-progress">{progress}%</output>
+          <label htmlFor="project-progress">Recorded project progress</label>
           <input
+            id="project-progress"
             type="range"
             min="0"
             max="100"
             value={progress}
             onChange={(event) => setProgress(Number(event.target.value))}
           />
-          <button className="primary-button full" onClick={save}>
-            Save changes
-          </button>
-        </MagicCard>
+          <button type="button" className="primary-button full" onClick={() => void save()}>Save progress</button>
+        </OperationalSection>
 
-        <MagicCard eyebrow="03 / HEALTH" title="Project health">
-          <div className="health-score">A+</div>
-          <p className="muted-on-color">Everything looks magical and on track!</p>
-          <button className="secondary-button full">View insights</button>
-        </MagicCard>
+        <aside className="health-summary">
+          <span className="eyebrow">03 / Health</span>
+          <h2>{health}</h2>
+          <p>Health is derived transparently from recorded completion in this fixture.</p>
+        </aside>
       </div>
 
-      <MagicCard eyebrow="04 / TIMELINE" title="Recent activity">
+      <OperationalSection eyebrow="04 / Timeline" title="Recent activity">
         <ActivityFeed items={project.activity || []} />
-      </MagicCard>
+      </OperationalSection>
 
-      {toast && <Toast message={toast} onClose={() => setToast("")} />}
+      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );
 }

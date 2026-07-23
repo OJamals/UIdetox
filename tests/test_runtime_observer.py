@@ -6,6 +6,7 @@ import sys
 import threading
 import types
 from contextlib import contextmanager
+from dataclasses import replace
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -135,7 +136,9 @@ def test_detect_runtime_findings_reports_text_edge_contact_and_padding() -> None
     element = _measured_element(
         hasText=True,
         isControl=True,
+        isBoxControl=True,
         isVisualContainer=True,
+        isTextFlow=True,
         textInsetTop=2.0,
         textInsetRight=1.0,
         textInsetBottom=2.0,
@@ -157,7 +160,9 @@ def test_detect_runtime_findings_prefers_logical_axis_padding() -> None:
     element = _measured_element(
         hasText=True,
         isControl=True,
+        isBoxControl=True,
         isVisualContainer=True,
+        isTextFlow=True,
         textInsetInlineStart=10.0,
         textInsetInlineEnd=10.0,
         textInsetBlockStart=10.0,
@@ -219,7 +224,9 @@ def test_detect_runtime_findings_ignores_healthy_geometry() -> None:
         hasText=True,
         isMultiline=True,
         isControl=True,
+        isBoxControl=True,
         isVisualContainer=True,
+        isTextFlow=True,
         fontSize=16.0,
         lineHeight=24.0,
         clientWidth=120.0,
@@ -241,6 +248,86 @@ def test_detect_runtime_findings_ignores_healthy_geometry() -> None:
     )
 
     assert detect_runtime_findings(element) == ()
+
+
+def test_attach_runtime_findings_collapses_clipped_descendants_into_container() -> None:
+    container = replace(
+        _measured_element(descendantClipped=True),
+        kind="region",
+        tag="aside",
+        role="complementary",
+        selector="#sidebar",
+    )
+    child = replace(
+        _measured_element(
+            hasText=True,
+            clippedByAncestor=True,
+            clippingAncestorSelector="#sidebar",
+        ),
+        selector="#sidebar-link",
+    )
+
+    attached = runtime_observer._attach_runtime_findings((container, child))
+
+    assert _finding_codes(attached[0]) == {"runtime-component-clipped"}
+    assert attached[1].findings == ()
+
+
+def test_plain_link_and_compact_input_are_not_padding_targets() -> None:
+    plain_link = _measured_element(
+        hasText=True,
+        isControl=True,
+        isBoxControl=False,
+        isVisualContainer=False,
+        paddingInlineStart=0.0,
+        paddingInlineEnd=0.0,
+        paddingBlockStart=0.0,
+        paddingBlockEnd=0.0,
+    )
+
+    assert detect_runtime_findings(plain_link) == ()
+
+
+def test_visual_container_accepts_child_managed_spacing_and_scroll_regions() -> None:
+    container = _measured_element(
+        hasText=True,
+        isBoxControl=False,
+        isVisualContainer=True,
+        isTextFlow=False,
+        containsScrollRegionX=True,
+        containsScrollRegionY=False,
+        textInsetInlineStart=0.0,
+        textInsetInlineEnd=-120.0,
+        textInsetBlockStart=12.0,
+        textInsetBlockEnd=12.0,
+        paddingInlineStart=0.0,
+        paddingInlineEnd=0.0,
+        paddingBlockStart=12.0,
+        paddingBlockEnd=12.0,
+    )
+
+    assert detect_runtime_findings(container) == ()
+
+
+def test_inline_scroll_region_does_not_hide_block_padding_defects() -> None:
+    container = _measured_element(
+        hasText=True,
+        isBoxControl=False,
+        isVisualContainer=True,
+        isTextFlow=False,
+        containsScrollRegionX=True,
+        containsScrollRegionY=False,
+        textInsetInlineStart=0.0,
+        textInsetInlineEnd=-120.0,
+        textInsetBlockStart=0.0,
+        textInsetBlockEnd=0.0,
+        paddingInlineStart=0.0,
+        paddingInlineEnd=0.0,
+        paddingBlockStart=0.0,
+        paddingBlockEnd=0.0,
+    )
+
+    assert _finding_codes(container) == {"runtime-vertical-padding"}
 
 
 class _Page:
@@ -522,7 +609,7 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     assert "runtime-text-clipped" not in findings_by_selector["#ellipsis"]
     assert "runtime-text-edge-contact" in findings_by_selector["#card"]
     assert "runtime-horizontal-padding" in findings_by_selector["#card"]
-    assert "runtime-vertical-padding" in findings_by_selector["#card"]
+    assert "runtime-vertical-padding" not in findings_by_selector["#card"]
     assert "runtime-line-spacing" in findings_by_selector["#tight"]
     assert "runtime-component-clipped" in findings_by_selector["#clip"]
     assert "runtime-text-clipped" in findings_by_selector["#ancestor-clipped-text"]

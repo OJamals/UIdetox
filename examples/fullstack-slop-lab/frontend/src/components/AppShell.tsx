@@ -5,35 +5,18 @@ import { TopBar } from "./TopBar";
 export function AppShell() {
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <Sidebar />
       <div className="app-column">
         <TopBar />
-        <main className="main-content">
+        <main className="main-content" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
-        <footer className="ai-footer">
-          <div>
-            <strong>NexusFlow AI</strong>
-            <p>Empowering modern teams to unlock limitless possibilities.</p>
-          </div>
-          <div>
-            <b>Product</b>
-            <a href="#">Features</a>
-            <a href="#">Pricing</a>
-            <a href="#">Integrations</a>
-          </div>
-          <div>
-            <b>Company</b>
-            <a href="#">About</a>
-            <a href="#">Blog</a>
-            <a href="#">Careers</a>
-          </div>
-          <div>
-            <b>Resources</b>
-            <a href="#">Docs</a>
-            <a href="#">Community</a>
-            <a href="#">Support</a>
-          </div>
+        <footer className="product-footer">
+          <span>NexusFlow qualification fixture</span>
+          <span>All records are synthetic · Last remediated July 2026</span>
         </footer>
       </div>
     </div>

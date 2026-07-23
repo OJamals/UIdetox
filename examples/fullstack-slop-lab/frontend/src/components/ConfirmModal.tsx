@@ -1,3 +1,6 @@
+import { useId } from "react";
+import { ModalDialog } from "./ModalDialog";
+
 type Props = {
   open: boolean;
   title: string;
@@ -13,23 +16,33 @@ export function ConfirmModal({
   onConfirm,
   onClose,
 }: Props) {
-  if (!open) return null;
+  const titleId = useId();
+  const messageId = useId();
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-card glass-card">
-        <span className="modal-icon">⚠️</span>
-        <h2>{title}</h2>
-        <p>{message}</p>
+    <ModalDialog
+      open={open}
+      labelledBy={titleId}
+      describedBy={messageId}
+      onClose={onClose}
+    >
+      <div>
+        <span aria-hidden="true" className="modal-icon">!</span>
+        <h2 id={titleId}>{title}</h2>
+        <p id={messageId}>{message}</p>
         <div className="modal-actions">
-          <button className="secondary-button" onClick={onClose}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onClose}
+          >
             Cancel
           </button>
-          <button className="danger-button" onClick={onConfirm}>
+          <button type="button" className="danger-button" onClick={onConfirm}>
             Yes, delete it
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

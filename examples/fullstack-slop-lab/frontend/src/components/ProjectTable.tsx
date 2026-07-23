@@ -7,17 +7,21 @@ type Props = {
 };
 
 export function ProjectTable({ projects, onDelete }: Props) {
+  if (projects.length === 0) {
+    return <p className="empty-state">No projects match the current view.</p>;
+  }
+
   return (
     <div className="table-wrap">
-      <table>
+      <table className="tabular-nums">
         <thead>
           <tr>
-            <th>Project</th>
-            <th>Status</th>
-            <th>Progress</th>
-            <th>Budget</th>
-            <th>Owner</th>
-            <th>Actions</th>
+            <th scope="col">Project</th>
+            <th scope="col">Status</th>
+            <th scope="col">Progress</th>
+            <th scope="col">Budget</th>
+            <th scope="col">Owner</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -34,7 +38,14 @@ export function ProjectTable({ projects, onDelete }: Props) {
               </td>
               <td>
                 <div className="progress-row">
-                  <div className="progress-track">
+                  <div
+                    aria-label={`${project.name} progress`}
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={project.progress}
+                    className="progress-track"
+                    role="progressbar"
+                  >
                     <span style={{ width: `${project.progress}%` }} />
                   </div>
                   <small>{project.progress}%</small>
@@ -43,9 +54,13 @@ export function ProjectTable({ projects, onDelete }: Props) {
               <td>${project.budget.toLocaleString()}</td>
               <td>{project.owner_name}</td>
               <td>
-                <button className="tiny-button">•••</button>
-                <button className="tiny-button danger" onClick={() => onDelete(project)}>
-                  🗑️
+                <button
+                  aria-label={`Delete ${project.name}`}
+                  type="button"
+                  className="tiny-button danger"
+                  onClick={() => onDelete(project)}
+                >
+                  Delete
                 </button>
               </td>
             </tr>

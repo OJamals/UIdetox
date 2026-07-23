@@ -72,7 +72,9 @@ _DYNAMIC_SEGMENT = re.compile(
     r"|\$(?P<dollar>[A-Za-z_$][\w$]*)"
     r"|<(?:(?:[^:>]+):)?(?P<angle>[A-Za-z_$][\w$]*)>)$"
 )
-_TEMPLATE_SEGMENT = re.compile(r"\$\{(?P<name>[A-Za-z_$][\w$]*)\}")
+_TEMPLATE_SEGMENT = re.compile(
+    r"\$\{(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\}"
+)
 
 
 @dataclass(frozen=True)
@@ -434,6 +436,8 @@ def _extract_backend_operations(
         if not path.is_file() or any(part in _IGNORED_DIRS for part in path.parts):
             continue
         relative = path.relative_to(root).as_posix()
+        if _is_test_source(relative):
+            continue
         lower_name = path.name.lower()
         if path.suffix.lower() in {".json", ".yaml", ".yml"} and (
             lower_name.startswith("openapi") or lower_name.startswith("swagger")
@@ -483,6 +487,19 @@ def _extract_backend_operations(
         "unknown": unknown,
         "source_manifest": dict(sorted(source_manifest.items())),
     }
+
+
+def _is_test_source(relative: str) -> bool:
+    path = Path(relative)
+    lowered_parts = {part.lower() for part in path.parts[:-1]}
+    lowered_name = path.name.lower()
+    return bool(
+        lowered_parts & {"__tests__", "e2e", "test", "tests"}
+        or lowered_name.startswith("test_")
+        or lowered_name.endswith("_test.py")
+        or ".spec." in lowered_name
+        or ".test." in lowered_name
+    )
 
 
 def _extract_openapi(path: Path, relative: str) -> list[OperationEvidence]:

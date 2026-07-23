@@ -1,6 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import { MagicCard } from "../components/MagicCard";
 import { Spinner } from "../components/Spinner";
 import { Toast } from "../components/Toast";
 import type { TeamMember } from "../types";
@@ -12,104 +11,102 @@ export function TeamPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
-  const load = () =>
-    api
-      .getTeam()
-      .then(setMembers)
-      .finally(() => setLoading(false));
-
-  useEffect(() => {
-    load();
+  const loadTeam = useCallback(async () => {
+    try {
+      setMembers(await api.getTeam());
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Team roster could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const invite = async (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    void loadTeam();
+  }, [loadTeam]);
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    await api.inviteTeamMember(String(data.get("email")), String(data.get("role")));
-    setShowInvite(false);
-    setToast("Invitation sent successfully!");
-    await load();
-  };
-
-  const remove = async (memberId: number) => {
-    setError("");
     try {
-      await api.removeTeamMember(memberId);
-      setToast("Team member removed!");
-      await load();
-    } catch {
-      setError("Oops! Something went wrong...");
+      await api.inviteTeamMember(String(data.get("email")), String(data.get("role")));
+      setShowInvite(false);
+      setToast("Invitation sent.");
+      await loadTeam();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Invitation could not be sent.");
     }
-  };
+  }
+
+  async function remove(memberId: number) {
+    try {
+      setError("");
+      await api.removeTeamMember(memberId);
+      setToast("Team member removed.");
+      await loadTeam();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Team member could not be removed.");
+    }
+  }
 
   if (loading) return <Spinner />;
 
   return (
     <div className="page">
-      <div className="page-heading">
+      <header className="page-heading">
         <div>
-          <span className="eyebrow">TEAM COLLABORATION</span>
-          <h1>Your dream team</h1>
-          <p>Empower everyone to do their best work together.</p>
+          <span className="eyebrow">Access roster</span>
+          <h1>Team</h1>
+          <p>Inspect workspace roles and manage invitations in the synthetic tenant.</p>
         </div>
-        <button className="primary-button" onClick={() => setShowInvite(true)}>
-          + Invite team member
+        <button type="button" className="primary-button" onClick={() => setShowInvite(true)}>
+          Invite member
         </button>
-      </div>
+      </header>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error ? <div className="error-banner" role="alert">{error}</div> : null}
 
       <div className="team-grid">
         {members.map((member) => (
-          <article className="team-card glass-card" key={member.id}>
-            <button className="tiny-button team-menu">•••</button>
-            <div className="avatar-xl">
-              {member.avatar}
-              <i className={member.online ? "online" : ""} />
-            </div>
+          <article className="team-card" key={member.id}>
+            <div aria-hidden="true" className="avatar-xl">{member.avatar}</div>
             <h2>{member.name}</h2>
             <p>{member.role}</p>
-            <small>{member.email}</small>
-            <div className="skill-pills">
-              <span>Creative</span>
-              <span>AI Expert</span>
-              <span>Leader</span>
-            </div>
-            <button className="secondary-button full" onClick={() => remove(member.id)}>
+            <a href={`mailto:${member.email}`}>{member.email}</a>
+            <p className={member.online ? "positive" : ""}>{member.online ? "Online" : "Offline"}</p>
+            <button type="button" className="secondary-button" onClick={() => void remove(member.id)}>
               Remove member
             </button>
           </article>
         ))}
       </div>
 
-      {showInvite && (
-        <div className="modal-backdrop">
-          <form className="modal-card create-form glass-card" onSubmit={invite}>
-            <div className="icon-tile">👥</div>
-            <h2>Grow your amazing team</h2>
-            <p>Invite someone to collaborate and create magic together.</p>
-            <input name="email" type="email" placeholder="Enter email address..." required />
-            <select name="role" defaultValue="Viewer">
+      {showInvite ? (
+        <dialog aria-labelledby="invite-member-title" className="modal-card create-form" open>
+          <form onSubmit={invite}>
+            <h2 id="invite-member-title">Invite team member</h2>
+            <p>The backend records this invitation as a synthetic roster entry.</p>
+            <label htmlFor="invite-email">Email address</label>
+            <input id="invite-email" autoComplete="email" name="email" type="email" required />
+            <label htmlFor="invite-role">Workspace role</label>
+            <select id="invite-role" name="role" defaultValue="Viewer">
               <option>Viewer</option>
               <option>Developer</option>
               <option>Designer</option>
               <option>Admin</option>
             </select>
             <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setShowInvite(false)}
-              >
-                Maybe later
+              <button type="button" className="secondary-button" onClick={() => setShowInvite(false)}>
+                Cancel
               </button>
-              <button className="primary-button">Send magical invite</button>
+              <button type="submit" className="primary-button">Send invitation</button>
             </div>
           </form>
-        </div>
-      )}
+        </dialog>
+      ) : null}
 
-      {toast && <Toast message={toast} onClose={() => setToast("")} />}
+      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );
 }

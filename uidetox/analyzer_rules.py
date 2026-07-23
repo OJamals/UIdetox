@@ -296,9 +296,8 @@ RULES = [
     },
     {
         "id": "CARD_NESTING_SLOP",
-        "pattern": re.compile(
-            r'(?:card|Card)["\']?[^<]{0,200}(?:card|Card)', re.IGNORECASE | re.DOTALL
-        ),
+        "pattern": re.compile(r"(?:card|Card)"),
+        "_custom_check": "card_nesting",
         "tier": "T2",
         "exts": _JSX_EXTS,
         "description": "Nested card pattern detected (card inside card).",
@@ -615,7 +614,7 @@ RULES = [
     {
         "id": "UNREACHABLE_CODE",
         "pattern": re.compile(
-            r"(?:return|throw|break|continue)\s[^;]*;\s*\n\s*(?![\s})\]*/])"
+            r"^[ \t]*(?:return(?:[ \t]+[^\n;]+)?|throw[ \t]+[^\n;]+|break|continue)\s*;\s*\n\s*(?![\s})\]*/])"
             r"(?:const|let|var|function|if|for|while|switch|try)\b",
             re.MULTILINE,
         ),
@@ -1472,6 +1471,7 @@ RULES = [
         ),
         "tier": "T1",
         "exts": {".tsx", ".ts", ".js"},
+        "_custom_check": "hardcoded_dev_url",
         "description": "Hardcoded localhost/127.0.0.1 URL in code — breaks in production.",
         "command": "Use environment variables: process.env.NEXT_PUBLIC_API_URL",
     },
@@ -1526,6 +1526,7 @@ RULES = [
     {
         "id": "USEEFFECT_EMPTY_DEPS_SLOP",
         "pattern": re.compile(r"useEffect\s*\([^,]{30,},\s*\[\]\)"),
+        "_custom_check": "useeffect_empty_deps",
         "tier": "T2",
         "exts": {".tsx", ".jsx"},
         "description": "Large useEffect with empty deps — likely missing dependencies.",
@@ -1860,7 +1861,7 @@ RULES = [
     {
         "id": "INPUT_AUTOCOMPLETE_MISSING_SLOP",
         "pattern": re.compile(
-            r'<input\s[^>]*type=["\'](?:email|password)["\'](?![^>]*(?:autocomplete|autoComplete)=)',
+            r'<input\b(?=[^>]*\btype=["\'](?:email|password)["\'])(?![^>]*(?:autocomplete|autoComplete)=)[^>]*>',
             re.IGNORECASE,
         ),
         "tier": "T2",
