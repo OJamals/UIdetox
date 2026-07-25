@@ -64,3 +64,11 @@ def test_namespaced_update_preserves_unrelated_files(tmp_path):
     update_skill._install_cursor(data, project)
 
     assert unrelated.read_text(encoding="utf-8") == "keep me"
+
+
+def test_bundled_provider_assets_match_canonical_sources(
+    packaged_asset_pairs: tuple[tuple[Path, Path], ...],
+) -> None:
+    assert packaged_asset_pairs
+    for canonical, bundled in packaged_asset_pairs:
+        assert bundled.read_bytes() == canonical.read_bytes(), canonical

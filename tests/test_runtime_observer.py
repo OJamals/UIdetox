@@ -38,6 +38,14 @@ def _finding_codes(element: RuntimeElement) -> set[str]:
     return {finding.code for finding in detect_runtime_findings(element)}
 
 
+def _skip_missing_browser(exc: RuntimeError) -> None:
+    message = str(exc).lower()
+    if "playwright unavailable" in message:
+        pytest.skip("Playwright is not installed for runtime integration tests.")
+    if "playwright install chromium" in message:
+        pytest.skip("Chromium is not installed for runtime integration tests.")
+
+
 def test_detect_runtime_findings_reports_layout_and_font_misalignment() -> None:
     element = _measured_element(
         layoutAxis="vertical",
@@ -564,8 +572,7 @@ def test_observer_detects_rendered_layout_and_typography_defects(
             settle_ms=0,
         )
     except RuntimeError as exc:
-        if "playwright install chromium" in str(exc).lower():
-            pytest.skip("Chromium is not installed for runtime integration tests.")
+        _skip_missing_browser(exc)
         raise
 
     findings_by_selector = {
@@ -638,8 +645,7 @@ def test_fullstack_lab_runtime_observation_is_repeatable(
                 settle_ms=0,
             )
         except RuntimeError as exc:
-            if "playwright install chromium" in str(exc).lower():
-                pytest.skip("Chromium is not installed for runtime integration tests.")
+            _skip_missing_browser(exc)
             raise
 
         assert observation.errors == ()

@@ -127,6 +127,8 @@ python -m pytest -q -W error
 ```
 
 The test command should finish with an all-green result and no failures or errors.
+Browser, calibration, dependency, and installed-wheel gates live in the
+[qualification guide](docs/qualification.md).
 
 ---
 

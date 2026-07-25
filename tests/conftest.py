@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import time
+import venv
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.error import URLError
@@ -12,6 +13,89 @@ from urllib.request import urlopen
 import pytest
 
 from uidetox.analyzer import ast_capabilities
+
+
+@pytest.fixture(scope="session")
+def project_root() -> Path:
+    return Path(__file__).parents[1]
+
+
+@pytest.fixture(scope="session")
+def publish_workflow(project_root: Path) -> str:
+    return (project_root / ".github/workflows/python-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.fixture(scope="session")
+def packaged_asset_pairs(
+    project_root: Path,
+) -> tuple[tuple[Path, Path], ...]:
+    data = project_root / "uidetox" / "data"
+    pairs = [
+        (project_root / "SKILL.md", data / "SKILL.md"),
+        (project_root / "AGENTS.md", data / "AGENTS.md"),
+    ]
+    for directory in ("commands", "reference"):
+        for canonical in sorted((project_root / directory).glob("*.md")):
+            pairs.append((canonical, data / directory / canonical.name))
+    for bundled in sorted((data / "docs").glob("*.md")):
+        pairs.append((project_root / "docs" / bundled.name, bundled))
+    return tuple(pairs)
+
+
+@pytest.fixture(scope="session")
+def built_wheel(project_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheel_dir = tmp_path_factory.mktemp("wheel")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            str(project_root),
+            "--no-deps",
+            "--no-build-isolation",
+            "--wheel-dir",
+            str(wheel_dir),
+        ],
+        cwd=project_root,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wheels = tuple(wheel_dir.glob("uidetox-*.whl"))
+    assert len(wheels) == 1
+    return wheels[0]
+
+
+@pytest.fixture(scope="session")
+def installed_wheel_cli_output(
+    built_wheel: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> str:
+    root = tmp_path_factory.mktemp("installed-wheel")
+    environment = root / "venv"
+    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
+    scripts = environment / ("Scripts" if sys.platform == "win32" else "bin")
+    python = scripts / ("python.exe" if sys.platform == "win32" else "python")
+    cli = scripts / ("uidetox.exe" if sys.platform == "win32" else "uidetox")
+    subprocess.run(
+        [str(python), "-m", "pip", "install", "--no-deps", str(built_wheel)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    outside_checkout = root / "outside-checkout"
+    outside_checkout.mkdir()
+    completed = subprocess.run(
+        [str(cli), "--version"],
+        cwd=outside_checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

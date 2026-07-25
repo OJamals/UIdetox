@@ -34,8 +34,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0,<9.0",
+    "pytest>=9.0.3,<10.0",
     "Pillow>=12.3.0",
+    "pip-audit>=2.9,<3.0",
+    "setuptools>=68.0",
 ]
 visual = [
     "Pillow>=12.3.0",
