@@ -1,5 +1,6 @@
 """Analyzer execution engine: per-rule, per-file, and project traversal."""
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from uidetox.analyzer_ast import _analyze_ast, has_ast_for
 from uidetox.analyzer_custom import _CUSTOM_CHECK_HANDLERS, _analyze_component_layout
 from uidetox.analyzer_project import reconcile_project_issues
 from uidetox.fileset import ProjectFileSet, find_project_root
+from uidetox.findings import Finding
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.rule_registry import ANALYZER_RULES as RULES
 from uidetox.source_facts import SourceFacts
@@ -19,7 +21,7 @@ def _analyze_rule(
     ext: str,
     design_variance: int,
     dynamic_colors: dict[str, str] | None,
-) -> list[dict]:
+) -> list[Finding]:
     """Analyze one configured rule against loaded source content."""
     issues = []
     # Skip rules conditioned on DESIGN_VARIANCE if below threshold
@@ -35,37 +37,100 @@ def _analyze_rule(
     if handler is not None:
         custom_issues = handler(rule, filepath, content, ext, dynamic_colors)
         if custom_issues is not None:
-            return custom_issues
+            return [
+                _static_finding(item, filepath, content, rule=rule)
+                for item in custom_issues
+            ]
 
-    # Standard regex match — flag once per file
+    # Emit every ordered occurrence. ``finditer`` advances safely for zero-width regexes.
     pattern = rule.get("pattern")
     if isinstance(pattern, re.Pattern):
-        m = pattern.search(content)
-        if m:
-            line_number = content.count("\n", 0, m.start()) + 1
-            col = m.start() - content.rfind("\n", 0, m.start())
-            lines_list = content.splitlines()
-            snippet = (
-                lines_list[line_number - 1].strip()
-                if line_number <= len(lines_list)
-                else ""
-            )
+        for match in pattern.finditer(content):
             issues.append(
-                sanitize_untrusted_data(
+                _static_finding(
                     {
                         "id": rule["id"],
                         "file": str(filepath.resolve()),
                         "tier": rule["tier"],
                         "issue": rule["description"],
                         "command": rule["command"],
-                        "line": line_number,
-                        "column": col,
-                        "snippet": snippet,
                     },
-                    matched_evidence=m.group(0),
+                    filepath,
+                    content,
+                    rule=rule,
+                    start=match.start(),
+                    end=match.end(),
+                    matched_evidence=match.group(0),
                 )
             )
     return issues
+
+
+def _static_finding(
+    issue: dict,
+    filepath: Path,
+    content: str,
+    *,
+    rule: dict | None = None,
+    start: int | None = None,
+    end: int | None = None,
+    matched_evidence: str | None = None,
+) -> Finding:
+    """Convert one static candidate at the analyzer engine seam."""
+    sanitized = sanitize_untrusted_data(issue, matched_evidence=matched_evidence)
+    candidate = dict(sanitized) if isinstance(sanitized, dict) else {}
+    line = int(candidate.get("line", 0) or 0)
+    column = int(candidate.get("column", 0) or 0)
+    if start is None:
+        preceding = content.splitlines(keepends=True)[: max(0, line - 1)]
+        start = sum(len(item) for item in preceding) + max(0, column - 1)
+    if end is None:
+        end = start
+    if line <= 0:
+        line = content.count("\n", 0, start) + 1
+    if column <= 0:
+        column = start - content.rfind("\n", 0, start)
+    lines = content.splitlines()
+    excerpt = str(candidate.get("snippet", ""))
+    if not excerpt and line <= len(lines):
+        excerpt = lines[line - 1].strip()
+    detector_id = str(
+        candidate.get("detector_id", candidate.get("id", "static-finding"))
+    )
+    tier = str(candidate.get("tier", (rule or {}).get("tier", "T2")))
+    severity = {"T1": "info", "T2": "warning", "T3": "error", "T4": "critical"}.get(
+        tier, "warning"
+    )
+    source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return Finding.create(
+        detector_id=detector_id,
+        category=str(candidate.get("category", "quality")),
+        severity=severity,
+        confidence=float(candidate.get("confidence", 1.0)),
+        message=str(
+            candidate.get("issue", candidate.get("message", "Static finding."))
+        ),
+        provenance="static",
+        evidence={"matched_text": matched_evidence or "", "source_hash": source_hash},
+        source_anchor={
+            "path": str(filepath.resolve()),
+            "line": line,
+            "column": column,
+            "start": start,
+            "end": end,
+        },
+        suppression_key=detector_id,
+        verifier={
+            "kind": "static",
+            "detector_id": detector_id,
+            "source_path": str(filepath.resolve()),
+            "source_hash": source_hash,
+            "start": start,
+            "end": end,
+        },
+        display_excerpt=excerpt,
+        legacy={"command": str(candidate.get("command", ""))},
+    )
 
 
 def analyze_file(
@@ -74,7 +139,7 @@ def analyze_file(
     dynamic_colors: dict[str, str] | None = None,
     *,
     facts: SourceFacts | None = None,
-) -> list[dict]:
+) -> list[Finding]:
     """Scan a single file against all slop rules.
 
     Args:
@@ -116,7 +181,12 @@ def analyze_file(
             _analyze_rule(rule, filepath, content, ext, design_variance, dynamic_colors)
         )
 
-    return issues
+    return [
+        item
+        if isinstance(item, Finding)
+        else _static_finding(item, filepath, content)
+        for item in issues
+    ]
 
 
 def analyze_directory(
@@ -127,7 +197,7 @@ def analyze_directory(
     target_files: list[str | Path] | None = None,
     *,
     _analyze_file=None,
-) -> list[dict]:
+) -> list[Finding]:
     """Walk directory and return a flat list of all detected slop issues.
 
     Args:
@@ -199,4 +269,15 @@ def analyze_directory(
             }
         )
 
-    return all_issues
+    canonical: list[Finding] = []
+    for item in all_issues:
+        if isinstance(item, Finding):
+            canonical.append(item)
+            continue
+        path = Path(str(item.get("file", color_issue_file)))
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            content = ""
+        canonical.append(_static_finding(item, path, content))
+    return canonical

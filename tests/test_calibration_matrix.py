@@ -261,7 +261,10 @@ def evaluate_cases(
             static_by_fixture[str(case["fixture"])].append(case)
 
     for fixture, fixture_cases in static_by_fixture.items():
-        actual = {str(issue["id"]) for issue in analyzer(fixture_root / fixture)}
+        actual = {
+            str(issue.get("detector_id", issue.get("id")))
+            for issue in analyzer(fixture_root / fixture)
+        }
         positive = {
             str(case["rule_id"])
             for case in fixture_cases
@@ -354,7 +357,11 @@ def test_calibration_reports_one_removed_expected_result_as_one_fn() -> None:
     def remove(path: Path) -> list[dict[str, Any]]:
         issues = analyze_file(path)
         if path.as_posix().endswith("react-next/positive.tsx"):
-            return [issue for issue in issues if issue["id"] != "LOREM_IPSUM_SLOP"]
+            return [
+                issue
+                for issue in issues
+                if issue["detector_id"] != "LOREM_IPSUM_SLOP"
+            ]
         return issues
 
     report = evaluate_cases(_load_manifest(), analyzer=remove)

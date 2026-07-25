@@ -103,7 +103,7 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
         }
         for index in range(3)
     ]
-    duplicate_finding = dict(findings[0], id="RULE-DUPLICATE")
+    duplicate_finding = dict(findings[0])
     findings.append(duplicate_finding)
     load_calls = 0
     save_calls = 0
@@ -148,7 +148,6 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
         "RULE-0",
         "RULE-1",
         "RULE-2",
-        "RULE-DUPLICATE",
     }
 
 
@@ -1511,7 +1510,7 @@ def test_issue_location_format_is_actionable():
 # ── New rule regression tests ─────────────────────────────────────────────
 
 
-def _issues_for(code: str, ext: str = ".tsx") -> list[dict]:
+def _issues_for(code: str, ext: str = ".tsx") -> list:
     """Write code to a temp file and return analyzer issues."""
     import tempfile
 
@@ -1522,7 +1521,7 @@ def _issues_for(code: str, ext: str = ".tsx") -> list[dict]:
 
 
 def _rule_fired(code: str, rule_id: str, ext: str = ".tsx") -> bool:
-    return any(i.get("id") == rule_id for i in _issues_for(code, ext))
+    return any(i.get("detector_id") == rule_id for i in _issues_for(code, ext))
 
 
 def test_outline_none_slop_fires_without_focus_visible():
@@ -1638,7 +1637,7 @@ def test_css_scroll_behavior_slop_fires_for_smooth_without_media(tmp_path):
     p = tmp_path / "base.css"
     p.write_text("html { scroll-behavior: smooth; color: #333; }", encoding="utf-8")
     issues = analyze_file(p)
-    assert any(i.get("id") == "CSS_SCROLL_BEHAVIOR_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "CSS_SCROLL_BEHAVIOR_SLOP" for i in issues)
 
 
 def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
@@ -1647,7 +1646,7 @@ def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
         "@media (max-width: 768px) { .nav { display: none; } }", encoding="utf-8"
     )
     issues = analyze_file(p)
-    assert any(i.get("id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
 
 
 def test_autofix_categorizes_outline_none_as_accessibility():
@@ -3852,7 +3851,7 @@ def test_hardcoded_dev_url_slop_skips_development_tool_config(tmp_path):
         encoding="utf-8",
     )
     assert not any(
-        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        issue.get("detector_id") == "HARDCODED_DEV_URL_SLOP"
         for issue in analyze_file(config)
     )
 
@@ -3864,7 +3863,7 @@ def test_hardcoded_dev_url_slop_fires_for_runtime_value_in_config(tmp_path):
         encoding="utf-8",
     )
     assert any(
-        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        issue.get("detector_id") == "HARDCODED_DEV_URL_SLOP"
         for issue in analyze_file(config)
     )
 
@@ -5244,7 +5243,11 @@ def test_unused_import_reports_local_alias_and_namespace_names():
         import * as Icons from './icons';
         export const Card = () => React.createElement('div');
     """)
-    issues = [issue for issue in _issues_for(code) if issue["id"] == "UNUSED_IMPORT"]
+    issues = [
+        issue
+        for issue in _issues_for(code)
+        if issue["detector_id"] == "UNUSED_IMPORT"
+    ]
     assert len(issues) == 1
     assert "PrimaryButton" in issues[0]["issue"]
     assert "Icons" in issues[0]["issue"]
@@ -5313,7 +5316,7 @@ def test_low_contrast_slop_fires_for_poor_contrast(tmp_path):
     # yellow-300 (~#fde047) on white (#ffffff) has near-1:1 contrast ratio
     dynamic_colors = {"yellow-300": "#fde047", "white": "#ffffff"}
     issues = analyze_file(p, dynamic_colors=dynamic_colors)
-    assert any(i.get("id") == "LOW_CONTRAST_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "LOW_CONTRAST_SLOP" for i in issues)
 
 
 def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
@@ -6546,7 +6549,9 @@ def test_window_confirm_slop_fires_exactly_once():
         tmp = f.name
     try:
         issues = analyze_file(Path(tmp))
-        confirm_issues = [i for i in issues if i.get("id") == "WINDOW_CONFIRM_SLOP"]
+        confirm_issues = [
+            i for i in issues if i.get("detector_id") == "WINDOW_CONFIRM_SLOP"
+        ]
         assert len(confirm_issues) == 1, (
             f"Expected exactly 1 WINDOW_CONFIRM_SLOP issue, got {len(confirm_issues)}"
         )
@@ -6569,9 +6574,10 @@ def test_tabindex_positive_not_duplicated_with_removed_rule():
     try:
         issues = analyze_file(Path(tmp))
         positive_ids = [
-            i.get("id")
+            i.get("detector_id")
             for i in issues
-            if "TABINDEX" in (i.get("id") or "") and "ZERO" not in (i.get("id") or "")
+            if "TABINDEX" in (i.get("detector_id") or "")
+            and "ZERO" not in (i.get("detector_id") or "")
         ]
         # Should only see TABINDEX_POSITIVE_SLOP, NOT the removed POSITIVE_TABINDEX_SLOP
         assert "POSITIVE_TABINDEX_SLOP" not in positive_ids
@@ -8143,8 +8149,10 @@ def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(
     config = load_config()
 
     assert config["ignore_patterns"] == ["spacing"]
-    assert state["issues"] == [live_keep]
-    assert state["diff_baseline"] == [baseline_keep]
+    assert [issue["id"] for issue in state["issues"]] == [live_keep["id"]]
+    assert [issue["id"] for issue in state["diff_baseline"]] == [
+        baseline_keep["id"]
+    ]
 
 
 def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(
@@ -9395,8 +9403,12 @@ class TestStateAndMemoryChaosResilience:
 
         state = load_state()
 
-        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
-        assert state["resolved"] == [{"id": "ISSUE-2", "file": "src/App.tsx"}]
+        assert [(issue["id"], issue["file"]) for issue in state["issues"]] == [
+            ("ISSUE-1", "src/App.tsx")
+        ]
+        assert [(issue["id"], issue["file"]) for issue in state["resolved"]] == [
+            ("ISSUE-2", "src/App.tsx")
+        ]
         assert state["stats"] == {"total_found": 0, "total_resolved": 0, "scans_run": 0}
 
     def test_load_state_normalizes_diff_baseline_shapes(self, tmp_path, monkeypatch):
@@ -9421,7 +9433,9 @@ class TestStateAndMemoryChaosResilience:
 
         state = load_state()
 
-        assert state["diff_baseline"] == [{"id": "BASE-1", "file": "src/App.tsx"}]
+        assert [
+            (issue["id"], issue["file"]) for issue in state["diff_baseline"]
+        ] == [("BASE-1", "src/App.tsx")]
 
     def test_load_state_backfills_missing_diff_baseline_for_legacy_state(
         self, tmp_path, monkeypatch
@@ -9447,7 +9461,9 @@ class TestStateAndMemoryChaosResilience:
         state = load_state()
 
         assert state["diff_baseline"] == []
-        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
+        assert [(issue["id"], issue["file"]) for issue in state["issues"]] == [
+            ("ISSUE-1", "src/App.tsx")
+        ]
 
     def test_load_state_normalizes_subjective_score_and_history(
         self, tmp_path, monkeypatch
@@ -10351,11 +10367,16 @@ def test_analyzer_public_import_contract():
     assert callable(analyze_directory)
 
 
+def _legacy_issue_view(issue):
+    keys = ("file", "tier", "issue", "command", "line", "column", "snippet")
+    return {"id": issue["detector_id"], **{key: issue[key] for key in keys if key in issue}}
+
+
 def test_analyzer_regex_issue_shape_and_order(tmp_path):
     source = tmp_path / "copy.md"
     source.write_text("Unlock the power", encoding="utf-8")
 
-    assert analyze_file(source) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(source)] == [
         {
             "id": "GENERIC_COPY_SLOP",
             "file": str(source.resolve()),
@@ -10376,13 +10397,16 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
     source = tmp_path / "button.tsx"
     source.write_text('<button className="px-4">Save</button>', encoding="utf-8")
 
-    assert analyze_file(source) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(source)] == [
         {
             "id": "MISSING_HOVER_STATES",
             "file": str(source.resolve()),
             "tier": "T2",
             "issue": "Button element without hover: state detected.",
             "command": "Add hover:, focus:, and active: states to all interactive elements.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
         },
         {
             "id": "MISSING_FOCUS_SLOP",
@@ -10390,6 +10414,9 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
             "tier": "T2",
             "issue": "Interactive element without focus: state — accessibility gap.",
             "command": "Add focus:ring or focus:outline states for keyboard accessibility.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
         },
         {
             "id": "BUTTON_TYPE_MISSING_SLOP",
@@ -10410,7 +10437,7 @@ def test_analyzer_css_and_unsupported_issue_output_contract(tmp_path):
     unsupported = tmp_path / "representative.txt"
     unsupported.write_text("transition: all\n", encoding="utf-8")
 
-    assert analyze_file(css) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(css)] == [
         {
             "id": "TRANSITION_ALL_SLOP",
             "file": str(css.resolve()),

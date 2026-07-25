@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
+import pytest
+
+from uidetox.analyzer_engine import _analyze_rule, analyze_file
 from uidetox.findings import (
     EligibilityContext,
     Finding,
@@ -10,6 +14,8 @@ from uidetox.findings import (
     evaluate_eligibility,
     score_current_snapshot,
 )
+from uidetox.project_map import OperationEvidence, SourceAnchor, reconcile_operations
+from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.state import load_state, save_state
 
 
@@ -85,6 +91,27 @@ def test_finding_fingerprint_ignores_display_copy_but_tracks_anchor_and_evidence
     assert changed_anchor.fingerprint != original.fingerprint
 
 
+def test_legacy_queue_uuid_does_not_change_detector_fingerprint() -> None:
+    common = {
+        "rule_id": "LOREM_IPSUM_SLOP",
+        "file": "src/Card.tsx",
+        "line": 8,
+        "column": 3,
+        "tier": "T2",
+        "issue": "Placeholder copy",
+        "command": "Replace copy",
+    }
+    first = Finding.from_dict({"id": "SCAN-AAAAAA", **common})
+    second = Finding.from_dict({"id": "SCAN-BBBBBB", **common})
+    another_occurrence = Finding.from_dict(
+        {"id": "SCAN-CCCCCC", **common, "line": 9, "start": 120, "end": 125}
+    )
+
+    assert first.detector_id == "LOREM_IPSUM_SLOP"
+    assert first.fingerprint == second.fingerprint
+    assert another_occurrence.fingerprint != first.fingerprint
+
+
 def test_finding_sanitizes_sensitive_matched_evidence_before_construction(
     tmp_path: Path,
 ) -> None:
@@ -106,6 +133,40 @@ def test_finding_sanitizes_sensitive_matched_evidence_before_construction(
     serialized = json.dumps(finding.to_dict())
     assert secret not in serialized
     assert "redacted" in serialized.lower()
+
+
+def test_finding_recursively_freezes_caller_owned_payloads(tmp_path: Path) -> None:
+    source_anchor = {"path": str(tmp_path / "Card.tsx"), "start": 1, "end": 2}
+    evidence = {"metrics": {"values": [1, 2]}}
+    finding = Finding.create(
+        detector_id="IMMUTABLE",
+        category="quality",
+        severity="warning",
+        confidence=1.0,
+        message="immutable",
+        provenance="static",
+        evidence=evidence,
+        source_anchor=source_anchor,
+        verifier={"kind": "static"},
+    )
+
+    source_anchor["start"] = 99
+    evidence["metrics"]["values"].append(3)
+
+    assert finding.source_anchor["start"] == 1
+    assert finding.evidence["metrics"]["values"] == (1, 2)
+    with pytest.raises(TypeError):
+        finding.source_anchor["start"] = 7
+    with pytest.raises(TypeError):
+        finding.evidence["metrics"]["values"][0] = 7
+    with pytest.raises(TypeError):
+        finding.evidence |= {"extra": True}
+    with pytest.raises(TypeError):
+        dict.__setitem__(finding.evidence, "extra", True)
+
+    thawed = finding.to_dict()
+    thawed["evidence"]["metrics"]["values"].append(9)
+    assert finding.evidence["metrics"]["values"] == (1, 2)
 
 
 def test_legacy_state_loads_as_canonical_without_read_time_rewrite(
@@ -138,7 +199,7 @@ def test_legacy_state_loads_as_canonical_without_read_time_rewrite(
     assert state_path.read_text(encoding="utf-8") == original
     assert loaded["schema_version"] == 2
     assert loaded["issues"][0]["schema_version"] == 2
-    assert loaded["issues"][0]["detector_id"] == "SCAN-001"
+    assert loaded["issues"][0]["detector_id"].startswith("manual-")
     assert loaded["issues"][0]["legacy"]["command"] == (
         "uidetox polish src/Card.tsx"
     )
@@ -181,6 +242,117 @@ def test_current_snapshot_score_ignores_historical_resolutions(tmp_path: Path) -
     assert baseline["current_slop"] > 0
 
 
+def test_missing_qualification_evidence_cannot_score_as_clean() -> None:
+    scores = score_current_snapshot({"issues": [], "resolved": [], "subjective": {}})
+
+    assert scores["qualified_coverage"] == 0.0
+    assert scores["objective_score"] == 0
+
+
+def test_empty_structured_review_shell_remains_ineligible() -> None:
+    state = {
+        "issues": [],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": {
+            "score": 100,
+            "dimensions": {"A": 100, "B": 100, "C": 100, "D": 100},
+            "rationale": "",
+            "finding_links": [],
+            "routes": [],
+            "states": [],
+            "viewports": [],
+            "reviewer": "",
+            "evidence_hashes": {},
+        },
+    }
+
+    result = evaluate_eligibility(state, EligibilityContext())
+
+    assert "missing_structured_review" in {
+        blocker.code for blocker in result.blockers
+    }
+
+
+@pytest.mark.parametrize(
+    "subjective",
+    [
+        {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "rationale": "Reviewed all routes.",
+            "finding_links": [],
+            "routes": ["/"],
+            "states": ["default"],
+            "viewports": ["desktop"],
+            "reviewer": "agent",
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+        },
+        {
+            "score": 100,
+            "dimensions": {"A": 41, "B": 29, "C": 20, "D": 10},
+            "rationale": "Reviewed all routes.",
+            "finding_links": [],
+            "routes": ["/"],
+            "states": ["default"],
+            "viewports": ["desktop"],
+            "reviewer": "agent",
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+        },
+        {
+            "score": 99,
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "rationale": "Reviewed all routes.",
+            "finding_links": [],
+            "routes": ["/"],
+            "states": ["default"],
+            "viewports": ["desktop"],
+            "reviewer": "agent",
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+        },
+    ],
+)
+def test_structured_review_rejects_missing_score_over_cap_or_mismatch(
+    subjective: dict,
+) -> None:
+    state = {
+        "issues": [],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": subjective,
+    }
+
+    result = evaluate_eligibility(state, EligibilityContext())
+
+    assert "missing_structured_review" in {
+        blocker.code for blocker in result.blockers
+    }
+
+
+def test_investigative_findings_remain_visible_without_becoming_defects(
+    tmp_path: Path,
+) -> None:
+    finding = Finding.create(
+        detector_id="contract-unresolved",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Dynamic route cannot be compared.",
+        provenance="contract",
+        contract_anchor={"kind": "unresolved", "normalized_path": "/api/:dynamic"},
+        verifier={"kind": "contract"},
+        status="investigate",
+    )
+    state = {
+        "issues": [finding.to_dict()],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": {},
+    }
+
+    scores = score_current_snapshot(state)
+    result = evaluate_eligibility(state, EligibilityContext())
+
+    assert scores["current_slop"] == 0
+    assert "pending_findings" not in {blocker.code for blocker in result.blockers}
+
+
 def test_eligibility_returns_typed_blockers_for_every_finalization_gate(
     tmp_path: Path,
 ) -> None:
@@ -214,3 +386,85 @@ def test_eligibility_returns_typed_blockers_for_every_finalization_gate(
         "session_branch_required",
     } <= codes
     assert result.eligible is False
+
+
+def test_standard_rule_emits_every_ordered_source_occurrence(tmp_path: Path) -> None:
+    source = tmp_path / "Card.tsx"
+    source.write_text(
+        "export const a = 'Lorem ipsum'; const b = 'Lorem ipsum';\n"
+        "export const c = 'Lorem ipsum';\n",
+        encoding="utf-8",
+    )
+
+    findings = [
+        item for item in analyze_file(source) if item.detector_id == "LOREM_IPSUM_SLOP"
+    ]
+
+    assert len(findings) == 3
+    assert [item.source_anchor["line"] for item in findings] == [1, 1, 2]
+    assert [item.source_anchor["start"] for item in findings] == sorted(
+        item.source_anchor["start"] for item in findings
+    )
+    assert len({item.fingerprint for item in findings}) == 3
+
+
+def test_zero_width_standard_rule_terminates_and_preserves_each_anchor(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "zero.tsx"
+    content = "xx"
+    source.write_text(content, encoding="utf-8")
+    rule = {
+        "id": "ZERO_WIDTH",
+        "tier": "T1",
+        "description": "zero-width test",
+        "command": "inspect",
+        "pattern": re.compile(r"(?=x)"),
+    }
+
+    findings = _analyze_rule(rule, source, content, ".tsx", 8, None)
+
+    assert [item.source_anchor["start"] for item in findings] == [0, 1]
+    assert [item.source_anchor["end"] for item in findings] == [0, 1]
+
+
+def test_runtime_and_contract_producers_return_canonical_findings() -> None:
+    class Element:
+        tag = "p"
+        measurements = {
+            "hasText": True,
+            "clientWidth": 120.0,
+            "scrollWidth": 156.0,
+            "clientHeight": 36.0,
+            "scrollHeight": 36.0,
+            "overflowX": "hidden",
+            "overflowY": "visible",
+        }
+
+    runtime = detect_runtime_findings(Element())
+    frontend = OperationEvidence(
+        side="frontend",
+        method="GET",
+        path="/api/items",
+        normalized_path="/api/items",
+        parameters=(),
+        dynamic=False,
+        classification="api",
+        sources=(
+            SourceAnchor(
+                file="src/items.ts",
+                line=4,
+                framework="fetch",
+                extractor="test",
+                confidence=1.0,
+            ),
+        ),
+    )
+    parity, _suppressed = reconcile_operations((frontend,), ())
+
+    assert runtime
+    assert all(isinstance(item, Finding) for item in runtime)
+    assert runtime[0].provenance == "runtime"
+    assert all(isinstance(item, Finding) for item in parity)
+    assert parity[0].provenance == "contract"
+    assert parity[0].contract_anchor["normalized_path"] == "/api/items"

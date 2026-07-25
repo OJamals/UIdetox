@@ -330,7 +330,7 @@ def load_state() -> dict:
     data.setdefault("subjective", {})
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
     data.setdefault("schema_version", FINDING_SCHEMA_VERSION)
-    data.setdefault("current_snapshot", {"qualified_coverage": 1.0})
+    data.setdefault("current_snapshot", {"qualified_coverage": 0.0})
     data.setdefault("overrides", [])
     return sanitize_untrusted_data(data)
 
@@ -343,7 +343,7 @@ def _default_state() -> dict:
         "issues": [],
         "resolved": [],
         "subjective": {},
-        "current_snapshot": {"qualified_coverage": 1.0},
+        "current_snapshot": {"qualified_coverage": 0.0},
         "overrides": [],
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }

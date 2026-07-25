@@ -11,6 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from uidetox.prompt_safety import sanitize_untrusted_data
@@ -49,6 +50,7 @@ _CANONICAL_KEYS = {
     "last_verification",
     "display_excerpt",
     "legacy",
+    "extensions",
     "file",
     "tier",
     "issue",
@@ -65,10 +67,55 @@ _CANONICAL_KEYS = {
 }
 
 
+class _FrozenMapping(Mapping[str, Any]):
+    """Recursively immutable mapping; never a ``dict`` mutation backdoor."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self, items: object = ()) -> None:
+        self._data = MappingProxyType(dict(items))  # type: ignore[arg-type]
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Mapping) and dict(self.items()) == dict(other.items())
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> _FrozenMapping:
+        return self
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _FrozenMapping(
+            (str(key), _freeze(item))
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return [_thaw(item) for item in value]
+    return value
+
+
 def _clean_mapping(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
-        return {}
-    return {str(key): item for key, item in value.items()}
+        return _FrozenMapping()  # type: ignore[return-value]
+    return _freeze(value)  # type: ignore[return-value]
 
 
 def _safe_payload(value: Mapping[str, Any], *, matched_evidence: object = None) -> dict:
@@ -169,8 +216,24 @@ class Finding(Mapping[str, Any]):
     schema_version: int = FINDING_SCHEMA_VERSION
     id: str = field(init=False)
     code: str = field(init=False)
+    metrics: dict[str, Any] = field(init=False)
+    kind: str = field(init=False)
+    normalized_path: str = field(init=False)
+    frontend: tuple[str, ...] = field(init=False)
+    backend: tuple[str, ...] = field(init=False)
+    detail: str = field(init=False)
 
     def __post_init__(self) -> None:
+        for name in (
+            "evidence",
+            "source_anchor",
+            "runtime_anchor",
+            "contract_anchor",
+            "verifier",
+            "legacy",
+            "extensions",
+        ):
+            object.__setattr__(self, name, _clean_mapping(getattr(self, name)))
         actual = self.fingerprint or _fingerprint(
             self.detector_id,
             self.source_anchor,
@@ -181,6 +244,31 @@ class Finding(Mapping[str, Any]):
         object.__setattr__(self, "fingerprint", actual)
         object.__setattr__(self, "id", actual)
         object.__setattr__(self, "code", self.detector_id)
+        metrics = self.evidence.get("metrics", self.evidence)
+        object.__setattr__(
+            self,
+            "metrics",
+            _clean_mapping(metrics),
+        )
+        object.__setattr__(
+            self, "kind", str(self.contract_anchor.get("kind", ""))
+        )
+        object.__setattr__(
+            self,
+            "normalized_path",
+            str(self.contract_anchor.get("normalized_path", "")),
+        )
+        object.__setattr__(
+            self,
+            "frontend",
+            tuple(str(item) for item in self.evidence.get("frontend", [])),
+        )
+        object.__setattr__(
+            self,
+            "backend",
+            tuple(str(item) for item in self.evidence.get("backend", [])),
+        )
+        object.__setattr__(self, "detail", self.message)
 
     @classmethod
     def create(
@@ -254,7 +342,11 @@ class Finding(Mapping[str, Any]):
             return cls._from_legacy(raw)
 
         known = {key: raw.get(key) for key in _CANONICAL_KEYS}
-        extensions = {key: item for key, item in raw.items() if key not in _CANONICAL_KEYS}
+        extensions = _clean_mapping(raw.get("extensions"))
+        extensions = {
+            **_thaw(extensions),  # type: ignore[arg-type]
+            **{key: item for key, item in raw.items() if key not in _CANONICAL_KEYS},
+        }
         verification = VerificationResult.from_dict(known.get("last_verification"))
         finding = cls(
             detector_id=str(known.get("detector_id", known.get("code", "unknown"))),
@@ -335,7 +427,20 @@ class Finding(Mapping[str, Any]):
                 legacy=raw,
             )
 
-        detector_id = str(raw.get("detector_id", raw.get("id", "legacy-issue")))
+        detector_id = str(raw.get("detector_id", raw.get("rule_id", ""))).strip()
+        queue_id = str(raw.get("id", "")).strip()
+        if not detector_id:
+            if queue_id and not queue_id.startswith("SCAN-"):
+                detector_id = queue_id
+            else:
+                manual_identity = "|".join(
+                    str(raw.get(key, "")).strip()
+                    for key in ("file", "issue", "command")
+                )
+                detector_id = (
+                    "manual-"
+                    + hashlib.sha256(manual_identity.encode("utf-8")).hexdigest()[:16]
+                )
         source_anchor = {
             "path": str(raw.get("file", "")),
             "line": int(raw.get("line", 0) or 0),
@@ -373,33 +478,9 @@ class Finding(Mapping[str, Any]):
     def tier(self) -> str:
         return _SEVERITY_TO_TIER.get(self.severity, "T2")
 
-    @property
-    def metrics(self) -> dict[str, Any]:
-        metrics = self.evidence.get("metrics", self.evidence)
-        return dict(metrics) if isinstance(metrics, Mapping) else {}
-
-    @property
-    def kind(self) -> str:
-        return str(self.contract_anchor.get("kind", ""))
-
-    @property
-    def normalized_path(self) -> str:
-        return str(self.contract_anchor.get("normalized_path", ""))
-
-    @property
-    def frontend(self) -> tuple[str, ...]:
-        return tuple(str(item) for item in self.evidence.get("frontend", []))
-
-    @property
-    def backend(self) -> tuple[str, ...]:
-        return tuple(str(item) for item in self.evidence.get("backend", []))
-
-    @property
-    def detail(self) -> str:
-        return self.message
-
     def to_dict(self) -> dict[str, Any]:
-        payload = dict(self.extensions)
+        payload = _thaw(self.extensions)
+        assert isinstance(payload, dict)
         payload.update(
             {
                 "schema_version": FINDING_SCHEMA_VERSION,
@@ -413,20 +494,20 @@ class Finding(Mapping[str, Any]):
                 "message": self.message,
                 "status": self.status,
                 "provenance": self.provenance,
-                "evidence": dict(self.evidence),
+                "evidence": _thaw(self.evidence),
                 "evidence_freshness": self.evidence_freshness,
-                "source_anchor": dict(self.source_anchor),
-                "runtime_anchor": dict(self.runtime_anchor),
-                "contract_anchor": dict(self.contract_anchor),
+                "source_anchor": _thaw(self.source_anchor),
+                "runtime_anchor": _thaw(self.runtime_anchor),
+                "contract_anchor": _thaw(self.contract_anchor),
                 "suppression_key": self.suppression_key,
-                "verifier": dict(self.verifier),
+                "verifier": _thaw(self.verifier),
                 "last_verification": (
                     self.last_verification.to_dict()
                     if self.last_verification is not None
                     else None
                 ),
                 "display_excerpt": self.display_excerpt,
-                "legacy": dict(self.legacy),
+                "legacy": _thaw(self.legacy),
                 # Compatibility display fields are derived, never mutable truth.
                 "file": str(self.source_anchor.get("path", "")),
                 "tier": self.tier,
@@ -435,7 +516,7 @@ class Finding(Mapping[str, Any]):
                 "line": int(self.source_anchor.get("line", 0) or 0),
                 "column": int(self.source_anchor.get("column", 0) or 0),
                 "snippet": self.display_excerpt,
-                "metrics": self.metrics,
+                "metrics": _thaw(self.metrics),
                 "kind": self.kind,
                 "normalized_path": self.normalized_path,
                 "frontend": list(self.frontend),
@@ -467,7 +548,7 @@ def score_current_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(item, (Finding, Mapping))
     ]
     snapshot = _clean_mapping(state.get("current_snapshot"))
-    coverage = snapshot.get("qualified_coverage", 1.0)
+    coverage = snapshot.get("qualified_coverage", 0.0)
     if not isinstance(coverage, (int, float)) or isinstance(coverage, bool):
         coverage = 0.0
     qualified_coverage = max(0.0, min(1.0, float(coverage)))
@@ -475,7 +556,8 @@ def score_current_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         sum(
             _SEVERITY_WEIGHT.get(finding.severity, 10.0) * finding.confidence
             for finding in pending
-            if finding.status not in {"suppressed", "verified_resolved"}
+            if finding.status
+            not in {"informational", "investigate", "suppressed", "verified_resolved"}
         ),
         2,
     )
@@ -483,10 +565,9 @@ def score_current_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         0, min(100, round(100 * qualified_coverage - current_slop))
     )
     subjective = _clean_mapping(state.get("subjective"))
+    structured_score = _structured_review_score(subjective)
     subjective_score = (
-        int(subjective["score"])
-        if _structured_review_complete(subjective) and not subjective.get("stale")
-        else None
+        structured_score if structured_score is not None and not subjective.get("stale") else None
     )
     blended_score = (
         round(objective_score * 0.6 + subjective_score * 0.4)
@@ -510,8 +591,15 @@ class EligibilityBlocker:
     message: str
     details: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", _clean_mapping(self.details))
+
     def to_dict(self) -> dict[str, Any]:
-        return {"code": self.code, "message": self.message, "details": self.details}
+        return {
+            "code": self.code,
+            "message": self.message,
+            "details": _thaw(self.details),
+        }
 
 
 @dataclass(frozen=True)
@@ -524,6 +612,9 @@ class EligibilityContext:
     require_session_branch: bool = False
     evidence_hashes: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_hashes", _clean_mapping(self.evidence_hashes))
+
 
 @dataclass(frozen=True)
 class EligibilityResult:
@@ -531,34 +622,64 @@ class EligibilityResult:
     score: dict[str, Any]
     blockers: tuple[EligibilityBlocker, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "score", _clean_mapping(self.score))
+        object.__setattr__(self, "blockers", tuple(self.blockers))
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "eligible": self.eligible,
-            "score": self.score,
+            "score": _thaw(self.score),
             "blockers": [item.to_dict() for item in self.blockers],
         }
 
 
-def _structured_review_complete(review: Mapping[str, Any]) -> bool:
+def _structured_review_score(review: Mapping[str, Any]) -> int | None:
     dimensions = review.get("dimensions")
     if not isinstance(dimensions, Mapping) or set(dimensions) != {"A", "B", "C", "D"}:
-        return False
-    if not all(
-        isinstance(dimensions[key], (int, float))
-        and not isinstance(dimensions[key], bool)
-        for key in ("A", "B", "C", "D")
+        return None
+    caps = {"A": 40, "B": 30, "C": 20, "D": 10}
+    values: dict[str, float] = {}
+    for key, cap in caps.items():
+        value = dimensions[key]
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not 0 <= float(value) <= cap
+        ):
+            return None
+        values[key] = float(value)
+    total = sum(values.values())
+    score = review.get("score")
+    if (
+        not isinstance(score, (int, float))
+        or isinstance(score, bool)
+        or not 0 <= float(score) <= 100
+        or float(score) != total
     ):
+        return None
+    return round(total)
+
+
+def _structured_review_complete(review: Mapping[str, Any]) -> bool:
+    if _structured_review_score(review) is None:
         return False
-    required = (
-        "rationale",
-        "finding_links",
-        "routes",
-        "states",
-        "viewports",
-        "reviewer",
-        "evidence_hashes",
+    if not str(review.get("rationale", "")).strip():
+        return False
+    if not str(review.get("reviewer", "")).strip():
+        return False
+    for key in ("finding_links", "routes", "states", "viewports"):
+        values = review.get(key)
+        if not isinstance(values, (list, tuple)) or not all(
+            isinstance(item, str) for item in values
+        ):
+            return False
+    hashes = review.get("evidence_hashes")
+    return (
+        isinstance(hashes, Mapping)
+        and set(hashes) == {"source", "map", "runtime"}
+        and all(str(hashes[key]).strip() for key in ("source", "map", "runtime"))
     )
-    return all(key in review for key in required)
 
 
 def evaluate_eligibility(
@@ -571,7 +692,13 @@ def evaluate_eligibility(
         item
         for item in state.get("issues", [])
         if isinstance(item, (Finding, Mapping))
-        and coerce_finding(item).status not in {"suppressed", "verified_resolved"}
+        and coerce_finding(item).status
+        not in {
+            "informational",
+            "investigate",
+            "suppressed",
+            "verified_resolved",
+        }
     ]
     if pending:
         blockers.append(

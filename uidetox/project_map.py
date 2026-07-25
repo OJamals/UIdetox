@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from uidetox.findings import Finding
+
 
 HTTP_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 _CODE_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"}
@@ -135,25 +137,32 @@ class OperationEvidence:
         return f"{self.side}:{method}:{path}"
 
 
-@dataclass(frozen=True)
-class ParityFinding:
-    """One deterministic reconciliation result."""
+ParityFinding = Finding
 
-    kind: str
-    normalized_path: str | None
-    frontend: tuple[str, ...] = ()
-    backend: tuple[str, ...] = ()
-    detail: str = ""
 
-    @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ParityFinding":
-        return cls(
-            kind=str(value.get("kind", "unresolved")),
-            normalized_path=_string_or_none(value.get("normalized_path")),
-            frontend=tuple(str(item) for item in value.get("frontend", [])),
-            backend=tuple(str(item) for item in value.get("backend", [])),
-            detail=str(value.get("detail", "")),
-        )
+def _parity_finding(
+    *,
+    kind: str,
+    normalized_path: str | None,
+    frontend: tuple[str, ...] = (),
+    backend: tuple[str, ...] = (),
+    detail: str = "",
+) -> Finding:
+    path = normalized_path or ""
+    investigative = kind in {"unresolved", "backend_only"}
+    return Finding.create(
+        detector_id=f"contract-{kind.replace('_', '-')}",
+        category="contract",
+        severity="info" if investigative else "warning",
+        confidence=0.5 if kind == "unresolved" else 0.85,
+        message=detail,
+        provenance="contract",
+        evidence={"frontend": list(frontend), "backend": list(backend)},
+        contract_anchor={"kind": kind, "normalized_path": path},
+        suppression_key=f"contract:{kind}:{path}",
+        verifier={"kind": "contract", "normalized_path": path},
+        status="investigate" if investigative else "pending",
+    )
 
 
 @dataclass(frozen=True)
@@ -167,8 +176,19 @@ class ProjectMap:
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        # Normalize tuples to JSON arrays before this is nested in FrontendMap.
-        return json.loads(json.dumps(asdict(self), sort_keys=True))
+        return {
+            "schema_version": self.schema_version,
+            "frontend_operations": [
+                json.loads(json.dumps(asdict(item), sort_keys=True))
+                for item in self.frontend_operations
+            ],
+            "backend_operations": [
+                json.loads(json.dumps(asdict(item), sort_keys=True))
+                for item in self.backend_operations
+            ],
+            "findings": [item.to_dict() for item in self.findings],
+            "evidence": self.evidence,
+        }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any] | None) -> "ProjectMap":
@@ -188,7 +208,7 @@ class ProjectMap:
                 for item in value.get("backend_operations", [])
             ),
             findings=tuple(
-                ParityFinding.from_dict(item) for item in value.get("findings", [])
+                Finding.from_dict(item) for item in value.get("findings", [])
             ),
             evidence=dict(value.get("evidence", {})),
         )
@@ -313,7 +333,7 @@ def reconcile_operations(
     ]
     for item in [*unresolved_front, *unresolved_back]:
         findings.append(
-            ParityFinding(
+            _parity_finding(
                 kind="unresolved",
                 normalized_path=item.normalized_path,
                 frontend=(item.ref,) if item.side == "frontend" else (),
@@ -341,7 +361,7 @@ def reconcile_operations(
             )
             if unmatched_front or unmatched_back:
                 findings.append(
-                    ParityFinding(
+                    _parity_finding(
                         kind="method_mismatch",
                         normalized_path=path,
                         frontend=tuple(item.ref for item in unmatched_front),
@@ -357,7 +377,7 @@ def reconcile_operations(
         if front_items:
             for item in front_items:
                 findings.append(
-                    ParityFinding(
+                    _parity_finding(
                         kind="frontend_only",
                         normalized_path=path,
                         frontend=(item.ref,),
@@ -370,7 +390,7 @@ def reconcile_operations(
                 suppressed.append(item.ref)
                 continue
             findings.append(
-                ParityFinding(
+                _parity_finding(
                     kind="backend_only",
                     normalized_path=path,
                     backend=(item.ref,),

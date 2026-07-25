@@ -603,7 +603,7 @@ def map_frontend(
             "viewport": page.viewport.name,
             "selector": element.selector,
             "element": element.name or element.role or element.tag,
-            **asdict(finding),
+            **finding.to_dict(),
         }
         for page in runtime_pages
         for element in page.elements
@@ -1103,7 +1103,9 @@ def _merge_runtime_evidence(
                         "styles": element.styles,
                         "states": element.states,
                         "measurements": element.measurements,
-                        "findings": [asdict(finding) for finding in element.findings],
+                        "findings": [
+                            finding.to_dict() for finding in element.findings
+                        ],
                     },
                 )
             )
