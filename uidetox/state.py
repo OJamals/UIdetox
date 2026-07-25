@@ -7,7 +7,12 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
-from uidetox.findings import FINDING_SCHEMA_VERSION, Finding, coerce_finding
+from uidetox.findings import (
+    FINDING_SCHEMA_VERSION,
+    Finding,
+    VerificationResult,
+    coerce_finding,
+)
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
 
@@ -365,7 +370,14 @@ def get_issue(issue_id: str) -> dict | None:
     return None
 
 
-def remove_issue(issue_id: str, note: str = "") -> bool:
+def remove_issue(
+    issue_id: str,
+    note: str = "",
+    *,
+    verification: VerificationResult | None = None,
+) -> bool:
+    if verification is None or verification.outcome != "absent":
+        return False
     with _state_lock():
         state = load_state()
         original_len = len(state.get("issues", []))
@@ -376,6 +388,8 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
         if len(state["issues"]) < original_len:
             # Track resolved issues
             for r in removed:
+                r["status"] = "verified_resolved"
+                r["last_verification"] = verification.to_dict()
                 r["resolved_at"] = _now_iso()
                 if note:
                     r["note"] = note
@@ -449,7 +463,12 @@ def clear_issues():
         save_state(state)
 
 
-def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
+def batch_remove_issues(
+    issue_ids: list[str],
+    note: str = "",
+    *,
+    verifications: dict[str, VerificationResult] | None = None,
+) -> list[dict]:
     """Remove multiple issues atomically in a single state update.
 
     Args:
@@ -459,15 +478,27 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
     Returns:
         List of removed issue dicts (empty if none found).
     """
+    verifications = verifications or {}
+    if any(
+        issue_id not in verifications
+        or verifications[issue_id].outcome != "absent"
+        for issue_id in issue_ids
+    ):
+        return []
     with _state_lock():
         state = load_state()
         id_set = set(issue_ids)
         removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
+        if len(removed) != len(id_set):
+            return []
         state["issues"] = [
             i for i in state.get("issues", []) if i.get("id") not in id_set
         ]
 
         for r in removed:
+            verification = verifications[r["id"]]
+            r["status"] = "verified_resolved"
+            r["last_verification"] = verification.to_dict()
             r["resolved_at"] = _now_iso()
             if note:
                 r["note"] = note
@@ -479,3 +510,36 @@ def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
         ) + len(removed)
         save_state(state)
         return removed
+
+
+def record_verification_override(
+    issue_ids: list[str],
+    *,
+    actor: str,
+    reason: str,
+    results: dict[str, VerificationResult],
+) -> None:
+    """Audit an explicit verifier override without resolving the findings."""
+    if not actor.strip() or not reason.strip():
+        raise ValueError("Verifier overrides require both actor and reason.")
+    with _state_lock():
+        state = load_state()
+        ids = set(issue_ids)
+        for issue in state.get("issues", []):
+            if issue.get("id") in ids:
+                issue["status"] = "overridden"
+                result = results.get(issue["id"])
+                issue["last_verification"] = result.to_dict() if result else None
+        state.setdefault("overrides", []).append(
+            {
+                "issue_ids": list(issue_ids),
+                "actor": actor.strip(),
+                "reason": reason.strip(),
+                "timestamp": _now_iso(),
+                "results": {
+                    issue_id: result.to_dict()
+                    for issue_id, result in results.items()
+                },
+            }
+        )
+        save_state(state)

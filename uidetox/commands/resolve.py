@@ -7,11 +7,13 @@ import subprocess
 from pathlib import Path
 from uidetox.state import (
     remove_issue,
+    record_verification_override,
     get_issue,
     get_project_root,
     load_state,
     load_config,
 )
+from uidetox.findings import verify_finding
 from uidetox.memory import save_session, log_progress, record_fix_outcome
 from uidetox.commands.batch_resolve import _run_verification
 from uidetox.utils import tracked_changed_entries, untracked_changed_files
@@ -44,7 +46,25 @@ def run(args: argparse.Namespace):
             sys.exit(1)
         print()
 
-    success = remove_issue(issue_id, note=args.note)
+    result = verify_finding(issue, state=load_state(), root=get_project_root())
+    if result.outcome != "absent":
+        reason = str(getattr(args, "override_verifier", "") or "").strip()
+        actor = str(getattr(args, "actor", "") or "").strip()
+        if reason and actor:
+            record_verification_override(
+                [issue_id], actor=actor, reason=reason, results={issue_id: result}
+            )
+            print(
+                f"⚠️  Verifier override recorded for {issue_id}; finding remains pending."
+            )
+            return
+        print(
+            f"❌ Finding verifier returned {result.outcome}: {result.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    success = remove_issue(issue_id, note=args.note, verification=result)
     if success:
         state = load_state()
         remaining = len(state.get("issues", []))

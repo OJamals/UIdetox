@@ -24,7 +24,7 @@ from uidetox.workflow import (
 
 
 def _issue_ids(issues: list[dict]) -> set[str]:
-    return {str(issue["id"]) for issue in issues}
+    return {str(issue.get("detector_id", issue["id"])) for issue in issues}
 
 
 def _write_full_stack_demo(tmp_path) -> None:

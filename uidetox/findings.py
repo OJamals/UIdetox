@@ -11,6 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -291,6 +292,7 @@ class Finding(Mapping[str, Any]):
         status: str = "pending",
         display_excerpt: str = "",
         legacy: Mapping[str, Any] | None = None,
+        extensions: Mapping[str, Any] | None = None,
     ) -> Finding:
         raw = {
             "detector_id": detector_id,
@@ -332,6 +334,7 @@ class Finding(Mapping[str, Any]):
             last_verification=last_verification,
             display_excerpt=str(clean.get("display_excerpt", display_excerpt)),
             legacy=_clean_mapping(clean.get("legacy")),
+            extensions=_clean_mapping(extensions),
         )
 
     @classmethod
@@ -472,6 +475,7 @@ class Finding(Mapping[str, Any]):
             status=str(raw.get("status", "pending")),
             display_excerpt=str(raw.get("display_excerpt", raw.get("snippet", ""))),
             legacy=raw,
+            extensions=raw,
         )
 
     @property
@@ -557,7 +561,12 @@ def score_current_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
             _SEVERITY_WEIGHT.get(finding.severity, 10.0) * finding.confidence
             for finding in pending
             if finding.status
-            not in {"informational", "investigate", "suppressed", "verified_resolved"}
+            not in {
+                "informational",
+                "investigate",
+                "suppressed",
+                "verified_resolved",
+            }
         ),
         2,
     )
@@ -797,3 +806,137 @@ def verification_result(
         detail=detail,
         evidence_hash=evidence_hash,
     )
+
+
+def verify_finding(
+    value: Finding | Mapping[str, Any],
+    *,
+    state: Mapping[str, Any] | None = None,
+    root: str | Path | None = None,
+) -> VerificationResult:
+    """Rerun the finding's originating detector against current evidence."""
+    finding = coerce_finding(value)
+    kind = str(finding.verifier.get("kind", finding.provenance or "manual"))
+    handlers = {
+        "static": _verify_static,
+        "runtime": _verify_runtime,
+        "contract": _verify_contract,
+        "manual": _verify_manual,
+    }
+    handler = handlers.get(kind)
+    if handler is None:
+        return verification_result(
+            "stale_evidence", kind, f"Unsupported verifier kind: {kind}"
+        )
+    try:
+        return handler(finding, state or {}, Path(root or Path.cwd()).resolve())
+    except (OSError, ValueError, TypeError) as error:
+        return verification_result("stale_evidence", kind, str(error))
+
+
+def _same_source_anchor(left: Finding, right: Finding) -> bool:
+    if "start" in left.source_anchor or "end" in left.source_anchor:
+        keys = ("start", "end")
+    else:
+        keys = ("line", "column")
+    return all(left.source_anchor.get(key) == right.source_anchor.get(key) for key in keys)
+
+
+def _verify_static(
+    finding: Finding, _state: Mapping[str, Any], root: Path
+) -> VerificationResult:
+    from uidetox.analyzer import analyze_file
+
+    source = Path(str(finding.source_anchor.get("path", "")))
+    source = source if source.is_absolute() else root / source
+    if not source.exists():
+        return verification_result("absent", "static", "Source no longer exists.")
+    matches = [
+        item
+        for item in analyze_file(source)
+        if item.detector_id == finding.detector_id
+    ]
+    if any(_same_source_anchor(finding, item) for item in matches):
+        return verification_result("reproduced", "static", "Detector reproduced at source anchor.")
+    if matches:
+        return verification_result("stale_anchor", "static", "Detector moved to a different source anchor.")
+    return verification_result("absent", "static", "Detector no longer reproduces.")
+
+
+def _verify_runtime(
+    finding: Finding, _state: Mapping[str, Any], root: Path
+) -> VerificationResult:
+    from uidetox.frontend_map import frontend_map_is_fresh, load_frontend_map
+
+    frontend_map = load_frontend_map()
+    if (
+        frontend_map.evidence.get("runtime_status") != "current"
+        or not frontend_map_is_fresh(frontend_map, root, frontend_map.target)
+    ):
+        return verification_result("stale_evidence", "runtime", "Runtime map is not current.")
+    anchor = finding.runtime_anchor
+    required = ("url", "viewport", "selector", "scenario")
+    if any(not str(anchor.get(key, "")).strip() for key in required):
+        return verification_result("stale_evidence", "runtime", "Route/scenario/viewport/selector evidence is incomplete.")
+    exact_node = None
+    for node in frontend_map.nodes:
+        metadata = node.metadata
+        if (
+            metadata.get("runtime_url") == anchor["url"]
+            and metadata.get("viewport") == anchor["viewport"]
+            and metadata.get("selector") == anchor["selector"]
+            and metadata.get("scenario", "default") == anchor["scenario"]
+        ):
+            exact_node = node
+            break
+    if exact_node is None:
+        observed = any(
+            node.metadata.get("runtime_url") == anchor["url"]
+            and node.metadata.get("viewport") == anchor["viewport"]
+            for node in frontend_map.nodes
+        )
+        return verification_result(
+            "absent" if observed else "stale_evidence",
+            "runtime",
+            "Scenario no longer reproduces." if observed else "Requested route/viewport was not observed.",
+        )
+    reproduced = any(
+        coerce_finding(item).detector_id == finding.detector_id
+        for item in exact_node.metadata.get("findings", [])
+        if isinstance(item, Mapping)
+    )
+    return verification_result(
+        "reproduced" if reproduced else "absent",
+        "runtime",
+        "Runtime detector reproduced." if reproduced else "Runtime detector no longer reproduces.",
+    )
+
+
+def _verify_contract(
+    finding: Finding, _state: Mapping[str, Any], root: Path
+) -> VerificationResult:
+    from uidetox.frontend_map import load_frontend_map
+    from uidetox.project_map import build_project_map
+
+    previous = load_frontend_map()
+    current = build_project_map(root, previous.nodes)
+    reproduced = any(
+        item.detector_id == finding.detector_id
+        and item.contract_anchor == finding.contract_anchor
+        for item in current.findings
+    )
+    return verification_result(
+        "reproduced" if reproduced else "absent",
+        "contract",
+        "Contract mismatch reproduced." if reproduced else "Contract mismatch no longer reproduces.",
+    )
+
+
+def _verify_manual(
+    finding: Finding, state: Mapping[str, Any], _root: Path
+) -> VerificationResult:
+    review = _clean_mapping(state.get("subjective"))
+    linked = finding.fingerprint in review.get("finding_links", ())
+    if _structured_review_complete(review) and linked:
+        return verification_result("absent", "manual", "Linked structured review confirms remediation.")
+    return verification_result("stale_evidence", "manual", "A linked structured review is required.")

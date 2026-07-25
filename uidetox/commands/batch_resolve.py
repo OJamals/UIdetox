@@ -13,7 +13,9 @@ from uidetox.state import (
     get_project_root,
     load_state,
     load_config,
+    record_verification_override,
 )
+from uidetox.findings import VerificationResult, verify_finding
 from uidetox.memory import save_session, log_progress
 from uidetox.prompt_safety import render_untrusted_data, sanitize_untrusted_data
 from uidetox.utils import (
@@ -183,8 +185,39 @@ def run(args: argparse.Namespace):
             sys.exit(1)
         print()
 
+    current_state = load_state()
+    verifications: dict[str, VerificationResult] = {
+        issue["id"]: verify_finding(
+            issue, state=current_state, root=get_project_root()
+        )
+        for issue in issue_records
+    }
+    uncleared = {
+        issue_id: result
+        for issue_id, result in verifications.items()
+        if result.outcome != "absent"
+    }
+    if uncleared:
+        reason = str(getattr(args, "override_verifier", "") or "").strip()
+        actor = str(getattr(args, "actor", "") or "").strip()
+        if reason and actor:
+            record_verification_override(
+                issue_ids, actor=actor, reason=reason, results=verifications
+            )
+            print(
+                "⚠️  Verifier override recorded; findings remain pending and scored."
+            )
+            return
+        details = "; ".join(
+            f"{issue_id}: {result.outcome}" for issue_id, result in uncleared.items()
+        )
+        print(f"❌ Finding verification failed: {details}", file=sys.stderr)
+        sys.exit(1)
+
     # Batch resolve
-    removed = batch_remove_issues(issue_ids, note=note)
+    removed = batch_remove_issues(
+        issue_ids, note=note, verifications=verifications
+    )
     if not removed:
         print("❌ No issues were resolved.", file=sys.stderr)
         sys.exit(1)

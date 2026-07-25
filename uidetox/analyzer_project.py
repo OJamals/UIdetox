@@ -22,10 +22,13 @@ def reconcile_project_issues(
     """Remove per-file findings disproved by linked project evidence."""
 
     issue_list = list(issues)
+    def detector(issue: dict) -> object:
+        return issue.get("detector_id", issue.get("id"))
+
     form_issue_files = {
         Path(str(issue.get("file", ""))).resolve()
         for issue in issue_list
-        if issue.get("id") == "FORM_NO_SUBMIT_SLOP"
+        if detector(issue) == "FORM_NO_SUBMIT_SLOP"
         and str(issue.get("file", "")).lower().endswith((".htm", ".html"))
     }
     if not form_issue_files:
@@ -43,7 +46,7 @@ def reconcile_project_issues(
         issue
         for issue in issue_list
         if not (
-            issue.get("id") == "FORM_NO_SUBMIT_SLOP"
+            detector(issue) == "FORM_NO_SUBMIT_SLOP"
             and Path(str(issue.get("file", ""))).resolve() in resolved_form_files
         )
     ]

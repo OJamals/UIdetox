@@ -395,6 +395,13 @@ def parse_args(args_list=None):
     resolve_parser.add_argument(
         "--note", required=True, help="Mandatory explanation of the fix applied"
     )
+    resolve_parser.add_argument(
+        "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
+    )
+    resolve_parser.add_argument(
+        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+    )
+    resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
 
     # Command: batch-resolve
     batch_resolve_parser = subparsers.add_parser(
@@ -409,8 +416,12 @@ def parse_args(args_list=None):
         "--note", required=True, help="Mandatory explanation of fixes applied"
     )
     batch_resolve_parser.add_argument(
-        "--skip-verify", action="store_true", help="Skip pre-commit verification gate"
+        "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
     )
+    batch_resolve_parser.add_argument(
+        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+    )
+    batch_resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
 
     # Command: plan
     subparsers.add_parser(

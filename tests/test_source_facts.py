@@ -202,9 +202,13 @@ def test_analyzer_and_semantic_consumers_reuse_one_source_fact_parse(tmp_path):
     assert semantics is not None
     assert semantics.components[0].name == "Shell"
     assert [issue["id"] for issue in ast_issues] == ["ANIMATE_STATE_SLOP"]
-    assert ast_issues == [
-        issue for issue in file_issues if issue["id"] == "ANIMATE_STATE_SLOP"
-    ]
+    canonical = next(
+        issue
+        for issue in file_issues
+        if issue["detector_id"] == "ANIMATE_STATE_SLOP"
+    )
+    assert ast_issues[0]["issue"] == canonical["issue"]
+    assert ast_issues[0]["file"] == canonical["file"]
     assert parse_calls == 1
 
 

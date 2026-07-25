@@ -42,7 +42,7 @@ def _sensitive_finding(tmp_path) -> tuple[str, dict]:
     finding = next(
         issue
         for issue in analyze_file(source)
-        if issue["id"] == "HARDCODED_SECRET_SLOP"
+        if issue["detector_id"] == "HARDCODED_SECRET_SLOP"
     )
     return sentinel, finding
 
