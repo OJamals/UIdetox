@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
   "fixture_root": "fixtures",
+  "catalog": {
+    "rule_count": 218,
+    "fingerprint": "385c308cc5adba954d8286bf6bb176142ff8f856d21062b8511f6e6cd004492c",
+    "unpaired_status": "manual",
+    "unpaired_rationale": "No deterministic corpus pair yet; qualification owned by plans/015-occurrence-complete-static-analysis.md."
+  },
   "cases": [
     {
       "id": "react-next-lorem-positive",
@@ -110,6 +116,19 @@
       "rationale": "Common fetch client shapes must expose deployment-breaking local URLs."
     },
     {
+      "id": "api-client-dev-url-negative",
+      "fixture": "api-client/negative.ts",
+      "framework": "typescript",
+      "language": "typescript",
+      "capability": "api-client",
+      "detector": "static-analyzer",
+      "rule_id": "HARDCODED_DEV_URL_SLOP",
+      "status": "negative",
+      "expected_anchors": [],
+      "severity": "error",
+      "rationale": "Injected API origins must not trigger hardcoded development URL detection."
+    },
+    {
       "id": "css-gradient-positive",
       "fixture": "css/gradient.css",
       "framework": "css",
@@ -121,6 +140,19 @@
       "expected_anchors": [{"path": "css/gradient.css", "contains": "linear-gradient"}],
       "severity": "warning",
       "rationale": "Purple-blue CSS gradients must be detected."
+    },
+    {
+      "id": "css-gradient-negative",
+      "fixture": "css/solid.css",
+      "framework": "css",
+      "language": "css",
+      "capability": "css",
+      "detector": "static-analyzer",
+      "rule_id": "CSS_GRADIENT_SLOP",
+      "status": "negative",
+      "expected_anchors": [],
+      "severity": "warning",
+      "rationale": "Token-backed solid surfaces must not trigger gradient detection."
     },
     {
       "id": "modern-theme-colors-negative",
@@ -147,6 +179,45 @@
       "expected_anchors": [{"path": "tailwind/component.tsx", "contains": "from-purple-500"}],
       "severity": "warning",
       "rationale": "Tailwind gradient utilities must be detected."
+    },
+    {
+      "id": "tailwind-gradient-family-positive",
+      "fixture": "tailwind/component.tsx",
+      "framework": "tailwind",
+      "language": "tsx",
+      "capability": "tailwind",
+      "detector": "static-analyzer",
+      "rule_id": "COLOR_GRADIENT_SLOP",
+      "status": "positive",
+      "expected_anchors": [{"path": "tailwind/component.tsx", "contains": "from-purple-500"}],
+      "severity": "warning",
+      "rationale": "Generic purple-blue gradient detection intentionally overlaps the Tailwind-specific rule."
+    },
+    {
+      "id": "tailwind-gradient-negative",
+      "fixture": "tailwind/solid.tsx",
+      "framework": "tailwind",
+      "language": "tsx",
+      "capability": "tailwind",
+      "detector": "static-analyzer",
+      "rule_id": "TAILWIND_V4_GRADIENT_SLOP",
+      "status": "negative",
+      "expected_anchors": [],
+      "severity": "warning",
+      "rationale": "Solid Tailwind utilities must not trigger gradient detection."
+    },
+    {
+      "id": "tailwind-gradient-family-negative",
+      "fixture": "tailwind/solid.tsx",
+      "framework": "tailwind",
+      "language": "tsx",
+      "capability": "tailwind",
+      "detector": "static-analyzer",
+      "rule_id": "COLOR_GRADIENT_SLOP",
+      "status": "negative",
+      "expected_anchors": [],
+      "severity": "warning",
+      "rationale": "Solid Tailwind utilities must not trigger generic gradient detection."
     },
     {
       "id": "python-backend-degraded",

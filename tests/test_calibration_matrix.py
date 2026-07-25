@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import hashlib
+from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from uidetox.analyzer import analyze_file
 from uidetox.rule_registry import RULE_REGISTRY
 
 
@@ -28,6 +33,13 @@ _REQUIRED_CASE_KEYS = {
 }
 
 
+@dataclass(frozen=True)
+class CalibrationReport:
+    totals: Mapping[str, int]
+    by_capability_framework: Mapping[str, Mapping[str, int]]
+    failures: tuple[str, ...]
+
+
 def _inside(root: Path, candidate: Path) -> bool:
     try:
         candidate.resolve().relative_to(root.resolve())
@@ -40,8 +52,10 @@ def validate_manifest(
     manifest: Mapping[str, object], calibration_root: Path = CALIBRATION_ROOT
 ) -> None:
     errors: list[str] = []
-    if set(manifest) != {"schema_version", "fixture_root", "cases"}:
-        errors.append("manifest keys must be schema_version, fixture_root, and cases")
+    if set(manifest) != {"schema_version", "fixture_root", "catalog", "cases"}:
+        errors.append(
+            "manifest keys must be schema_version, fixture_root, catalog, and cases"
+        )
     if manifest.get("schema_version") != 1:
         errors.append("schema_version must be 1")
 
@@ -131,12 +145,146 @@ def validate_manifest(
         raise ValueError("Invalid calibration manifest:\n- " + "\n- ".join(errors))
 
 
+def _catalog_fingerprint(rule_ids: list[str]) -> str:
+    return hashlib.sha256("\n".join(rule_ids).encode()).hexdigest()
+
+
+def validate_catalog_contract(
+    manifest: Mapping[str, object],
+    registry: Mapping[str, object] = RULE_REGISTRY,
+) -> None:
+    catalog = manifest.get("catalog")
+    if not isinstance(catalog, dict):
+        raise ValueError("Invalid calibration catalog: catalog must be an object")
+    if set(catalog) != {
+        "rule_count",
+        "fingerprint",
+        "unpaired_status",
+        "unpaired_rationale",
+    }:
+        raise ValueError("Invalid calibration catalog: unknown or missing keys")
+    rule_ids = list(registry)
+    errors = []
+    if catalog["rule_count"] != len(rule_ids):
+        errors.append(
+            f"rule_count mismatch: expected {len(rule_ids)}, "
+            f"found {catalog['rule_count']}"
+        )
+    if catalog["fingerprint"] != _catalog_fingerprint(rule_ids):
+        errors.append("catalog fingerprint mismatch")
+    if catalog["unpaired_status"] != "manual":
+        errors.append("unpaired_status must be manual")
+    rationale = catalog["unpaired_rationale"]
+    if not isinstance(rationale, str) or "plans/015-" not in rationale:
+        errors.append("unpaired_rationale must link plan 015")
+    if errors:
+        raise ValueError("Invalid calibration catalog:\n- " + "\n- ".join(errors))
+
+
+def build_rule_qualifications(
+    manifest: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    cases = manifest["cases"]
+    assert isinstance(cases, list)
+    statuses: dict[str, set[str]] = defaultdict(set)
+    for case in cases:
+        if (
+            case["detector"] == "static-analyzer"
+            and case["status"] in {"positive", "negative"}
+        ):
+            statuses[case["rule_id"]].add(case["status"])
+
+    catalog = manifest["catalog"]
+    assert isinstance(catalog, dict)
+    qualifications = {}
+    for rule_id, spec in RULE_REGISTRY.items():
+        objective = statuses[rule_id] == {"positive", "negative"}
+        qualifications[rule_id] = {
+            "status": "objective" if objective else catalog["unpaired_status"],
+            "owner_category": spec.category,
+            "supported_extensions": spec.extensions,
+            "occurrence_policy": (
+                "detector-defined"
+                if spec.analyzer_rule.get("_custom_check")
+                else "first-per-file"
+            ),
+            "confidence": "high" if objective else "manual",
+            "rationale": (
+                "Paired positive and negative corpus cases."
+                if objective
+                else catalog["unpaired_rationale"]
+            ),
+        }
+    return qualifications
+
+
+def evaluate_cases(
+    manifest: Mapping[str, object],
+    *,
+    analyzer: Callable[[Path], list[dict[str, Any]]] = analyze_file,
+) -> CalibrationReport:
+    cases = manifest["cases"]
+    fixture_root = CALIBRATION_ROOT / str(manifest["fixture_root"])
+    assert isinstance(cases, list)
+    totals: Counter[str] = Counter()
+    grouped: dict[str, Counter[str]] = defaultdict(Counter)
+    failures: list[str] = []
+    static_by_fixture: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for case in cases:
+        status = str(case["status"])
+        key = f"{case['capability']}::{case['framework']}"
+        if status in {"degraded", "unsupported"}:
+            totals[status] += 1
+            grouped[key][status] += 1
+        elif case["detector"] == "static-analyzer":
+            static_by_fixture[str(case["fixture"])].append(case)
+
+    for fixture, fixture_cases in static_by_fixture.items():
+        actual = {str(issue["id"]) for issue in analyzer(fixture_root / fixture)}
+        positive = {
+            str(case["rule_id"])
+            for case in fixture_cases
+            if case["status"] == "positive"
+        }
+        negative = {
+            str(case["rule_id"])
+            for case in fixture_cases
+            if case["status"] == "negative"
+        }
+        first = fixture_cases[0]
+        key = f"{first['capability']}::{first['framework']}"
+
+        for rule_id in sorted(positive & actual):
+            totals["tp"] += 1
+            grouped[key]["tp"] += 1
+        for rule_id in sorted(positive - actual):
+            totals["fn"] += 1
+            grouped[key]["fn"] += 1
+            failures.append(f"FN {fixture}: expected {rule_id}")
+        false_positives = (actual - positive) | (actual & negative)
+        for rule_id in sorted(false_positives):
+            totals["fp"] += 1
+            grouped[key]["fp"] += 1
+            failures.append(f"FP {fixture}: unexpected {rule_id}")
+
+    return CalibrationReport(
+        totals=dict(totals),
+        by_capability_framework={
+            key: dict(counts) for key, counts in sorted(grouped.items())
+        },
+        failures=tuple(failures),
+    )
+
+
 def _load_manifest(path: Path = MANIFEST_PATH) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_calibration_manifest_is_valid() -> None:
-    validate_manifest(_load_manifest())
+    manifest = _load_manifest()
+    validate_manifest(manifest)
+    validate_catalog_contract(manifest)
 
 
 def test_calibration_manifest_seeds_required_framework_and_boundary_shapes() -> None:
@@ -156,6 +304,68 @@ def test_calibration_manifest_seeds_required_framework_and_boundary_shapes() -> 
         "openapi",
         "orm-schema",
     } <= capabilities
+
+
+def test_calibration_signal_has_no_unclassified_fp_or_fn() -> None:
+    report = evaluate_cases(_load_manifest())
+
+    assert report.totals["tp"] > 0
+    assert report.totals.get("fp", 0) == 0, report.failures
+    assert report.totals.get("fn", 0) == 0, report.failures
+    assert report.totals["degraded"] > 0
+    assert report.totals["unsupported"] > 0
+    assert report.by_capability_framework
+
+
+def test_calibration_reports_one_injected_unexpected_result_as_one_fp() -> None:
+    def inject(path: Path) -> list[dict[str, Any]]:
+        issues = analyze_file(path)
+        if path.name == "negative.tsx":
+            return [*issues, {"id": "COLOR_BLACK_SLOP"}]
+        return issues
+
+    report = evaluate_cases(_load_manifest(), analyzer=inject)
+
+    assert report.totals["fp"] == 1
+    assert sum("COLOR_BLACK_SLOP" in failure for failure in report.failures) == 1
+
+
+def test_calibration_reports_one_removed_expected_result_as_one_fn() -> None:
+    def remove(path: Path) -> list[dict[str, Any]]:
+        issues = analyze_file(path)
+        if path.as_posix().endswith("react-next/positive.tsx"):
+            return [issue for issue in issues if issue["id"] != "LOREM_IPSUM_SLOP"]
+        return issues
+
+    report = evaluate_cases(_load_manifest(), analyzer=remove)
+
+    assert report.totals["fn"] == 1
+    assert sum("LOREM_IPSUM_SLOP" in failure for failure in report.failures) == 1
+
+
+def test_live_catalog_has_explicit_objective_or_manual_qualification() -> None:
+    qualifications = build_rule_qualifications(_load_manifest())
+
+    assert set(qualifications) == set(RULE_REGISTRY)
+    assert all(
+        record["status"] in {"objective", "manual"}
+        and record["owner_category"]
+        and record["supported_extensions"]
+        and record["occurrence_policy"] in {"first-per-file", "detector-defined"}
+        and record["confidence"] in {"high", "manual"}
+        and record["rationale"]
+        for record in qualifications.values()
+    )
+    assert any(record["status"] == "objective" for record in qualifications.values())
+    assert any(record["status"] == "manual" for record in qualifications.values())
+
+
+def test_new_catalog_rule_without_manifest_update_fails_collection_contract() -> None:
+    expanded = dict(RULE_REGISTRY)
+    expanded["UNQUALIFIED_NEW_RULE"] = next(iter(RULE_REGISTRY.values()))
+
+    with pytest.raises(ValueError, match="rule_count mismatch|fingerprint mismatch"):
+        validate_catalog_contract(_load_manifest(), expanded)
 
 
 @pytest.mark.parametrize(

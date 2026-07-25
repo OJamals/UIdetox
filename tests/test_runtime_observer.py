@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import sys
-import threading
 import types
-from contextlib import contextmanager
 from dataclasses import replace
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterator
 
 import pytest
 
 from uidetox import runtime_observer
 from uidetox.runtime_observer import (
+    DEFAULT_VIEWPORTS,
     RuntimeElement,
     RuntimeViewport,
     detect_runtime_findings,
@@ -39,27 +36,6 @@ def _measured_element(**measurements: object) -> RuntimeElement:
 
 def _finding_codes(element: RuntimeElement) -> set[str]:
     return {finding.code for finding in detect_runtime_findings(element)}
-
-
-@contextmanager
-def _serve_directory(directory: Path) -> Iterator[str]:
-    class QuietHandler(SimpleHTTPRequestHandler):
-        def log_message(self, _format: str, *_args: object) -> None:
-            return None
-
-    handler = lambda *args, **kwargs: QuietHandler(  # noqa: E731
-        *args, directory=str(directory), **kwargs
-    )
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address
-        yield f"http://{host}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
 
 
 def test_detect_runtime_findings_reports_layout_and_font_misalignment() -> None:
@@ -516,8 +492,10 @@ def test_observer_screenshot_failure_preserves_existing_file(
     assert not list(tmp_path.glob(".*.tmp"))
 
 
+@pytest.mark.browser
 def test_observer_detects_rendered_layout_and_typography_defects(
     tmp_path: Path,
+    local_http_server,
 ) -> None:
     fixture = tmp_path / "layout-defects.html"
     fixture.write_text(
@@ -578,17 +556,17 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         encoding="utf-8",
     )
 
-    with _serve_directory(tmp_path) as origin:
-        try:
-            observation = observe_frontend(
-                f"{origin}/{fixture.name}",
-                viewports=(RuntimeViewport("desktop", 1280, 800),),
-                settle_ms=0,
-            )
-        except RuntimeError as exc:
-            if "playwright install chromium" in str(exc).lower():
-                pytest.skip("Chromium is not installed for runtime integration tests.")
-            raise
+    origin = local_http_server(tmp_path)
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("desktop", 1280, 800),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        if "playwright install chromium" in str(exc).lower():
+            pytest.skip("Chromium is not installed for runtime integration tests.")
+        raise
 
     findings_by_selector = {
         element.selector: {finding.code for finding in element.findings}
@@ -640,3 +618,58 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         ]
         == "#ancestor-clip"
     )
+
+
+@pytest.mark.browser
+def test_fullstack_lab_runtime_observation_is_repeatable(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    lab = Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
+    origin = local_http_server(lab)
+
+    def capture(run: str) -> tuple[dict[str, object], ...]:
+        screenshot_root = tmp_path / run
+        try:
+            observation = observe_frontend(
+                f"{origin}/index.html",
+                viewports=DEFAULT_VIEWPORTS,
+                screenshots_dir=screenshot_root,
+                settle_ms=0,
+            )
+        except RuntimeError as exc:
+            if "playwright install chromium" in str(exc).lower():
+                pytest.skip("Chromium is not installed for runtime integration tests.")
+            raise
+
+        assert observation.errors == ()
+        assert len(observation.pages) == len(DEFAULT_VIEWPORTS)
+        assert all(
+            page.screenshot and Path(page.screenshot).is_file()
+            for page in observation.pages
+        )
+        return tuple(
+            {
+                "url": page.url,
+                "title": page.title,
+                "viewport": (
+                    page.viewport.name,
+                    page.viewport.width,
+                    page.viewport.height,
+                ),
+                "elements": tuple(
+                    (
+                        element.kind,
+                        element.tag,
+                        element.role,
+                        element.name,
+                        element.selector,
+                        tuple(finding.code for finding in element.findings),
+                    )
+                    for element in page.elements
+                ),
+            }
+            for page in observation.pages
+        )
+
+    assert capture("first") == capture("second")

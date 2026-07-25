@@ -73,3 +73,6 @@ uidetox = [
 [tool.pytest.ini_options]
 addopts = "--tb=short"
 testpaths = ["tests"]
+markers = [
+    "browser: live Playwright and localhost browser qualification",
+]
