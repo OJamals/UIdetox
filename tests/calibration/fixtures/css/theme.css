@@ -1,0 +1,4 @@
+:root {
+  --surface: oklch(98% 0.01 85);
+  --accent: oklch(62% 0.18 35);
+}

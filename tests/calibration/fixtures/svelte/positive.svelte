@@ -1,0 +1,1 @@
+<main>Lorem ipsum</main>
