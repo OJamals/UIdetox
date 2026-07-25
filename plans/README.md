@@ -22,7 +22,7 @@ parallel implementations, and update its status row.
 | 010 | Split optional capability dependencies into extras | P2 | S | 001 | DONE |
 | 011 | Characterize the capture and visual-diff pipeline | P2 | M | 010 | DONE |
 | 012 | Separate analyzer policy from execution engine | P3 | L | 007, 008, 009 | DONE |
-| 013 | Secure repository evidence before persistence or agent injection | P0 | M | — | TODO |
+| 013 | Secure repository evidence before persistence or agent injection | P0 | M | — | DONE |
 | 014 | Make every capability claim executable and measurable | P0 | L | — | TODO |
 | 015 | Replace fragmented issue handling with verified finding lifecycle | P0 | L | 013, 014 | TODO |
 | 016 | Replace shallow extraction with adapter-driven application semantics | P1 | L | 014 | TODO |
