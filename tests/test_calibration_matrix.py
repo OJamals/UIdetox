@@ -149,6 +149,28 @@ def _catalog_fingerprint(rule_ids: list[str]) -> str:
     return hashlib.sha256("\n".join(rule_ids).encode()).hexdigest()
 
 
+def _qualification_partition(
+    manifest: Mapping[str, object],
+    registry: Mapping[str, object],
+) -> tuple[set[str], list[str]]:
+    cases = manifest.get("cases")
+    assert isinstance(cases, list)
+    statuses: dict[str, set[str]] = defaultdict(set)
+    for case in cases:
+        if (
+            case["detector"] == "static-analyzer"
+            and case["status"] in {"positive", "negative"}
+        ):
+            statuses[str(case["rule_id"])].add(str(case["status"]))
+    objective = {
+        rule_id
+        for rule_id in registry
+        if statuses[rule_id] == {"positive", "negative"}
+    }
+    manual = [rule_id for rule_id in registry if rule_id not in objective]
+    return objective, manual
+
+
 def validate_catalog_contract(
     manifest: Mapping[str, object],
     registry: Mapping[str, object] = RULE_REGISTRY,
@@ -159,11 +181,13 @@ def validate_catalog_contract(
     if set(catalog) != {
         "rule_count",
         "fingerprint",
-        "unpaired_status",
-        "unpaired_rationale",
+        "manual_rule_count",
+        "manual_rule_fingerprint",
+        "manual_rationale",
     }:
         raise ValueError("Invalid calibration catalog: unknown or missing keys")
     rule_ids = list(registry)
+    _objective, manual_rule_ids = _qualification_partition(manifest, registry)
     errors = []
     if catalog["rule_count"] != len(rule_ids):
         errors.append(
@@ -172,11 +196,16 @@ def validate_catalog_contract(
         )
     if catalog["fingerprint"] != _catalog_fingerprint(rule_ids):
         errors.append("catalog fingerprint mismatch")
-    if catalog["unpaired_status"] != "manual":
-        errors.append("unpaired_status must be manual")
-    rationale = catalog["unpaired_rationale"]
+    if catalog["manual_rule_count"] != len(manual_rule_ids):
+        errors.append(
+            f"manual rule count mismatch: expected {len(manual_rule_ids)}, "
+            f"found {catalog['manual_rule_count']}"
+        )
+    if catalog["manual_rule_fingerprint"] != _catalog_fingerprint(manual_rule_ids):
+        errors.append("manual rule fingerprint mismatch")
+    rationale = catalog["manual_rationale"]
     if not isinstance(rationale, str) or "plans/015-" not in rationale:
-        errors.append("unpaired_rationale must link plan 015")
+        errors.append("manual rationale must link plan 015")
     if errors:
         raise ValueError("Invalid calibration catalog:\n- " + "\n- ".join(errors))
 
@@ -184,23 +213,14 @@ def validate_catalog_contract(
 def build_rule_qualifications(
     manifest: Mapping[str, object],
 ) -> dict[str, dict[str, object]]:
-    cases = manifest["cases"]
-    assert isinstance(cases, list)
-    statuses: dict[str, set[str]] = defaultdict(set)
-    for case in cases:
-        if (
-            case["detector"] == "static-analyzer"
-            and case["status"] in {"positive", "negative"}
-        ):
-            statuses[case["rule_id"]].add(case["status"])
-
+    objective_rules, _manual_rules = _qualification_partition(manifest, RULE_REGISTRY)
     catalog = manifest["catalog"]
     assert isinstance(catalog, dict)
     qualifications = {}
     for rule_id, spec in RULE_REGISTRY.items():
-        objective = statuses[rule_id] == {"positive", "negative"}
+        objective = rule_id in objective_rules
         qualifications[rule_id] = {
-            "status": "objective" if objective else catalog["unpaired_status"],
+            "status": "objective" if objective else "manual",
             "owner_category": spec.category,
             "supported_extensions": spec.extensions,
             "occurrence_policy": (
@@ -212,7 +232,7 @@ def build_rule_qualifications(
             "rationale": (
                 "Paired positive and negative corpus cases."
                 if objective
-                else catalog["unpaired_rationale"]
+                else catalog["manual_rationale"]
             ),
         }
     return qualifications
@@ -366,6 +386,19 @@ def test_new_catalog_rule_without_manifest_update_fails_collection_contract() ->
 
     with pytest.raises(ValueError, match="rule_count mismatch|fingerprint mismatch"):
         validate_catalog_contract(_load_manifest(), expanded)
+
+
+def test_new_rule_still_fails_after_global_catalog_fingerprint_refresh() -> None:
+    expanded = dict(RULE_REGISTRY)
+    expanded["UNQUALIFIED_NEW_RULE"] = next(iter(RULE_REGISTRY.values()))
+    manifest = _load_manifest()
+    catalog = manifest["catalog"]
+    assert isinstance(catalog, dict)
+    catalog["rule_count"] = len(expanded)
+    catalog["fingerprint"] = _catalog_fingerprint(list(expanded))
+
+    with pytest.raises(ValueError, match="manual rule"):
+        validate_catalog_contract(manifest, expanded)
 
 
 @pytest.mark.parametrize(

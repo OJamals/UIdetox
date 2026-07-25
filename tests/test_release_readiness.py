@@ -34,10 +34,25 @@ def test_publish_workflow_validates_tag_and_distributions(
 def test_publish_workflow_qualifies_windows_without_duplicate_job_body(
     publish_workflow: str,
 ) -> None:
+    parsed = yaml.load(publish_workflow, Loader=yaml.BaseLoader)
+    browser_legs = parsed["jobs"]["quality"]["strategy"]["matrix"]["include"]
+
     assert "runs-on: ${{ matrix.os }}" in publish_workflow
     assert "ubuntu-latest" in publish_workflow
     assert "windows-latest" in publish_workflow
     assert publish_workflow.count("name: Run tests") == 1
+    assert publish_workflow.count("name: Run browser qualification") == 1
+    assert browser_legs == [
+        {
+            "os": "ubuntu-latest",
+            "python-version": "3.13",
+            "browser": "true",
+        }
+    ]
+    assert publish_workflow.count("if: matrix.browser == true") == 2
+    assert "python -m pip install '.[capture]'" in publish_workflow
+    assert "python -m playwright install --with-deps chromium" in publish_workflow
+    assert "python -m pytest -q -W error -m browser" in publish_workflow
 
 
 def test_publish_workflow_uses_one_authentication_mode(
@@ -99,9 +114,11 @@ def test_built_wheel_contains_all_canonical_assets(
 
 
 def test_installed_wheel_cli_runs_outside_checkout(
-    installed_wheel_cli_output: str,
+    installed_wheel_cli_output: tuple[str, str],
 ) -> None:
-    assert installed_wheel_cli_output.startswith("uidetox ")
+    output, pyvenv_config = installed_wheel_cli_output
+    assert output.startswith("uidetox ")
+    assert "include-system-site-packages = false" in pyvenv_config.lower()
 
 
 def test_qualification_documentation_matches_executable_gates(

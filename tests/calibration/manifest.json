@@ -4,8 +4,9 @@
   "catalog": {
     "rule_count": 218,
     "fingerprint": "385c308cc5adba954d8286bf6bb176142ff8f856d21062b8511f6e6cd004492c",
-    "unpaired_status": "manual",
-    "unpaired_rationale": "No deterministic corpus pair yet; qualification owned by plans/015-occurrence-complete-static-analysis.md."
+    "manual_rule_count": 213,
+    "manual_rule_fingerprint": "f489012e5ac70ab424ad776388cc40017d77e74b1e98a056d98ad74c7fa1334d",
+    "manual_rationale": "No deterministic corpus pair yet; qualification owned by plans/015-occurrence-complete-static-analysis.md."
   },
   "cases": [
     {

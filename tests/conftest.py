@@ -73,10 +73,10 @@ def built_wheel(project_root: Path, tmp_path_factory: pytest.TempPathFactory) ->
 def installed_wheel_cli_output(
     built_wheel: Path,
     tmp_path_factory: pytest.TempPathFactory,
-) -> str:
+) -> tuple[str, str]:
     root = tmp_path_factory.mktemp("installed-wheel")
     environment = root / "venv"
-    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
+    venv.EnvBuilder(with_pip=True).create(environment)
     scripts = environment / ("Scripts" if sys.platform == "win32" else "bin")
     python = scripts / ("python.exe" if sys.platform == "win32" else "python")
     cli = scripts / ("uidetox.exe" if sys.platform == "win32" else "uidetox")
@@ -95,7 +95,8 @@ def installed_wheel_cli_output(
         capture_output=True,
         text=True,
     )
-    return completed.stdout.strip()
+    pyvenv_config = (environment / "pyvenv.cfg").read_text(encoding="utf-8")
+    return completed.stdout.strip(), pyvenv_config
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

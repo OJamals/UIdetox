@@ -37,7 +37,7 @@ Install browser support first with:
 
 ```bash
 python -m pip install -e '.[dev,capture]'
-python -m playwright install chromium
+python -m playwright install --with-deps chromium
 ```
 
 Browser tests may skip only when Chromium is absent and must include that reason.
@@ -52,9 +52,10 @@ python -m pytest -q -W error tests/test_release_readiness.py tests/test_update_s
 ```
 
 This gate builds one wheel, checks bundled skill/command/reference/provider
-assets against canonical sources, installs the wheel, and runs its CLI outside
-the checkout. Release CI runs the same suite on Python 3.11–3.13 across Ubuntu
-and Windows before building the upload artifact once.
+assets against canonical sources, installs the wheel in an isolated environment,
+and runs its CLI outside the checkout. Release CI runs the same suite on Python
+3.11–3.13 across Ubuntu and Windows, plus the live browser gate on Ubuntu with
+Python 3.13, before building the upload artifact once.
 
 Audit the active environment:
 
