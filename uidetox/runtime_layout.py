@@ -12,32 +12,7 @@ class RuntimeMeasuredElement(Protocol):
     measurements: dict[str, Any]
 
 
-class RuntimeFinding:
-    """Compatibility constructor returning canonical :class:`Finding` values."""
-
-    def __new__(
-        cls,
-        *,
-        code: str,
-        category: str,
-        severity: str,
-        message: str,
-        metrics: dict[str, Any] | None = None,
-    ) -> Finding:
-        return _runtime_finding(
-            code=code,
-            category=category,
-            severity=severity,
-            message=message,
-            metrics=metrics,
-        )
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> Finding:
-        return Finding.from_dict(value)
-
-
-def _runtime_finding(
+def RuntimeFinding(
     *,
     code: str,
     category: str,
@@ -80,7 +55,7 @@ def _alignment_findings(
     if layout_deviation > 4:
         axis = str(measurements.get("layoutAxis", "cross-axis"))
         findings.append(
-            _runtime_finding(
+            RuntimeFinding(
                 code="runtime-layout-misalignment",
                 category="layout",
                 severity="warning",
@@ -109,7 +84,7 @@ def _alignment_findings(
                 metrics["expected_font_family"] = expected_font
             reasons.append("font family differs from equivalent peer text")
         findings.append(
-            _runtime_finding(
+            RuntimeFinding(
                 code="runtime-font-misalignment",
                 category="typography",
                 severity="warning",
@@ -175,7 +150,7 @@ def _clipping_findings(
                 metrics[f"ancestor_overflow_{_snake_case(logical_side)}_px"] = value
         location = " and ".join(axes) if axes else "the rendered boundary"
         findings.append(
-            _runtime_finding(
+            RuntimeFinding(
                 code=(
                     "runtime-text-truncated" if intentional else "runtime-text-clipped"
                 ),
@@ -194,7 +169,7 @@ def _clipping_findings(
         clipped_by_ancestor and not has_text
     ):
         findings.append(
-            _runtime_finding(
+            RuntimeFinding(
                 code="runtime-component-clipped",
                 category="overflow",
                 severity="error",
@@ -273,7 +248,7 @@ def _spacing_findings(
         and min(present_edge_insets) < 4
     ):
         findings.append(
-            _runtime_finding(
+            RuntimeFinding(
                 code="runtime-text-edge-contact",
                 category="spacing",
                 severity="warning",
@@ -301,7 +276,7 @@ def _spacing_findings(
         minimum = 8.0
         if min(horizontal_padding) < minimum or _padding_is_uneven(horizontal_padding):
             findings.append(
-                _runtime_finding(
+                RuntimeFinding(
                     code="runtime-horizontal-padding",
                     category="spacing",
                     severity="warning",
@@ -333,7 +308,7 @@ def _spacing_findings(
         minimum = 6.0 if is_box_control else 8.0
         if min(vertical_padding) < minimum or _padding_is_uneven(vertical_padding):
             findings.append(
-                _runtime_finding(
+                RuntimeFinding(
                     code="runtime-vertical-padding",
                     category="spacing",
                     severity="warning",
@@ -378,7 +353,7 @@ def _line_spacing_findings(
     if minimum_line_gap is not None:
         metrics["minimum_line_gap_px"] = minimum_line_gap
     return (
-        _runtime_finding(
+        RuntimeFinding(
             code="runtime-line-spacing",
             category="typography",
             severity="error" if line_overlap else "warning",

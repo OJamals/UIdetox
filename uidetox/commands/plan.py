@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score
+from uidetox.findings import current_evidence_hashes, score_current_snapshot
 
 # Effort estimate per tier (minutes)
 _TIER_EFFORT = {"T1": 2, "T2": 8, "T3": 20, "T4": 45}
@@ -223,7 +223,7 @@ def run(args: argparse.Namespace):
         print()
 
     # ---- Score context ----
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     target = config.get("target_score", 95)
     print("  ─── Score Context ───")
     filled = scores["blended_score"] // 5

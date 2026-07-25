@@ -27,7 +27,7 @@ from ..fileset import ProjectFileSet
 from ..tooling import detect_all
 from ..memory import get_patterns, get_notes, get_session, get_last_scan, log_progress
 from ..prompt_safety import render_untrusted_data
-from ..utils import compute_design_score
+from ..findings import current_evidence_hashes, score_current_snapshot
 from ..workflow import run_executable_workflow
 
 
@@ -241,7 +241,7 @@ def run(args: argparse.Namespace):
     print("    When queue is empty:")
     print("    3a. Run `uidetox rescan`        (fresh static analysis)")
     print("    3b. Run `uidetox review`        (subjective quality review)")
-    print("    3c. Run `uidetox review --score <N>`  (record score)")
+    print("    3c. Record A/B/C/D scores with rationale + reviewer")
     print("    3d. Run `uidetox status`        (check blended score)")
     print(f"    3e. Score >= {target}? -> `uidetox finish`")
     print(f"        Score < {target}?  -> back to STAGE 2")
@@ -265,7 +265,7 @@ def run(args: argparse.Namespace):
     # ==================================================================
     # AUTO-PHASE DETECTION: Tell the agent exactly where to start
     # ==================================================================
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     blended = scores["blended_score"]
     queue_size = len(issues)
 

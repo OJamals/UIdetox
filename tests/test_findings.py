@@ -353,6 +353,32 @@ def test_investigative_findings_remain_visible_without_becoming_defects(
     assert "pending_findings" not in {blocker.code for blocker in result.blockers}
 
 
+def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() -> None:
+    review = {
+        "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+        "score": 100,
+        "rationale": "Reviewed every route and state.",
+        "reviewer": "qa-agent",
+        "finding_links": [],
+        "routes": ["/"],
+        "states": ["default"],
+        "viewports": ["desktop"],
+        "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
+    }
+    current = {"source": "new", "map": "m", "runtime": "r"}
+    state = {
+        "issues": [],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": review,
+    }
+    scores = score_current_snapshot(state, evidence_hashes=current)
+    eligibility = evaluate_eligibility(
+        state, EligibilityContext(evidence_hashes=current)
+    )
+    assert scores["subjective_score"] is None
+    assert "stale_review" in {blocker.code for blocker in eligibility.blockers}
+
+
 def test_eligibility_returns_typed_blockers_for_every_finalization_gate(
     tmp_path: Path,
 ) -> None:

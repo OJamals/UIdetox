@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from uidetox.design_context import DesignSettings
+from uidetox.findings import (
+    EligibilityContext,
+    current_evidence_hashes,
+    evaluate_eligibility,
+)
 from uidetox.frontend_map import (
     FRONTEND_MAP_FILE,
     frontend_map_is_fresh,
@@ -28,7 +33,7 @@ from uidetox.redesign import (
     save_redesign_set,
 )
 from uidetox.state import load_config, load_state
-from uidetox.utils import compute_design_score, now_iso
+from uidetox.utils import now_iso
 from uidetox.visual_semantics import project_visual_evidence_status
 
 
@@ -488,22 +493,6 @@ class WorkflowEngine:
                 WAITING_SELECTION,
                 "Select a redesign proposal and rerun with `--proposal-id`.",
             )
-        if phase.id == "subjective_review" and inputs.subjective_score is None:
-            return (
-                WAITING_REVIEW,
-                "Record human/LLM subjective input and rerun with `--review-score`.",
-            )
-        if phase.id in {"status_evaluation", "finish_eligibility"}:
-            fresh = (
-                bool(state["signals"].get("verification_fresh", False))
-                if "semantic_map" in self._executed_this_run
-                else inputs.verification_fresh
-            )
-            if not fresh:
-                return (
-                    WAITING_VERIFICATION,
-                    "Verification evidence is stale or blocked; refresh it before resuming.",
-                )
         return None
 
     def _waiting_after(
@@ -512,25 +501,22 @@ class WorkflowEngine:
         state: dict[str, Any],
         inputs: WorkflowInputs,
     ) -> tuple[str, str] | None:
-        if (
-            phase.id == "issue_planning"
-            and int(state["signals"].get("issues_pending", 0)) > 0
-        ):
-            return (
-                WAITING_AGENT,
-                "Source fixes require an agent; resolve the queued plan, then rerun.",
-            )
         if phase.id == "status_evaluation":
-            score = int(state["signals"].get("blended_score", 0))
-            queue = int(state["signals"].get("issues_pending", 0))
-            if queue > 0 or score < inputs.target_score:
-                return (
-                    WAITING_AGENT,
-                    (
-                        f"Finish gate not met: score={score}/{inputs.target_score}, "
-                        f"issues={queue}. Apply one bounded fix/review cycle, then rerun."
-                    ),
+            eligibility = state["signals"].get("eligibility", {})
+            if isinstance(eligibility, Mapping) and not eligibility.get("eligible"):
+                codes = {
+                    blocker.get("code")
+                    for blocker in eligibility.get("blockers", [])
+                    if isinstance(blocker, Mapping)
+                }
+                waiting = (
+                    WAITING_REVIEW
+                    if codes & {"missing_structured_review", "stale_review"}
+                    else WAITING_VERIFICATION
+                    if codes & {"stale_evidence", "incomplete_qualification"}
+                    else WAITING_AGENT
                 )
+                return waiting, "Finalization blocked: " + ", ".join(sorted(codes))
         return None
 
     def _wait(
@@ -742,7 +728,17 @@ def in_process_adapters() -> WorkflowAdapters:
         )
 
     def subjective_review(context: WorkflowContext) -> AdapterResult:
-        review_command.run(Namespace(score=context.inputs.subjective_score))
+        review_command.run(
+            Namespace(
+                score=context.inputs.subjective_score,
+                dimension_a=None,
+                dimension_b=None,
+                dimension_c=None,
+                dimension_d=None,
+                require_visual_evidence=False,
+                visual_evidence_file=None,
+            )
+        )
         return AdapterResult(
             artifacts={
                 "review_score": f"inline:{context.inputs.subjective_score}",
@@ -752,22 +748,37 @@ def in_process_adapters() -> WorkflowAdapters:
 
     def status(context: WorkflowContext) -> AdapterResult:
         current = load_state()
-        scores = compute_design_score(current)
-        pending = len(current.get("issues", []))
-        return AdapterResult(
-            artifacts={"status": "inline:" + json.dumps(scores, sort_keys=True)},
-            evidence=(
-                f"Blended score {scores['blended_score']}; {pending} pending issue(s)."
+        fresh = (
+            bool(context.state["signals"].get("verification_fresh", False))
+            if "semantic_map" in context.state.get("phases", {})
+            else context.inputs.verification_fresh
+        )
+        eligibility = evaluate_eligibility(
+            current,
+            EligibilityContext(
+                target_score=context.inputs.target_score,
+                verification_fresh=fresh,
+                evidence_hashes=current_evidence_hashes(context.root),
             ),
+        )
+        payload = eligibility.to_dict()
+        scores = payload["score"]
+        return AdapterResult(
+            artifacts={"status": "inline:" + json.dumps(payload, sort_keys=True)},
+            evidence=f"Canonical eligibility: {payload['eligible']}.",
             signals={
                 "blended_score": scores["blended_score"],
-                "issues_pending": pending,
+                "issues_pending": len(current.get("issues", [])),
+                "eligibility": payload,
                 "visual_evidence_state": context.inputs.visual_evidence_state,
                 "visual_evidence_required": (context.inputs.visual_evidence_required),
             },
         )
 
     def finish_eligibility(context: WorkflowContext) -> AdapterResult:
+        eligibility = context.state["signals"].get("eligibility", {})
+        if not isinstance(eligibility, Mapping) or not eligibility.get("eligible"):
+            raise RuntimeError("Canonical finalization eligibility is not satisfied.")
         return AdapterResult(
             artifacts={"finish_eligibility": "inline:verified"},
             evidence=(

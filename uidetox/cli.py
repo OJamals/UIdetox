@@ -435,8 +435,18 @@ def parse_args(args_list=None):
     review_parser.add_argument(
         "--score",
         type=int,
-        help="Store an LLM-assigned subjective design score (0-100)",
+        help="Store legacy scalar input (incomplete; cannot satisfy finalization)",
     )
+    for key, cap in (("a", 40), ("b", 30), ("c", 20), ("d", 10)):
+        review_parser.add_argument(
+            f"--dimension-{key}", type=int, help=f"Structured dimension {key.upper()} (0-{cap})"
+        )
+    review_parser.add_argument("--rationale", help="Evidence-based review rationale")
+    review_parser.add_argument("--reviewer", help="Reviewer identity")
+    review_parser.add_argument("--finding-link", action="append", default=[])
+    review_parser.add_argument("--route", action="append", default=[])
+    review_parser.add_argument("--state", action="append", default=[])
+    review_parser.add_argument("--viewport", action="append", default=[])
     review_parser.add_argument(
         "--require-visual-evidence",
         action="store_true",

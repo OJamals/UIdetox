@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from .state import get_uidetox_dir, load_config, load_state
-from .utils import compute_design_score
+from .findings import score_current_snapshot
 from .visual_semantics import project_visual_evidence_status
 
 
@@ -42,7 +42,7 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
     state = load_state()
     visual_status = project_visual_evidence_status(load_config())
     stamp = _stamp()
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state)
     snapshot = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "trigger": trigger,

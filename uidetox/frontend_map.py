@@ -603,7 +603,11 @@ def map_frontend(
             "viewport": page.viewport.name,
             "selector": element.selector,
             "element": element.name or element.role or element.tag,
-            **finding.to_dict(),
+            **finding.with_runtime_anchor(
+                url=page.url,
+                viewport=page.viewport.name,
+                selector=element.selector,
+            ).to_dict(),
         }
         for page in runtime_pages
         for element in page.elements
@@ -1102,9 +1106,15 @@ def _merge_runtime_evidence(
                         "bounds": element.bounds,
                         "styles": element.styles,
                         "states": element.states,
+                        "scenario": "default",
                         "measurements": element.measurements,
                         "findings": [
-                            finding.to_dict() for finding in element.findings
+                            finding.with_runtime_anchor(
+                                url=page.url,
+                                viewport=page.viewport.name,
+                                selector=element.selector,
+                            ).to_dict()
+                            for finding in element.findings
                         ],
                     },
                 )

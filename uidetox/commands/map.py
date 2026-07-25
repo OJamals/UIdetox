@@ -6,8 +6,10 @@ from collections import Counter
 from pathlib import Path
 
 from uidetox.frontend_map import map_frontend, save_frontend_map
+from uidetox.findings import coerce_finding
+from uidetox.project_map import ProjectMap
 from uidetox.runtime_observer import observe_frontend
-from uidetox.state import get_project_root, get_uidetox_dir, load_config
+from uidetox.state import add_issues, get_project_root, get_uidetox_dir, load_config
 
 
 def run(args: argparse.Namespace) -> None:
@@ -46,6 +48,13 @@ def run(args: argparse.Namespace) -> None:
         frontend_map,
         Path(output_arg) if output_arg else None,
     )
+    runtime_findings = [
+        coerce_finding(item)
+        for item in frontend_map.evidence.get("runtime_findings", [])
+        if isinstance(item, dict)
+    ]
+    contract_findings = ProjectMap.from_dict(frontend_map.project_map).findings
+    queued = add_issues([*runtime_findings, *contract_findings])
 
     if getattr(args, "json", False):
         print(json.dumps(frontend_map.to_dict(), indent=2, sort_keys=True))
@@ -62,6 +71,7 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Actions     : {counts['action']}")
     print(f"  Data sources: {counts['data']}")
     print(f"  Artifact    : {output_path}")
+    print(f"  Queued      : {queued} current finding(s)")
     if frontend_map.evidence.get("runtime_observed"):
         viewports = ", ".join(frontend_map.evidence.get("runtime_viewports", []))
         print(

@@ -49,7 +49,8 @@ def test_status_json_exposes_visual_evidence(
     )
     monkeypatch.setattr(status, "load_state", _state)
     monkeypatch.setattr(status, "load_config", lambda: {})
-    monkeypatch.setattr(status, "get_session", lambda: None)
+    monkeypatch.setattr(status, "_git_context", lambda: ("main", False))
+    monkeypatch.setattr(status, "current_verification_fresh", lambda: False)
     monkeypatch.setattr(
         status,
         "project_visual_evidence_status",
@@ -65,6 +66,10 @@ def test_status_json_exposes_visual_evidence(
     assert (
         payload["visual_evidence"]["top_changed_regions"][0]["region_id"] == "primary"
     )
+    assert "eligibility" in payload
+    assert "incomplete_qualification" in {
+        blocker["code"] for blocker in payload["eligibility"]["blockers"]
+    }
 
 
 def test_status_required_visual_evidence_gate_exits_nonzero(
@@ -81,6 +86,8 @@ def test_status_required_visual_evidence_gate_exits_nonzero(
     )
     monkeypatch.setattr(status, "load_state", _state)
     monkeypatch.setattr(status, "load_config", lambda: {})
+    monkeypatch.setattr(status, "_git_context", lambda: ("main", False))
+    monkeypatch.setattr(status, "current_verification_fresh", lambda: False)
     monkeypatch.setattr(
         status,
         "project_visual_evidence_status",

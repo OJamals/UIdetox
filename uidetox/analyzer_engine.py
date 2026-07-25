@@ -130,6 +130,11 @@ def _static_finding(
         },
         display_excerpt=excerpt,
         legacy={"command": str(candidate.get("command", ""))},
+        extensions={
+            key: candidate[key]
+            for key in ("credential_class", "evidence_fingerprint")
+            if key in candidate
+        },
     )
 
 

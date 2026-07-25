@@ -253,7 +253,6 @@ def test_skip_verify_does_not_bypass_finding_verifier(tmp_path, monkeypatch):
     source.write_text("Unlock the power", encoding="utf-8")
     finding = _static(source)
     save_state({"issues": [finding], "resolved": [], "stats": {}})
-    monkeypatch.setattr(resolve, "load_config", lambda: {})
     with pytest.raises(SystemExit):
         resolve.run(argparse.Namespace(issue_id=finding.id, note="fixed", skip_verify=True))
     assert len(load_state()["issues"]) == 1

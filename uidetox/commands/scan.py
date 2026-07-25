@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import uuid
 from uidetox.analyzer import analyze_directory, RULES
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.frontend_map import map_frontend
@@ -28,8 +27,7 @@ from uidetox.state import (
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
 from uidetox.memory import save_scan_summary, save_session, log_progress
-from uidetox.prompt_safety import sanitize_untrusted_data
-from uidetox.utils import compute_design_score
+from uidetox.findings import coerce_finding, current_evidence_hashes, score_current_snapshot
 
 
 # Categories auto-covered by static analyzer, mapped to rule IDs
@@ -489,16 +487,28 @@ def run(args: argparse.Namespace):
         design_variance=variance,
         target_files=since_targets,
     )
-    slop_issues = sanitize_untrusted_data(slop_issues)
+    slop_issues = [coerce_finding(issue) for issue in slop_issues]
+
+    parity = None
+    has_fullstack = bool(backends or databases or apis)
+    if has_fullstack:
+        try:
+            parity = ProjectMap.from_dict(
+                map_frontend(project_root, Path(scan_path).resolve()).project_map
+            )
+        except (OSError, TypeError, ValueError) as error:
+            if table_output:
+                print(f"  Full-stack operation parity unavailable: {error}")
+    findings = [*slop_issues, *(parity.findings if parity else ())]
 
     # JSON output: print all issues as JSON and exit early
     if json_output:
-        print(json.dumps(slop_issues, indent=2))
+        print(json.dumps([finding.to_dict() for finding in findings], indent=2))
         return
 
     # GitHub Actions annotation output
     if github_output:
-        for issue in slop_issues:
+        for issue in findings:
             line = issue.get("line", 1)
             col = issue.get("column", 1)
             filepath = issue.get("file", "")
@@ -508,28 +518,15 @@ def run(args: argparse.Namespace):
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
 
-    pending_issues = []
-    triggered_rules: set[str] = set()
-    for issue in slop_issues:
-        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
-            issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
-            new_issue = {
-                "id": issue_id,
-                "rule_id": issue.get("id"),
-                "file": issue["file"],
-                "tier": issue["tier"],
-                "issue": issue["issue"],
-                "command": issue["command"],
-            }
-            for key in ("line", "column", "snippet", "credential_class", "evidence_fingerprint"):
-                if key in issue:
-                    new_issue[key] = issue[key]
-            pending_issues.append(new_issue)
-            if rule_id := issue.get("id"):
-                triggered_rules.add(rule_id)
-
-    pending_issues = sanitize_untrusted_data(pending_issues)
-    queued_count = add_issues(pending_issues)
+    pending_issues = [
+        issue
+        for issue in findings
+        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns)
+    ]
+    triggered_rules = {issue.detector_id for issue in findings}
+    queued_count = add_issues(
+        pending_issues, qualified_complete=since_targets is None
+    )
 
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
@@ -554,16 +551,9 @@ def run(args: argparse.Namespace):
     print(f"  Need audit: {', '.join(manual_list)}")
 
     # Full-stack integration checks
-    backends = tooling.get("backend", [])
-    databases = tooling.get("database", [])
-    apis = tooling.get("api", [])
-    has_fullstack = bool(backends or databases or apis)
     if has_fullstack:
         print()
-        try:
-            parity = ProjectMap.from_dict(
-                map_frontend(project_root, Path(scan_path).resolve()).project_map
-            )
+        if parity is not None:
             counts = parity.counts
             print(
                 "  Full-stack operation parity: "
@@ -576,119 +566,7 @@ def run(args: argparse.Namespace):
                 "  Evidence scope: static HTTP routes and schema references only; "
                 "auth, UI error states, and business equivalence remain unverified."
             )
-        except (OSError, TypeError, ValueError) as error:
-            print(f"  Full-stack operation parity unavailable: {error}")
-
-    # ===========================================================
-    # PART 2: SUBJECTIVE ANALYSIS (LLM-driven design review)
-    # ===========================================================
-    print()
-    print("=" * 58)
-    print(" PART 2: SUBJECTIVE ANALYSIS (LLM design review)")
-    print("=" * 58)
-    print()
-    print("  The mechanical analysis above INFORMS this subjective review.")
-    print("  Read every frontend file. Evaluate the holistic design quality.")
-    print()
-
-    # ---- VISUAL DESIGN & AESTHETICS (40 pts) ----
-    print("  A. VISUAL DESIGN & AESTHETICS (0-40)")
-    print("  " + "-" * 50)
-    print("    STYLING & ELEGANCE (0-15)")
-    print("      Surface textures, color relationships, shadow/border craft.")
-    print("      Does it feel polished or rough? Premium or cheap?")
-    print("      Is there visual rhythm — intentional contrast between dense and airy?")
-    print()
-    print("    TYPOGRAPHY (0-10)")
-    print("      Font choice, weight spectrum, scale, kerning, line-height.")
-    print("      Is there a clear type hierarchy (display, body, caption)?")
-    print("      Are weights intentional (500/600, not just 400/700)?")
-    print()
-    print("    LAYOUT & SPATIAL DESIGN (0-15)")
-    print("      Grid structure, whitespace, alignment, responsive behavior.")
-    print("      Is the layout compositional or just stacked divs?")
-    print("      Does spacing create grouping and hierarchy, not just padding?")
-    print()
-
-    # ---- DESIGN SYSTEM & COHERENCE (30 pts) ----
-    print("  B. DESIGN SYSTEM & COHERENCE (0-30)")
-    print("  " + "-" * 50)
-    print("    CONSISTENCY (0-15)")
-    print("      Unified tokens, spacing scale, color palette, component patterns.")
-    print("      Does the same element look the same everywhere?")
-    print("      Would a new developer know the design system from reading the code?")
-    print()
-    print("    IDENTITY (0-15)")
-    print("      Does this feel designed, not generated?")
-    print("      Is there an intentional aesthetic point-of-view?")
-    print(
-        "      Would someone ask 'what tool made this?' (bad) or 'who designed this?' (good)"
-    )
-    print()
-
-    # ---- INTERACTION & CRAFT (20 pts) ----
-    print("  C. INTERACTION & CRAFT (0-20)")
-    print("  " + "-" * 50)
-    print("    STATES & MICRO-INTERACTIONS (0-10)")
-    print("      Hover, focus, active, disabled, loading, empty, error states.")
-    print("      Transitions, animations, feedback on user actions.")
-    print("      Does the interface feel alive and responsive to input?")
-    print()
-    print("    EDGE CASES & POLISH (0-10)")
-    print("      Error boundaries, empty states, skeleton screens, truncation.")
-    print("      Graceful degradation, mobile edge cases, keyboard navigation.")
-    print("      Does the squint test pass — clear hierarchy at a glance?")
-    print()
-
-    # ---- ARCHITECTURE & COHERENCE (10 pts) ----
-    print("  D. ARCHITECTURE & CODE QUALITY (0-10)")
-    print("  " + "-" * 50)
-    print("    Component structure, file organization, naming conventions.")
-    print("    Separation of concerns (logic/presentation/data).")
-    print("    Reusability, composability, prop/API surface area.")
-    if has_fullstack:
-        print("    DTO alignment: do frontend types match backend schemas?")
-        print("    Error surfacing: do API errors appear as meaningful UI feedback?")
-        print("    Data flow: is fetching/caching/mutation coherent across the stack?")
-    print()
-
-    # Dial-aware review guidance (compact)
-    dial_notes = []
-    if variance > 4:
-        dial_notes.append(
-            f"VARIANCE={variance}: centered heroes BANNED, push asymmetric layouts"
-        )
-    if variance > 7:
-        dial_notes.append(
-            f"VARIANCE={variance}: masonry, overlapping elements, offset margins"
-        )
-    if intensity > 5:
-        dial_notes.append(
-            f"MOTION={intensity}: entrance animations, staggered lists required"
-        )
-    if intensity > 7:
-        dial_notes.append(
-            f"MOTION={intensity}: scroll-triggered reveals, spring physics"
-        )
-    if density < 5:
-        dial_notes.append(f"DENSITY={density}: art gallery mode, generous whitespace")
-    if density > 7:
-        dial_notes.append(
-            f"DENSITY={density}: cockpit mode, dense data, compact spacing"
-        )
-    if dial_notes:
-        print("  Dial constraints for this review:")
-        for note in dial_notes:
-            print(f"    -> {note}")
-        print()
-
-    print("  For each new issue found, queue it:")
-    print(
-        '    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
-    )
-    print()
-    print("  When review is complete, record your subjective score:")
-    print("    uidetox review --score <N>   (0-100, sum of A+B+C+D above)")
+    print("  Run `uidetox review` for the evidence-bound A/B/C/D review brief.")
     print()
 
     # ===========================================================
@@ -706,7 +584,7 @@ def run(args: argparse.Namespace):
 
     # Compute current score and show target check
     state = load_state()
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
     queue_size = len(state.get("issues", []))
 
@@ -729,7 +607,7 @@ def run(args: argparse.Namespace):
             print("  -> Run `uidetox next` to start fixing.")
         else:
             print(f"  Queue empty but score < {target} -> subjective review needed.")
-            print("  -> Complete Part 2 above, then `uidetox review --score <N>`")
+            print("  -> Run `uidetox review`, then record a structured review.")
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
 

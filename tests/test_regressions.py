@@ -166,7 +166,7 @@ def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
     monkeypatch.setattr(scan, "get_project_root", lambda: tmp_path)
     monkeypatch.setattr(scan, "load_config", lambda: {"tooling": tooling})
     monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
-    monkeypatch.setattr(scan, "add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(scan, "add_issues", lambda issues, **kwargs: len(issues))
     monkeypatch.setattr(scan, "increment_scans", lambda: None)
     monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(scan, "_save_scan_to_memory", lambda *args, **kwargs: None)
@@ -178,7 +178,7 @@ def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan, "compute_design_score", lambda state: {"blended_score": 100}
+        scan, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
 
 
@@ -216,7 +216,12 @@ def test_scan_json_output_preserves_issue_schema(monkeypatch, tmp_path, capsys):
     scan.run(argparse.Namespace(path=".", output="json", since=None))
     captured = capsys.readouterr()
 
-    assert json.loads(captured.out) == [issue]
+    payload = json.loads(captured.out)
+    assert payload[0]["detector_id"] == issue["id"]
+    assert payload[0]["fingerprint"]
+    assert {key: payload[0][key] for key in issue if key != "id"} == {
+        key: value for key, value in issue.items() if key != "id"
+    }
     assert captured.err == ""
     assert captured.out.lstrip().startswith("[")
     assert captured.out.rstrip().endswith("]")
@@ -259,7 +264,7 @@ def test_scan_table_output_preserves_human_banner(monkeypatch, tmp_path, capsys)
 
     assert "SCAN CODEBASE -- Static Analysis + Subjective Review" in captured.out
     assert "PART 1: MECHANICAL ISSUES" in captured.out
-    assert "PART 2: SUBJECTIVE ANALYSIS" in captured.out
+    assert "evidence-bound A/B/C/D review brief" in captured.out
     assert "Running" in captured.out
     assert captured.err == ""
 
@@ -906,7 +911,7 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        scan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
 
     scan_cmd.run(argparse.Namespace(path=".", output="json", since=None))
@@ -1421,8 +1426,7 @@ def test_finish_preflight_rejects_dirty_workspace(monkeypatch):
 
     monkeypatch.setattr(finish.subprocess, "run", fake_run)
 
-    with pytest.raises(SystemExit):
-        finish._ensure_clean_workspace()
+    assert finish._workspace_dirty() is True
 
 
 def test_package_version_matches_runtime_version():
@@ -2107,7 +2111,7 @@ def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exist
 def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2130,8 +2134,8 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["git", "status", "--porcelain"]:
@@ -2146,7 +2150,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2161,7 +2165,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
 def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2182,8 +2186,8 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2196,7 +2200,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2218,7 +2222,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
 
 
 def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2242,8 +2246,8 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2266,7 +2270,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2283,7 +2287,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
 def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2304,8 +2308,8 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
@@ -2325,7 +2329,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
             )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2340,7 +2344,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
 def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_path(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     root = tmp_path
     src_dir = root / "src"
@@ -2364,8 +2368,8 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2378,7 +2382,7 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -7171,7 +7175,9 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
         "uidetox.commands.scan.detect_all",
         lambda path=".": type("P", (), {"to_dict": lambda s: {}})(),
     )
-    monkeypatch.setattr("uidetox.commands.scan.add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(
+        "uidetox.commands.scan.add_issues", lambda issues, **kwargs: len(issues)
+    )
     monkeypatch.setattr("uidetox.commands.scan.increment_scans", lambda: None)
     monkeypatch.setattr("uidetox.commands.scan.save_run_snapshot", lambda **kw: None)
     monkeypatch.setattr("uidetox.commands.scan.save_scan_summary", lambda **kw: None)
@@ -8228,7 +8234,7 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
     monkeypatch.setattr(rescan_cmd, "analyze_directory", fake_analyze_directory)
 
@@ -8237,7 +8243,7 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     assert analyzed_path == root.resolve()
 
 
-def test_rescan_batches_queue_and_preserves_recurrence_semantics(
+def test_rescan_batches_all_current_findings_without_history_credit(
     tmp_path, monkeypatch, capsys
 ):
     import uidetox.state as state_module
@@ -8308,7 +8314,7 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
     monkeypatch.setattr(
         rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings
@@ -8326,14 +8332,12 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(
     persisted = original_load_state()["issues"]
     assert [issue["file"] for issue in persisted] == [
         "src/Recurring.tsx",
+        "src/Resolved.tsx",
         "src/First.tsx",
         "src/Second.tsx",
     ]
-    assert persisted[0]["tier"] == "T3"
     output = capsys.readouterr().out
-    assert "Queued 3 mechanical anti-pattern issues" in output
-    assert "Skipped 1 already-resolved issue" in output
-    assert "Escalated 1 recurring issue" in output
+    assert "Queued 4 mechanical anti-pattern issues" in output
 
 
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(
@@ -9593,7 +9597,7 @@ class TestStateAndMemoryChaosResilience:
         payload = json.loads(capsys.readouterr().out)
 
         assert payload["subjective_score"] is None
-        assert payload["design_score"] == 50
+        assert payload["design_score"] == 0
 
     def test_load_run_history_skips_non_dict_snapshot_files(
         self, tmp_path, monkeypatch

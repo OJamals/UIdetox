@@ -20,6 +20,7 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
+from uidetox.findings import Finding
 from uidetox.runtime_layout import RuntimeFinding, detect_runtime_findings
 from uidetox.utils import now_iso
 
@@ -58,7 +59,7 @@ class RuntimeElement:
     styles: dict[str, str]
     states: dict[str, Any] = field(default_factory=dict)
     measurements: dict[str, Any] = field(default_factory=dict)
-    findings: tuple[RuntimeFinding, ...] = ()
+    findings: tuple[Finding, ...] = ()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeElement":
@@ -78,7 +79,7 @@ class RuntimeElement:
             states=dict(states),
             measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
             findings=tuple(
-                RuntimeFinding.from_dict(dict(item))
+                Finding.from_dict(dict(item))
                 for item in value.get("findings", [])
                 if isinstance(item, dict)
             ),

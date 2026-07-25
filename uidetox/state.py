@@ -1,12 +1,10 @@
 """State and Config Management for UIdetox."""
-
 import contextlib
 import json
 import os
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
-
 from uidetox.findings import (
     FINDING_SCHEMA_VERSION,
     Finding,
@@ -15,19 +13,15 @@ from uidetox.findings import (
 )
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
-
 try:
     import fcntl as _fcntl
-
     _HAS_FLOCK = True
 except ImportError:
     _HAS_FLOCK = False  # Windows — locking is best-effort only
 
-
 @contextlib.contextmanager
 def _state_lock():
     """Advisory POSIX file lock to serialize concurrent state mutations.
-
     On platforms without fcntl (Windows), this is a no-op — concurrent
     writes are still possible but won't crash.
     """
@@ -42,7 +36,6 @@ def _state_lock():
             yield
         finally:
             _fcntl.flock(lf.fileno(), _fcntl.LOCK_UN)
-
 
 UIDETOX_DIR = ".uidetox"
 CONFIG_FILE = "config.json"
@@ -60,7 +53,6 @@ _PROJECT_ROOT_MARKERS = (
     "setup.cfg",
 )
 
-
 def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path | None:
     """Return the nearest ancestor containing any marker file or directory."""
     current = start
@@ -71,61 +63,48 @@ def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path |
             return None
         current = current.parent
 
-
 def get_project_root() -> Path:
     """Find the project root from the current working directory.
-
     Preference order:
     1. Existing `.uidetox` ancestor (persisted project state already established)
     2. Nearest git/project root marker ancestor for cold starts from subdirectories
     3. Current working directory as a last resort
     """
     cwd = Path.cwd().resolve()
-
     uidetox_root = _find_ancestor_with_markers(cwd, (UIDETOX_DIR,))
     if uidetox_root is not None:
         return uidetox_root
-
     git_root = _find_ancestor_with_markers(cwd, (".git",))
     if git_root is not None:
         return git_root
-
     project_root = _find_ancestor_with_markers(cwd, _PROJECT_ROOT_MARKERS)
     if project_root is not None:
         return project_root
-
     return cwd
-
 
 def get_uidetox_dir() -> Path:
     return get_project_root() / UIDETOX_DIR
-
 
 def ensure_uidetox_dir():
     d = get_uidetox_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-
 def _now_iso() -> str:
     return now_iso()
 
-
 def _is_numeric_config_value(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
 
 def _normalize_counter(value: object) -> int:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return int(value)
     return 0
 
-
 def _normalize_bounded_score(value: object) -> int | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return max(0, min(100, int(value)))
     return None
-
 
 def _normalize_issue_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
@@ -136,34 +115,27 @@ def _normalize_issue_collection(value: object) -> list[dict]:
         if isinstance(issue, (Finding, dict))
     ]
 
-
 def _normalize_subjective_history_entry(entry: object) -> dict | None:
     if not isinstance(entry, dict):
         return None
-
     score = _normalize_bounded_score(entry.get("score"))
     if score is None:
         return None
-
     normalized = dict(entry)
     timestamp = entry.get("timestamp")
     normalized["score"] = score
     normalized["timestamp"] = timestamp if isinstance(timestamp, str) else ""
     return normalized
 
-
 def _normalize_subjective_state(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
-
     normalized = dict(value)
-
     score = _normalize_bounded_score(value.get("score"))
     if score is None:
         normalized.pop("score", None)
     else:
         normalized["score"] = score
-
     history = value.get("history")
     if not isinstance(history, list):
         normalized["history"] = []
@@ -174,19 +146,15 @@ def _normalize_subjective_state(value: object) -> dict:
             if clean_entry is not None:
                 normalized_history.append(clean_entry)
         normalized["history"] = normalized_history
-
     return normalized
-
 
 def _normalize_tool_entry(tool: object) -> dict | None:
     if not isinstance(tool, dict):
         return None
-
     name = tool.get("name")
     run_cmd = tool.get("run_cmd")
     if not isinstance(name, str) or not isinstance(run_cmd, str):
         return None
-
     normalized = {"name": name, "run_cmd": run_cmd}
     config_file = tool.get("config_file")
     if isinstance(config_file, str):
@@ -196,11 +164,9 @@ def _normalize_tool_entry(tool: object) -> dict | None:
         normalized["fix_cmd"] = fix_cmd
     return normalized
 
-
 def _normalize_tool_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-
     normalized: list[dict] = []
     for entry in value:
         clean_entry = _normalize_tool_entry(entry)
@@ -208,27 +174,21 @@ def _normalize_tool_collection(value: object) -> list[dict]:
             normalized.append(clean_entry)
     return normalized
 
-
 def _normalize_tooling_config(tooling: object) -> dict:
     if not isinstance(tooling, dict):
         return {}
-
     normalized = dict(tooling)
     for key in ("typescript", "linter", "formatter"):
         if key in normalized:
             normalized[key] = _normalize_tool_entry(normalized[key])
-
     for key in ("frontend", "backend", "database", "api"):
         if key in normalized:
             normalized[key] = _normalize_tool_collection(normalized[key])
-
     if "package_manager" in normalized and not isinstance(
         normalized["package_manager"], str
     ):
         normalized["package_manager"] = None
-
     return normalized
-
 
 def load_config() -> dict:
     config_path = get_uidetox_dir() / CONFIG_FILE
@@ -240,18 +200,14 @@ def load_config() -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return default_config.copy()
-
     if not isinstance(data, dict):
         return default_config.copy()
-
     # Ensure numeric dials have correct types to prevent TypeError in comparisons.
     for key, default in default_config.items():
         if not _is_numeric_config_value(data.get(key)):
             data[key] = default
-
     if not _is_numeric_config_value(data.get("target_score")):
         data["target_score"] = 95
-
     if "tooling" in data:
         data["tooling"] = _normalize_tooling_config(data["tooling"])
     if "ignore_patterns" in data and not isinstance(data["ignore_patterns"], list):
@@ -270,9 +226,7 @@ def load_config() -> dict:
         data["auto_commit"] = False
     if "dev_server" in data and not isinstance(data["dev_server"], str):
         data.pop("dev_server", None)
-
     return data
-
 
 def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
     d = ensure_uidetox_dir()
@@ -284,10 +238,8 @@ def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
         os.fsync(f.fileno())
     os.replace(tmp_path, target)
 
-
 def save_config(config: dict):
     _save_json(config, CONFIG_FILE, "config_")
-
 
 def load_state() -> dict:
     """
@@ -307,7 +259,6 @@ def load_state() -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         data = _default_state()
-
     # Validate expected types — a corrupted or hand-edited state.json can contain
     # wrong types for critical fields, causing cryptic AttributeError crashes downstream.
     if not isinstance(data, dict):
@@ -318,7 +269,6 @@ def load_state() -> dict:
         data["resolved"] = _normalize_issue_collection(data.get("resolved"))
         data["diff_baseline"] = _normalize_issue_collection(data.get("diff_baseline"))
         data["subjective"] = _normalize_subjective_state(data.get("subjective"))
-
         stats = data.get("stats")
         if not isinstance(stats, dict):
             stats = {"total_found": 0, "total_resolved": 0, "scans_run": 0}
@@ -328,7 +278,6 @@ def load_state() -> dict:
             stats["total_resolved"] = _normalize_counter(stats.get("total_resolved"))
             stats["scans_run"] = _normalize_counter(stats.get("scans_run"))
         data["stats"] = stats
-
     # Ensure new fields exist for backwards compat
     data.setdefault("diff_baseline", [])
     data.setdefault("resolved", [])
@@ -338,7 +287,6 @@ def load_state() -> dict:
     data.setdefault("current_snapshot", {"qualified_coverage": 0.0})
     data.setdefault("overrides", [])
     return sanitize_untrusted_data(data)
-
 
 def _default_state() -> dict:
     return {
@@ -353,14 +301,12 @@ def _default_state() -> dict:
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }
 
-
 def save_state(state: dict):
     canonical = dict(state)
     canonical["schema_version"] = FINDING_SCHEMA_VERSION
     for key in ("issues", "resolved", "diff_baseline"):
         canonical[key] = _normalize_issue_collection(canonical.get(key))
     _save_json(sanitize_untrusted_data(canonical), STATE_FILE, "state_")
-
 
 def get_issue(issue_id: str) -> dict | None:
     state = load_state()
@@ -369,53 +315,32 @@ def get_issue(issue_id: str) -> dict | None:
             return item
     return None
 
-
 def remove_issue(
     issue_id: str,
     note: str = "",
     *,
     verification: VerificationResult | None = None,
 ) -> bool:
-    if verification is None or verification.outcome != "absent":
-        return False
-    with _state_lock():
-        state = load_state()
-        original_len = len(state.get("issues", []))
-        removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
-        state["issues"] = [
-            i for i in state.get("issues", []) if i.get("id") != issue_id
-        ]
-        if len(state["issues"]) < original_len:
-            # Track resolved issues
-            for r in removed:
-                r["status"] = "verified_resolved"
-                r["last_verification"] = verification.to_dict()
-                r["resolved_at"] = _now_iso()
-                if note:
-                    r["note"] = note
-                state.setdefault("resolved", []).append(r)
-            state.setdefault("stats", {})
-            state["stats"]["total_resolved"] = state["stats"].get(
-                "total_resolved", 0
-            ) + len(removed)
-            save_state(state)
-            return True
-        return False
-
+    return bool(
+        verification
+        and batch_remove_issues(
+            [issue_id], note=note, verifications={issue_id: verification}
+        )
+    )
 
 def issue_dedup_key(issue: dict) -> str:
     """Return a stable key for detecting duplicate pending issues."""
     return coerce_finding(issue).fingerprint
 
-
-def add_issues(issues: Iterable[Finding | dict]) -> int:
+def add_issues(
+    issues: Iterable[Finding | dict], *, qualified_complete: bool | None = None
+) -> int:
     """Add unique pending issues in one locked persistence transaction."""
     with _state_lock():
         state = load_state()
         pending = state.setdefault("issues", [])
         dedup_keys = {issue_dedup_key(existing) for existing in pending}
         accepted_count = 0
-
         for issue in issues:
             finding = coerce_finding(issue)
             new_key = finding.fingerprint
@@ -429,10 +354,13 @@ def add_issues(issues: Iterable[Finding | dict]) -> int:
             pending.append(payload)
             dedup_keys.add(new_key)
             accepted_count += 1
-
-        if accepted_count == 0:
+        if qualified_complete is not None:
+            state["current_snapshot"] = {
+                "qualified_coverage": 1.0 if qualified_complete else 0.0,
+                "scanned_at": _now_iso(),
+            }
+        if accepted_count == 0 and qualified_complete is None:
             return 0
-
         state.setdefault("stats", {})
         state["stats"]["total_found"] = (
             state["stats"].get("total_found", 0) + accepted_count
@@ -440,10 +368,8 @@ def add_issues(issues: Iterable[Finding | dict]) -> int:
         save_state(state)
         return accepted_count
 
-
 def add_issue(issue: Finding | dict) -> bool:
     return add_issues((issue,)) == 1
-
 
 def increment_scans():
     """Track number of scans run."""
@@ -454,14 +380,12 @@ def increment_scans():
         state["last_scan"] = _now_iso()
         save_state(state)
 
-
 def clear_issues():
     """Clear all pending issues (used by rescan)."""
     with _state_lock():
         state = load_state()
         state["issues"] = []
         save_state(state)
-
 
 def batch_remove_issues(
     issue_ids: list[str],
@@ -470,11 +394,9 @@ def batch_remove_issues(
     verifications: dict[str, VerificationResult] | None = None,
 ) -> list[dict]:
     """Remove multiple issues atomically in a single state update.
-
     Args:
         issue_ids: List of issue IDs to resolve.
         note: Resolution note applied to all issues.
-
     Returns:
         List of removed issue dicts (empty if none found).
     """
@@ -494,7 +416,6 @@ def batch_remove_issues(
         state["issues"] = [
             i for i in state.get("issues", []) if i.get("id") not in id_set
         ]
-
         for r in removed:
             verification = verifications[r["id"]]
             r["status"] = "verified_resolved"
@@ -503,14 +424,12 @@ def batch_remove_issues(
             if note:
                 r["note"] = note
             state.setdefault("resolved", []).append(r)
-
         state.setdefault("stats", {})
         state["stats"]["total_resolved"] = state["stats"].get(
             "total_resolved", 0
         ) + len(removed)
         save_state(state)
         return removed
-
 
 def record_verification_override(
     issue_ids: list[str],
