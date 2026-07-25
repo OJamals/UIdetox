@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
+from uidetox.findings import FINDING_SCHEMA_VERSION, Finding, coerce_finding
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
 
@@ -124,7 +125,11 @@ def _normalize_bounded_score(value: object) -> int | None:
 def _normalize_issue_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-    return [issue for issue in value if isinstance(issue, dict)]
+    return [
+        coerce_finding(issue).to_dict()
+        for issue in value
+        if isinstance(issue, (Finding, dict))
+    ]
 
 
 def _normalize_subjective_history_entry(entry: object) -> dict | None:
@@ -303,6 +308,7 @@ def load_state() -> dict:
     if not isinstance(data, dict):
         data = _default_state()
     else:
+        data["schema_version"] = FINDING_SCHEMA_VERSION
         data["issues"] = _normalize_issue_collection(data.get("issues"))
         data["resolved"] = _normalize_issue_collection(data.get("resolved"))
         data["diff_baseline"] = _normalize_issue_collection(data.get("diff_baseline"))
@@ -323,22 +329,32 @@ def load_state() -> dict:
     data.setdefault("resolved", [])
     data.setdefault("subjective", {})
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
+    data.setdefault("schema_version", FINDING_SCHEMA_VERSION)
+    data.setdefault("current_snapshot", {"qualified_coverage": 1.0})
+    data.setdefault("overrides", [])
     return sanitize_untrusted_data(data)
 
 
 def _default_state() -> dict:
     return {
+        "schema_version": FINDING_SCHEMA_VERSION,
         "last_scan": None,
         "diff_baseline": [],
         "issues": [],
         "resolved": [],
         "subjective": {},
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "overrides": [],
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }
 
 
 def save_state(state: dict):
-    _save_json(sanitize_untrusted_data(state), STATE_FILE, "state_")
+    canonical = dict(state)
+    canonical["schema_version"] = FINDING_SCHEMA_VERSION
+    for key in ("issues", "resolved", "diff_baseline"):
+        canonical[key] = _normalize_issue_collection(canonical.get(key))
+    _save_json(sanitize_untrusted_data(canonical), STATE_FILE, "state_")
 
 
 def get_issue(issue_id: str) -> dict | None:
@@ -375,12 +391,10 @@ def remove_issue(issue_id: str, note: str = "") -> bool:
 
 def issue_dedup_key(issue: dict) -> str:
     """Return a stable key for detecting duplicate pending issues."""
-    return "::".join(
-        str(issue.get(field, "")).strip() for field in ("file", "issue", "command")
-    )
+    return coerce_finding(issue).fingerprint
 
 
-def add_issues(issues: Iterable[dict]) -> int:
+def add_issues(issues: Iterable[Finding | dict]) -> int:
     """Add unique pending issues in one locked persistence transaction."""
     with _state_lock():
         state = load_state()
@@ -389,11 +403,16 @@ def add_issues(issues: Iterable[dict]) -> int:
         accepted_count = 0
 
         for issue in issues:
-            new_key = issue_dedup_key(issue)
+            finding = coerce_finding(issue)
+            new_key = finding.fingerprint
             if new_key in dedup_keys:
                 continue
-            issue["created_at"] = _now_iso()
-            pending.append(issue)
+            created_at = _now_iso()
+            if isinstance(issue, dict):
+                issue["created_at"] = created_at
+            payload = finding.to_dict()
+            payload["created_at"] = created_at
+            pending.append(payload)
             dedup_keys.add(new_key)
             accepted_count += 1
 
@@ -408,7 +427,7 @@ def add_issues(issues: Iterable[dict]) -> int:
         return accepted_count
 
 
-def add_issue(issue: dict) -> bool:
+def add_issue(issue: Finding | dict) -> bool:
     return add_issues((issue,)) == 1
 
 
