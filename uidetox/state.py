@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
+from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
 
 try:
@@ -322,7 +323,7 @@ def load_state() -> dict:
     data.setdefault("resolved", [])
     data.setdefault("subjective", {})
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
-    return data
+    return sanitize_untrusted_data(data)
 
 
 def _default_state() -> dict:
@@ -337,7 +338,7 @@ def _default_state() -> dict:
 
 
 def save_state(state: dict):
-    _save_json(state, STATE_FILE, "state_")
+    _save_json(sanitize_untrusted_data(state), STATE_FILE, "state_")
 
 
 def get_issue(issue_id: str) -> dict | None:

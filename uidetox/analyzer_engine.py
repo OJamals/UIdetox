@@ -7,6 +7,7 @@ from uidetox.analyzer_ast import _analyze_ast, has_ast_for
 from uidetox.analyzer_custom import _CUSTOM_CHECK_HANDLERS, _analyze_component_layout
 from uidetox.analyzer_project import reconcile_project_issues
 from uidetox.fileset import ProjectFileSet, find_project_root
+from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.rule_registry import ANALYZER_RULES as RULES
 from uidetox.source_facts import SourceFacts
 
@@ -50,16 +51,19 @@ def _analyze_rule(
                 else ""
             )
             issues.append(
-                {
-                    "id": rule["id"],
-                    "file": str(filepath.resolve()),
-                    "tier": rule["tier"],
-                    "issue": rule["description"],
-                    "command": rule["command"],
-                    "line": line_number,
-                    "column": col,
-                    "snippet": snippet,
-                }
+                sanitize_untrusted_data(
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                        "line": line_number,
+                        "column": col,
+                        "snippet": snippet,
+                    },
+                    matched_evidence=m.group(0),
+                )
             )
     return issues
 

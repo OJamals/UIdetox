@@ -121,15 +121,15 @@ def run(args: argparse.Namespace):
                 tier = new_tier
                 escalated_count += 1
 
-        issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
         new_issue = {
-            "id": issue_id,
+            "id": f"SCAN-{str(uuid.uuid4())[:6].upper()}",
             "file": issue["file"],
             "tier": tier,
             "issue": issue["issue"],
             "command": issue["command"],
+            "rule_id": issue.get("id"),
         }
-        for meta_key in ("line", "column", "snippet"):
+        for meta_key in ("line", "column", "snippet", "credential_class", "evidence_fingerprint"):
             if meta_key in issue:
                 new_issue[meta_key] = issue[meta_key]
         pending_issues.append(new_issue)

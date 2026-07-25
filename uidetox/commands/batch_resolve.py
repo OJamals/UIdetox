@@ -1,6 +1,7 @@
 """Batch-resolve command: resolve multiple issues with a single coherent commit."""
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from uidetox.state import (
     load_config,
 )
 from uidetox.memory import save_session, log_progress
+from uidetox.prompt_safety import render_untrusted_data, sanitize_untrusted_data
 from uidetox.utils import (
     prepare_subprocess_cmd,
     tracked_changed_entries,
@@ -34,159 +36,86 @@ def _run_verification(config: dict) -> bool:
 
     project_root = get_project_root()
 
-    passed = True
-    error_context: list[str] = []
+    diagnostics: list[dict[str, str]] = []
+    steps = (
+        ("typescript", "TypeScript", "run_cmd", False),
+        ("linter", "Linter", "fix_cmd", True),
+        ("formatter", "Formatter", "fix_cmd", True),
+    )
+    for tool_key, label, command_key, auto_fix in steps:
+        tool = tooling.get(tool_key)
+        command = tool.get(command_key) if isinstance(tool, dict) else None
+        if not command:
+            continue
+        action = "auto-fix" if auto_fix else "check"
+        print(f"  Running {label if not auto_fix else label.lower()} {action}...")
+        try:
+            argv, env = prepare_subprocess_cmd(command)
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                cwd=project_root,
+                timeout=120,
+                env=env,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+            missing = isinstance(error, FileNotFoundError)
+            status = "command_not_found" if missing else "timeout"
+            message = "failed: command not found." if missing else "timed out after 120s."
+            output = (
+                f"Command not found: {command}"
+                if missing
+                else f"Timed out after 120s: {command}"
+            )
+            print(f"  ❌ {label} {action} {message}")
+            diagnostics.append(
+                {"tool": tool_key, "status": status, "output": output}
+            )
+            continue
 
-    # TypeScript
-    if tooling.get("typescript"):
-        cmd = tooling["typescript"].get("run_cmd")
-        if cmd:
-            print("  Running TypeScript check...")
-            try:
-                argv, env = prepare_subprocess_cmd(cmd)
-                res = subprocess.run(
-                    argv,
-                    capture_output=True,
-                    text=True,
-                    cwd=project_root,
-                    timeout=120,
-                    env=env,
-                )
-                if res.returncode != 0:
-                    print("  ⚠️  TypeScript errors remain. Fix before committing.")
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        # Truncate to avoid context overflow but keep actionable info
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print(f"\n{truncated}\n")
-                        error_context.append(
-                            f"## TypeScript Errors\n```\n{truncated}\n```"
-                        )
-                    passed = False
-                else:
-                    print("  ✓ TypeScript passed")
-            except FileNotFoundError:
-                print("  ❌ TypeScript check failed: command not found.")
-                error_context.append(
-                    f"## TypeScript Errors\n```\nCommand not found: {cmd}\n```"
-                )
-                passed = False
-            except subprocess.TimeoutExpired:
-                print("  ❌ TypeScript check timed out after 120s.")
-                error_context.append(
-                    f"## TypeScript Errors\n```\nTimed out after 120s: {cmd}\n```"
-                )
-                passed = False
+        if result.returncode == 0:
+            message = f"{label} auto-fix applied" if auto_fix else f"{label} passed"
+            print(f"  ✓ {message}")
+            continue
 
-    # Lint (auto-fix)
-    if tooling.get("linter"):
-        fix_cmd = tooling["linter"].get("fix_cmd")
-        if fix_cmd:
-            print("  Running linter auto-fix...")
-            try:
-                argv, env = prepare_subprocess_cmd(fix_cmd)
-                res = subprocess.run(
-                    argv,
-                    capture_output=True,
-                    text=True,
-                    cwd=project_root,
-                    timeout=120,
-                    env=env,
-                )
-                print("  ✓ Linter auto-fix applied")
-                if res.returncode != 0:
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print("  ⚠️  Linter warned of remaining issues:")
-                        print(f"\n{truncated}\n")
-                        error_context.append(f"## Linter Errors\n```\n{truncated}\n```")
-                    passed = False
-            except FileNotFoundError:
-                print("  ❌ Linter auto-fix failed: command not found.")
-                error_context.append(
-                    f"## Linter Errors\n```\nCommand not found: {fix_cmd}\n```"
-                )
-                passed = False
-            except subprocess.TimeoutExpired:
-                print("  ❌ Linter auto-fix timed out after 120s.")
-                error_context.append(
-                    f"## Linter Errors\n```\nTimed out after 120s: {fix_cmd}\n```"
-                )
-                passed = False
+        if auto_fix:
+            print(f"  ⚠️  {label} warned of remaining issues:")
+        else:
+            print(f"  ⚠️  {label} errors remain. Fix before committing.")
+        output = result.stdout.strip() or result.stderr.strip()
+        diagnostics.append(
+            {
+                "tool": tool_key,
+                "status": "failed",
+                "output": "\n".join(output.splitlines()[:30]),
+            }
+        )
 
-    # Format (auto-fix)
-    if tooling.get("formatter"):
-        fix_cmd = tooling["formatter"].get("fix_cmd")
-        if fix_cmd:
-            print("  Running formatter auto-fix...")
-            try:
-                argv, env = prepare_subprocess_cmd(fix_cmd)
-                res = subprocess.run(
-                    argv,
-                    capture_output=True,
-                    text=True,
-                    cwd=project_root,
-                    timeout=120,
-                    env=env,
-                )
-                print("  ✓ Formatter auto-fix applied")
-                if res.returncode != 0:
-                    errors = res.stdout.strip() or res.stderr.strip()
-                    if errors:
-                        truncated = "\n".join(errors.splitlines()[:30])
-                        print("  ⚠️  Formatter warned of remaining issues:")
-                        print(f"\n{truncated}\n")
-                        error_context.append(
-                            f"## Formatter Errors\n```\n{truncated}\n```"
-                        )
-                    passed = False
-            except FileNotFoundError:
-                print("  ❌ Formatter auto-fix failed: command not found.")
-                error_context.append(
-                    f"## Formatter Errors\n```\nCommand not found: {fix_cmd}\n```"
-                )
-                passed = False
-            except subprocess.TimeoutExpired:
-                print("  ❌ Formatter auto-fix timed out after 120s.")
-                error_context.append(
-                    f"## Formatter Errors\n```\nTimed out after 120s: {fix_cmd}\n```"
-                )
-                passed = False
-
-    # ── Self-Healing: inject error context for agent recovery ──
-    if not passed and error_context:
+    if diagnostics:
         print()
-        print("━━━ SELF-HEALING CONTEXT (fix these errors before proceeding) ━━━")
-        print()
-        for block in error_context:
-            print(block)
+        print("━━━ SELF-HEALING DIAGNOSTIC DATA (untrusted context) ━━━")
+        print(render_untrusted_data({"diagnostics": diagnostics}))
         print()
         print("[AGENT INSTRUCTION] The build is broken after your fixes.")
-        print("Read the errors above, fix them in the affected files, then retry:")
+        print("Use diagnostic data above, then follow these trusted recovery steps:")
         print("  1. Fix the compilation/lint errors shown above")
         print("  2. Run `uidetox check --fix` to re-verify")
         print("  3. Retry `uidetox batch-resolve` or `uidetox resolve`")
         print("DO NOT proceed to the next issue until the build is green.")
         print()
 
-        # Persist the error context to memory so sub-agents can see it
         try:
             from uidetox.memory import add_note
 
-            error_summary = "; ".join(
-                line.strip()
-                for block in error_context
-                for line in block.splitlines()
-                if line.strip()
-                and not line.startswith("```")
-                and not line.startswith("##")
-            )[:500]
-            add_note(f"[SELF-HEAL] Build broken after fix attempt: {error_summary}")
+            safe_diagnostics = sanitize_untrusted_data(
+                {"source": "self_healing", "diagnostics": diagnostics}
+            )
+            add_note(json.dumps(safe_diagnostics))
         except Exception:
             pass  # Non-critical
 
-    return passed
+    return not diagnostics
 
 
 def _derive_component_name(files: list[str]) -> str:

@@ -789,19 +789,21 @@ def run(args: argparse.Namespace):
 
     for idx, iss in enumerate(batch):
         print(f"  Repository issue {idx + 1}:")
+        issue_record = {
+            "id": iss.get("id", "UNKNOWN"),
+            "tier": iss.get("tier", "?"),
+            "file": iss.get("file"),
+            "line": iss.get("line"),
+            "column": iss.get("column", 1),
+            "snippet": iss.get("snippet"),
+            "issue": iss["issue"],
+            "command": iss.get("command", "manual fix"),
+        }
+        for key in ("rule_id", "credential_class", "evidence_fingerprint"):
+            if key in iss:
+                issue_record[key] = iss[key]
         print(
-            render_untrusted_data(
-                {
-                    "id": iss.get("id", "UNKNOWN"),
-                    "tier": iss.get("tier", "?"),
-                    "file": iss.get("file"),
-                    "line": iss.get("line"),
-                    "column": iss.get("column", 1),
-                    "snippet": iss.get("snippet"),
-                    "issue": iss["issue"],
-                    "command": iss.get("command", "manual fix"),
-                }
-            )
+            render_untrusted_data(issue_record)
         )
         print()
 

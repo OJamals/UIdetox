@@ -342,7 +342,7 @@ def _build_memory_block(
     if not memory_data:
         return ""
 
-    return "# Memory Bank\n" + render_untrusted_data({"memory": memory_data}) + "\n"
+    return "# Saved Context Data\n" + render_untrusted_data({"memory": memory_data}) + "\n"
 
 
 def _build_deconfliction_block(

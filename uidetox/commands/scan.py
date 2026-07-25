@@ -28,6 +28,7 @@ from uidetox.state import (
 from uidetox.tooling import detect_all
 from uidetox.history import save_run_snapshot
 from uidetox.memory import save_scan_summary, save_session, log_progress
+from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import compute_design_score
 
 
@@ -488,6 +489,7 @@ def run(args: argparse.Namespace):
         design_variance=variance,
         target_files=since_targets,
     )
+    slop_issues = sanitize_untrusted_data(slop_issues)
 
     # JSON output: print all issues as JSON and exit early
     if json_output:
@@ -513,18 +515,20 @@ def run(args: argparse.Namespace):
             issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
             new_issue = {
                 "id": issue_id,
+                "rule_id": issue.get("id"),
                 "file": issue["file"],
                 "tier": issue["tier"],
                 "issue": issue["issue"],
                 "command": issue["command"],
             }
-            for key in ("line", "column", "snippet"):
+            for key in ("line", "column", "snippet", "credential_class", "evidence_fingerprint"):
                 if key in issue:
                     new_issue[key] = issue[key]
             pending_issues.append(new_issue)
             if rule_id := issue.get("id"):
                 triggered_rules.add(rule_id)
 
+    pending_issues = sanitize_untrusted_data(pending_issues)
     queued_count = add_issues(pending_issues)
 
     if queued_count > 0:
