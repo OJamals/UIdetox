@@ -245,7 +245,6 @@ def _analyze_document_structure_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run document-structure heuristics."""
     issues = []
@@ -302,7 +301,6 @@ def _analyze_interaction_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run interaction-state heuristics."""
     issues = []
@@ -421,7 +419,6 @@ def _analyze_commented_code_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect blocks of commented-out source."""
     issues = []
@@ -510,7 +507,6 @@ def _analyze_unused_import_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect imported names unused outside import declarations."""
     if rule.get("_custom_check") != "unused_import":
@@ -538,7 +534,6 @@ def _analyze_unused_state_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect useState values never read."""
     issues = []
@@ -569,7 +564,6 @@ def _analyze_accessibility_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run accessibility and document-shell heuristics."""
     issues = []
@@ -732,7 +726,6 @@ def _analyze_css_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run CSS foundation heuristics."""
     issues = []
@@ -896,7 +889,6 @@ def _analyze_tailwind_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run conflicting Tailwind utility heuristics."""
     issues = []
@@ -1022,7 +1014,6 @@ def _analyze_html_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run HTML element and attribute heuristics."""
     issues = []
@@ -1155,7 +1146,6 @@ def _analyze_browser_security_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run browser security and SSR-safety heuristics."""
     issues = []
@@ -1288,7 +1278,6 @@ def _analyze_react_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run React composition and dependency heuristics."""
     issues = []
@@ -1479,7 +1468,6 @@ def _analyze_control_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run interactive-control accessibility heuristics."""
     issues = []
@@ -1610,7 +1598,6 @@ def _analyze_runtime_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run React runtime-state heuristics."""
     issues = []
@@ -1684,7 +1671,6 @@ def _analyze_design_pattern_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run repeated design-pattern heuristics."""
     issues = []

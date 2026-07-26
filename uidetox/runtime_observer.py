@@ -2466,7 +2466,7 @@ async () => {
       const shapeGap = neighborUndersized
         ? centerDistance - 24
         : Math.hypot(centerX - closestX, centerY - closestY) - 12;
-      const intersects = shapeGap <= 0;
+      const intersects = shapeGap < 0;
       const score = shapeGap;
       if (!nearest || score < nearest.score) {
         nearest = {

@@ -2014,12 +2014,24 @@ def test_browser_target_spacing_uses_circle_against_large_target_rectangle(
   #near-large { left: 121px; top: 80px; }
   #clear-small { left: 100px; top: 300px; }
   #clear-large { left: 123px; top: 280px; }
+  #overlap-peer-a { left: 100px; top: 500px; }
+  #overlap-peer-b { left: 123px; top: 500px; }
+  #tangent-peer-a { left: 100px; top: 600px; }
+  #tangent-peer-b { left: 124px; top: 600px; }
+  #clear-peer-a { left: 100px; top: 700px; }
+  #clear-peer-b { left: 125px; top: 700px; }
 </style>
 <main>
   <button class="small" id="near-small" aria-label="Near small"></button>
   <button class="large" id="near-large">Near large</button>
   <button class="small" id="clear-small" aria-label="Clear small"></button>
   <button class="large" id="clear-large">Clear large</button>
+  <button class="small" id="overlap-peer-a" aria-label="Overlap A"></button>
+  <button class="small" id="overlap-peer-b" aria-label="Overlap B"></button>
+  <button class="small" id="tangent-peer-a" aria-label="Tangent A"></button>
+  <button class="small" id="tangent-peer-b" aria-label="Tangent B"></button>
+  <button class="small" id="clear-peer-a" aria-label="Clear peer A"></button>
+  <button class="small" id="clear-peer-b" aria-label="Clear peer B"></button>
 </main>
 """.strip(),
         encoding="utf-8",
@@ -2048,6 +2060,18 @@ def test_browser_target_spacing_uses_circle_against_large_target_rectangle(
     assert "runtime-target-size" not in {
         finding.code for finding in elements["#clear-small"].findings
     }
+    assert (
+        elements["#overlap-peer-a"].measurements["targetSpacing"]["status"]
+        == "intersects"
+    )
+    assert "runtime-target-size" in {
+        finding.code for finding in elements["#overlap-peer-a"].findings
+    }
+    for selector in ("#tangent-peer-a", "#clear-peer-a"):
+        assert elements[selector].measurements["targetSpacing"]["status"] == "clear"
+        assert "runtime-target-size" not in {
+            finding.code for finding in elements[selector].findings
+        }
 
 
 @pytest.mark.browser

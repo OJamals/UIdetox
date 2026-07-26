@@ -34,7 +34,7 @@ def _analyze_rule(
     custom = rule.get("_custom_check")
     handler = _CUSTOM_CHECK_HANDLERS.get(custom)
     if handler is not None:
-        custom_issues = handler(rule, filepath, content, ext, None)
+        custom_issues = handler(rule, filepath, content, ext)
         if custom_issues is not None:
             return [
                 _static_finding(item, filepath, content, rule=rule)

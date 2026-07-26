@@ -5323,7 +5323,6 @@ def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
     tmp_path, monkeypatch
 ):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
 
     files = [tmp_path / "src" / f"Component{index}.tsx" for index in range(4)]
     files[0].parent.mkdir()
@@ -5337,8 +5336,6 @@ def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
         return []
 
     monkeypatch.setattr(analyzer_module, "analyze_file", fake_analyze_file)
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     issues = analyzer_module.analyze_directory(
         str(tmp_path),
@@ -5355,7 +5352,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
     tmp_path, monkeypatch
 ):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
 
     accepted = tmp_path / "src" / "Accepted.tsx"
     excluded = tmp_path / "excluded" / "Excluded.tsx"
@@ -5373,8 +5369,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
         "analyze_file",
         lambda file_path, **kwargs: analyzed.append(Path(file_path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     issues = analyzer_module.analyze_directory(
         str(tmp_path),
@@ -10351,7 +10345,6 @@ def test_get_frontend_files_nested_cwd_uses_project_root_config(monkeypatch, tmp
 
 def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
     from uidetox.commands import diff as diff_cmd
     from uidetox.commands.watch import _snapshot
     from uidetox.fileset import ProjectFileSet
@@ -10405,8 +10398,6 @@ def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
         "analyze_file",
         lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root_path: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root_path: {})
     analyzer_module.analyze_directory(
         str(root),
         exclude_paths=config["exclude"],
@@ -10656,7 +10647,6 @@ def test_analyzer_ast_issue_shape_and_missing_parser_fallback(tmp_path):
 
 def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
     from uidetox.fileset import ProjectFileSet
 
     accepted = tmp_path / "src" / "Accepted.tsx"
@@ -10678,8 +10668,6 @@ def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
         "analyze_file",
         lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     assert (
         analyzer_module.analyze_directory(
