@@ -404,6 +404,7 @@ def batch_remove_issues(
     if any(
         issue_id not in verifications
         or verifications[issue_id].outcome != "absent"
+        or not verifications[issue_id].evidence_hash
         for issue_id in issue_ids
     ):
         return []

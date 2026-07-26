@@ -1,5 +1,4 @@
 """Durable, opt-in execution engine for the UIdetox workflow."""
-
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +15,7 @@ from uidetox.findings import (
     EligibilityContext,
     current_evidence_hashes,
     evaluate_eligibility,
+    structured_review_current,
 )
 from uidetox.frontend_map import (
     FRONTEND_MAP_FILE,
@@ -36,24 +36,20 @@ from uidetox.state import load_config, load_state
 from uidetox.utils import now_iso
 from uidetox.visual_semantics import project_visual_evidence_status
 
-
 WORKFLOW_STATE_FILE = "workflow-state.json"
 WAITING_AGENT = "waiting_for_agent"
 WAITING_REVIEW = "waiting_for_review"
 WAITING_SELECTION = "waiting_for_proposal_selection"
 WAITING_VERIFICATION = "waiting_for_verification"
 
-
 @dataclass(frozen=True)
 class PhaseDefinition:
     """Static transition knowledge for one workflow phase."""
-
     id: str
     adapter: str
     dependencies: tuple[str, ...]
     input_keys: tuple[str, ...]
     artifact_kinds: tuple[str, ...] = ()
-
 
 PHASES = (
     PhaseDefinition(
@@ -102,14 +98,14 @@ PHASES = (
         "subjective_review",
         "subjective_review",
         ("prototype_generation",),
-        ("source", "review_score"),
-        ("review_score",),
+        ("source", "review"),
+        ("structured_review",),
     ),
     PhaseDefinition(
         "status_evaluation",
         "status_evaluation",
         ("subjective_review", "issue_planning", "semantic_map"),
-        ("source", "queue", "review_score", "verification", "target"),
+        ("source", "queue", "review", "verification", "target"),
         ("status",),
     ),
     PhaseDefinition(
@@ -121,7 +117,6 @@ PHASES = (
     ),
 )
 
-
 @dataclass(frozen=True)
 class WorkflowInputs:
     source_fingerprint: str
@@ -130,11 +125,10 @@ class WorkflowInputs:
     verification_fingerprint: str
     target_score: int = 95
     proposal_id: str | None = None
-    subjective_score: int | None = None
+    review_fingerprint: str = ""
     verification_fresh: bool = True
     visual_evidence_state: str = "missing"
     visual_evidence_required: bool = False
-
     def value(self, key: str) -> Any:
         values = {
             "source": self.source_fingerprint,
@@ -143,20 +137,17 @@ class WorkflowInputs:
             "verification": self.verification_fingerprint,
             "target": self.target_score,
             "proposal": self.proposal_id,
-            "review_score": self.subjective_score,
+            "review": self.review_fingerprint,
         }
         return values[key]
-
 
 @dataclass(frozen=True)
 class AdapterResult:
     """Concise, serializable result returned by an in-process phase adapter."""
-
     artifacts: dict[str, str] = field(default_factory=dict)
     artifact_validation: dict[str, str] = field(default_factory=dict)
     evidence: str = ""
     signals: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass(frozen=True)
 class WorkflowContext:
@@ -165,16 +156,12 @@ class WorkflowContext:
     state: dict[str, Any]
     phase: PhaseDefinition
 
-
 PhaseRunner = Callable[[WorkflowContext], AdapterResult]
-
 
 @dataclass(frozen=True)
 class WorkflowAdapters:
     """Injected in-process functions keyed by phase adapter name."""
-
     runners: Mapping[str, PhaseRunner]
-
     def run(self, phase: PhaseDefinition, context: WorkflowContext) -> AdapterResult:
         try:
             runner = self.runners[phase.adapter]
@@ -190,7 +177,6 @@ class WorkflowAdapters:
             )
         return result
 
-
 @dataclass(frozen=True)
 class WorkflowRunResult:
     status: str
@@ -200,10 +186,14 @@ class WorkflowRunResult:
     state_path: Path
     completed: tuple[str, ...]
 
+class WorkflowPause(RuntimeError):
+    def __init__(self, waiting: str, message: str) -> None:
+        self.waiting = waiting
+        self.message = message
+        super().__init__(message)
 
 class WorkflowEngine:
     """Execute each phase at most once per call and persist every transition."""
-
     def __init__(
         self,
         root: str | Path,
@@ -219,7 +209,6 @@ class WorkflowEngine:
             else self.root / ".uidetox" / WORKFLOW_STATE_FILE
         )
         self._executed_this_run: set[str] = set()
-
     def run(self, inputs: WorkflowInputs) -> WorkflowRunResult:
         self._executed_this_run = set()
         state = self._load_state(inputs.target_score)
@@ -227,12 +216,10 @@ class WorkflowEngine:
         state["waiting"] = None
         state["error"] = None
         self._save_state(state)
-
         for index, phase in enumerate(PHASES):
             precondition = self._waiting_before(phase, state, inputs)
             if precondition is not None:
                 return self._wait(state, phase, *precondition)
-
             expected = self._phase_fingerprint(phase, state, inputs)
             phase_state = state["phases"][phase.id]
             if (
@@ -251,7 +238,6 @@ class WorkflowEngine:
                 self._invalidate_from(state, index)
                 phase_state = state["phases"][phase.id]
                 expected = self._phase_fingerprint(phase, state, inputs)
-
             phase_state["status"] = "running"
             phase_state["attempts"] = int(phase_state.get("attempts", 0)) + 1
             phase_state["error"] = None
@@ -261,6 +247,14 @@ class WorkflowEngine:
                 result = self.adapters.run(
                     phase,
                     WorkflowContext(self.root, inputs, state, phase),
+                )
+            except WorkflowPause as pause:
+                phase_state["status"] = "pending"
+                phase_state["error"] = None
+                phase_state["completed_at"] = None
+                self._save_state(state)
+                return self._wait(
+                    state, phase, pause.waiting, pause.message
                 )
             except Exception as exc:  # adapters define their own error taxonomy
                 phase_state["status"] = "failed"
@@ -278,7 +272,6 @@ class WorkflowEngine:
                     phase=phase.id,
                     message=f"{phase.id} failed: {phase_state['error']}",
                 )
-
             validation = {
                 key: result.artifact_validation.get(
                     key,
@@ -340,11 +333,9 @@ class WorkflowEngine:
             self._executed_this_run.add(phase.id)
             state["status"] = "running"
             self._save_state(state)
-
             after = self._waiting_after(phase, state, inputs)
             if after is not None:
                 return self._wait(state, phase, *after)
-
         state["status"] = "eligible"
         state["waiting"] = None
         self._save_state(state)
@@ -357,7 +348,6 @@ class WorkflowEngine:
                 "Run `uidetox finish` explicitly to finalize."
             ),
         )
-
     def _load_state(self, target_score: int) -> dict[str, Any]:
         if self.state_path.exists():
             try:
@@ -387,7 +377,6 @@ class WorkflowEngine:
             "updated_at": now_iso(),
             "phases": {phase.id: _new_phase_state() for phase in PHASES},
         }
-
     def _save_state(self, state: dict[str, Any]) -> None:
         state["updated_at"] = now_iso()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +396,6 @@ class WorkflowEngine:
                 os.unlink(temp_name)
             except FileNotFoundError:
                 pass
-
     def _phase_fingerprint(
         self,
         phase: PhaseDefinition,
@@ -424,7 +412,6 @@ class WorkflowEngine:
                 },
             }
         )
-
     def _invalidate_from(self, state: dict[str, Any], index: int) -> None:
         invalidated = {PHASES[index].id}
         changed = True
@@ -447,7 +434,6 @@ class WorkflowEngine:
         state["status"] = "pending"
         state["waiting"] = None
         self._save_state(state)
-
     def _artifacts_fresh(
         self,
         phase: PhaseDefinition,
@@ -466,7 +452,6 @@ class WorkflowEngine:
             if current is None or current != fingerprints.get(kind):
                 return False
         return True
-
     def _artifact_signature(self, reference: str, mode: str) -> str | None:
         if mode == "inline":
             return _stable_hash({"inline": reference})
@@ -481,7 +466,6 @@ class WorkflowEngine:
             return hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             return None
-
     def _waiting_before(
         self,
         phase: PhaseDefinition,
@@ -494,7 +478,6 @@ class WorkflowEngine:
                 "Select a redesign proposal and rerun with `--proposal-id`.",
             )
         return None
-
     def _waiting_after(
         self,
         phase: PhaseDefinition,
@@ -518,7 +501,6 @@ class WorkflowEngine:
                 )
                 return waiting, "Finalization blocked: " + ", ".join(sorted(codes))
         return None
-
     def _wait(
         self,
         state: dict[str, Any],
@@ -540,7 +522,6 @@ class WorkflowEngine:
             waiting=waiting,
             message=message,
         )
-
     def _result(
         self,
         state: dict[str, Any],
@@ -563,13 +544,11 @@ class WorkflowEngine:
             ),
         )
 
-
 def build_workflow_inputs(
     root: str | Path,
     *,
     target_score: int,
     proposal_id: str | None,
-    subjective_score: int | None,
     require_visual_evidence: bool | None = None,
     visual_evidence_file: str | Path | None = None,
 ) -> WorkflowInputs:
@@ -616,28 +595,23 @@ def build_workflow_inputs(
         verification_fingerprint=_stable_hash(verification_payload),
         target_score=target_score,
         proposal_id=proposal_id,
-        subjective_score=subjective_score,
+        review_fingerprint=_stable_hash(state.get("subjective", {})),
         verification_fresh=verification_fresh,
         visual_evidence_state=visual_status.state,
         visual_evidence_required=visual_status.required,
     )
 
-
 def in_process_adapters() -> WorkflowAdapters:
     """Build production adapters without invoking an external agent or shell CLI."""
-
     from uidetox.commands import check as check_command
     from uidetox.commands import plan as plan_command
-    from uidetox.commands import review as review_command
     from uidetox.commands import scan as scan_command
-
     def mechanical(context: WorkflowContext) -> AdapterResult:
         check_command.run(Namespace(fix=True))
         return AdapterResult(
             artifacts={"check_report": "inline:mechanical-checks-complete"},
             evidence="Mechanical checks completed in process.",
         )
-
     def static_analysis(context: WorkflowContext) -> AdapterResult:
         scan_command.run(Namespace(path=".", since=None, output="table"))
         current = load_state()
@@ -645,7 +619,6 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"scan_state": "inline:" + _stable_hash(current)},
             evidence="Static analysis completed and issue state was refreshed.",
         )
-
     def semantic_map(context: WorkflowContext) -> AdapterResult:
         output = context.root / ".uidetox" / FRONTEND_MAP_FILE
         previous = load_frontend_map(output) if output.exists() else None
@@ -676,7 +649,6 @@ def in_process_adapters() -> WorkflowAdapters:
             evidence="Semantic frontend/project map persisted.",
             signals={"verification_fresh": verification_fresh},
         )
-
     def issue_plan(context: WorkflowContext) -> AdapterResult:
         plan_command.run(Namespace())
         current = load_state()
@@ -694,7 +666,6 @@ def in_process_adapters() -> WorkflowAdapters:
             evidence=f"Issue plan contains {pending} pending issue(s).",
             signals={"issues_pending": pending},
         )
-
     def redesign(context: WorkflowContext) -> AdapterResult:
         frontend_map = load_frontend_map(context.root / ".uidetox" / FRONTEND_MAP_FILE)
         settings = DesignSettings.from_config(
@@ -715,7 +686,6 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"redesign_set": str(output)},
             evidence="Source-aware redesign proposals persisted.",
         )
-
     def prototype(context: WorkflowContext) -> AdapterResult:
         redesigns = load_redesign_set()
         proposal_id = context.inputs.proposal_id
@@ -726,26 +696,21 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"prototype_brief": str(output)},
             evidence=f"Prototype brief generated for {proposal_id}.",
         )
-
     def subjective_review(context: WorkflowContext) -> AdapterResult:
-        review_command.run(
-            Namespace(
-                score=context.inputs.subjective_score,
-                dimension_a=None,
-                dimension_b=None,
-                dimension_c=None,
-                dimension_d=None,
-                require_visual_evidence=False,
-                visual_evidence_file=None,
+        current = load_state()
+        review = current.get("subjective", {})
+        hashes = current_evidence_hashes(context.root)
+        if not isinstance(review, Mapping) or not structured_review_current(
+            review, hashes
+        ):
+            raise WorkflowPause(
+                WAITING_REVIEW,
+                "Record a current structured review with `uidetox review`, then resume.",
             )
-        )
         return AdapterResult(
-            artifacts={
-                "review_score": f"inline:{context.inputs.subjective_score}",
-            },
-            evidence="Subjective score recorded.",
+            artifacts={"structured_review": "inline:" + _stable_hash(review)},
+            evidence="Current structured subjective review confirmed.",
         )
-
     def status(context: WorkflowContext) -> AdapterResult:
         current = load_state()
         fresh = (
@@ -774,7 +739,6 @@ def in_process_adapters() -> WorkflowAdapters:
                 "visual_evidence_required": (context.inputs.visual_evidence_required),
             },
         )
-
     def finish_eligibility(context: WorkflowContext) -> AdapterResult:
         eligibility = context.state["signals"].get("eligibility", {})
         if not isinstance(eligibility, Mapping) or not eligibility.get("eligible"):
@@ -787,7 +751,6 @@ def in_process_adapters() -> WorkflowAdapters:
             ),
             signals={"finish_eligible": True},
         )
-
     return WorkflowAdapters(
         {
             "mechanical_checks": mechanical,
@@ -802,13 +765,11 @@ def in_process_adapters() -> WorkflowAdapters:
         }
     )
 
-
 def run_executable_workflow(
     root: str | Path,
     *,
     target_score: int = 95,
     proposal_id: str | None = None,
-    subjective_score: int | None = None,
     require_visual_evidence: bool | None = None,
     visual_evidence_file: str | Path | None = None,
     adapters: WorkflowAdapters | None = None,
@@ -819,7 +780,6 @@ def run_executable_workflow(
         root,
         target_score=target_score,
         proposal_id=proposal_id,
-        subjective_score=subjective_score,
         require_visual_evidence=require_visual_evidence,
         visual_evidence_file=visual_evidence_file,
     )
@@ -828,7 +788,6 @@ def run_executable_workflow(
         adapters or in_process_adapters(),
         state_path=state_path,
     ).run(active_inputs)
-
 
 def _source_fingerprint(root: Path, config: dict[str, Any]) -> str:
     ignored = {
@@ -901,7 +860,6 @@ def _source_fingerprint(root: Path, config: dict[str, Any]) -> str:
             manifest[str(path)] = "unreadable"
     return _stable_hash(manifest)
 
-
 def _new_phase_state() -> dict[str, Any]:
     return {
         "status": "pending",
@@ -918,11 +876,9 @@ def _new_phase_state() -> dict[str, Any]:
         "completed_at": None,
     }
 
-
 def _stable_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
 
 def _concise_error(error: Exception) -> str:
     message = " ".join(str(error).split())

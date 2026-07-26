@@ -45,7 +45,6 @@ def run(args: argparse.Namespace):
             project_root,
             target_score=target,
             proposal_id=getattr(args, "proposal_id", None),
-            subjective_score=getattr(args, "review_score", None),
             require_visual_evidence=(
                 True if getattr(args, "require_visual_evidence", False) else None
             ),

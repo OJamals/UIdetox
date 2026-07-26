@@ -44,9 +44,13 @@ def test_static_verifier_distinguishes_reproduced_absent_and_stale_anchor(tmp_pa
     source.write_text("Unlock the power", encoding="utf-8")
     finding = _static(source)
 
-    assert verify_finding(finding, root=tmp_path).outcome == "reproduced"
+    reproduced = verify_finding(finding, root=tmp_path)
+    assert reproduced.outcome == "reproduced"
+    assert reproduced.evidence_hash
     source.write_text("Specific product copy", encoding="utf-8")
-    assert verify_finding(finding, root=tmp_path).outcome == "absent"
+    absent = verify_finding(finding, root=tmp_path)
+    assert absent.outcome == "absent"
+    assert absent.evidence_hash
     source.write_text("prefix Unlock the power", encoding="utf-8")
     assert verify_finding(finding, root=tmp_path).outcome == "stale_anchor"
 
@@ -124,7 +128,28 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
         json.dumps(artifact), encoding="utf-8"
     )
 
-    assert verify_finding(runtime, root=tmp_path).outcome == "reproduced"
+    reproduced = verify_finding(runtime, root=tmp_path)
+    assert reproduced.outcome == "reproduced"
+    assert reproduced.evidence_hash
+    artifact["nodes"][0]["metadata"]["scenario"] = "hover"
+    (tmp_path / ".uidetox" / "frontend-map.json").write_text(
+        json.dumps(artifact), encoding="utf-8"
+    )
+    assert verify_finding(runtime, root=tmp_path).outcome == "stale_evidence"
+    artifact["nodes"][0]["metadata"]["scenario"] = "default"
+    artifact["nodes"][0]["metadata"]["viewport"] = "desktop"
+    (tmp_path / ".uidetox" / "frontend-map.json").write_text(
+        json.dumps(artifact), encoding="utf-8"
+    )
+    assert verify_finding(runtime, root=tmp_path).outcome == "stale_evidence"
+    artifact["nodes"][0]["metadata"]["viewport"] = "mobile"
+    artifact["nodes"][0]["metadata"]["selector"] = "#other"
+    (tmp_path / ".uidetox" / "frontend-map.json").write_text(
+        json.dumps(artifact), encoding="utf-8"
+    )
+    absent = verify_finding(runtime, root=tmp_path)
+    assert absent.outcome == "absent"
+    assert absent.evidence_hash
     artifact["evidence"]["runtime_status"] = "stale"
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
@@ -142,6 +167,7 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
         provenance="manual",
         verifier={"kind": "manual"},
     )
+    hashes = {"source": "a", "map": "b", "runtime": "c"}
     state = {
         "subjective": {
             "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
@@ -152,12 +178,33 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
             "routes": ["/"],
             "states": ["default"],
             "viewports": ["desktop"],
-            "evidence_hashes": {"source": "a", "map": "b", "runtime": "c"},
+            "evidence_hashes": dict(hashes),
         }
     }
-    assert verify_finding(finding, state=state, root=tmp_path).outcome == "absent"
-    state["subjective"]["finding_links"] = []
-    assert verify_finding(finding, state=state, root=tmp_path).outcome == "stale_evidence"
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "uidetox.findings.current_evidence_hashes", lambda _root: dict(hashes)
+        )
+        absent = verify_finding(finding, state=state, root=tmp_path)
+        assert absent.outcome == "absent"
+        assert absent.evidence_hash
+        state["subjective"]["stale"] = True
+        assert (
+            verify_finding(finding, state=state, root=tmp_path).outcome
+            == "stale_evidence"
+        )
+        state["subjective"]["stale"] = False
+        state["subjective"]["evidence_hashes"]["source"] = "old"
+        assert (
+            verify_finding(finding, state=state, root=tmp_path).outcome
+            == "stale_evidence"
+        )
+        state["subjective"]["evidence_hashes"] = hashes
+        state["subjective"]["finding_links"] = []
+        assert (
+            verify_finding(finding, state=state, root=tmp_path).outcome
+            == "stale_evidence"
+        )
 
 
 def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypatch):
@@ -177,20 +224,27 @@ def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypat
     monkeypatch.setattr(
         frontend_map_module,
         "load_frontend_map",
-        lambda: SimpleNamespace(nodes=()),
+        lambda *_args: SimpleNamespace(nodes=(), target="."),
     )
+    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: True)
     monkeypatch.setattr(
         project_map_module,
         "build_project_map",
         lambda *args: SimpleNamespace(findings=(finding,)),
     )
-    assert verify_finding(finding, root=tmp_path).outcome == "reproduced"
+    reproduced = verify_finding(finding, root=tmp_path)
+    assert reproduced.outcome == "reproduced"
+    assert reproduced.evidence_hash
     monkeypatch.setattr(
         project_map_module,
         "build_project_map",
         lambda *args: SimpleNamespace(findings=()),
     )
-    assert verify_finding(finding, root=tmp_path).outcome == "absent"
+    absent = verify_finding(finding, root=tmp_path)
+    assert absent.outcome == "absent"
+    assert absent.evidence_hash
+    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: False)
+    assert verify_finding(finding, root=tmp_path).outcome == "stale_evidence"
 
 
 def test_state_removal_requires_absent_verification(tmp_path, monkeypatch):
@@ -198,13 +252,28 @@ def test_state_removal_requires_absent_verification(tmp_path, monkeypatch):
     finding = _static(tmp_path / "copy.md")
     save_state({"issues": [finding], "resolved": [], "stats": {}})
     reproduced = VerificationResult("reproduced", "now", "static")
-    absent = VerificationResult("absent", "now", "static")
+    absent = VerificationResult("absent", "now", "static", evidence_hash="current")
 
     assert remove_issue(finding.id, note="fixed", verification=reproduced) is False
     assert remove_issue(finding.id, note="fixed", verification=absent) is True
     resolved = load_state()["resolved"][0]
     assert resolved["status"] == "verified_resolved"
     assert resolved["last_verification"]["outcome"] == "absent"
+
+
+def test_state_removal_rejects_unbound_absent_verification(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    finding = _static(tmp_path / "copy.md")
+    save_state({"issues": [finding], "resolved": [], "stats": {}})
+
+    assert (
+        remove_issue(
+            finding.id,
+            verification=VerificationResult("absent", "now", "static"),
+        )
+        is False
+    )
+    assert load_state()["issues"]
 
 
 def test_batch_removal_is_atomic_when_any_verifier_does_not_clear(tmp_path, monkeypatch):
@@ -217,8 +286,8 @@ def test_batch_removal_is_atomic_when_any_verifier_does_not_clear(tmp_path, monk
     )
     save_state({"issues": [one, two], "resolved": [], "stats": {}})
     verifications = {
-        one.id: VerificationResult("absent", "now", "static"),
-        two.id: VerificationResult("reproduced", "now", "static"),
+        one.id: VerificationResult("absent", "now", "static", evidence_hash="one"),
+        two.id: VerificationResult("reproduced", "now", "static", evidence_hash="two"),
     }
     assert batch_remove_issues([one.id, two.id], note="fixed", verifications=verifications) == []
     assert len(load_state()["issues"]) == 2

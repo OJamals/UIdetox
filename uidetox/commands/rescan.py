@@ -1,19 +1,22 @@
 """Rescan command: clears the queue and runs a unified re-scan (static + subjective).
-
 This is the 'outer loop' in the desloppify flow -- after the fix loop drains the
 queue, rescan re-evaluates from scratch to discover deeper issues and check if
 the target score has been reached.
-
-Smart deduplication: issues already resolved in this session won't be re-queued
-unless the underlying pattern reappears in modifed code. Issues that survived
-multiple rescans get auto-escalated in priority.
 """
-
 import argparse
 import os
 import sys
+
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
+from uidetox.commands.scan import current_map_findings
+from uidetox.findings import (
+    coerce_finding,
+    current_evidence_hashes,
+    score_current_snapshot,
+)
+from uidetox.history import save_run_snapshot
+from uidetox.memory import log_progress
 from uidetox.state import (
     add_issues,
     clear_issues,
@@ -22,9 +25,6 @@ from uidetox.state import (
     load_config,
     load_state,
 )
-from uidetox.history import save_run_snapshot
-from uidetox.findings import coerce_finding, current_evidence_hashes, score_current_snapshot
-from uidetox.memory import log_progress
 
 
 def run(args: argparse.Namespace):
@@ -35,18 +35,14 @@ def run(args: argparse.Namespace):
     old_count = len(old_issues)
     resolved = state.get("resolved", [])
     target = config.get("target_score", 95)
-
     # Clear existing issues and track the rescan
     clear_issues()
     increment_scans()
-
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
-
     path_arg = getattr(args, "path", ".")
     path = str(project_root) if path_arg in (None, "", ".") else path_arg
-
     # Validate path before doing anything
     if not os.path.isdir(path):
         print(
@@ -54,7 +50,6 @@ def run(args: argparse.Namespace):
             file=sys.stderr,
         )
         sys.exit(1)
-
     print("=" * 58)
     print(" UIdetox Rescan (fresh analysis + smart dedup)")
     print("=" * 58)
@@ -62,7 +57,6 @@ def run(args: argparse.Namespace):
     print(f"  Resolved history: {len(resolved)} issue(s)")
     print(f"  Path: {path}  |  Dials: V={variance} M={intensity} D={density}")
     print()
-
     # ---- STATIC ANALYSIS ----
     print("  Running static slop analyzer...")
     ignore_patterns = config.get("ignore_patterns", [])
@@ -74,20 +68,25 @@ def run(args: argparse.Namespace):
         zone_overrides=zone_overrides,
         design_variance=variance,
     )
-
     pending_issues = [
         coerce_finding(issue)
         for issue in slop_issues
         if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns)
     ]
-
-    queued_count = add_issues(pending_issues, qualified_complete=True)
-
+    mapped_findings, map_qualified = current_map_findings(project_root)
+    pending_issues = list(
+        {
+            finding.fingerprint: finding
+            for finding in [*pending_issues, *mapped_findings]
+        }.values()
+    )
+    queued_count = add_issues(
+        pending_issues, qualified_complete=map_qualified
+    )
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print("  -> No mechanical anti-patterns detected.")
-
     # ---- SUBJECTIVE REVIEW PROMPT ----
     print()
     print("  SUBJECTIVE REVIEW (complete during this rescan):")
@@ -102,13 +101,11 @@ def run(args: argparse.Namespace):
     )
     print("  Run `uidetox review` and record structured A/B/C/D evidence.")
     print()
-
     # ---- SUPPRESSIONS ----
     if ignore_patterns:
         print(
             f"  Active suppressions: {len(ignore_patterns)} (do NOT flag matching issues)"
         )
-
     # ---- TARGET CHECK ----
     save_run_snapshot(trigger="rescan")
     log_progress(
@@ -119,14 +116,12 @@ def run(args: argparse.Namespace):
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
     queue_size = len(state.get("issues", []))
-
     print()
     print("-" * 58)
     filled = score // 5
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score: [{bar}] {score}/100  (target: {target})")
     print(f"  Queue: {queue_size} issue(s)")
-
     if score >= target and queue_size == 0:
         print("  TARGET REACHED -> Run `uidetox finish`")
     elif queue_size > 0:

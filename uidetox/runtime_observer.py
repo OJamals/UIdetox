@@ -21,7 +21,7 @@ from uidetox.capabilities import (
     chromium_install_guidance,
 )
 from uidetox.findings import Finding
-from uidetox.runtime_layout import RuntimeFinding, detect_runtime_findings
+from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.utils import now_iso
 
 

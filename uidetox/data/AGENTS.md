@@ -91,7 +91,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox next` | Batch issues for top-priority component/directory with SKILL.md context injection |
 | `uidetox resolve <id> --note "..."` | Mark a single issue as fixed (note is mandatory) |
 | `uidetox batch-resolve ID1 ID2 ... --note "..."` | Resolve multiple issues with a single coherent commit |
-| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution (`--proposal-id`, `--review-score`) |
+| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution (`--proposal-id`; structured review resumes from persisted evidence) |
 | `uidetox loop --orchestrator` | Sub-agent mode with auto-parallel (1-5) and memory injection |
 | `uidetox subagent` | Manage sub-agent sessions and generate stage prompts |
 | `uidetox memory` | Read/write persistent agent memory (patterns, notes, reviewed files) |

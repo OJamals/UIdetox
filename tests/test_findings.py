@@ -63,6 +63,55 @@ def test_finding_round_trip_is_versioned_stable_and_forward_compatible(
     assert restored.to_dict()["source_anchor"]["start"] == 12
 
 
+@pytest.mark.parametrize(
+    ("provenance", "anchor"),
+    [
+        (
+            "runtime",
+            {
+                "runtime_anchor": {
+                    "url": "http://localhost:3000",
+                    "viewport": "mobile",
+                    "selector": "#total",
+                    "scenario": "default",
+                }
+            },
+        ),
+        (
+            "contract",
+            {
+                "contract_anchor": {
+                    "kind": "frontend_only",
+                    "normalized_path": "/orders",
+                }
+            },
+        ),
+    ],
+)
+def test_future_canonical_schema_preserves_type_version_and_unknown_fields(
+    provenance: str, anchor: dict
+) -> None:
+    finding = Finding.create(
+        detector_id=f"{provenance}-test",
+        category="quality",
+        severity="warning",
+        confidence=0.9,
+        message="Future canonical finding",
+        provenance=provenance,
+        **anchor,
+    )
+    payload = {**finding.to_dict(), "schema_version": 3, "future": {"mode": "new"}}
+
+    restored = Finding.from_dict(payload)
+    serialized = restored.to_dict()
+
+    assert restored.provenance == provenance
+    assert restored.schema_version == 3
+    assert serialized["schema_version"] == 3
+    assert serialized["future"] == {"mode": "new"}
+    assert serialized[f"{provenance}_anchor"] == anchor[f"{provenance}_anchor"]
+
+
 def test_finding_fingerprint_ignores_display_copy_but_tracks_anchor_and_evidence(
     tmp_path: Path,
 ) -> None:

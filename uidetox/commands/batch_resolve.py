@@ -171,7 +171,7 @@ def run(args: argparse.Namespace):
     uncleared = {
         issue_id: result
         for issue_id, result in verifications.items()
-        if result.outcome != "absent"
+        if result.outcome != "absent" or not result.evidence_hash
     }
     if uncleared:
         reason = str(getattr(args, "override_verifier", "") or "").strip()

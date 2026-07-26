@@ -8340,6 +8340,98 @@ def test_rescan_batches_all_current_findings_without_history_credit(
     assert "Queued 4 mechanical anti-pattern issues" in output
 
 
+def test_rescan_requeues_current_runtime_and_contract_findings(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import rescan as rescan_cmd
+    from uidetox.findings import Finding
+
+    runtime = Finding.create(
+        detector_id="runtime-text-clipped",
+        category="overflow",
+        severity="error",
+        confidence=0.9,
+        message="Text clips",
+        provenance="runtime",
+        runtime_anchor={
+            "url": "http://localhost:3000",
+            "viewport": "mobile",
+            "selector": "#total",
+            "scenario": "default",
+        },
+    )
+    contract = Finding.create(
+        detector_id="contract-frontend-only",
+        category="contract",
+        severity="warning",
+        confidence=0.85,
+        message="Missing backend",
+        provenance="contract",
+        contract_anchor={"kind": "frontend_only", "normalized_path": "/orders"},
+    )
+    captured = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        rescan_cmd,
+        "current_map_findings",
+        lambda _root: ((runtime, contract), True),
+    )
+    monkeypatch.setattr(
+        rescan_cmd,
+        "add_issues",
+        lambda findings, **kwargs: captured.update(
+            findings=list(findings), **kwargs
+        )
+        or 2,
+    )
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        rescan_cmd,
+        "score_current_snapshot",
+        lambda state, **kwargs: {"blended_score": 0},
+    )
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert {item.provenance for item in captured["findings"]} == {
+        "runtime",
+        "contract",
+    }
+    assert captured["qualified_complete"] is True
+
+
+def test_stale_map_findings_cannot_qualify_rescan(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from uidetox.commands import scan as scan_cmd
+
+    map_path = tmp_path / ".uidetox" / "frontend-map.json"
+    map_path.parent.mkdir()
+    map_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_frontend_map",
+        lambda _path: SimpleNamespace(
+            target=".",
+            evidence={"runtime_status": "stale"},
+            nodes=(),
+            project_map={},
+        ),
+    )
+    monkeypatch.setattr(scan_cmd, "frontend_map_is_fresh", lambda *args: False)
+
+    findings, qualified = scan_cmd.current_map_findings(tmp_path)
+
+    assert findings == ()
+    assert qualified is False
+
+
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch, tmp_path
 ):
@@ -9621,6 +9713,37 @@ class TestStateAndMemoryChaosResilience:
         assert len(runs) == 1
         assert runs[0]["timestamp"] == "2026-05-02T00:00:01Z"
         assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
+
+    def test_history_snapshot_scores_against_current_evidence_hashes(
+        self, tmp_path, monkeypatch
+    ):
+        import uidetox.history as history
+
+        hashes = {"source": "s", "map": "m", "runtime": "r"}
+        received = {}
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(history, "load_state", lambda: {"issues": []})
+        monkeypatch.setattr(history, "load_config", lambda: {})
+        monkeypatch.setattr(
+            history,
+            "project_visual_evidence_status",
+            lambda _config: type("Visual", (), {"to_dict": lambda self: {}})(),
+        )
+        monkeypatch.setattr(history, "current_evidence_hashes", lambda: hashes)
+        monkeypatch.setattr(
+            history,
+            "score_current_snapshot",
+            lambda state, **kwargs: received.update(kwargs)
+            or {
+                "blended_score": 0,
+                "objective_score": 0,
+                "subjective_score": None,
+            },
+        )
+
+        history.save_run_snapshot()
+
+        assert received["evidence_hashes"] == hashes
 
     def test_load_run_history_skips_invalid_utf8_snapshot_files(
         self, tmp_path, monkeypatch

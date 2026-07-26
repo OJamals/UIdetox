@@ -1,36 +1,43 @@
 """Scan command -- unified static + subjective analysis in a single pass.
-
 Implements the desloppify flow: Scan Codebase -> generate score -> both
 Mechanical Issues (static analyzer) AND Subjective Analysis (LLM review)
 happen together, with mechanical informing subjective.
 """
-
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-from uidetox.analyzer import analyze_directory, RULES
+from pathlib import Path
+
+from uidetox.analyzer import RULES, analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.frontend_map import map_frontend
+from uidetox.findings import (
+    Finding,
+    coerce_finding,
+    current_evidence_hashes,
+    score_current_snapshot,
+)
+from uidetox.frontend_map import (
+    FRONTEND_MAP_FILE,
+    frontend_map_is_fresh,
+    load_frontend_map,
+    map_frontend,
+)
+from uidetox.history import save_run_snapshot
+from uidetox.memory import log_progress, save_scan_summary, save_session
 from uidetox.project_map import ProjectMap
 from uidetox.state import (
     add_issues,
     ensure_uidetox_dir,
     get_project_root,
+    increment_scans,
     load_config,
     load_state,
     save_config,
-    increment_scans,
 )
 from uidetox.tooling import detect_all
-from uidetox.history import save_run_snapshot
-from uidetox.memory import save_scan_summary, save_session, log_progress
-from uidetox.findings import coerce_finding, current_evidence_hashes, score_current_snapshot
 
-
-# Categories auto-covered by static analyzer, mapped to rule IDs
 _AUTO_CATEGORIES = {
     "typography": {
         "TYPOGRAPHY_SLOP",
@@ -283,7 +290,6 @@ _AUTO_CATEGORIES = {
         "PROP_TYPES_IN_TS_SLOP",
     },
 }
-
 # Categories that ALWAYS need manual agent audit (not automatable via regex)
 _MANUAL_CATEGORIES = {
     "responsive": "Mobile collapse, container queries, fluid typography",
@@ -294,9 +300,7 @@ _MANUAL_CATEGORIES = {
     "a11y (deep)": "Skip-to-content, live regions, complex ARIA patterns, focus traps",
 }
 
-
 _OUTPUT_FORMATS = frozenset({"table", "json", "github"})
-
 
 def _get_output_format(args: argparse.Namespace) -> str:
     """Return a validated output format before scan work emits anything."""
@@ -309,33 +313,57 @@ def _get_output_format(args: argparse.Namespace) -> str:
         raise SystemExit(2)
     return output_format
 
-
 def _is_table_output(output_format: str) -> bool:
     return output_format == "table"
-
 
 def _is_json_output(output_format: str) -> bool:
     return output_format == "json"
 
-
 def _is_github_output(output_format: str) -> bool:
     return output_format == "github"
-
 
 def _print_fallback_warning(message: str, *, table_output: bool) -> None:
     """Keep machine stdout parseable while preserving table diagnostics."""
     print(message, file=sys.stdout if table_output else sys.stderr)
 
+def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]:
+    """Return findings from a current persisted runtime/contract map."""
+    path = project_root / ".uidetox" / FRONTEND_MAP_FILE
+    if not path.exists():
+        return (), True
+    try:
+        frontend_map = load_frontend_map(path)
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return (), False
+    if (
+        not frontend_map_is_fresh(frontend_map, project_root, frontend_map.target)
+        or frontend_map.evidence.get("runtime_status") == "stale"
+    ):
+        return (), False
+    findings = list(ProjectMap.from_dict(frontend_map.project_map).findings)
+    for node in frontend_map.nodes:
+        metadata = node.metadata
+        for raw in metadata.get("findings", ()):
+            if not isinstance(raw, dict):
+                continue
+            finding = coerce_finding(raw)
+            if finding.provenance == "runtime":
+                finding = finding.with_runtime_anchor(
+                    url=str(metadata.get("runtime_url", "")),
+                    viewport=str(metadata.get("viewport", "")),
+                    selector=str(metadata.get("selector", "")),
+                    scenario=str(metadata.get("scenario", "default")),
+                )
+            findings.append(finding)
+    return tuple(findings), True
 
 def run(args: argparse.Namespace):
     output_format = _get_output_format(args)
     table_output = _is_table_output(output_format)
     json_output = _is_json_output(output_format)
     github_output = _is_github_output(output_format)
-
     ensure_uidetox_dir()
     project_root = get_project_root()
-
     # Validate that the path exists and is a directory before doing anything
     scan_path_arg = getattr(args, "path", ".")
     scan_path = str(project_root) if scan_path_arg in (None, "", ".") else scan_path_arg
@@ -345,21 +373,17 @@ def run(args: argparse.Namespace):
             file=sys.stderr,
         )
         sys.exit(1)
-
     config = load_config()
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
     target = config.get("target_score", 95)
-
     # Auto-detect tooling if not already configured
     if not config.get("tooling"):
         profile = detect_all(project_root)
         config["tooling"] = profile.to_dict()
         save_config(config)
-
     tooling = config.get("tooling", {})
-
     if table_output:
         print("+" + "=" * 58 + "+")
         print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
@@ -367,7 +391,6 @@ def run(args: argparse.Namespace):
         print(f"  Path  : {scan_path}")
         print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
         print()
-
     # --- Tooling Summary ---
     pm = tooling.get("package_manager")
     ts = tooling.get("typescript")
@@ -377,7 +400,6 @@ def run(args: argparse.Namespace):
     backends = tooling.get("backend", [])
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
-
     if table_output:
         print(
             f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}"
@@ -394,7 +416,6 @@ def run(args: argparse.Namespace):
                 layers.append(f"api={', '.join(a['name'] for a in apis)}")
             print(f"           {', '.join(layers)}")
         print()
-
     # --- Suppressions & Zones ---
     ignore_patterns = config.get("ignore_patterns", [])
     overrides = config.get("zone_overrides", {})
@@ -402,7 +423,6 @@ def run(args: argparse.Namespace):
         print(f"  Active suppressions: {len(ignore_patterns)} pattern(s)")
     if table_output and overrides:
         print(f"  Active zone overrides: {len(overrides)}")
-
     # ===========================================================
     # PART 1: MECHANICAL ISSUES (deterministic static analysis)
     # ===========================================================
@@ -411,17 +431,14 @@ def run(args: argparse.Namespace):
         print("=" * 58)
         print(" PART 1: MECHANICAL ISSUES (static analyzer)")
         print("=" * 58)
-
     # Run tsc/lint/format pre-pass if tooling is available
     if table_output and (ts or linter or fmt):
         print(
             "  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first."
         )
         print()
-
     # Run static slop analyzer
     since_sha = getattr(args, "since", None)
-
     # Incremental mode: only scan files changed since a git SHA
     since_targets: list[str] | None = None
     if since_sha:
@@ -446,7 +463,6 @@ def run(args: argparse.Namespace):
                 )
             else:
                 result = None
-
             if result is not None and result.returncode == 0:
                 scan_root = Path(scan_path).resolve()
                 resolved_targets: set[str] = set()
@@ -475,7 +491,6 @@ def run(args: argparse.Namespace):
                 f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
                 table_output=table_output,
             )
-
     if table_output:
         print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
     exclude_paths = config.get("exclude", [])
@@ -488,7 +503,6 @@ def run(args: argparse.Namespace):
         target_files=since_targets,
     )
     slop_issues = [coerce_finding(issue) for issue in slop_issues]
-
     parity = None
     has_fullstack = bool(backends or databases or apis)
     if has_fullstack:
@@ -499,13 +513,21 @@ def run(args: argparse.Namespace):
         except (OSError, TypeError, ValueError) as error:
             if table_output:
                 print(f"  Full-stack operation parity unavailable: {error}")
-    findings = [*slop_issues, *(parity.findings if parity else ())]
-
+    mapped_findings, map_qualified = current_map_findings(project_root)
+    findings = list(
+        {
+            finding.fingerprint: finding
+            for finding in [
+                *slop_issues,
+                *(parity.findings if parity else ()),
+                *mapped_findings,
+            ]
+        }.values()
+    )
     # JSON output: print all issues as JSON and exit early
     if json_output:
         print(json.dumps([finding.to_dict() for finding in findings], indent=2))
         return
-
     # GitHub Actions annotation output
     if github_output:
         for issue in findings:
@@ -517,7 +539,6 @@ def run(args: argparse.Namespace):
             level = "error" if tier in ("T3", "T4") else "warning"
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
-
     pending_issues = [
         issue
         for issue in findings
@@ -525,14 +546,12 @@ def run(args: argparse.Namespace):
     ]
     triggered_rules = {issue.detector_id for issue in findings}
     queued_count = add_issues(
-        pending_issues, qualified_complete=since_targets is None
+        pending_issues, qualified_complete=since_targets is None and map_qualified
     )
-
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print("  -> No mechanical anti-patterns detected.")
-
     # Category coverage (compact)
     print()
     auto_hits = []
@@ -549,7 +568,6 @@ def run(args: argparse.Namespace):
         print(f"  Clean     : {', '.join(auto_clean)}")
     manual_list = [f"{cat}" for cat in _MANUAL_CATEGORIES]
     print(f"  Need audit: {', '.join(manual_list)}")
-
     # Full-stack integration checks
     if has_fullstack:
         print()
@@ -568,7 +586,6 @@ def run(args: argparse.Namespace):
             )
     print("  Run `uidetox review` for the evidence-bound A/B/C/D review brief.")
     print()
-
     # ===========================================================
     # SCORE CHECK: Target reached?
     # ===========================================================
@@ -581,13 +598,11 @@ def run(args: argparse.Namespace):
         context=f"Found {queued_count} issues in {scan_path}",
     )
     log_progress("scan", f"Scanned {scan_path}: {queued_count} issues queued")
-
     # Compute current score and show target check
     state = load_state()
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
     queue_size = len(state.get("issues", []))
-
     print("=" * 58)
     print(" TARGET SCORE CHECK")
     print("=" * 58)
@@ -595,7 +610,6 @@ def run(args: argparse.Namespace):
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score : [{bar}] {score}/100  (target: {target})")
     print(f"  Queue        : {queue_size} issue(s)")
-
     if score >= target and queue_size == 0:
         print()
         print(f"  TARGET REACHED -- Score >= {target} and queue is empty.")
@@ -611,7 +625,6 @@ def run(args: argparse.Namespace):
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
 
-
 def _save_scan_to_memory(
     slop_issues: list, queued_count: int, triggered_rules: set, scan_path: str
 ):
@@ -619,7 +632,6 @@ def _save_scan_to_memory(
     by_tier: dict[str, int] = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
     by_category: dict[str, int] = {}
     file_counts: dict[str, int] = {}
-
     for issue in slop_issues:
         tier = issue.get("tier", "T4")
         by_tier[tier] = by_tier.get(tier, 0) + 1
@@ -628,9 +640,7 @@ def _save_scan_to_memory(
         by_category[cat] = by_category.get(cat, 0) + 1
         f = issue.get("file", "")
         file_counts[f] = file_counts.get(f, 0) + 1
-
     top_files = sorted(file_counts.keys(), key=lambda f: file_counts[f], reverse=True)
-
     save_scan_summary(
         total_found=queued_count,
         by_tier=by_tier,
@@ -638,7 +648,6 @@ def _save_scan_to_memory(
         files_scanned=len(file_counts),
         top_files=top_files,
     )
-
 
 def _infer_category(desc: str) -> str:
     """Infer issue category from description text."""

@@ -20,9 +20,9 @@ from uidetox.redesign import (
     propose_redesigns,
     save_redesign_set,
 )
+from uidetox.runtime_layout import RuntimeFinding
 from uidetox.runtime_observer import (
     RuntimeElement,
-    RuntimeFinding,
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,

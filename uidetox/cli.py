@@ -670,12 +670,6 @@ def parse_args(args_list=None):
         help="Explicit redesign proposal selected for prototype generation",
     )
     loop_parser.add_argument(
-        "--review-score",
-        type=int,
-        choices=range(0, 101),
-        help="Human/LLM subjective review score used to resume the review gate",
-    )
-    loop_parser.add_argument(
         "--require-visual-evidence",
         action="store_true",
         help="Require fresh visual evidence before verification can pass",
