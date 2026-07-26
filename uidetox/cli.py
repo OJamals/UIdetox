@@ -399,7 +399,9 @@ def parse_args(args_list=None):
         "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
     )
     resolve_parser.add_argument(
-        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+        "--override-verifier",
+        metavar="REASON",
+        help="Audit an explicit verifier override without resolving",
     )
     resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
 
@@ -419,9 +421,13 @@ def parse_args(args_list=None):
         "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
     )
     batch_resolve_parser.add_argument(
-        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+        "--override-verifier",
+        metavar="REASON",
+        help="Audit an explicit verifier override without resolving",
     )
-    batch_resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
+    batch_resolve_parser.add_argument(
+        "--actor", help="Actor recording a verifier override"
+    )
 
     # Command: plan
     subparsers.add_parser(
@@ -439,7 +445,9 @@ def parse_args(args_list=None):
     )
     for key, cap in (("a", 40), ("b", 30), ("c", 20), ("d", 10)):
         review_parser.add_argument(
-            f"--dimension-{key}", type=int, help=f"Structured dimension {key.upper()} (0-{cap})"
+            f"--dimension-{key}",
+            type=int,
+            help=f"Structured dimension {key.upper()} (0-{cap})",
         )
     review_parser.add_argument("--rationale", help="Evidence-based review rationale")
     review_parser.add_argument("--reviewer", help="Reviewer identity")

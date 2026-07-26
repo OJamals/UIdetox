@@ -12,6 +12,7 @@ from uidetox.findings import (
     Finding,
     VerificationResult,
     evaluate_eligibility,
+    review_capture_matrix_digest,
     score_current_snapshot,
 )
 from uidetox.project_map import ContractNode, SourceAnchor, reconcile_contract_graph
@@ -464,6 +465,8 @@ def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> Non
         provenance="runtime",
         verifier={"kind": "runtime"},
     )
+    matrix = [{"route": "/checkout", "state": "ready", "viewport": "mobile"}]
+    matrix_digest = review_capture_matrix_digest(matrix)
     state = {
         "issues": [critical.to_dict()],
         "current_snapshot": {"qualified_coverage": 1.0},
@@ -478,18 +481,14 @@ def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> Non
             "states": ["ready"],
             "viewports": ["mobile"],
             "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+            "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
                 "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
                 "finding_links": [critical.fingerprint],
                 "region_links": ["runtime-primary-action"],
-                "capture_matrix": [
-                    {
-                        "route": "/checkout",
-                        "state": "ready",
-                        "viewport": "mobile",
-                    }
-                ],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
             },
         },
     }
@@ -528,6 +527,8 @@ def test_incomplete_structured_review_cannot_inflate_score_or_eligibility() -> N
 
 
 def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() -> None:
+    matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
+    matrix_digest = review_capture_matrix_digest(matrix)
     review = {
         "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
         "score": 100,
@@ -539,14 +540,14 @@ def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() ->
         "states": ["default"],
         "viewports": ["desktop"],
         "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
+        "required_matrix_digest": matrix_digest,
         "scope_validation": {
             "status": "validated",
             "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
             "finding_links": ["finding-1"],
             "region_links": ["runtime-region-1"],
-            "capture_matrix": [
-                {"route": "/", "state": "default", "viewport": "desktop"}
-            ],
+            "capture_matrix": matrix,
+            "required_matrix_digest": matrix_digest,
         },
     }
     current = {"source": "new", "map": "m", "runtime": "r"}
@@ -559,6 +560,55 @@ def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() ->
     eligibility = evaluate_eligibility(
         state, EligibilityContext(evidence_hashes=current)
     )
+    assert scores["subjective_score"] is None
+    assert "stale_review" in {blocker.code for blocker in eligibility.blockers}
+
+
+def test_review_matrix_digest_drift_removes_score_and_blocks_finalization() -> None:
+    finding = Finding.create(
+        detector_id="runtime-review-anchor",
+        category="quality",
+        severity="info",
+        confidence=1.0,
+        message="Review anchor.",
+        provenance="runtime",
+        status="informational",
+    )
+    hashes = {"source": "s", "map": "m", "runtime": "r"}
+    state = {
+        "issues": [finding.to_dict()],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "score": 100,
+            "rationale": "Reviewed every required capture.",
+            "reviewer": "qa-agent",
+            "finding_links": [finding.fingerprint],
+            "region_links": ["runtime-region-1"],
+            "routes": ["/one"],
+            "states": ["initial"],
+            "viewports": ["desktop"],
+            "evidence_hashes": hashes,
+            "required_matrix_digest": "0" * 64,
+            "scope_validation": {
+                "status": "validated",
+                "evidence_hashes": hashes,
+                "finding_links": [finding.fingerprint],
+                "region_links": ["runtime-region-1"],
+                "capture_matrix": [
+                    {"route": "/one", "state": "initial", "viewport": "desktop"}
+                ],
+                "required_matrix_digest": "0" * 64,
+            },
+        },
+    }
+
+    scores = score_current_snapshot(state, evidence_hashes=hashes)
+    eligibility = evaluate_eligibility(
+        state,
+        EligibilityContext(evidence_hashes=hashes),
+    )
+
     assert scores["subjective_score"] is None
     assert "stale_review" in {blocker.code for blocker in eligibility.blockers}
 

@@ -22,7 +22,11 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
-from uidetox.color_utils import normalize_rendered_color
+from uidetox.color_utils import (
+    composite_rendered_color,
+    contrast_ratio_rgba,
+    normalize_rendered_color,
+)
 from uidetox.design_semantics import detect_design_findings
 from uidetox.findings import Finding
 from uidetox.runtime_layout import detect_runtime_findings
@@ -49,9 +53,179 @@ from uidetox.runtime_scenarios import (
 )
 from uidetox.utils import now_iso
 
+_FOCUS_COLOR_PATTERN = re.compile(
+    r"(?:rgba?|hsla?|oklab|oklch|color)\([^)]*\)|#[0-9a-f]{3,8}|transparent",
+    re.IGNORECASE,
+)
+_FOCUS_CONTRAST_THRESHOLD = 3.0
+_WHITE = (1.0, 1.0, 1.0, 1.0)
+
+
+def _focus_effective_color(
+    raw: object,
+    backdrop: tuple[float, float, float, float] = _WHITE,
+) -> tuple[float, float, float, float] | None:
+    color = normalize_rendered_color(str(raw or ""))
+    return composite_rendered_color(color, backdrop) if color is not None else None
+
+
+def _focus_contrast(
+    first: tuple[float, float, float, float] | None,
+    second: tuple[float, float, float, float] | None,
+) -> float:
+    if first is None or second is None:
+        return 0.0
+    return contrast_ratio_rgba(first, second)
+
+
+def _normalize_focus_indicator(value: object) -> dict[str, Any]:
+    indicator = dict(value) if isinstance(value, dict) else {}
+    baseline = (
+        dict(indicator.get("baseline"))
+        if isinstance(indicator.get("baseline"), dict)
+        else {}
+    )
+    focused = (
+        dict(indicator.get("focused"))
+        if isinstance(indicator.get("focused"), dict)
+        else {}
+    )
+    if not baseline or not focused:
+        return indicator
+
+    baseline_background = _focus_effective_color(baseline.get("backgroundColor"))
+    focused_background = _focus_effective_color(focused.get("backgroundColor"))
+    perceptible: list[str] = []
+    ratios: dict[str, float] = {}
+
+    background_ratio = _focus_contrast(baseline_background, focused_background)
+    if (
+        baseline.get("backgroundColor") != focused.get("backgroundColor")
+        and background_ratio >= _FOCUS_CONTRAST_THRESHOLD
+    ):
+        perceptible.append("backgroundColor")
+        ratios["backgroundColor"] = round(background_ratio, 4)
+
+    for side in ("Top", "Right", "Bottom", "Left"):
+        property_name = f"border{side}Color"
+        width_name = f"border{side}Width"
+        width = float(str(focused.get(width_name, "0")).removesuffix("px") or 0)
+        baseline_width = float(
+            str(baseline.get(width_name, "0")).removesuffix("px") or 0
+        )
+        if width <= 0 or (
+            baseline.get(property_name) == focused.get(property_name)
+            and width == baseline_width
+        ):
+            continue
+        baseline_border = _focus_effective_color(
+            baseline.get(property_name),
+            baseline_background or _WHITE,
+        )
+        focused_border = _focus_effective_color(
+            focused.get(property_name),
+            focused_background or _WHITE,
+        )
+        ratio = _focus_contrast(baseline_border, focused_border)
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append(property_name)
+            ratios[property_name] = round(ratio, 4)
+
+    outline_width = float(str(focused.get("outlineWidth", "0")).removesuffix("px") or 0)
+    outline_changed = any(
+        baseline.get(property_name) != focused.get(property_name)
+        for property_name in ("outlineStyle", "outlineWidth", "outlineColor")
+    )
+    if (
+        outline_changed
+        and outline_width > 0
+        and focused.get("outlineStyle") not in {"none", "hidden"}
+    ):
+        baseline_outline = _focus_effective_color(
+            baseline.get("outlineColor"),
+            baseline_background or _WHITE,
+        )
+        if (
+            baseline.get("outlineStyle") in {"none", "hidden"}
+            or float(str(baseline.get("outlineWidth", "0")).removesuffix("px") or 0)
+            <= 0
+        ):
+            baseline_outline = baseline_background
+        focused_outline = _focus_effective_color(
+            focused.get("outlineColor"),
+            focused_background or _WHITE,
+        )
+        ratio = _focus_contrast(baseline_outline, focused_outline)
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append("outline")
+            ratios["outline"] = round(ratio, 4)
+
+    if baseline.get("boxShadow") != focused.get("boxShadow"):
+        baseline_shadow_colors = [
+            _focus_effective_color(
+                color,
+                baseline_background or _WHITE,
+            )
+            for color in _FOCUS_COLOR_PATTERN.findall(
+                str(baseline.get("boxShadow", ""))
+            )
+        ] or [baseline_background]
+        focused_shadow_colors = [
+            _focus_effective_color(
+                color,
+                focused_background or _WHITE,
+            )
+            for color in _FOCUS_COLOR_PATTERN.findall(str(focused.get("boxShadow", "")))
+        ]
+        ratio = max(
+            (
+                _focus_contrast(focused_color, baseline_color)
+                for focused_color in focused_shadow_colors
+                for baseline_color in baseline_shadow_colors
+            ),
+            default=0.0,
+        )
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append("boxShadow")
+            ratios["boxShadow"] = round(ratio, 4)
+
+    raw_areas = (
+        indicator.get("areaByProperty")
+        if isinstance(indicator.get("areaByProperty"), dict)
+        else {}
+    )
+    area_keys = {
+        "backgroundColor": "backgroundColor",
+        "borderTopColor": "border",
+        "borderRightColor": "border",
+        "borderBottomColor": "border",
+        "borderLeftColor": "border",
+        "outline": "outline",
+        "boxShadow": "boxShadow",
+    }
+    areas = [
+        float(raw_areas.get(area_keys[property_name], 0) or 0)
+        for property_name in perceptible
+    ]
+    indicator.update(
+        {
+            "visible": bool(perceptible),
+            "changed": bool(indicator.get("changedProperties")),
+            "distinguishable": bool(perceptible),
+            "perceptibleProperties": perceptible,
+            "contrastRatios": ratios,
+            "area": round(max(areas, default=0.0), 2),
+        }
+    )
+    return indicator
+
 
 def _normalized_runtime_measurements(value: object) -> dict[str, Any]:
     measurements = dict(value) if isinstance(value, dict) else {}
+    if isinstance(measurements.get("focusIndicator"), dict):
+        measurements["focusIndicator"] = _normalize_focus_indicator(
+            measurements["focusIndicator"]
+        )
     raw_paint = measurements.get("paint")
     if not isinstance(raw_paint, dict):
         return measurements
@@ -1530,30 +1704,24 @@ async () => {
     outlineColor: style.outlineColor,
     boxShadow: style.boxShadow,
     borderTopColor: style.borderTopColor,
+    borderTopWidth: style.borderTopWidth,
     borderRightColor: style.borderRightColor,
+    borderRightWidth: style.borderRightWidth,
     borderBottomColor: style.borderBottomColor,
+    borderBottomWidth: style.borderBottomWidth,
     borderLeftColor: style.borderLeftColor,
+    borderLeftWidth: style.borderLeftWidth,
     backgroundColor: style.backgroundColor,
     color: style.color
   });
 
-  const shadowDistinguishable = value => {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (!normalized || normalized === "none" || normalized === "transparent") {
-      return false;
-    }
-    const colors = normalized.match(
-      /(?:rgba?|hsla?)\([^)]*\)|#[0-9a-f]{3,8}|transparent/g
-    ) || [];
-    return colors.length
-      ? colors.some(color => computedAlpha(color) !== 0)
-      : true;
-  };
-
   const focusIndicatorProperties = new Set([
     "outlineStyle", "outlineWidth", "outlineColor", "boxShadow",
-    "borderTopColor", "borderRightColor", "borderBottomColor",
-    "borderLeftColor", "backgroundColor", "color"
+    "borderTopColor", "borderTopWidth",
+    "borderRightColor", "borderRightWidth",
+    "borderBottomColor", "borderBottomWidth",
+    "borderLeftColor", "borderLeftWidth",
+    "backgroundColor", "color"
   ]);
   const focusIndicator = (element, style, rect) => {
     const focused = document.activeElement === element;
@@ -1582,21 +1750,28 @@ async () => {
       && outlineWidth > 0
       && computedAlpha(current.outlineColor) !== 0
     );
-    const shadowVisible = shadowDistinguishable(current.boxShadow);
-    const thickness = outlineVisible ? outlineWidth : shadowVisible ? 1 : 0;
-    const area = thickness > 0
+    const outlineArea = outlineVisible
       ? (
-          (rect.width + thickness * 2) * (rect.height + thickness * 2)
+          (rect.width + outlineWidth * 2) * (rect.height + outlineWidth * 2)
           - rect.width * rect.height
         )
       : 0;
+    const borderArea = (
+      pixels(current.borderTopWidth) * rect.width
+      + pixels(current.borderRightWidth) * rect.height
+      + pixels(current.borderBottomWidth) * rect.width
+      + pixels(current.borderLeftWidth) * rect.height
+    );
+    const shadowArea = (
+      (rect.width + 2) * (rect.height + 2) - rect.width * rect.height
+    );
     const changed = changedProperties.some(
       property => focusIndicatorProperties.has(property)
     );
     return {
-      visible: Boolean(outlineVisible || shadowVisible),
+      visible: false,
       changed,
-      distinguishable: Boolean(outlineVisible || shadowVisible),
+      distinguishable: false,
       changedProperties,
       baseline: baseline || {},
       focused: current,
@@ -1604,7 +1779,13 @@ async () => {
       outlineWidth: round(outlineWidth),
       outlineColor: current.outlineColor,
       boxShadow: current.boxShadow,
-      area: round(area),
+      areaByProperty: {
+        backgroundColor: round(rect.width * rect.height),
+        border: round(borderArea),
+        outline: round(outlineArea),
+        boxShadow: round(shadowArea)
+      },
+      area: 0,
       minimum_area: round(2 * 2 * (rect.width + rect.height))
     };
   };
@@ -2262,9 +2443,13 @@ async () => {
     let nearest = null;
     for (const candidate of candidates) {
       const other = candidate.rect;
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const otherCenterX = other.left + other.width / 2;
+      const otherCenterY = other.top + other.height / 2;
       const centerDistance = Math.hypot(
-        rect.left + rect.width / 2 - (other.left + other.width / 2),
-        rect.top + rect.height / 2 - (other.top + other.height / 2)
+        centerX - otherCenterX,
+        centerY - otherCenterY
       );
       const horizontalGap = Math.max(
         0,
@@ -2275,17 +2460,23 @@ async () => {
         Math.max(rect.top, other.top) - Math.min(rect.bottom, other.bottom)
       );
       const edgeGap = Math.hypot(horizontalGap, verticalGap);
-      const circleGap = centerDistance - 24;
-      const intersects = circleGap <= 0 || edgeGap <= 0;
-      const score = Math.min(circleGap, edgeGap);
+      const neighborUndersized = other.width < 24 || other.height < 24;
+      const closestX = Math.max(other.left, Math.min(centerX, other.right));
+      const closestY = Math.max(other.top, Math.min(centerY, other.bottom));
+      const shapeGap = neighborUndersized
+        ? centerDistance - 24
+        : Math.hypot(centerX - closestX, centerY - closestY) - 12;
+      const intersects = shapeGap <= 0;
+      const score = shapeGap;
       if (!nearest || score < nearest.score) {
         nearest = {
           score,
           selector: candidate.selector,
           centerDistance,
-          circleGap,
+          shapeGap,
           edgeGap,
-          intersects
+          intersects,
+          neighborShape: neighborUndersized ? "circle" : "rectangle"
         };
       }
     }
@@ -2293,7 +2484,8 @@ async () => {
       status: nearest?.intersects ? "intersects" : "clear",
       nearest_selector: nearest?.selector || "",
       center_distance_px: nearest ? round(nearest.centerDistance) : null,
-      circle_gap_px: nearest ? round(nearest.circleGap) : null,
+      shape_gap_px: nearest ? round(nearest.shapeGap) : null,
+      neighbor_shape: nearest?.neighborShape || "",
       edge_gap_px: nearest ? round(nearest.edgeGap) : null,
       total_targets: targetRecords.length,
       indexed_targets: targetRecords.length,

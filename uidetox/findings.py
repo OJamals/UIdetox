@@ -458,6 +458,52 @@ def coerce_finding(value: Finding | Mapping[str, Any]) -> Finding:
     return value if isinstance(value, Finding) else Finding.from_dict(value)
 
 
+def review_capture_matrix_digest(captures: object) -> str:
+    """Return a stable digest for the exact canonical review capture tuples."""
+
+    normalized = (
+        sorted(
+            {
+                (
+                    str(capture.get("route", "")).strip(),
+                    str(capture.get("state", "")).strip(),
+                    str(capture.get("viewport", "")).strip(),
+                )
+                for capture in captures
+                if isinstance(capture, Mapping)
+                and all(
+                    str(capture.get(key, "")).strip()
+                    for key in ("route", "state", "viewport")
+                )
+            }
+        )
+        if isinstance(captures, (list, tuple, set, frozenset))
+        else []
+    )
+    payload = [
+        {"route": route, "state": state, "viewport": viewport}
+        for route, state, viewport in normalized
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+
+
+def _current_finding_links(state: Mapping[str, Any]) -> set[str]:
+    return {
+        link
+        for item in state.get("issues", [])
+        if isinstance(item, (Finding, Mapping))
+        for link in (
+            coerce_finding(item).fingerprint,
+            str(item.get("id", "")).strip()
+            if isinstance(item, Mapping)
+            else str(item.legacy.get("id", "")).strip(),
+        )
+        if link
+    }
+
+
 def score_current_snapshot(
     state: Mapping[str, Any], *, evidence_hashes: Mapping[str, str] | None = None
 ) -> dict[str, Any]:
@@ -482,24 +528,12 @@ def score_current_snapshot(
     )
     objective = max(0, min(100, round(100 * coverage - slop)))
     review = _mapping(state.get("subjective"))
-    current_finding_links = {
-        link
-        for item in state.get("issues", [])
-        if isinstance(item, (Finding, Mapping))
-        for link in (
-            coerce_finding(item).fingerprint,
-            str(item.get("id", "")).strip()
-            if isinstance(item, Mapping)
-            else str(item.legacy.get("id", "")).strip(),
-        )
-        if link
-    }
     subjective = (
         _structured_review_score(review)
         if structured_review_current(
             review,
             evidence_hashes,
-            current_finding_links=current_finding_links,
+            current_finding_links=_current_finding_links(state),
         )
         else None
     )
@@ -611,6 +645,12 @@ def _structured_review_complete(review: Mapping[str, Any]) -> bool:
     )
     hashes = review.get("evidence_hashes")
     scope = review.get("scope_validation")
+    digest = str(review.get("required_matrix_digest", ""))
+    scope_digest = (
+        str(scope.get("required_matrix_digest", ""))
+        if isinstance(scope, Mapping)
+        else ""
+    )
     return bool(
         _structured_review_score(review) is not None
         and str(review.get("rationale", "")).strip()
@@ -637,6 +677,9 @@ def _structured_review_complete(review: Mapping[str, Any]) -> bool:
         == sorted(review.get("region_links", ()))
         and isinstance(scope.get("capture_matrix"), (list, tuple))
         and bool(scope["capture_matrix"])
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        and scope_digest == digest
     )
 
 
@@ -651,9 +694,13 @@ def structured_review_current(
         for item in review.get("finding_links", ())
         if str(item).strip()
     }
+    scope = _mapping(review.get("scope_validation"))
+    matrix_digest = review_capture_matrix_digest(scope.get("capture_matrix"))
     return bool(
         _structured_review_complete(review)
         and not review.get("stale")
+        and review.get("required_matrix_digest") == matrix_digest
+        and scope.get("required_matrix_digest") == matrix_digest
         and (current_finding_links is None or links.issubset(current_finding_links))
         and (
             not evidence_hashes
@@ -703,22 +750,20 @@ def evaluate_eligibility(
         "Current source/map/runtime verification evidence is stale.",
     )
     complete = _structured_review_complete(review)
+    current = structured_review_current(
+        review,
+        context.evidence_hashes,
+        current_finding_links=_current_finding_links(state),
+    )
     add(
         not complete,
         "missing_structured_review",
         "Structured A/B/C/D subjective review evidence is required.",
     )
     add(
-        complete
-        and (
-            review.get("stale")
-            or (
-                context.evidence_hashes
-                and _mapping(review.get("evidence_hashes")) != context.evidence_hashes
-            )
-        ),
+        complete and not current,
         "stale_review",
-        "Subjective review hashes do not match current evidence.",
+        "Subjective review scope or hashes do not match current evidence.",
     )
     add(context.dirty, "dirty_tree", "Git worktree must be clean to finalize.")
     add(

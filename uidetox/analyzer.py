@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+from uidetox import analyzer_engine as _engine
 from uidetox.analyzer_ast import (
     AST_CAPABILITIES,
     HAS_AST,
@@ -35,7 +36,6 @@ from uidetox.analyzer_custom import (
     _extract_import_names,
     _find_unused_import_names,
 )
-from uidetox import analyzer_engine as _engine
 from uidetox.analyzer_engine import _analyze_rule, analyze_file
 from uidetox.analyzer_rules import _ALL_FE_EXTS, _FE_EXTS, _JSX_EXTS
 from uidetox.fileset import IGNORED_DIRECTORY_NAMES

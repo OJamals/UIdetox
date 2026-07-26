@@ -126,6 +126,4 @@ def test_public_luminance_and_contrast_accept_modern_rendered_colors():
 
     assert luminance("oklch(0% 0 0)") == 0.0
     assert luminance("color(srgb 1 1 1)") == 1.0
-    assert contrast_ratio("rgb(0 0 0)", "hsl(0 0% 100%)") == pytest.approx(
-        21.0
-    )
+    assert contrast_ratio("rgb(0 0 0)", "hsl(0 0% 100%)") == pytest.approx(21.0)

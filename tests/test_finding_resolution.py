@@ -14,6 +14,7 @@ from uidetox.findings import (
     VerificationResult,
     current_verification_fresh,
     evaluate_eligibility,
+    review_capture_matrix_digest,
     score_current_snapshot,
     verify_finding,
 )
@@ -320,6 +321,8 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
         verifier={"kind": "manual"},
     )
     hashes = {"source": "a", "map": "b", "runtime": "c"}
+    matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
+    matrix_digest = review_capture_matrix_digest(matrix)
     state = {
         "subjective": {
             "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
@@ -332,14 +335,14 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
             "states": ["default"],
             "viewports": ["desktop"],
             "evidence_hashes": dict(hashes),
+            "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
                 "evidence_hashes": dict(hashes),
                 "finding_links": [finding.fingerprint],
                 "region_links": ["runtime-hierarchy"],
-                "capture_matrix": [
-                    {"route": "/", "state": "default", "viewport": "desktop"}
-                ],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
             },
         }
     }
@@ -398,6 +401,8 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
         assert (
             verify_finding(finding, state={}, root=tmp_path).outcome == "stale_evidence"
         )
+        matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
+        matrix_digest = review_capture_matrix_digest(matrix)
         review = {
             "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
             "score": 100,
@@ -409,14 +414,14 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
             "states": ["default"],
             "viewports": ["desktop"],
             "evidence_hashes": hashes,
+            "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
                 "evidence_hashes": hashes,
                 "finding_links": [queue_id],
                 "region_links": ["runtime-hierarchy"],
-                "capture_matrix": [
-                    {"route": "/", "state": "default", "viewport": "desktop"}
-                ],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
             },
         }
         assert (

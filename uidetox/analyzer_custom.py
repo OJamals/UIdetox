@@ -9,7 +9,6 @@ from uidetox.analyzer_interactions import (
     is_development_proxy_url,
 )
 
-
 _REDUCED_MOTION_MEDIA = re.compile(
     r"@media\s*\([^)]*prefers-reduced-motion\s*:\s*reduce[^)]*\)\s*\{",
     re.IGNORECASE,
@@ -24,6 +23,7 @@ _REDUCED_MOTION_OVERRIDE_PROPERTIES = {
     "transition-delay",
     "transition-duration",
 }
+
 
 def _issue_for_match(
     rule: dict,
@@ -170,7 +170,9 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
         )
     )
     pricing_context = bool(
-        re.search(r"\b(?:pricing|price|plan|tier|subscription)\b", content, re.IGNORECASE)
+        re.search(
+            r"\b(?:pricing|price|plan|tier|subscription)\b", content, re.IGNORECASE
+        )
     )
     if (pricing_context and pricing_signals >= 3) or pricing_cards >= 3:
         issues.append(
@@ -334,9 +336,7 @@ def _analyze_interaction_custom_rule(
         ):
             tag = m.group(1).lower()
             classes = m.group(2)
-            if not class_list_has_interaction_state(
-                classes, filepath, "focus", tag
-            ):
+            if not class_list_has_interaction_state(classes, filepath, "focus", tag):
                 issues.append(
                     {
                         "id": rule["id"],
@@ -1352,29 +1352,31 @@ def _analyze_react_custom_rule(
             for name in _extract_import_names(import_match)
         }
         setters = set(
-            re.findall(
-                r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content
-            )
+            re.findall(r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content)
         )
-        stable = imported | setters | {
-            "String",
-            "Number",
-            "Boolean",
-            "Date",
-            "Math",
-            "JSON",
-            "Promise",
-            "Error",
-            "Object",
-            "Array",
-            "console",
-            "document",
-            "window",
-            "undefined",
-            "null",
-            "true",
-            "false",
-        }
+        stable = (
+            imported
+            | setters
+            | {
+                "String",
+                "Number",
+                "Boolean",
+                "Date",
+                "Math",
+                "JSON",
+                "Promise",
+                "Error",
+                "Object",
+                "Array",
+                "console",
+                "document",
+                "window",
+                "undefined",
+                "null",
+                "true",
+                "false",
+            }
+        )
         effect_pattern = re.compile(
             r"useEffect\s*\(\s*\(\s*\)\s*=>\s*\{(?P<body>.*?)\}\s*,\s*\[\s*\]\s*\)",
             re.DOTALL,
@@ -1408,15 +1410,15 @@ def _analyze_react_custom_rule(
             callback_params = set(
                 re.findall(r"(?:\(|,)\s*([A-Za-z_$][\w$]*)\s*(?:\)|,)\s*=>", body)
             )
-            for destructured in re.findall(
-                r"\(\s*[\[{]([^\]}]+)[\]}]\s*\)\s*=>", body
-            ):
+            for destructured in re.findall(r"\(\s*[\[{]([^\]}]+)[\]}]\s*\)\s*=>", body):
                 callback_params.update(
                     re.findall(r"\b[A-Za-z_$][\w$]*\b", destructured)
                 )
             strings_removed = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "", body)
             identifiers = set(re.findall(r"\b[A-Za-z_$][\w$]*\b", strings_removed))
-            property_names = set(re.findall(r"\.\s*([A-Za-z_$][\w$]*)", strings_removed))
+            property_names = set(
+                re.findall(r"\.\s*([A-Za-z_$][\w$]*)", strings_removed)
+            )
             external = (
                 identifiers
                 - property_names
@@ -1569,9 +1571,7 @@ def _analyze_control_custom_rule(
             content,
             re.IGNORECASE,
         )
-        if has_modal_container and not (
-            has_native_dialog or has_dialog_role
-        ):
+        if has_modal_container and not (has_native_dialog or has_dialog_role):
             issues.append(
                 {
                     "id": rule["id"],
@@ -1618,8 +1618,7 @@ def _analyze_runtime_custom_rule(
     if custom == "hardcoded_dev_url":
         matches = tuple(rule["pattern"].finditer(content))
         if any(
-            not is_development_proxy_url(filepath, content, match)
-            for match in matches
+            not is_development_proxy_url(filepath, content, match) for match in matches
         ):
             issues.append(
                 {
@@ -1692,7 +1691,21 @@ def _analyze_design_pattern_custom_rule(
     custom = rule.get("_custom_check")
     if custom == "card_nesting":
         stack: list[tuple[str, bool]] = []
-        void_tags = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+        void_tags = {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "source",
+            "track",
+            "wbr",
+        }
         for match in re.finditer(
             r"<(\/)?([A-Za-z][\w.]*)\b([^>]*)>", content, re.DOTALL
         ):

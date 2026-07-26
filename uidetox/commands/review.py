@@ -5,7 +5,11 @@ import sys
 from typing import Any
 from urllib.parse import urlsplit
 
-from uidetox.findings import coerce_finding, current_evidence_hashes
+from uidetox.findings import (
+    coerce_finding,
+    current_evidence_hashes,
+    review_capture_matrix_digest,
+)
 from uidetox.frontend_map import FrontendMap, load_frontend_map
 from uidetox.state import ensure_uidetox_dir, load_config, load_state, save_state
 from uidetox.utils import now_iso
@@ -78,6 +82,7 @@ def _store_structured_review(
         raise SystemExit(1)
 
     scores = {key: int(value) for key, value in dimensions.items() if value is not None}
+    required_matrix_digest = str(scope_validation["required_matrix_digest"])
     record: dict[str, Any] = {
         "dimensions": scores,
         "score": sum(scores.values()),
@@ -89,6 +94,7 @@ def _store_structured_review(
         "states": required_lists["state"],
         "viewports": required_lists["viewport"],
         "evidence_hashes": hashes,
+        "required_matrix_digest": required_matrix_digest,
         "scope_validation": scope_validation,
         "stale": False,
         "timestamp": now_iso(),
@@ -181,27 +187,45 @@ def _validate_review_scope(
                     viewport_name,
                 )
             )
+    capture_list_lengths = {
+        len(required_lists[key]) for key in ("route", "state", "viewport")
+    }
+    if len(capture_list_lengths) != 1:
+        errors.append(
+            "--route, --state, and --viewport must be repeated the same number of times"
+        )
     requested = {
         (_route_key(route), state_name.strip(), viewport.strip())
-        for route in required_lists["route"]
-        for state_name in required_lists["state"]
-        for viewport in required_lists["viewport"]
+        for route, state_name, viewport in zip(
+            required_lists["route"],
+            required_lists["state"],
+            required_lists["viewport"],
+            strict=False,
+        )
     }
-    missing_captures = sorted(requested - completed)
+    missing_captures = sorted(completed - requested)
     if missing_captures:
         errors.append(
-            "completed route/state/viewport captures are missing: "
+            "required completed route/state/viewport captures were not reviewed: "
             + ", ".join("/".join(item) for item in missing_captures)
         )
+    unexpected_captures = sorted(requested - completed)
+    if unexpected_captures:
+        errors.append(
+            "submitted route/state/viewport captures are not completed: "
+            + ", ".join("/".join(item) for item in unexpected_captures)
+        )
+    capture_matrix = [
+        {"route": route, "state": state_name, "viewport": viewport}
+        for route, state_name, viewport in sorted(completed)
+    ]
     return {
         "status": "validated" if not errors else "invalid",
         "evidence_hashes": dict(hashes),
         "finding_links": sorted(required_lists["finding_link"]),
         "region_links": sorted(required_lists["region_link"]),
-        "capture_matrix": [
-            {"route": route, "state": state_name, "viewport": viewport}
-            for route, state_name, viewport in sorted(requested)
-        ],
+        "capture_matrix": capture_matrix,
+        "required_matrix_digest": review_capture_matrix_digest(capture_matrix),
         "errors": errors,
     }
 

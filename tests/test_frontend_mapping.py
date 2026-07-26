@@ -116,9 +116,7 @@ def _runtime_capture(
             "navigation failed" if failed else "",
         ),
         coverage=(
-            RuntimeCoverage.empty(100)
-            if failed
-            else RuntimeCoverage(0, 0, 0, 0, 10)
+            RuntimeCoverage.empty(100) if failed else RuntimeCoverage(0, 0, 0, 0, 10)
         ),
         started_at="2026-07-26T00:00:00Z",
         completed_at="2026-07-26T00:00:01Z",
@@ -382,10 +380,7 @@ def test_runtime_graph_identity_is_exact_per_capture_and_state(tmp_path):
         for node in runtime_nodes
         if node.kind == "runtime_action"
     ]
-    assert {
-        (anchor["state"], anchor["capture_id"])
-        for anchor in anchors
-    } == {
+    assert {(anchor["state"], anchor["capture_id"]) for anchor in anchors} == {
         ("loading", "capture-loading"),
         ("ready", "capture-ready"),
     }
@@ -502,9 +497,7 @@ def test_runtime_design_metadata_and_relationships_round_trip_deterministically(
         "name": "light",
         "colorScheme": "light",
     }
-    assert runtime_nodes["#second"].metadata["measurements"]["paint"][
-        "unresolved"
-    ]
+    assert runtime_nodes["#second"].metadata["measurements"]["paint"]["unresolved"]
 
     node_by_id = {node.id: node for node in first.nodes}
     runtime_edges = {
@@ -548,9 +541,7 @@ def test_current_map_finding_projection_includes_diagnostics_once(
 
     findings, qualified = scan_command.current_map_findings(tmp_path)
     diagnostic_codes = [
-        finding.code
-        for finding in findings
-        if finding.code.startswith("browser-")
+        finding.code for finding in findings if finding.code.startswith("browser-")
     ]
 
     assert qualified is True
@@ -628,8 +619,9 @@ def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
         map_frontend(tmp_path),
     )
     assert retained.evidence["runtime_status"] == "partial"
-    assert retained.evidence["runtime_semantic_coverage"] == (
-        frontend_map.evidence["runtime_semantic_coverage"]
+    assert (
+        retained.evidence["runtime_semantic_coverage"]
+        == (frontend_map.evidence["runtime_semantic_coverage"])
     )
 
     (tmp_path / "src" / "theme.css").write_text(
@@ -638,8 +630,9 @@ def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
     )
     stale = retain_runtime_evidence(frontend_map, map_frontend(tmp_path))
     assert stale.evidence["runtime_status"] == "stale"
-    assert stale.evidence["runtime_semantic_coverage"] == (
-        frontend_map.evidence["runtime_semantic_coverage"]
+    assert (
+        stale.evidence["runtime_semantic_coverage"]
+        == (frontend_map.evidence["runtime_semantic_coverage"])
     )
 
 
@@ -1056,18 +1049,14 @@ export function SharedSecondary() {
         "provenance": "selector:exact+route",
         "candidates": ["src/Alpha.tsx"],
     }
-    route_only = runtime_nodes[
-        ("http://localhost:3000/unique", "#missing-unique")
-    ]
+    route_only = runtime_nodes[("http://localhost:3000/unique", "#missing-unique")]
     assert route_only.metadata["source_ownership"] == {
         "status": "resolved",
         "confidence": 0.4,
         "provenance": "route:unique-context",
         "candidates": ["src/Unique.tsx"],
     }
-    ambiguous = runtime_nodes[
-        ("http://localhost:3000/shared", "#missing-shared")
-    ]
+    ambiguous = runtime_nodes[("http://localhost:3000/shared", "#missing-shared")]
     assert ambiguous.metadata["source_targets"] == []
     assert ambiguous.metadata["source_ownership"] == {
         "status": "ambiguous",
@@ -1689,9 +1678,7 @@ export function App() {
     frontend_map = map_frontend(tmp_path, "src")
     project_map = frontend_map.project_map
     client = next(
-        node
-        for node in project_map["nodes"]
-        if node["kind"] == "client_operation"
+        node for node in project_map["nodes"] if node["kind"] == "client_operation"
     )
     request = next(
         node
@@ -1784,9 +1771,7 @@ export function App() {
     client_ids = {
         node["id"] for node in graph["nodes"] if node["kind"] == "client_operation"
     }
-    action_ids = {
-        node["id"] for node in graph["nodes"] if node["kind"] == "ui_action"
-    }
+    action_ids = {node["id"] for node in graph["nodes"] if node["kind"] == "ui_action"}
 
     assert len(client_ids) == 2
     assert not any(
@@ -1884,8 +1869,7 @@ export function App() {
     )
 
     assert any(
-        finding.detector_id == "contract-ui-state-missing"
-        for finding in graph.findings
+        finding.detector_id == "contract-ui-state-missing" for finding in graph.findings
     )
 
 

@@ -1510,7 +1510,8 @@ def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound(
             "targetSpacing": {
                 "status": "intersects",
                 "center_distance_px": 24.0,
-                "circle_gap_px": 0.0,
+                "shape_gap_px": 0.0,
+                "neighbor_shape": "circle",
                 "edge_gap_px": 4.0,
                 "total_targets": 2,
                 "indexed_targets": 2,
@@ -1575,7 +1576,8 @@ def test_target_spacing_uses_shape_intersection_and_reports_truncation() -> None
                 "status": "intersects",
                 "nearest_selector": "#peer",
                 "center_distance_px": 24.0,
-                "circle_gap_px": 0.0,
+                "shape_gap_px": 0.0,
+                "neighbor_shape": "circle",
                 "edge_gap_px": 4.0,
                 "total_targets": 2,
                 "indexed_targets": 2,
@@ -1645,6 +1647,7 @@ def test_focus_indicator_requires_focus_specific_distinguishable_delta() -> None
                 "visible": True,
                 "changed": True,
                 "distinguishable": True,
+                "perceptibleProperties": ["outline"],
                 "area": 220,
                 "minimum_area": 220,
             },
@@ -1964,7 +1967,8 @@ def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
         "status": "intersects",
         "nearest_selector": "#near-small",
         "center_distance_px": 18,
-        "circle_gap_px": -6,
+        "shape_gap_px": -6,
+        "neighbor_shape": "circle",
         "edge_gap_px": 0,
         "total_targets": 10,
         "indexed_targets": 10,
@@ -1985,6 +1989,152 @@ def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
     assert "runtime-spatial-rhythm" in {
         finding.code for finding in focus["#rhythm-outlier"].findings
     }
+
+
+@pytest.mark.browser
+def test_browser_target_spacing_uses_circle_against_large_target_rectangle(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "target-spacing-shapes.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; }
+  button {
+    box-sizing: border-box;
+    position: absolute;
+    margin: 0;
+    padding: 0;
+  }
+  .small { width: 20px; height: 20px; }
+  .large { width: 100px; height: 60px; }
+  #near-small { left: 100px; top: 100px; }
+  #near-large { left: 121px; top: 80px; }
+  #clear-small { left: 100px; top: 300px; }
+  #clear-large { left: 123px; top: 280px; }
+</style>
+<main>
+  <button class="small" id="near-small" aria-label="Near small"></button>
+  <button class="large" id="near-large">Near large</button>
+  <button class="small" id="clear-small" aria-label="Clear small"></button>
+  <button class="large" id="clear-large">Clear large</button>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    elements = {element.selector: element for element in observation.pages[0].elements}
+    assert elements["#near-small"].measurements["targetSpacing"]["status"] == (
+        "intersects"
+    )
+    assert (
+        elements["#near-small"].measurements["targetSpacing"]["nearest_selector"]
+        == "#near-large"
+    )
+    assert "runtime-target-size" in {
+        finding.code for finding in elements["#near-small"].findings
+    }
+    assert elements["#clear-small"].measurements["targetSpacing"]["status"] == "clear"
+    assert "runtime-target-size" not in {
+        finding.code for finding in elements["#clear-small"].findings
+    }
+
+
+@pytest.mark.browser
+def test_browser_focus_evidence_requires_perceptible_computed_delta(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "focus-perceptibility.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; background: white; }
+  button {
+    display: block;
+    width: 120px;
+    height: 36px;
+    margin: 12px;
+    color: black;
+    background: white;
+    border: 2px solid transparent;
+    outline: none;
+    box-shadow: none;
+  }
+  #background:focus { background: black; }
+  #border:focus { border-color: black; }
+  #faint-shadow:focus { box-shadow: 0 0 0 2px rgb(0 0 0 / 1%); }
+  #outline:focus { outline: 2px solid black; }
+  #visible-shadow:focus { box-shadow: 0 0 0 2px black; }
+  #permanent-shadow { box-shadow: 0 0 0 2px black; }
+</style>
+<main>
+  <button id="background">Background</button>
+  <button id="border">Border</button>
+  <button id="faint-shadow">Faint shadow</button>
+  <button id="outline">Outline</button>
+  <button id="visible-shadow">Visible shadow</button>
+  <button id="permanent-shadow">Permanent shadow</button>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+    focus_cases = (
+        ("background", "#background"),
+        ("border", "#border"),
+        ("faint-shadow", "#faint-shadow"),
+        ("outline", "#outline"),
+        ("visible-shadow", "#visible-shadow"),
+        ("permanent-shadow", "#permanent-shadow"),
+    )
+    actions = tuple(
+        action
+        for state, selector in focus_cases
+        for action in (
+            RuntimeScenarioAction(kind="focus", selector=selector),
+            RuntimeScenarioAction(kind="capture", state=state),
+        )
+    )
+    scenario = RuntimeScenario(
+        name="focus-deltas",
+        url=url,
+        actions=actions,
+        expected_state="permanent-shadow",
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    pages = {page.state: page for page in observation.pages}
+    expected_failures = {"faint-shadow", "permanent-shadow"}
+    for state, selector in focus_cases:
+        element = next(
+            element for element in pages[state].elements if element.selector == selector
+        )
+        codes = {finding.code for finding in element.findings}
+        if state in expected_failures:
+            assert "runtime-focus-visible" in codes
+        else:
+            assert "runtime-focus-visible" not in codes
+            assert element.measurements["focusIndicator"]["perceptibleProperties"]
 
 
 @pytest.mark.browser

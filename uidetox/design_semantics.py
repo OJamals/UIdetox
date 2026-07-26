@@ -739,6 +739,7 @@ def _interaction_findings(
             or indicator.get("visible") is not True
             or indicator.get("changed") is not True
             or indicator.get("distinguishable") is not True
+            or not indicator.get("perceptibleProperties")
         ):
             findings[index].append(
                 _finding(

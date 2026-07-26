@@ -15,7 +15,11 @@ from uidetox.state import load_state
 from uidetox.visual_evidence import VisualEvidenceStatus
 
 
-def _validated_review_map(tmp_path: Path) -> FrontendMap:
+def _validated_review_map(
+    tmp_path: Path,
+    *,
+    capture_matrix: list[dict] | None = None,
+) -> FrontendMap:
     return FrontendMap(
         schema_version=SCHEMA_VERSION,
         generated_at="2026-07-26T00:00:00Z",
@@ -38,7 +42,9 @@ def _validated_review_map(tmp_path: Path) -> FrontendMap:
             "source_status": "current",
             "runtime_status": "current",
             "runtime_findings": [{"fingerprint": "finding-1", "id": "finding-1"}],
-            "runtime_capture_matrix": [
+            "runtime_capture_matrix": capture_matrix
+            if capture_matrix is not None
+            else [
                 {
                     "scenario": "checkout",
                     "state": "error",
@@ -240,6 +246,81 @@ def test_review_stores_structured_dimensions_and_current_evidence_hashes(
     assert stored["scope_validation"]["capture_matrix"] == [
         {"route": "/checkout", "state": "error", "viewport": "mobile"}
     ]
+    assert len(stored["required_matrix_digest"]) == 64
+    assert (
+        stored["scope_validation"]["required_matrix_digest"]
+        == stored["required_matrix_digest"]
+    )
+
+
+def test_structured_review_rejects_subset_of_non_cartesian_completed_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        review,
+        "_load_review_map",
+        lambda: _validated_review_map(
+            tmp_path,
+            capture_matrix=[
+                {
+                    "scenario": "one",
+                    "state": "initial",
+                    "url": "http://localhost:3000/one",
+                    "viewport": {"name": "desktop"},
+                    "status": "completed",
+                },
+                {
+                    "scenario": "two",
+                    "state": "error",
+                    "url": "http://localhost:3000/two",
+                    "viewport": {"name": "mobile"},
+                    "status": "completed",
+                },
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        review,
+        "current_evidence_hashes",
+        lambda: {"source": "s", "map": "m", "runtime": "r"},
+    )
+
+    with pytest.raises(SystemExit):
+        review._store_structured_review(
+            argparse.Namespace(
+                rationale="Reviewed only one completed capture.",
+                reviewer="qa-agent",
+                finding_link=["finding-1"],
+                region_link=["runtime-card"],
+                route=["/one"],
+                state=["initial"],
+                viewport=["desktop"],
+            ),
+            {"A": 36, "B": 27, "C": 18, "D": 9},
+        )
+
+    error = capsys.readouterr().err
+    assert "/two/error/mobile" in error
+
+    review._store_structured_review(
+        argparse.Namespace(
+            rationale="Reviewed both completed captures.",
+            reviewer="qa-agent",
+            finding_link=["finding-1"],
+            region_link=["runtime-card"],
+            route=["/one", "/two"],
+            state=["initial", "error"],
+            viewport=["desktop", "mobile"],
+        ),
+        {"A": 36, "B": 27, "C": 18, "D": 9},
+    )
+    assert load_state()["subjective"]["scope_validation"]["capture_matrix"] == [
+        {"route": "/one", "state": "initial", "viewport": "desktop"},
+        {"route": "/two", "state": "error", "viewport": "mobile"},
+    ]
 
 
 def test_structured_review_rejects_stale_links_and_incomplete_capture_matrix(
@@ -264,9 +345,9 @@ def test_structured_review_rejects_stale_links_and_incomplete_capture_matrix(
                 reviewer="qa-agent",
                 finding_link=["stale-finding"],
                 region_link=["stale-region"],
-                route=["/checkout"],
+                route=["/checkout", "/checkout"],
                 state=["error", "success"],
-                viewport=["mobile"],
+                viewport=["mobile", "mobile"],
             ),
             {"A": 36, "B": 27, "C": 18, "D": 9},
         )
