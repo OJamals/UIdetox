@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from uidetox.design_context import DesignDials, DesignIntent
-from uidetox.frontend_map import FrontendMap, frontend_map_is_fresh
+from uidetox.frontend_map import FrontendMap, frontend_map_is_fresh, runtime_route
 from uidetox.project_map import ProjectMap
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
@@ -531,13 +531,11 @@ def _build_proposal(
             + brief.intent.preserve
         )
     )
-    preserved_contract_evidence = tuple(
-        {
-            "contract": contract,
-            "source_modules": list(source_targets),
-            "runtime_status": evidence_freshness["runtime"]["status"],
-        }
-        for contract in preserved
+    preserved_contract_evidence = _preserved_contract_evidence(
+        frontend_map,
+        preserved,
+        brief,
+        evidence_freshness["runtime"]["status"],
     )
     feasibility_blockers = tuple(
         dict.fromkeys(
@@ -554,8 +552,7 @@ def _build_proposal(
     )
     feasibility_blockers = tuple(item for item in feasibility_blockers if item)
     observable_checks = _observable_acceptance_checks(
-        preserved,
-        source_targets,
+        preserved_contract_evidence,
         evidence_freshness,
         contract_blockers,
         brief,
@@ -868,18 +865,108 @@ def _contract_blockers(frontend_map: FrontendMap) -> tuple[str, ...]:
     return tuple(blockers)
 
 
-def _observable_acceptance_checks(
+def _preserved_contract_evidence(
+    frontend_map: FrontendMap,
     preserved: tuple[str, ...],
-    source_targets: tuple[str, ...],
+    brief: RedesignBrief,
+    runtime_status: str,
+) -> tuple[dict[str, Any], ...]:
+    project_map = ProjectMap.from_dict(frontend_map.project_map)
+    intent_preserve = set(brief.intent.preserve)
+    brief_preserve = set(brief.preserve)
+    source_index: dict[str, tuple[set[str], set[str]]] = {}
+
+    def add(contract: str, file: str, provenance: str) -> None:
+        if not file:
+            return
+        modules, evidence = source_index.setdefault(contract, (set(), set()))
+        modules.add(file)
+        evidence.add(provenance)
+
+    for node in frontend_map.nodes:
+        contract = ""
+        if node.kind == "route":
+            contract = f"Route remains reachable: {node.name}"
+        elif node.kind == "runtime_page":
+            contract = (
+                f"Observed runtime route remains reachable: {runtime_route(node.name)}"
+            )
+        elif node.kind == "data":
+            contract = f"Data contract remains functional: {node.name}"
+        elif node.kind == "action":
+            contract = f"Interaction capability remains available: {node.name}"
+        elif node.kind == "runtime_action":
+            role = str(node.metadata.get("role", "action")) or "action"
+            contract = (
+                f'Accessible runtime action remains available: {role} "{node.name}"'
+            )
+        elif node.kind == "state":
+            contract = f"User-visible state remains represented: {node.name}"
+        elif (node.kind == "region" and node.name == "form") or (
+            node.kind == "runtime_region"
+            and str(node.metadata.get("tag", "")) == "form"
+        ):
+            contract = (
+                "Form semantics, validation, and submission behavior remain functional."
+            )
+        if contract:
+            add(contract, node.file, f"frontend-map:{node.kind}:{node.id}")
+
+    for node in project_map.nodes:
+        if node.side != "frontend" or node.kind != "client_operation":
+            continue
+        path = str(node.attributes.get("path", ""))
+        contract = f"Data contract remains functional: {path}"
+        add(contract, node.source.file, f"project-map:{node.kind}:{node.id}")
+
+    records: list[dict[str, Any]] = []
+    for contract in preserved:
+        modules, provenance = source_index.get(contract, (set(), set()))
+        if modules:
+            source_status = "mapped"
+        elif contract in intent_preserve:
+            source_status = "intent"
+            provenance = tuple(brief.intent.evidence.get("preserve", ()))
+        elif contract in brief_preserve:
+            source_status = "intent"
+            provenance = ("redesign-brief:preserve",)
+        else:
+            source_status = "unresolved"
+        records.append(
+            {
+                "contract": contract,
+                "source_modules": sorted(modules),
+                "source_status": source_status,
+                "provenance": sorted(provenance),
+                "runtime_status": runtime_status,
+            }
+        )
+    return tuple(records)
+
+
+def _observable_acceptance_checks(
+    preserved_contract_evidence: tuple[dict[str, Any], ...],
     freshness: dict[str, Any],
     contract_blockers: tuple[str, ...],
     brief: RedesignBrief,
 ) -> tuple[str, ...]:
-    modules = ", ".join(source_targets) or "the mapped source modules"
-    checks = [
-        f"Source check: {contract} remains represented in {modules}."
-        for contract in preserved
-    ]
+    checks: list[str] = []
+    for evidence in preserved_contract_evidence:
+        contract = str(evidence["contract"])
+        modules = ", ".join(evidence["source_modules"])
+        provenance = ", ".join(evidence["provenance"])
+        if modules:
+            checks.append(f"Source check: {contract} remains represented in {modules}.")
+        elif evidence["source_status"] == "intent":
+            checks.append(
+                f"Intent check: {contract} remains preserved per "
+                f"{provenance or 'explicit intent'}."
+            )
+        else:
+            checks.append(
+                f"Evidence gap: resolve a source anchor for {contract} "
+                "before implementation."
+            )
     checks.append(
         "Source check: rerun `uidetox map` and confirm the source manifest is current."
     )
