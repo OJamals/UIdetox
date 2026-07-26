@@ -21,10 +21,11 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
+from uidetox.design_semantics import detect_design_findings
 from uidetox.fileset import ProjectFileSet
 from uidetox.findings import Finding
 from uidetox.project_map import build_project_map, project_source_manifest
-from uidetox.runtime_observer import RuntimeObservation
+from uidetox.runtime_observer import RuntimeObservation, RuntimePage
 from uidetox.runtime_scenarios import RuntimeCaptureRecord, RuntimeDiagnostic
 from uidetox.semantic_adapters import (
     ApplicationSemantics,
@@ -464,11 +465,7 @@ def map_frontend(
                 "response_type_refs": list(call.response_type_refs),
                 "request_contracts": request_contracts,
                 "response_contracts": response_contracts,
-                "ui_actions": (
-                    sorted(action_names)
-                    if attributable_ui
-                    else []
-                ),
+                "ui_actions": (sorted(action_names) if attributable_ui else []),
                 "ui_states": sorted(state_names) if attributable_ui else [],
                 "ui_lifecycle_evidence": (
                     "present"
@@ -496,14 +493,10 @@ def map_frontend(
                     else "unknown"
                 ),
                 "authorization": (
-                    "absent"
-                    if not auth_evidence and call_count == 1
-                    else "unknown"
+                    "absent" if not auth_evidence and call_count == 1 else "unknown"
                 ),
                 "tenant": (
-                    "absent"
-                    if not auth_evidence and call_count == 1
-                    else "unknown"
+                    "absent" if not auth_evidence and call_count == 1 else "unknown"
                 ),
                 "ui_required": bool(call_ui_owner),
                 "owner": call.owner,
@@ -678,7 +671,7 @@ def map_frontend(
                     ),
                 )
 
-    _merge_runtime_evidence(
+    runtime_pages = _merge_runtime_evidence(
         nodes,
         edges,
         edge_keys,
@@ -693,11 +686,8 @@ def map_frontend(
     target_label = (
         "." if scope == root_path else scope.relative_to(root_path).as_posix()
     )
-    runtime_pages = tuple(runtime.pages) if runtime is not None else ()
     runtime_viewports = sorted({page.viewport.name for page in runtime_pages})
-    runtime_urls = (
-        list(runtime.requested_urls) if runtime is not None else []
-    )
+    runtime_urls = list(runtime.requested_urls) if runtime is not None else []
     runtime_screenshots = [
         page.screenshot for page in runtime_pages if page.screenshot is not None
     ]
@@ -745,17 +735,11 @@ def map_frontend(
     ]
     runtime_coverage = {
         "requested": len(runtime_captures),
-        "completed": sum(
-            capture.status == "completed" for capture in runtime_captures
-        ),
+        "completed": sum(capture.status == "completed" for capture in runtime_captures),
         "failed": sum(capture.status == "failed" for capture in runtime_captures),
-        "truncated": sum(
-            capture.coverage.truncated for capture in runtime_captures
-        ),
+        "truncated": sum(capture.coverage.truncated for capture in runtime_captures),
         "total": sum(capture.coverage.total for capture in runtime_captures),
-        "candidates": sum(
-            capture.coverage.candidates for capture in runtime_captures
-        ),
+        "candidates": sum(capture.coverage.candidates for capture in runtime_captures),
         "eligible": sum(capture.coverage.eligible for capture in runtime_captures),
         "emitted": sum(capture.coverage.emitted for capture in runtime_captures),
     }
@@ -821,16 +805,13 @@ def map_frontend(
             "runtime_finding_counts": dict(sorted(runtime_finding_counts.items())),
             "runtime_findings": runtime_findings,
             "runtime_errors": list(runtime.errors) if runtime is not None else [],
-            "runtime_capture_matrix": [
-                asdict(capture) for capture in runtime_captures
-            ],
+            "runtime_capture_matrix": [asdict(capture) for capture in runtime_captures],
             "runtime_diagnostics": runtime_diagnostics,
             "runtime_coverage": runtime_coverage,
             "runtime_semantic_coverage": runtime_semantic_coverage,
             "runtime_viewport_discovery": (
                 asdict(runtime.viewport_discovery)
-                if runtime is not None
-                and runtime.viewport_discovery is not None
+                if runtime is not None and runtime.viewport_discovery is not None
                 else None
             ),
         },
@@ -1122,15 +1103,12 @@ def _runtime_semantic_coverage(pages: Iterable[Any]) -> dict[str, int]:
                 and isinstance(layers, list)
                 and bool(layers)
                 and all(
-                    isinstance(layer, dict)
-                    and isinstance(layer.get("rgba"), list)
+                    isinstance(layer, dict) and isinstance(layer.get("rgba"), list)
                     for layer in layers
                 )
                 and not unresolved
             )
-            coverage[
-                "paint_resolved" if resolved else "paint_unresolved"
-            ] += 1
+            coverage["paint_resolved" if resolved else "paint_unresolved"] += 1
     return dict(coverage)
 
 
@@ -1141,16 +1119,79 @@ def _merge_runtime_evidence(
     runtime: RuntimeObservation | None,
     signal_counts: Counter[str],
     application: ApplicationSemantics,
-) -> None:
+) -> tuple[RuntimePage, ...]:
     if runtime is None:
-        return
+        return ()
 
+    enriched_pages: list[RuntimePage] = []
     for page in runtime.pages:
+        route_sources = application.route_sources(page.url)
+        ownerships = tuple(
+            application.source_ownership(
+                selector=element.selector,
+                tag=element.tag,
+                source_hint=element.source_hint,
+                source_selectors=element.source_selectors,
+                runtime_url=page.url,
+                route_sources=route_sources,
+            )
+            for element in page.elements
+        )
+        ownership_groups: defaultdict[tuple[str, str], list[int]] = defaultdict(list)
+        for index, (element, ownership) in enumerate(
+            zip(page.elements, ownerships, strict=True)
+        ):
+            raw_group = str(element.measurements.get("equivalenceGroup", "")).strip()
+            source_key = "|".join(ownership.source_targets)
+            if (
+                raw_group
+                and source_key
+                and ownership.provenance in {"selector:exact", "selector:exact+route"}
+            ):
+                ownership_groups[(raw_group, source_key)].append(index)
+        canonical_groups = {
+            index: (raw_group, source_key)
+            for (raw_group, source_key), indexes in ownership_groups.items()
+            if len(indexes) >= 3
+            for index in indexes
+        }
+        owned_elements = []
+        for index, element in enumerate(page.elements):
+            canonical = canonical_groups.get(index)
+            measurements = dict(element.measurements)
+            if canonical is not None:
+                raw_group, source_key = canonical
+                measurements.update(
+                    {
+                        "equivalenceGroup": raw_group,
+                        "equivalenceEvidence": "source-ownership",
+                        "sourceOwnershipKey": source_key,
+                    }
+                )
+            owned_elements.append(replace(element, measurements=measurements))
+        owned_page = replace(page, elements=tuple(owned_elements))
+        aligned_findings = detect_design_findings(owned_page)
+        owned_elements = [
+            replace(
+                element,
+                findings=tuple(
+                    {
+                        finding.fingerprint: finding
+                        for finding in (
+                            *element.findings,
+                            *aligned_findings[index],
+                        )
+                    }.values()
+                ),
+            )
+            for index, element in enumerate(owned_page.elements)
+        ]
+        page = replace(owned_page, elements=tuple(owned_elements))
+        enriched_pages.append(page)
         capture_identity = page.capture_id
         page_id = _node_id("runtime_page", "", capture_identity)
         page_finding_count = sum(len(element.findings) for element in page.elements)
         page_semantic_coverage = _runtime_semantic_coverage((page,))
-        route_sources = application.route_sources(page.url)
         nodes.append(
             FrontendNode(
                 id=page_id,
@@ -1176,15 +1217,7 @@ def _merge_runtime_evidence(
             )
         )
         runtime_elements: list[tuple[str, Any]] = []
-        for element in page.elements:
-            ownership = application.source_ownership(
-                selector=element.selector,
-                tag=element.tag,
-                source_hint=element.source_hint,
-                source_selectors=element.source_selectors,
-                runtime_url=page.url,
-                route_sources=route_sources,
-            )
+        for element, ownership in zip(page.elements, ownerships, strict=True):
             if element.kind == "action":
                 node_kind = "runtime_action"
             elif element.kind == "text":
@@ -1270,13 +1303,9 @@ def _merge_runtime_evidence(
             for element_id, element in runtime_elements
             if element.selector
         }
-        equivalence_groups: defaultdict[str, list[tuple[str, Any]]] = defaultdict(
-            list
-        )
+        equivalence_groups: defaultdict[str, list[tuple[str, Any]]] = defaultdict(list)
         for element_id, element in runtime_elements:
-            parent_selector = str(
-                element.measurements.get("layoutParentSelector", "")
-            )
+            parent_selector = str(element.measurements.get("layoutParentSelector", ""))
             parent_id = selector_to_id.get(parent_selector)
             if parent_id is not None and parent_id != element_id:
                 _append_edge_once(
@@ -1292,13 +1321,9 @@ def _merge_runtime_evidence(
                         },
                     ),
                 )
-            equivalence_group = str(
-                element.measurements.get("equivalenceGroup", "")
-            )
+            equivalence_group = str(element.measurements.get("equivalenceGroup", ""))
             if equivalence_group:
-                equivalence_groups[equivalence_group].append(
-                    (element_id, element)
-                )
+                equivalence_groups[equivalence_group].append((element_id, element))
         for group, members in sorted(equivalence_groups.items()):
             ordered = sorted(members, key=lambda item: item[1].order)
             if len(ordered) < 2:
@@ -1324,6 +1349,8 @@ def _merge_runtime_evidence(
                         },
                     ),
                 )
+
+    return tuple(enriched_pages)
 
 
 def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
@@ -1567,7 +1594,11 @@ def _line_number(content: str, offset: int) -> int:
 def _contract_ui_state(name: str) -> str | None:
     lowered = name.lower()
     return next(
-        (state for state in ("loading", "error", "empty", "success") if state in lowered),
+        (
+            state
+            for state in ("loading", "error", "empty", "success")
+            if state in lowered
+        ),
         None,
     )
 

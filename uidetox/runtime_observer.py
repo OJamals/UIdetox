@@ -57,9 +57,7 @@ def _normalized_runtime_measurements(value: object) -> dict[str, Any]:
         return measurements
     paint = dict(raw_paint)
     unresolved = [
-        dict(item)
-        for item in paint.get("unresolved", [])
-        if isinstance(item, dict)
+        dict(item) for item in paint.get("unresolved", []) if isinstance(item, dict)
     ]
 
     def normalize_entry(
@@ -171,8 +169,7 @@ def _attach_runtime_findings(
         element.selector
         for element in attached
         if any(
-            finding.code == "runtime-component-clipped"
-            for finding in element.findings
+            finding.code == "runtime-component-clipped" for finding in element.findings
         )
     }
     if not clipping_containers:
@@ -185,8 +182,7 @@ def _attach_runtime_findings(
                 for finding in element.findings
                 if not (
                     finding.code == "runtime-text-clipped"
-                    and finding.metrics.get("clipping_ancestor")
-                    in clipping_containers
+                    and finding.metrics.get("clipping_ancestor") in clipping_containers
                 )
             ),
         )
@@ -302,15 +298,12 @@ class RuntimeObservation:
             object.__setattr__(self, "pages", pages)
         captures = self.captures
         if not captures and pages:
-            captures = tuple(
-                _legacy_capture(page, self.generated_at) for page in pages
-            )
+            captures = tuple(_legacy_capture(page, self.generated_at) for page in pages)
             object.__setattr__(self, "captures", captures)
         completed = sum(capture.status == "completed" for capture in captures)
         failed = sum(capture.status == "failed" for capture in captures)
         degraded = any(
-            capture.readiness.status == "degraded"
-            or capture.coverage.truncated
+            capture.readiness.status == "degraded" or capture.coverage.truncated
             for capture in captures
             if capture.status == "completed"
         )
@@ -409,17 +402,16 @@ def observe_frontend(
                 name="default",
                 url=url,
                 expected_state="initial",
-                readiness=readiness
-                or RuntimeReadinessPolicy(settle_ms=settle_ms),
+                readiness=readiness or RuntimeReadinessPolicy(settle_ms=settle_ms),
             )
             for url in normalized_urls
         )
     )
     if not active_scenarios:
         raise ValueError("At least one runtime scenario is required.")
-    unrequested_urls = {
-        scenario.url for scenario in active_scenarios
-    } - set(normalized_urls)
+    unrequested_urls = {scenario.url for scenario in active_scenarios} - set(
+        normalized_urls
+    )
     if unrequested_urls:
         raise ValueError("Runtime scenario URLs must be included in requested URLs.")
     validate_runtime_observation_plan(
@@ -752,11 +744,7 @@ def _wait_for_readiness(
                 timeout=min(policy.request_idle_ms, timeout_ms),
             )
     except playwright_timeout_error as exc:
-        status = (
-            "failed"
-            if strategy in {"selector", "app-hook"}
-            else "degraded"
-        )
+        status = "failed" if strategy in {"selector", "app-hook"} else "degraded"
         detail = f"{strategy} timed out: {exc}"
     if policy.settle_ms:
         page.wait_for_timeout(policy.settle_ms)
@@ -1038,9 +1026,7 @@ def _elements_and_coverage_from_payload(
 ) -> tuple[tuple[RuntimeElement, ...], RuntimeCoverage]:
     if isinstance(payload, list):
         elements = tuple(
-            RuntimeElement.from_dict(item)
-            for item in payload
-            if isinstance(item, dict)
+            RuntimeElement.from_dict(item) for item in payload if isinstance(item, dict)
         )
         count = len(elements)
         return elements, RuntimeCoverage(
@@ -1067,10 +1053,9 @@ def _elements_and_coverage_from_payload(
 
 
 def _runtime_evaluate_script(budget: RuntimeDomBudget) -> str:
-    return (
-        _RUNTIME_EVALUATE_SCRIPT.replace("__UIDETOX_SCAN__", str(budget.scan))
-        .replace("__UIDETOX_CANDIDATES__", str(budget.candidates))
-    )
+    return _RUNTIME_EVALUATE_SCRIPT.replace(
+        "__UIDETOX_SCAN__", str(budget.scan)
+    ).replace("__UIDETOX_CANDIDATES__", str(budget.candidates))
 
 
 def _screenshot_name(url: str, viewport: RuntimeViewport) -> str:
@@ -1212,23 +1197,55 @@ async () => {
     return Array.from(new Set(selectors));
   };
 
-  const selectorFor = (element, sourceSelectors = sourceSelectorsFor(element)) => {
-    const stable = sourceSelectors.find(
+  const selectorCache = new WeakMap();
+  const siblingPositionCache = new WeakMap();
+  const siblingPositionFor = element => {
+    const parent = element.parentElement;
+    if (!parent) return {count: 0, index: 0};
+    let positions = siblingPositionCache.get(parent);
+    if (!positions) {
+      positions = new WeakMap();
+      const childrenByTag = new Map();
+      for (const child of parent.children) {
+        const tag = child.tagName;
+        const siblings = childrenByTag.get(tag) || [];
+        siblings.push(child);
+        childrenByTag.set(tag, siblings);
+      }
+      for (const siblings of childrenByTag.values()) {
+        siblings.forEach((sibling, index) => {
+          positions.set(sibling, {count: siblings.length, index: index + 1});
+        });
+      }
+      siblingPositionCache.set(parent, positions);
+    }
+    return positions.get(element) || {count: 0, index: 0};
+  };
+
+  const selectorFor = (element, sourceSelectors = null) => {
+    if (selectorCache.has(element)) return selectorCache.get(element);
+    const resolvedSourceSelectors = sourceSelectors || sourceSelectorsFor(element);
+    const stable = resolvedSourceSelectors.find(
       selector => selector.startsWith("#") || selector.startsWith("[data-")
     );
-    if (stable) return stable;
+    if (stable) {
+      selectorCache.set(element, stable);
+      return stable;
+    }
     const parts = [];
     let current = element;
     while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
       const tag = current.tagName.toLowerCase();
-      const siblings = current.parentElement
-        ? Array.from(current.parentElement.children).filter(item => item.tagName === current.tagName)
-        : [];
-      const suffix = siblings.length > 1 ? `:nth-of-type(${siblings.indexOf(current) + 1})` : "";
+      const siblingPosition = siblingPositionFor(current);
+      const suffix = siblingPosition.count > 1
+        ? `:nth-of-type(${siblingPosition.index})`
+        : "";
       parts.unshift(`${tag}${suffix}`);
       current = current.parentElement;
     }
-    return parts.join(" > ");
+    const selector = parts.join(" > ");
+    selectorCache.set(element, selector);
+    return selector;
   };
 
   const nameFor = (element) => {
@@ -1384,41 +1401,67 @@ async () => {
     return "";
   };
 
-  const paintEvidence = (element, style) => {
-    const unresolved = [];
-    const backgroundLayers = [];
-    let current = element;
-    let opaque = false;
-    while (current) {
-      const currentStyle = geometryFor(current).style;
-      const selector = selectorFor(current);
-      const raw = currentStyle.backgroundColor;
-      backgroundLayers.push({selector, raw});
-      const before = unresolved.length;
-      const properties = [
-        ["background-image", currentStyle.backgroundImage, "none"],
-        ["background-blend-mode", currentStyle.backgroundBlendMode, "normal"],
-        ["mix-blend-mode", currentStyle.mixBlendMode, "normal"],
-        ["filter", currentStyle.filter, "none"],
-        [
-          "backdrop-filter",
-          currentStyle.backdropFilter || currentStyle.webkitBackdropFilter,
-          "none"
-        ]
-      ];
-      for (const [property, value, clean] of properties) {
-        if (value && value !== clean) {
-          unresolved.push({selector, property, value});
+  // Ephemeral ancestry cache shared by every emitted text node in this DOM pass.
+  const paintLayerCache = new WeakMap();
+  const pseudoPaintCandidates = new WeakSet();
+  let inspectAllPaintPseudos = false;
+  const collectPseudoPaintCandidates = rules => {
+    for (const rule of rules) {
+      if (rule.cssRules) {
+        collectPseudoPaintCandidates(rule.cssRules);
+      }
+      const selector = String(rule.selectorText || "");
+      if (!/::(?:before|after)\b/.test(selector)) continue;
+      const baseSelector = selector.replace(/::(?:before|after)\b/g, "");
+      try {
+        for (const element of document.querySelectorAll(baseSelector)) {
+          pseudoPaintCandidates.add(element);
         }
+      } catch {
+        inspectAllPaintPseudos = true;
       }
-      const opacity = Number.parseFloat(currentStyle.opacity);
-      if (Number.isFinite(opacity) && opacity < 0.999) {
-        unresolved.push({
-          selector,
-          property: "opacity",
-          value: currentStyle.opacity
-        });
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      collectPseudoPaintCandidates(sheet.cssRules);
+    } catch {
+      // Cross-origin sheets cannot be inspected. Preserve correctness by
+      // falling back to computed pseudo styles for every painted layer.
+      inspectAllPaintPseudos = true;
+    }
+  }
+  const paintLayerFor = current => {
+    if (paintLayerCache.has(current)) return paintLayerCache.get(current);
+    const currentStyle = geometryFor(current).style;
+    const selector = selectorFor(current);
+    const raw = currentStyle.backgroundColor;
+    const unresolved = [];
+    const properties = [
+      ["background-image", currentStyle.backgroundImage, "none"],
+      ["background-blend-mode", currentStyle.backgroundBlendMode, "normal"],
+      ["mix-blend-mode", currentStyle.mixBlendMode, "normal"],
+      ["filter", currentStyle.filter, "none"],
+      [
+        "backdrop-filter",
+        currentStyle.backdropFilter || currentStyle.webkitBackdropFilter,
+        "none"
+      ]
+    ];
+    for (const [property, value, clean] of properties) {
+      if (value && value !== clean) {
+        unresolved.push({selector, property, value});
       }
+    }
+    const opacity = Number.parseFloat(currentStyle.opacity);
+    if (Number.isFinite(opacity) && opacity < 0.999) {
+      unresolved.push({
+        selector,
+        property: "opacity",
+        value: currentStyle.opacity
+      });
+    }
+    if (inspectAllPaintPseudos || pseudoPaintCandidates.has(current)) {
       for (const pseudo of ["::before", "::after"]) {
         const pseudoStyle = getComputedStyle(current, pseudo);
         const content = pseudoStyle.content;
@@ -1436,8 +1479,27 @@ async () => {
           }
         }
       }
-      const alpha = computedAlpha(raw);
-      if (alpha === 1 && unresolved.length === before) {
+    }
+    const result = {
+      selector,
+      raw,
+      alpha: computedAlpha(raw),
+      unresolved
+    };
+    paintLayerCache.set(current, result);
+    return result;
+  };
+
+  const paintEvidence = (element, style) => {
+    const unresolved = [];
+    const backgroundLayers = [];
+    let current = element;
+    let opaque = false;
+    while (current) {
+      const layer = paintLayerFor(current);
+      backgroundLayers.push({selector: layer.selector, raw: layer.raw});
+      unresolved.push(...layer.unresolved);
+      if (layer.alpha === 1 && layer.unresolved.length === 0) {
         opaque = true;
         break;
       }
@@ -1462,14 +1524,65 @@ async () => {
     colorScheme: style.colorScheme || ""
   });
 
+  const focusVisualSnapshot = style => ({
+    outlineStyle: style.outlineStyle,
+    outlineWidth: style.outlineWidth,
+    outlineColor: style.outlineColor,
+    boxShadow: style.boxShadow,
+    borderTopColor: style.borderTopColor,
+    borderRightColor: style.borderRightColor,
+    borderBottomColor: style.borderBottomColor,
+    borderLeftColor: style.borderLeftColor,
+    backgroundColor: style.backgroundColor,
+    color: style.color
+  });
+
+  const shadowDistinguishable = value => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized || normalized === "none" || normalized === "transparent") {
+      return false;
+    }
+    const colors = normalized.match(
+      /(?:rgba?|hsla?)\([^)]*\)|#[0-9a-f]{3,8}|transparent/g
+    ) || [];
+    return colors.length
+      ? colors.some(color => computedAlpha(color) !== 0)
+      : true;
+  };
+
+  const focusIndicatorProperties = new Set([
+    "outlineStyle", "outlineWidth", "outlineColor", "boxShadow",
+    "borderTopColor", "borderRightColor", "borderBottomColor",
+    "borderLeftColor", "backgroundColor", "color"
+  ]);
   const focusIndicator = (element, style, rect) => {
-    const outlineWidth = pixels(style.outlineWidth);
+    const focused = document.activeElement === element;
+    const current = focusVisualSnapshot(style);
+    let baseline = null;
+    if (focused && element.parentElement) {
+      const clone = element.cloneNode(false);
+      clone.removeAttribute("autofocus");
+      clone.setAttribute("aria-hidden", "true");
+      clone.setAttribute("tabindex", "-1");
+      clone.style.setProperty("position", "fixed", "important");
+      clone.style.setProperty("left", "-10000px", "important");
+      clone.style.setProperty("top", "-10000px", "important");
+      clone.style.setProperty("visibility", "hidden", "important");
+      clone.style.setProperty("pointer-events", "none", "important");
+      element.parentElement.appendChild(clone);
+      baseline = focusVisualSnapshot(getComputedStyle(clone));
+      clone.remove();
+    }
+    const changedProperties = baseline
+      ? Object.keys(current).filter(property => current[property] !== baseline[property])
+      : [];
+    const outlineWidth = pixels(current.outlineWidth);
     const outlineVisible = (
-      !["none", "hidden"].includes(style.outlineStyle)
+      !["none", "hidden"].includes(current.outlineStyle)
       && outlineWidth > 0
-      && computedAlpha(style.outlineColor) !== 0
+      && computedAlpha(current.outlineColor) !== 0
     );
-    const shadowVisible = style.boxShadow && style.boxShadow !== "none";
+    const shadowVisible = shadowDistinguishable(current.boxShadow);
     const thickness = outlineVisible ? outlineWidth : shadowVisible ? 1 : 0;
     const area = thickness > 0
       ? (
@@ -1477,12 +1590,20 @@ async () => {
           - rect.width * rect.height
         )
       : 0;
+    const changed = changedProperties.some(
+      property => focusIndicatorProperties.has(property)
+    );
     return {
       visible: Boolean(outlineVisible || shadowVisible),
-      outlineStyle: style.outlineStyle,
+      changed,
+      distinguishable: Boolean(outlineVisible || shadowVisible),
+      changedProperties,
+      baseline: baseline || {},
+      focused: current,
+      outlineStyle: current.outlineStyle,
       outlineWidth: round(outlineWidth),
-      outlineColor: style.outlineColor,
-      boxShadow: style.boxShadow,
+      outlineColor: current.outlineColor,
+      boxShadow: current.boxShadow,
       area: round(area),
       minimum_area: round(2 * 2 * (rect.width + rect.height))
     };
@@ -1703,6 +1824,18 @@ async () => {
     const {style, rect, role} = geometryFor(element);
     const text = textGeometry(element, style, rect);
     const control = isControl(element, role);
+    const tag = element.tagName.toLowerCase();
+    const directText = Array.from(element.childNodes).some(node => (
+      node.nodeType === Node.TEXT_NODE && (node.textContent || "").trim()
+    ));
+    const controlText = (
+      ["input", "textarea"].includes(tag)
+      && Boolean(element.value || element.getAttribute("placeholder"))
+    ) || (
+      tag === "select"
+      && Boolean(element.selectedOptions?.[0]?.textContent?.trim())
+    );
+    const paintedText = Boolean(directText || controlText);
     const visualContainer = isVisualContainer(element, style);
     const boxControl = isBoxControl(element, role, style);
     const paletteRole = paletteRoleFor(element, role, visualContainer);
@@ -1744,8 +1877,12 @@ async () => {
         ))
       );
     }
+    const readingHierarchy = element.closest(
+      "main,section,article,aside,nav,[role='region']"
+    );
     const measurements = {
       hasText: Boolean(text),
+      paintedText,
       isMultiline: Boolean(text && text.lineCount > 1),
       isTextFlow: Boolean(text && isSingleTextFlow(element)),
       lineCount: text?.lineCount || 0,
@@ -1799,6 +1936,9 @@ async () => {
       paddingBlockEnd: round(pixels(style.paddingBlockEnd)),
       layoutParentSelector: element.parentElement
         ? selectorFor(element.parentElement)
+        : "",
+      readingHierarchySelector: readingHierarchy
+        ? selectorFor(readingHierarchy)
         : "",
       paletteRole,
       readingOrder: documentOrder.get(element) ?? 0,
@@ -2069,15 +2209,133 @@ async () => {
       || (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
     ));
   const selected = eligible.slice(0, __UIDETOX_CANDIDATES__);
-  const selectedTargets = selected.filter(element => {
+  const visibleTargets = allElements.filter(element => {
+    if (!isVisible(element)) return false;
     const measured = baseMeasurement(element);
     return isControl(element, measured.role);
   });
+  const targetGeometryTruncated = totalElements > allElements.length;
+  const targetCellSize = 64;
+  const targetRecords = visibleTargets.map(element => ({
+    element,
+    selector: selectorFor(element),
+    rect: baseMeasurement(element).rect
+  }));
+  const targetSpatialIndex = new Map();
+  const targetCells = (rect, expansion = 0) => {
+    const cells = [];
+    const left = Math.floor((rect.left - expansion) / targetCellSize);
+    const right = Math.floor((rect.right + expansion) / targetCellSize);
+    const top = Math.floor((rect.top - expansion) / targetCellSize);
+    const bottom = Math.floor((rect.bottom + expansion) / targetCellSize);
+    for (let x = left; x <= right; x += 1) {
+      for (let y = top; y <= bottom; y += 1) {
+        cells.push(`${x}:${y}`);
+      }
+    }
+    return cells;
+  };
+  for (const record of targetRecords) {
+    for (const cell of targetCells(record.rect)) {
+      const bucket = targetSpatialIndex.get(cell) || [];
+      bucket.push(record);
+      targetSpatialIndex.set(cell, bucket);
+    }
+  }
+  const targetSpacingEvidence = element => {
+    if (targetGeometryTruncated) {
+      return {
+        status: "unresolved",
+        reason: "document-scan-truncated",
+        total_targets: targetRecords.length,
+        indexed_targets: targetRecords.length,
+        truncated: true
+      };
+    }
+    const rect = baseMeasurement(element).rect;
+    const candidates = new Set();
+    for (const cell of targetCells(rect, 24)) {
+      for (const candidate of targetSpatialIndex.get(cell) || []) {
+        if (candidate.element !== element) candidates.add(candidate);
+      }
+    }
+    let nearest = null;
+    for (const candidate of candidates) {
+      const other = candidate.rect;
+      const centerDistance = Math.hypot(
+        rect.left + rect.width / 2 - (other.left + other.width / 2),
+        rect.top + rect.height / 2 - (other.top + other.height / 2)
+      );
+      const horizontalGap = Math.max(
+        0,
+        Math.max(rect.left, other.left) - Math.min(rect.right, other.right)
+      );
+      const verticalGap = Math.max(
+        0,
+        Math.max(rect.top, other.top) - Math.min(rect.bottom, other.bottom)
+      );
+      const edgeGap = Math.hypot(horizontalGap, verticalGap);
+      const circleGap = centerDistance - 24;
+      const intersects = circleGap <= 0 || edgeGap <= 0;
+      const score = Math.min(circleGap, edgeGap);
+      if (!nearest || score < nearest.score) {
+        nearest = {
+          score,
+          selector: candidate.selector,
+          centerDistance,
+          circleGap,
+          edgeGap,
+          intersects
+        };
+      }
+    }
+    const evidence = {
+      status: nearest?.intersects ? "intersects" : "clear",
+      nearest_selector: nearest?.selector || "",
+      center_distance_px: nearest ? round(nearest.centerDistance) : null,
+      circle_gap_px: nearest ? round(nearest.circleGap) : null,
+      edge_gap_px: nearest ? round(nearest.edgeGap) : null,
+      total_targets: targetRecords.length,
+      indexed_targets: targetRecords.length,
+      truncated: false
+    };
+    return evidence;
+  };
+  const potentialOccluderRecords = allElements
+    .filter(element => {
+      if (!isVisible(element)) return false;
+      const {style} = geometryFor(element);
+      const position = style.position;
+      return (
+        ["fixed", "sticky"].includes(position)
+        || (
+          position !== "static"
+          && style.zIndex !== "auto"
+          && Number.isFinite(Number.parseFloat(style.zIndex))
+        )
+        || (element.tagName.toLowerCase() === "dialog" && element.open)
+        || element.matches("[popover]:popover-open")
+      );
+    })
+    .map(element => ({
+      element,
+      rect: baseMeasurement(element).rect
+    }));
+  const occluderSpatialIndex = new Map();
+  for (const record of potentialOccluderRecords) {
+    for (const cell of targetCells(record.rect)) {
+      const bucket = occluderSpatialIndex.get(cell) || [];
+      bucket.push(record);
+      occluderSpatialIndex.set(cell, bucket);
+    }
+  }
   // Ephemeral per-capture index; this is never retained in Python or artifacts.
   const semanticSiblingGroups = new WeakMap();
   const semanticSiblingEvidence = element => {
     const parent = element.parentElement;
-    if (!parent) return null;
+    if (!parent) {
+      return null;
+    }
     const measured = baseMeasurement(element);
     const key = `${element.tagName.toLowerCase()}:${measured.role}`;
     let groups = semanticSiblingGroups.get(parent);
@@ -2085,38 +2343,31 @@ async () => {
       groups = new Map();
       semanticSiblingGroups.set(parent, groups);
     }
-    if (groups.has(key)) return groups.get(key);
+    if (groups.has(key)) {
+      return groups.get(key);
+    }
     const peers = Array.from(parent.children).filter(candidate => {
       if (!geometryCache.has(candidate) || !isVisible(candidate)) return false;
       const candidateRole = baseMeasurement(candidate).role;
       return `${candidate.tagName.toLowerCase()}:${candidateRole}` === key;
     });
+    const parentStyle = geometryFor(parent).style;
+    const axis = (
+      parentStyle.display === "flex"
+      && ["row", "row-reverse"].includes(parentStyle.flexDirection)
+    )
+      ? "horizontal"
+      : "vertical";
     const evidence = peers.length < 3
       ? null
       : {
           group: `${selectorFor(parent)}:${key}`,
           evidence: "same-parent-role",
+          axis,
           peers: peers.slice(0, 20).map(peer => selectorFor(peer))
         };
     groups.set(key, evidence);
     return evidence;
-  };
-  const nearestTargetDistance = element => {
-    const rect = baseMeasurement(element).rect;
-    const center = {
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2
-    };
-    const distances = selectedTargets
-      .filter(candidate => candidate !== element)
-      .map(candidate => {
-        const candidateRect = baseMeasurement(candidate).rect;
-        return Math.hypot(
-          center.x - (candidateRect.left + candidateRect.width / 2),
-          center.y - (candidateRect.top + candidateRect.height / 2)
-        );
-      });
-    return distances.length ? round(Math.min(...distances)) : null;
   };
   const targetException = (element, role, style) => {
     if (element.getAttribute("data-uidetox-essential") === "true") {
@@ -2134,6 +2385,25 @@ async () => {
     return "";
   };
   const occlusionEvidence = (element, rect) => {
+    const possibleOccluders = new Set();
+    for (const cell of targetCells(rect)) {
+      for (const candidate of occluderSpatialIndex.get(cell) || []) {
+        if (
+          candidate.element !== element
+          && !candidate.element.contains(element)
+          && !element.contains(candidate.element)
+          && candidate.rect.right > rect.left
+          && candidate.rect.left < rect.right
+          && candidate.rect.bottom > rect.top
+          && candidate.rect.top < rect.bottom
+        ) {
+          possibleOccluders.add(candidate.element);
+        }
+      }
+    }
+    if (!possibleOccluders.size) {
+      return {selector: "", fraction: 0};
+    }
     const insetX = Math.min(2, Math.max(0, rect.width / 4));
     const insetY = Math.min(2, Math.max(0, rect.height / 4));
     const points = [
@@ -2158,22 +2428,28 @@ async () => {
     const [selector, count] = [...covering.entries()].sort(
       (first, second) => second[1] - first[1]
     )[0];
-    return {selector, fraction: count / points.length};
+    const evidence = {selector, fraction: count / points.length};
+    return evidence;
   };
   const elements = selected.map((element, candidateOrder) => {
     const {style, rect, role, measurements} = baseMeasurement(element);
     measurements.theme = themeEvidence(element, style);
-    measurements.paint = paintEvidence(element, style);
-    measurements.focusIndicator = focusIndicator(element, style, rect);
+    if (measurements.paintedText) {
+      measurements.paint = paintEvidence(element, style);
+    }
+    if (isControl(element, role) && document.activeElement === element) {
+      measurements.focusIndicator = focusIndicator(element, style, rect);
+    }
     enrichPeerMeasurements(element, measurements);
     const equivalence = semanticSiblingEvidence(element);
     if (equivalence) {
       measurements.equivalenceGroup = equivalence.group;
       measurements.equivalenceEvidence = equivalence.evidence;
+      measurements.equivalenceAxis = equivalence.axis;
       measurements.equivalentPeerSelectors = equivalence.peers;
     }
     if (isControl(element, role)) {
-      measurements.nearestTargetDistance = nearestTargetDistance(element);
+      measurements.targetSpacing = targetSpacingEvidence(element);
       measurements.targetException = targetException(element, role, style);
     }
     const occlusion = occlusionEvidence(element, rect);
@@ -2220,12 +2496,6 @@ async () => {
         position: style.position,
         color: style.color,
         backgroundColor: style.backgroundColor,
-        backgroundImage: style.backgroundImage,
-        backgroundBlendMode: style.backgroundBlendMode,
-        mixBlendMode: style.mixBlendMode,
-        filter: style.filter,
-        backdropFilter: style.backdropFilter || style.webkitBackdropFilter,
-        opacity: style.opacity,
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
         fontWeight: style.fontWeight,
@@ -2249,15 +2519,6 @@ async () => {
         gap: style.gap,
         gridTemplateColumns: style.gridTemplateColumns,
         borderRadius: style.borderRadius,
-        outlineStyle: style.outlineStyle,
-        outlineWidth: style.outlineWidth,
-        outlineColor: style.outlineColor,
-        boxShadow: style.boxShadow,
-        zIndex: style.zIndex,
-        cursor: style.cursor,
-        pointerEvents: style.pointerEvents,
-        appearance: style.appearance,
-        colorScheme: style.colorScheme
       },
       states,
       measurements
@@ -2274,7 +2535,13 @@ async () => {
       truncated: (
         totalElements > allElements.length
         || eligible.length > elements.length
-      )
+      ),
+      target_geometry: {
+        visible: targetRecords.length,
+        indexed: targetRecords.length,
+        truncated: targetGeometryTruncated,
+        index: "spatial-grid"
+      }
     }
   };
 }

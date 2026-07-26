@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
@@ -44,6 +45,14 @@ class DesignPage(Protocol):
 
 
 def _number(value: object, default: float = 0.0) -> float:
+    if isinstance(value, str):
+        match = re.fullmatch(
+            r"\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(?:px)?\s*",
+            value,
+        )
+        if match is None:
+            return default
+        value = match.group(1)
     try:
         number = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
@@ -100,6 +109,8 @@ def _finding(
 
 
 def _paint_finding(element: DesignElement) -> Finding | None:
+    if element.measurements.get("paintedText") is not True:
+        return None
     paint = element.measurements.get("paint")
     if not isinstance(paint, Mapping):
         return None
@@ -139,7 +150,9 @@ def _paint_finding(element: DesignElement) -> Finding | None:
             message="Rendered contrast is unresolved because normalized paint evidence is incomplete.",
             metrics=_metrics(
                 {"coverage": "unresolved", "causes": ["missing-normalized-color"]},
-                constraints=("Capture computed colors and their actual painted ancestors.",),
+                constraints=(
+                    "Capture computed colors and their actual painted ancestors.",
+                ),
             ),
         )
     layers: list[tuple[str, RenderedColor]] = []
@@ -164,7 +177,9 @@ def _paint_finding(element: DesignElement) -> Finding | None:
                             }
                         ],
                     },
-                    constraints=("Preserve the raw computed value for a fresh browser capture.",),
+                    constraints=(
+                        "Preserve the raw computed value for a fresh browser capture.",
+                    ),
                 ),
             )
         layers.append((str(raw_layer.get("selector", "")), color))
@@ -177,7 +192,9 @@ def _paint_finding(element: DesignElement) -> Finding | None:
             message="Rendered contrast is unresolved because no painted backdrop was captured.",
             metrics=_metrics(
                 {"coverage": "unresolved", "causes": ["missing-backdrop"]},
-                constraints=("Capture ancestor layers through a proven opaque canvas.",),
+                constraints=(
+                    "Capture ancestor layers through a proven opaque canvas.",
+                ),
             ),
         )
 
@@ -194,7 +211,9 @@ def _paint_finding(element: DesignElement) -> Finding | None:
             metrics=_metrics(
                 {"coverage": "unresolved", "backdrop_alpha": round(backdrop[3], 6)},
                 peers=tuple(selector for selector, _color in layers if selector),
-                constraints=("Extend the captured ancestor stack to a proven opaque layer.",),
+                constraints=(
+                    "Extend the captured ancestor stack to a proven opaque layer.",
+                ),
             ),
         )
     if element.states.get("disabled") is True:
@@ -232,6 +251,10 @@ def _paint_finding(element: DesignElement) -> Finding | None:
                     {"selector": selector, "rgba": list(color)}
                     for selector, color in layers
                 ],
+                "theme": dict(element.measurements.get("theme", {}))
+                if isinstance(element.measurements.get("theme"), Mapping)
+                else {},
+                "states": dict(element.states),
             },
             peers=tuple(selector for selector, _color in layers if selector),
             constraints=(
@@ -239,6 +262,45 @@ def _paint_finding(element: DesignElement) -> Finding | None:
                 "Change only a rendered foreground or painted backdrop in this source-owned region.",
             ),
         ),
+    )
+
+
+def _healthy_paint_signature(element: DesignElement) -> tuple[object, ...] | None:
+    """Return the inputs that fully determine a no-finding paint result."""
+
+    if element.measurements.get("paintedText") is not True:
+        return None
+    paint = element.measurements.get("paint")
+    if not isinstance(paint, Mapping) or paint.get("unresolved"):
+        return None
+    foreground_value = paint.get("foreground")
+    foreground = (
+        _rgba(foreground_value.get("rgba"))
+        if isinstance(foreground_value, Mapping)
+        else None
+    )
+    raw_layers = paint.get("background_layers")
+    if foreground is None or not isinstance(raw_layers, (list, tuple)):
+        return None
+    layers: list[RenderedColor] = []
+    for raw_layer in raw_layers:
+        if not isinstance(raw_layer, Mapping):
+            return None
+        color = _rgba(raw_layer.get("rgba"))
+        if color is None:
+            return None
+        layers.append(color)
+    if not layers:
+        return None
+    return (
+        foreground,
+        tuple(layers),
+        _number(
+            element.styles.get("fontSize"),
+            _number(element.measurements.get("fontSize"), 16),
+        ),
+        _number(element.styles.get("fontWeight"), 400),
+        element.states.get("disabled") is True,
     )
 
 
@@ -274,19 +336,17 @@ def _component_and_palette_findings(
     elements: Sequence[DesignElement],
 ) -> dict[int, list[Finding]]:
     findings: dict[int, list[Finding]] = defaultdict(list)
-    groups: dict[str, list[int]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for index, element in enumerate(elements):
         group = str(element.measurements.get("equivalenceGroup", "")).strip()
         evidence = str(element.measurements.get("equivalenceEvidence", "")).strip()
-        if group and evidence:
-            groups[group].append(index)
-    component_outliers: set[int] = set()
-    for group, indexes in groups.items():
-        source_hints = {elements[index].source_hint for index in indexes}
-        if len(indexes) >= 3 and len(source_hints) == 1 and "" not in source_hints:
+        ownership_key = str(element.measurements.get("sourceOwnershipKey", "")).strip()
+        if group and evidence == "source-ownership" and ownership_key:
+            groups[(ownership_key, group)].append(index)
+    for (ownership_key, group), indexes in groups.items():
+        if len(indexes) >= 3:
             signatures = [_style_signature(elements[index]) for index in indexes]
             for index in _outlier_indexes(indexes, signatures):
-                component_outliers.add(index)
                 peers = [
                     elements[peer].selector
                     for peer in indexes
@@ -307,7 +367,7 @@ def _component_and_palette_findings(
                                         "equivalenceEvidence", ""
                                     )
                                 ),
-                                "source_hint": elements[index].source_hint,
+                                "source_ownership": ownership_key,
                                 "signature": list(_style_signature(elements[index])),
                             },
                             peers=peers,
@@ -325,12 +385,13 @@ def _component_and_palette_findings(
             if str(elements[index].measurements.get("paletteRole", "")).strip()
         ]
         palette_signatures = [
-            (elements[index].styles.get("color", ""), elements[index].styles.get("backgroundColor", ""))
+            (
+                elements[index].styles.get("color", ""),
+                elements[index].styles.get("backgroundColor", ""),
+            )
             for index in palette_indexes
         ]
         for index in _outlier_indexes(palette_indexes, palette_signatures):
-            if index in component_outliers:
-                continue
             peers = [
                 elements[peer].selector
                 for peer in palette_indexes
@@ -346,6 +407,7 @@ def _component_and_palette_findings(
                     metrics=_metrics(
                         {
                             "equivalence_group": group,
+                            "source_ownership": ownership_key,
                             "palette_role": str(
                                 elements[index].measurements.get("paletteRole", "")
                             ),
@@ -366,54 +428,62 @@ def _component_and_palette_findings(
 
 def _heading_findings(elements: Sequence[DesignElement]) -> dict[int, list[Finding]]:
     findings: dict[int, list[Finding]] = defaultdict(list)
-    headings = [
-        (index, int(element.tag[1]))
-        for index, element in enumerate(elements)
-        if len(element.tag) == 2
-        and element.tag.startswith("h")
-        and element.tag[1].isdigit()
-        and 1 <= int(element.tag[1]) <= 6
-    ]
-    for position, (index, level) in enumerate(headings):
-        higher = [
-            candidate
-            for candidate in headings[:position]
-            if candidate[1] < level
-        ]
-        if not higher:
+    hierarchies: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for index, element in enumerate(elements):
+        if (
+            len(element.tag) != 2
+            or not element.tag.startswith("h")
+            or not element.tag[1].isdigit()
+            or not 1 <= int(element.tag[1]) <= 6
+        ):
             continue
-        peer_index, _peer_level = higher[-1]
-        element, peer = elements[index], elements[peer_index]
-        size = _number(element.styles.get("fontSize"))
-        peer_size = _number(peer.styles.get("fontSize"))
-        weight = _number(element.styles.get("fontWeight"))
-        peer_weight = _number(peer.styles.get("fontWeight"))
-        if size < peer_size or (size == peer_size and weight < peer_weight):
-            continue
-        findings[index].append(
-            _finding(
-                code="runtime-type-hierarchy",
-                category="typography",
-                severity="warning",
-                confidence=0.94,
-                message="A lower-level heading is not visually subordinate to its preceding higher-level heading.",
-                metrics=_metrics(
-                    {
-                        "heading": element.tag,
-                        "font_size_px": size,
-                        "font_weight": weight,
-                        "parent_heading": peer.tag,
-                        "parent_font_size_px": peer_size,
-                        "parent_font_weight": peer_weight,
-                    },
-                    peers=(peer.selector,),
-                    constraints=(
-                        "Preserve semantic heading levels and reading order.",
-                        "Create measurable type-scale or weight separation without changing content hierarchy.",
+        hierarchy = str(
+            element.measurements.get("readingHierarchySelector")
+            or element.measurements.get("layoutParentSelector")
+            or ""
+        ).strip()
+        if hierarchy:
+            hierarchies[hierarchy].append((index, int(element.tag[1])))
+    for hierarchy, headings in hierarchies.items():
+        for position, (index, level) in enumerate(headings):
+            higher = [
+                candidate for candidate in headings[:position] if candidate[1] < level
+            ]
+            if not higher:
+                continue
+            peer_index, _peer_level = higher[-1]
+            element, peer = elements[index], elements[peer_index]
+            size = _number(element.styles.get("fontSize"))
+            peer_size = _number(peer.styles.get("fontSize"))
+            weight = _number(element.styles.get("fontWeight"))
+            peer_weight = _number(peer.styles.get("fontWeight"))
+            if size < peer_size or (size == peer_size and weight < peer_weight):
+                continue
+            findings[index].append(
+                _finding(
+                    code="runtime-type-hierarchy",
+                    category="typography",
+                    severity="warning",
+                    confidence=0.94,
+                    message="A lower-level heading is not visually subordinate to its preceding higher-level heading.",
+                    metrics=_metrics(
+                        {
+                            "heading": element.tag,
+                            "hierarchy": hierarchy,
+                            "font_size_px": size,
+                            "font_weight": weight,
+                            "parent_heading": peer.tag,
+                            "parent_font_size_px": peer_size,
+                            "parent_font_weight": peer_weight,
+                        },
+                        peers=(peer.selector,),
+                        constraints=(
+                            "Preserve semantic heading levels and reading order.",
+                            "Create measurable type-scale or weight separation without changing content hierarchy.",
+                        ),
                     ),
-                ),
+                )
             )
-        )
     return findings
 
 
@@ -424,7 +494,8 @@ def _rhythm_findings(elements: Sequence[DesignElement]) -> dict[int, list[Findin
         parent = str(element.measurements.get("layoutParentSelector", "")).strip()
         group = str(element.measurements.get("equivalenceGroup", "")).strip()
         evidence = str(element.measurements.get("equivalenceEvidence", "")).strip()
-        if parent and group and evidence:
+        axis = str(element.measurements.get("equivalenceAxis", "")).strip()
+        if parent and group and evidence and axis != "horizontal":
             groups[(parent, group)].append(index)
     for (parent, group), indexes in groups.items():
         if len(indexes) < 4:
@@ -455,7 +526,7 @@ def _rhythm_findings(elements: Sequence[DesignElement]) -> dict[int, list[Findin
                 elements[peer].selector
                 for peer in ordered
                 if peer != index and elements[peer].selector
-            ]
+            ][:20]
             findings[index].append(
                 _finding(
                     code="runtime-spatial-rhythm",
@@ -534,9 +605,13 @@ def _geometry_findings(
                 )
             )
         position = element.styles.get("position", "")
-        offscreen = left < -1 or right > page.viewport.width + 1 or (
-            position in {"fixed", "sticky"}
-            and (top < -1 or top + height > page.viewport.height + 1)
+        offscreen = (
+            left < -1
+            or right > page.viewport.width + 1
+            or (
+                position in {"fixed", "sticky"}
+                and (top < -1 or top + height > page.viewport.height + 1)
+            )
         )
         if offscreen and not element.measurements.get("isScrollRegion"):
             findings[index].append(
@@ -593,18 +668,45 @@ def _interaction_findings(
             continue
         width = _number(element.bounds.get("width"))
         height = _number(element.bounds.get("height"))
-        target_exception = str(
-            element.measurements.get("targetException", "")
-        ).strip()
-        nearest = element.measurements.get("nearestTargetDistance")
+        target_exception = str(element.measurements.get("targetException", "")).strip()
+        target_spacing = element.measurements.get("targetSpacing")
+        spacing_status = (
+            str(target_spacing.get("status", "")).strip()
+            if isinstance(target_spacing, Mapping)
+            else ""
+        )
+        undersized = width < 24 or height < 24
+        if (
+            undersized
+            and target_exception not in _TARGET_EXCEPTIONS
+            and spacing_status == "unresolved"
+        ):
+            findings[index].append(
+                _finding(
+                    code="runtime-target-spacing-unresolved",
+                    category="interaction",
+                    severity="warning",
+                    confidence=1.0,
+                    message="Target spacing is unresolved because the visible interactive-target index was truncated.",
+                    metrics=_metrics(
+                        {
+                            "width_px": width,
+                            "height_px": height,
+                            "required_px": 24,
+                            "target_spacing": dict(target_spacing)
+                            if isinstance(target_spacing, Mapping)
+                            else {},
+                        },
+                        constraints=(
+                            "Capture every visible interactive target in the same DOM pass before granting a spacing exception.",
+                        ),
+                    ),
+                )
+            )
         if (
             target_exception not in _TARGET_EXCEPTIONS
-            and not (
-                isinstance(nearest, (int, float))
-                and not isinstance(nearest, bool)
-                and float(nearest) >= 24
-            )
-            and (width < 24 or height < 24)
+            and spacing_status not in {"clear", "unresolved"}
+            and undersized
         ):
             findings[index].append(
                 _finding(
@@ -618,7 +720,9 @@ def _interaction_findings(
                             "width_px": width,
                             "height_px": height,
                             "required_px": 24,
-                            "nearest_target_distance_px": nearest,
+                            "target_spacing": dict(target_spacing)
+                            if isinstance(target_spacing, Mapping)
+                            else {},
                         },
                         constraints=(
                             "Preserve inline, user-agent, essential, and spacing exceptions when evidenced.",
@@ -630,7 +734,12 @@ def _interaction_findings(
         if element.states.get("focused") is not True:
             continue
         indicator = element.measurements.get("focusIndicator")
-        if not isinstance(indicator, Mapping) or indicator.get("visible") is not True:
+        if (
+            not isinstance(indicator, Mapping)
+            or indicator.get("visible") is not True
+            or indicator.get("changed") is not True
+            or indicator.get("distinguishable") is not True
+        ):
             findings[index].append(
                 _finding(
                     code="runtime-focus-visible",
@@ -648,7 +757,7 @@ def _interaction_findings(
                         },
                         constraints=(
                             "Preserve keyboard focus order and control semantics.",
-                            "Add a visible indicator in the captured focus state.",
+                            "Add a distinguishable computed visual delta specific to the captured focus state.",
                         ),
                     ),
                 )
@@ -687,9 +796,15 @@ def detect_design_findings(
 
     elements = page.elements
     buckets: dict[int, list[Finding]] = defaultdict(list)
+    healthy_paint_signatures: set[tuple[object, ...]] = set()
     for index, element in enumerate(elements):
+        paint_signature = _healthy_paint_signature(element)
+        if paint_signature is not None and paint_signature in healthy_paint_signatures:
+            continue
         if paint_finding := _paint_finding(element):
             buckets[index].append(paint_finding)
+        elif paint_signature is not None:
+            healthy_paint_signatures.add(paint_signature)
     for family in (
         _component_and_palette_findings(elements),
         _heading_findings(elements),

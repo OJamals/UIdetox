@@ -99,17 +99,13 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
             {"kind": "fill", "selector": "#nickname", "value": "inline-bypass"}
         )
     with pytest.raises(ValueError, match="environment variable"):
-        RuntimeScenarioAction.from_dict(
-            {"kind": "fill", "selector": "#nickname"}
-        )
+        RuntimeScenarioAction.from_dict({"kind": "fill", "selector": "#nickname"})
     with pytest.raises(ValueError, match="Unknown runtime action fields: key"):
         RuntimeScenarioAction.from_dict(
             {"kind": "click", "selector": "#save", "key": "Enter"}
         )
     with pytest.raises(ValueError, match="must be one of"):
-        RuntimeScenarioAction.from_dict(
-            {"kind": "wait-for-state", "state": "visible"}
-        )
+        RuntimeScenarioAction.from_dict({"kind": "wait-for-state", "state": "visible"})
     with pytest.raises(ValueError, match="must be one of"):
         RuntimeScenarioAction.from_dict(
             {
@@ -463,7 +459,9 @@ def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> Non
     assert discovery.total_boundaries == 2
     assert discovery.truncated is False
     assert {boundary.width for boundary in discovery.boundaries} == {500, 600}
-    probes = [viewport for viewport in discovery.viewports if viewport.kind == "boundary"]
+    probes = [
+        viewport for viewport in discovery.viewports if viewport.kind == "boundary"
+    ]
     assert {viewport.width for viewport in probes} == {499, 501, 599, 601}
     assert all(viewport.sources == ("responsive.css",) for viewport in probes)
 
@@ -489,9 +487,7 @@ def test_observation_status_never_promotes_partial_or_degraded_to_current() -> N
         generated_at="2026-07-26T00:00:00Z",
         requested_urls=("https://example.invalid",),
         pages=(page,),
-        captures=(
-            _capture_record("ok", status="completed", readiness="degraded"),
-        ),
+        captures=(_capture_record("ok", status="completed", readiness="degraded"),),
     )
 
     assert partial.status == "partial"
@@ -728,8 +724,7 @@ def test_finalization_preserves_capture_local_coverage_diagnostic(
     frontend_map = map_frontend(tmp_path, runtime=observation)
 
     assert {
-        finding["code"]
-        for finding in frontend_map.evidence["runtime_findings"]
+        finding["code"] for finding in frontend_map.evidence["runtime_findings"]
     } == {
         "runtime-dom-budget-exceeded",
         "browser-console-error",
@@ -819,7 +814,9 @@ def test_runtime_diagnostics_are_sanitized_before_serialization(
     from uidetox.frontend_map import map_frontend
 
     callbacks: dict[str, object] = {}
-    page = SimpleNamespace(on=lambda event, callback: callbacks.__setitem__(event, callback))
+    page = SimpleNamespace(
+        on=lambda event, callback: callbacks.__setitem__(event, callback)
+    )
     scenario = RuntimeScenario(
         name="safe",
         url="https://example.invalid/dashboard",
@@ -835,9 +832,7 @@ def test_runtime_diagnostics_are_sanitized_before_serialization(
     console_secret = "sk-1234567890abcdefghijkl"
     password_secret = "correct-horse-battery-staple"
     query_secret = "query-secret-value"
-    callbacks["console"](
-        SimpleNamespace(type="error", text=f"token={console_secret}")
-    )
+    callbacks["console"](SimpleNamespace(type="error", text=f"token={console_secret}"))
     callbacks["pageerror"](RuntimeError(f"password={password_secret}"))
     callbacks["requestfailed"](
         SimpleNamespace(
@@ -1233,6 +1228,7 @@ def _paint(
     unresolved: tuple[dict[str, str], ...] = (),
 ) -> dict[str, object]:
     return {
+        "paintedText": True,
         "paint": {
             "foreground": {
                 "raw": "computed-foreground",
@@ -1247,11 +1243,13 @@ def _paint(
                 for index, color in enumerate(backgrounds)
             ],
             "unresolved": list(unresolved),
-        }
+        },
     }
 
 
-def test_rendered_contrast_uses_actual_inherited_alpha_pair_and_large_text_rule() -> None:
+def test_rendered_contrast_uses_actual_inherited_alpha_pair_and_large_text_rule() -> (
+    None
+):
     inherited_alpha = _design_element(
         "#body",
         measurements=_paint(
@@ -1265,18 +1263,27 @@ def test_rendered_contrast_uses_actual_inherited_alpha_pair_and_large_text_rule(
         y=40,
         styles={"fontSize": "24px"},
         measurements=_paint(
-            (0.18, 0.18, 0.18, 1.0),
+            (0.28, 0.28, 0.28, 1.0),
             (1.0, 1.0, 1.0, 1.0),
         ),
     )
+    normal = replace(
+        large,
+        selector="#normal",
+        bounds={**large.bounds, "y": 80},
+        styles={**large.styles, "fontSize": "23.99px"},
+    )
 
-    findings = _design_findings(_design_page(inherited_alpha, large))
+    findings = _design_findings(_design_page(inherited_alpha, large, normal))
 
     assert "runtime-contrast" in findings["#body"]
     assert "runtime-contrast" not in findings["#large"]
+    assert "runtime-contrast" in findings["#normal"]
 
 
-def test_rendered_contrast_marks_gradient_image_and_blend_as_unresolved_not_clean() -> None:
+def test_rendered_contrast_marks_gradient_image_and_blend_as_unresolved_not_clean() -> (
+    None
+):
     element = _design_element(
         "#hero",
         measurements=_paint(
@@ -1301,10 +1308,50 @@ def test_rendered_contrast_marks_gradient_image_and_blend_as_unresolved_not_clea
     assert findings == {"runtime-color-unresolved"}
 
 
-def test_palette_role_and_component_drift_require_evidenced_equivalence_groups() -> None:
+def test_contrast_ignores_empty_containers_and_non_text_gradient_surfaces() -> None:
+    empty = _design_element(
+        "#empty",
+        kind="region",
+        measurements={
+            **_paint(
+                (0.7, 0.7, 0.7, 1.0),
+                (1.0, 1.0, 1.0, 1.0),
+            ),
+            "paintedText": False,
+        },
+    )
+    gradient_surface = _design_element(
+        "#gradient-surface",
+        kind="region",
+        y=40,
+        measurements={
+            **_paint(
+                (0.0, 0.0, 0.0, 1.0),
+                unresolved=(
+                    {
+                        "selector": "#gradient-surface",
+                        "property": "background-image",
+                        "value": "linear-gradient(red, blue)",
+                    },
+                ),
+            ),
+            "paintedText": False,
+        },
+    )
+
+    findings = _design_findings(_design_page(empty, gradient_surface))
+
+    assert findings["#empty"] == set()
+    assert findings["#gradient-surface"] == set()
+
+
+def test_palette_role_and_component_drift_require_evidenced_equivalence_groups() -> (
+    None
+):
     common = {
         "equivalenceGroup": "toolbar:button",
-        "equivalenceEvidence": "same-parent-role",
+        "equivalenceEvidence": "source-ownership",
+        "sourceOwnershipKey": "src/Toolbar.tsx",
         "paletteRole": "action",
     }
     peers = [
@@ -1412,14 +1459,14 @@ def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> 
         replace(item, bounds={**item.bounds, "y": 120 + index * 40})
         for index, item in enumerate(rhythm)
     )
-    healthy = _design_findings(
-        _design_page(heading_one, healthy_h2, *healthy_rhythm)
-    )
+    healthy = _design_findings(_design_page(heading_one, healthy_h2, *healthy_rhythm))
     assert "runtime-type-hierarchy" not in healthy["#h2"]
     assert all("runtime-spatial-rhythm" not in codes for codes in healthy.values())
 
 
-def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound() -> None:
+def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound() -> (
+    None
+):
     sticky = _design_element(
         "#sticky",
         kind="region",
@@ -1458,7 +1505,18 @@ def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound(
         y=100,
         width=23.99,
         height=24,
-        measurements={"layoutParentSelector": "body"},
+        measurements={
+            "layoutParentSelector": "body",
+            "targetSpacing": {
+                "status": "intersects",
+                "center_distance_px": 24.0,
+                "circle_gap_px": 0.0,
+                "edge_gap_px": 4.0,
+                "total_targets": 2,
+                "indexed_targets": 2,
+                "truncated": False,
+            },
+        },
     )
     focused = _design_element(
         "#focused",
@@ -1472,8 +1530,10 @@ def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound(
         states={"focused": True},
         measurements={
             "focusIndicator": {
-                "visible": False,
-                "area": 0,
+                "visible": True,
+                "changed": False,
+                "distinguishable": False,
+                "area": 220,
                 "minimum_area": 220,
             },
             "layoutParentSelector": "body",
@@ -1500,6 +1560,109 @@ def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound(
     boundary_findings = _design_findings(_design_page(boundary, inline))
     assert "runtime-target-size" not in boundary_findings["#small"]
     assert "runtime-target-size" not in boundary_findings["#inline"]
+
+
+def test_target_spacing_uses_shape_intersection_and_reports_truncation() -> None:
+    intersecting = _design_element(
+        "#intersecting",
+        kind="action",
+        tag="button",
+        role="button",
+        width=20,
+        height=20,
+        measurements={
+            "targetSpacing": {
+                "status": "intersects",
+                "nearest_selector": "#peer",
+                "center_distance_px": 24.0,
+                "circle_gap_px": 0.0,
+                "edge_gap_px": 4.0,
+                "total_targets": 2,
+                "indexed_targets": 2,
+                "truncated": False,
+            },
+        },
+    )
+    truncated = replace(
+        intersecting,
+        selector="#truncated",
+        bounds={**intersecting.bounds, "x": 80},
+        measurements={
+            "targetSpacing": {
+                "status": "unresolved",
+                "total_targets": 5000,
+                "indexed_targets": 4096,
+                "truncated": True,
+            },
+        },
+    )
+
+    findings = _design_findings(_design_page(intersecting, truncated))
+
+    assert "runtime-target-size" in findings["#intersecting"]
+    assert "runtime-target-spacing-unresolved" in findings["#truncated"]
+
+
+def test_focus_indicator_requires_focus_specific_distinguishable_delta() -> None:
+    permanent_shadow = _design_element(
+        "#permanent-shadow",
+        kind="action",
+        tag="button",
+        role="button",
+        width=80,
+        height=30,
+        states={"focused": True},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": False,
+                "distinguishable": True,
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+    transparent_shadow = replace(
+        permanent_shadow,
+        selector="#transparent-shadow",
+        bounds={**permanent_shadow.bounds, "x": 100},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": True,
+                "distinguishable": False,
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+    focus_delta = replace(
+        permanent_shadow,
+        selector="#focus-delta",
+        bounds={**permanent_shadow.bounds, "x": 200},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": True,
+                "distinguishable": True,
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+
+    findings = _design_findings(
+        _design_page(
+            permanent_shadow,
+            transparent_shadow,
+            focus_delta,
+            state="focus",
+        )
+    )
+
+    assert "runtime-focus-visible" in findings["#permanent-shadow"]
+    assert "runtime-focus-visible" in findings["#transparent-shadow"]
+    assert "runtime-focus-visible" not in findings["#focus-delta"]
 
 
 class _Page:
@@ -1705,8 +1868,10 @@ def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
   #alpha { color: rgb(0 0 0 / 50%); background: transparent; }
   #modern { color: oklch(70% 0.1 250); background: hsl(0 0% 100%); }
   #gradient { color: white; background: linear-gradient(red, blue); }
+  #empty-gradient { width: 80px; height: 20px; background: linear-gradient(red, blue); }
   #hover:hover { color: rgb(119, 119, 119); }
-  #focus:focus { outline: none; box-shadow: none; }
+  #focus { box-shadow: 0 0 0 2px rgb(0, 0, 0); }
+  #focus:focus { outline: none; box-shadow: 0 0 0 2px rgb(0, 0, 0); }
   #small, #near-small { width: 20px; height: 20px; padding: 0; }
   #small { position: absolute; left: 200px; top: 200px; }
   #near-small { position: absolute; left: 218px; top: 200px; }
@@ -1724,6 +1889,7 @@ def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
   <p id="alpha">Inherited alpha text</p>
   <p id="modern">Modern computed color</p>
   <p id="gradient">Unknown gradient backdrop</p>
+  <div id="empty-gradient" role="region"></div>
   <button id="hover">Hover target</button>
   <button id="focus">Focus target</button>
   <button id="disabled" disabled>Disabled target</button>
@@ -1778,22 +1944,36 @@ def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
         "name": "light",
         "colorScheme": "light",
     }
-    assert "runtime-contrast" in {
-        finding.code for finding in focus["#alpha"].findings
+    assert "runtime-contrast" in {finding.code for finding in focus["#alpha"].findings}
+    assert {finding.code for finding in focus["#gradient"].findings} == {
+        "runtime-color-unresolved"
     }
-    assert {
-        finding.code for finding in focus["#gradient"].findings
-    } == {"runtime-color-unresolved"}
+    assert "paint" not in focus["#empty-gradient"].measurements
+    assert not {
+        finding.code
+        for finding in focus["#empty-gradient"].findings
+        if finding.code in {"runtime-contrast", "runtime-color-unresolved"}
+    }
     assert "runtime-focus-visible" in {
         finding.code for finding in focus["#focus"].findings
     }
     assert "runtime-target-size" in {
         finding.code for finding in focus["#small"].findings
     }
+    assert focus["#small"].measurements["targetSpacing"] == {
+        "status": "intersects",
+        "nearest_selector": "#near-small",
+        "center_distance_px": 18,
+        "circle_gap_px": -6,
+        "edge_gap_px": 0,
+        "total_targets": 10,
+        "indexed_targets": 10,
+        "truncated": False,
+    }
     assert "runtime-sticky-occlusion" in {
         finding.code for finding in focus["#covered"].findings
     }
-    assert "runtime-component-drift" in {
+    assert "runtime-component-drift" not in {
         finding.code for finding in focus["#tool-outlier"].findings
     }
     rendered_h2 = next(
@@ -2037,11 +2217,10 @@ def test_scenario_observation_records_interaction_state_and_diagnostics(
 
     assert observation.status == "current"
     assert [page.state for page in observation.pages] == ["open"]
-    assert any(element.selector == "#modal" for element in observation.pages[0].elements)
-    assert {
-        diagnostic.code
-        for diagnostic in observation.captures[0].diagnostics
-    } >= {
+    assert any(
+        element.selector == "#modal" for element in observation.pages[0].elements
+    )
+    assert {diagnostic.code for diagnostic in observation.captures[0].diagnostics} >= {
         "browser-console-error",
         "browser-http-error",
         "browser-page-error",
@@ -2155,18 +2334,14 @@ def test_peer_analysis_covers_aligned_and_outlier_tails_after_twenty(
         settle_ms=0,
     )
     assert observation.pages, observation.errors
-    elements = {
-        element.selector: element for element in observation.pages[0].elements
-    }
+    elements = {element.selector: element for element in observation.pages[0].elements}
 
     assert elements["#tail-aligned"].measurements["layoutPeerCount"] == 25
     assert "runtime-layout-misalignment" not in _finding_codes(
         elements["#tail-aligned"]
     )
     assert elements["#tail-outlier"].measurements["layoutPeerCount"] == 25
-    assert "runtime-layout-misalignment" in _finding_codes(
-        elements["#tail-outlier"]
-    )
+    assert "runtime-layout-misalignment" in _finding_codes(elements["#tail-outlier"])
 
 
 @pytest.mark.browser
@@ -2239,9 +2414,7 @@ def test_source_boundary_text_zoom_and_long_localization_runtime_probes(
     }
     assert elements["#zoom-copy"].measurements["fontSize"] == 32
     assert "runtime-text-clipped" in _finding_codes(elements["#zoom-copy"])
-    assert "runtime-text-clipped" in _finding_codes(
-        elements["#localized-action"]
-    )
+    assert "runtime-text-clipped" in _finding_codes(elements["#localized-action"])
 
 
 @pytest.mark.browser
@@ -2302,8 +2475,7 @@ def test_readiness_distinguishes_slow_hydration_from_polling_degradation(
     )
 
     readiness = {
-        capture.scenario: capture.readiness.status
-        for capture in observation.captures
+        capture.scenario: capture.readiness.status for capture in observation.captures
     }
     assert readiness == {"hydrated": "current", "polling": "degraded"}
     assert observation.status == "degraded"

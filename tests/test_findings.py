@@ -152,13 +152,15 @@ def test_confidence_preserves_zero_and_safely_defaults_malformed_values() -> Non
 
     assert zero.confidence == 0.0
     assert Finding.from_dict(zero.to_dict()).confidence == 0.0
-    assert Finding.from_dict(
-        {**zero.to_dict(), "confidence": "not-a-number"}
-    ).confidence == 0.5
+    assert (
+        Finding.from_dict({**zero.to_dict(), "confidence": "not-a-number"}).confidence
+        == 0.5
+    )
     for nonfinite in (float("nan"), float("inf"), float("-inf")):
-        assert Finding.from_dict(
-            {**zero.to_dict(), "confidence": nonfinite}
-        ).confidence == 0.5
+        assert (
+            Finding.from_dict({**zero.to_dict(), "confidence": nonfinite}).confidence
+            == 0.5
+        )
 
 
 @pytest.mark.parametrize(
@@ -305,9 +307,7 @@ def test_legacy_state_loads_as_canonical_without_read_time_rewrite(
     assert loaded["schema_version"] == 2
     assert loaded["issues"][0]["schema_version"] == 2
     assert loaded["issues"][0]["detector_id"].startswith("manual-")
-    assert loaded["issues"][0]["legacy"]["command"] == (
-        "uidetox polish src/Card.tsx"
-    )
+    assert loaded["issues"][0]["legacy"]["command"] == ("uidetox polish src/Card.tsx")
 
     save_state(loaded)
     persisted = json.loads(state_path.read_text(encoding="utf-8"))
@@ -373,9 +373,7 @@ def test_empty_structured_review_shell_remains_ineligible() -> None:
 
     result = evaluate_eligibility(state, EligibilityContext())
 
-    assert "missing_structured_review" in {
-        blocker.code for blocker in result.blockers
-    }
+    assert "missing_structured_review" in {blocker.code for blocker in result.blockers}
 
 
 @pytest.mark.parametrize(
@@ -426,9 +424,7 @@ def test_structured_review_rejects_missing_score_over_cap_or_mismatch(
 
     result = evaluate_eligibility(state, EligibilityContext())
 
-    assert "missing_structured_review" in {
-        blocker.code for blocker in result.blockers
-    }
+    assert "missing_structured_review" in {blocker.code for blocker in result.blockers}
 
 
 def test_investigative_findings_remain_visible_without_becoming_defects(
@@ -482,6 +478,19 @@ def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> Non
             "states": ["ready"],
             "viewports": ["mobile"],
             "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+            "scope_validation": {
+                "status": "validated",
+                "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+                "finding_links": [critical.fingerprint],
+                "region_links": ["runtime-primary-action"],
+                "capture_matrix": [
+                    {
+                        "route": "/checkout",
+                        "state": "ready",
+                        "viewport": "mobile",
+                    }
+                ],
+            },
         },
     }
 
@@ -515,9 +524,7 @@ def test_incomplete_structured_review_cannot_inflate_score_or_eligibility() -> N
 
     assert scores["subjective_score"] is None
     assert scores["blended_score"] == scores["objective_score"] == 80
-    assert "missing_structured_review" in {
-        blocker.code for blocker in result.blockers
-    }
+    assert "missing_structured_review" in {blocker.code for blocker in result.blockers}
 
 
 def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() -> None:
@@ -532,6 +539,15 @@ def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() ->
         "states": ["default"],
         "viewports": ["desktop"],
         "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
+        "scope_validation": {
+            "status": "validated",
+            "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
+            "finding_links": ["finding-1"],
+            "region_links": ["runtime-region-1"],
+            "capture_matrix": [
+                {"route": "/", "state": "default", "viewport": "desktop"}
+            ],
+        },
     }
     current = {"source": "new", "map": "m", "runtime": "r"}
     state = {
@@ -616,7 +632,7 @@ def test_zero_width_standard_rule_terminates_and_preserves_each_anchor(
         "pattern": re.compile(r"(?=x)"),
     }
 
-    findings = _analyze_rule(rule, source, content, ".tsx", 8, None)
+    findings = _analyze_rule(rule, source, content, ".tsx", 8)
 
     assert [item.source_anchor["start"] for item in findings] == [0, 1]
     assert [item.source_anchor["end"] for item in findings] == [0, 1]

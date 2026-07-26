@@ -3,8 +3,9 @@
 import argparse
 import sys
 from typing import Any
+from urllib.parse import urlsplit
 
-from uidetox.findings import current_evidence_hashes
+from uidetox.findings import coerce_finding, current_evidence_hashes
 from uidetox.frontend_map import FrontendMap, load_frontend_map
 from uidetox.state import ensure_uidetox_dir, load_config, load_state, save_state
 from uidetox.utils import now_iso
@@ -26,9 +27,7 @@ def run(args: argparse.Namespace) -> None:
             print(f"  - {reason}", file=sys.stderr)
         raise SystemExit(1)
 
-    dimensions = {
-        key: getattr(args, f"dimension_{key.lower()}", None) for key in _CAPS
-    }
+    dimensions = {key: getattr(args, f"dimension_{key.lower()}", None) for key in _CAPS}
     if any(value is not None for value in dimensions.values()):
         _store_structured_review(args, dimensions)
         return
@@ -64,6 +63,16 @@ def _store_structured_review(
         for name, values in required_lists.items()
         if not values
     )
+    frontend_map = _load_review_map()
+    hashes = current_evidence_hashes()
+    state = load_state()
+    scope_validation = _validate_review_scope(
+        frontend_map,
+        state,
+        hashes,
+        required_lists,
+    )
+    errors.extend(scope_validation.pop("errors"))
     if errors:
         print("Error: " + "; ".join(errors), file=sys.stderr)
         raise SystemExit(1)
@@ -79,12 +88,122 @@ def _store_structured_review(
         "routes": required_lists["route"],
         "states": required_lists["state"],
         "viewports": required_lists["viewport"],
-        "evidence_hashes": current_evidence_hashes(),
+        "evidence_hashes": hashes,
+        "scope_validation": scope_validation,
         "stale": False,
         "timestamp": now_iso(),
     }
     _save_review(record)
     print(f"✅ Structured subjective review recorded: {record['score']}/100")
+
+
+def _route_key(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urlsplit(text)
+    return parsed.path or "/" if parsed.scheme or text.startswith("/") else text
+
+
+def _validate_review_scope(
+    frontend_map: FrontendMap | None,
+    state: dict[str, Any],
+    hashes: dict[str, str],
+    required_lists: dict[str, list[str]],
+) -> dict[str, Any]:
+    errors: list[str] = []
+    if frontend_map is None:
+        return {
+            "status": "invalid",
+            "errors": ["a current frontend map is required"],
+        }
+    evidence = frontend_map.evidence
+    if evidence.get("source_status") != "current":
+        errors.append("frontend map source evidence is not current")
+    if evidence.get("runtime_status") != "current":
+        errors.append("frontend map runtime evidence is not current")
+    if set(hashes) != {"source", "map", "runtime"} or not all(hashes.values()):
+        errors.append("fresh source/map/runtime evidence hashes are required")
+
+    finding_ids: set[str] = set()
+    for value in state.get("issues", []):
+        if not isinstance(value, dict):
+            continue
+        finding = coerce_finding(value)
+        finding_ids.add(finding.fingerprint)
+        queue_id = str(value.get("id", "")).strip()
+        if queue_id:
+            finding_ids.add(queue_id)
+    runtime_findings = evidence.get("runtime_findings", [])
+    if isinstance(runtime_findings, list):
+        for value in runtime_findings:
+            if not isinstance(value, dict):
+                continue
+            for key in ("fingerprint", "id"):
+                finding_id = str(value.get(key, "")).strip()
+                if finding_id:
+                    finding_ids.add(finding_id)
+    invalid_findings = sorted(set(required_lists["finding_link"]) - finding_ids)
+    if invalid_findings:
+        errors.append(
+            "finding links are not present in current findings: "
+            + ", ".join(invalid_findings)
+        )
+
+    region_ids = {
+        node.id
+        for node in frontend_map.nodes
+        if node.kind in {"region", "runtime_region"}
+    }
+    invalid_regions = sorted(set(required_lists["region_link"]) - region_ids)
+    if invalid_regions:
+        errors.append(
+            "region links are not present in the current graph: "
+            + ", ".join(invalid_regions)
+        )
+
+    captures = evidence.get("runtime_capture_matrix", [])
+    completed: set[tuple[str, str, str]] = set()
+    if isinstance(captures, list):
+        for capture in captures:
+            if not isinstance(capture, dict) or capture.get("status") != "completed":
+                continue
+            viewport = capture.get("viewport", {})
+            viewport_name = (
+                str(viewport.get("name", "")).strip()
+                if isinstance(viewport, dict)
+                else str(viewport).strip()
+            )
+            completed.add(
+                (
+                    _route_key(capture.get("url")),
+                    str(capture.get("state", "")).strip(),
+                    viewport_name,
+                )
+            )
+    requested = {
+        (_route_key(route), state_name.strip(), viewport.strip())
+        for route in required_lists["route"]
+        for state_name in required_lists["state"]
+        for viewport in required_lists["viewport"]
+    }
+    missing_captures = sorted(requested - completed)
+    if missing_captures:
+        errors.append(
+            "completed route/state/viewport captures are missing: "
+            + ", ".join("/".join(item) for item in missing_captures)
+        )
+    return {
+        "status": "validated" if not errors else "invalid",
+        "evidence_hashes": dict(hashes),
+        "finding_links": sorted(required_lists["finding_link"]),
+        "region_links": sorted(required_lists["region_link"]),
+        "capture_matrix": [
+            {"route": route, "state": state_name, "viewport": viewport}
+            for route, state_name, viewport in sorted(requested)
+        ],
+        "errors": errors,
+    }
 
 
 def _store_subjective_score(score: int) -> None:
@@ -152,9 +271,7 @@ def _print_review_brief(
                 continue
             viewport = capture.get("viewport", {})
             viewport_name = (
-                viewport.get("name", "")
-                if isinstance(viewport, dict)
-                else viewport
+                viewport.get("name", "") if isinstance(viewport, dict) else viewport
             )
             print(
                 "  Capture: "
@@ -180,7 +297,8 @@ def _print_review_brief(
             if isinstance(finding, dict):
                 print(
                     f"  Finding: {finding.get('code', 'unknown')} "
-                    f"{finding.get('selector', '')}".rstrip()
+                    f"{finding.get('selector', '')} "
+                    f"[{finding.get('fingerprint', finding.get('id', ''))}]".rstrip()
                 )
     for node in frontend_map.nodes:
         if not node.kind.startswith("runtime_") or node.kind == "runtime_page":

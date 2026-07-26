@@ -2,6 +2,7 @@ import colorsys
 import json
 import math
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import TypeAlias
 
@@ -53,7 +54,9 @@ def _alpha(value: str | None) -> float:
         return 1.0
     text = value.strip().lower()
     try:
-        return _clamp_unit(float(text[:-1]) / 100 if text.endswith("%") else float(text))
+        return _clamp_unit(
+            float(text[:-1]) / 100 if text.endswith("%") else float(text)
+        )
     except ValueError:
         raise ValueError("Invalid alpha channel") from None
 
@@ -71,7 +74,9 @@ def _components(value: str) -> tuple[list[str], str | None]:
 
 def _rgb_component(value: str) -> float:
     text = value.strip().lower()
-    return _clamp_unit(float(text[:-1]) / 100 if text.endswith("%") else float(text) / 255)
+    return _clamp_unit(
+        float(text[:-1]) / 100 if text.endswith("%") else float(text) / 255
+    )
 
 
 def _angle_degrees(value: str) -> float:
@@ -89,37 +94,30 @@ def _angle_degrees(value: str) -> float:
 
 def _percent_or_number(value: str, *, percent_scale: float = 1.0) -> float:
     text = value.strip().lower()
-    return (
-        float(text[:-1]) / 100 * percent_scale
-        if text.endswith("%")
-        else float(text)
-    )
+    return float(text[:-1]) / 100 * percent_scale if text.endswith("%") else float(text)
 
 
-def _oklab_to_linear_srgb(lightness: float, axis_a: float, axis_b: float) -> tuple[float, float, float]:
+def _oklab_to_linear_srgb(
+    lightness: float, axis_a: float, axis_b: float
+) -> tuple[float, float, float]:
     l_root = lightness + 0.3963377774 * axis_a + 0.2158037573 * axis_b
     m_root = lightness - 0.1055613458 * axis_a - 0.0638541728 * axis_b
     s_root = lightness - 0.0894841775 * axis_a - 1.2914855480 * axis_b
     l_value, m_value, s_value = l_root**3, m_root**3, s_root**3
     return (
         _clamp_unit(
-            4.0767416621 * l_value
-            - 3.3077115913 * m_value
-            + 0.2309699292 * s_value
+            4.0767416621 * l_value - 3.3077115913 * m_value + 0.2309699292 * s_value
         ),
         _clamp_unit(
-            -1.2684380046 * l_value
-            + 2.6097574011 * m_value
-            - 0.3413193965 * s_value
+            -1.2684380046 * l_value + 2.6097574011 * m_value - 0.3413193965 * s_value
         ),
         _clamp_unit(
-            -0.0041960863 * l_value
-            - 0.7034186147 * m_value
-            + 1.707614701 * s_value
+            -0.0041960863 * l_value - 0.7034186147 * m_value + 1.707614701 * s_value
         ),
     )
 
 
+@lru_cache(maxsize=4096)
 def normalize_rendered_color(value: str) -> RenderedColor | None:
     """Normalize a browser-computed color or persisted round trip to linear sRGB."""
 
@@ -136,8 +134,7 @@ def normalize_rendered_color(value: str) -> RenderedColor | None:
             if len(digits) not in {6, 8}:
                 return None
             encoded = tuple(
-                int(digits[index : index + 2], 16) / 255
-                for index in (0, 2, 4)
+                int(digits[index : index + 2], 16) / 255 for index in (0, 2, 4)
             )
             alpha = int(digits[6:8], 16) / 255 if len(digits) == 8 else 1.0
             return (*(_srgb_to_linear(channel) for channel in encoded), alpha)
@@ -197,10 +194,7 @@ def normalize_rendered_color(value: str) -> RenderedColor | None:
             channels, alpha_text = _components(body)
             if len(channels) != 3:
                 return None
-            values = tuple(
-                _percent_or_number(channel)
-                for channel in channels
-            )
+            values = tuple(_percent_or_number(channel) for channel in channels)
             linear = (
                 tuple(_srgb_to_linear(channel) for channel in values)
                 if space == "srgb"
@@ -239,12 +233,8 @@ def composite_rendered_color(
 def contrast_ratio_rgba(first: RenderedColor, second: RenderedColor) -> float:
     """Return WCAG relative-luminance contrast for two opaque rendered colors."""
 
-    first_luminance = (
-        first[0] * 0.2126 + first[1] * 0.7152 + first[2] * 0.0722
-    )
-    second_luminance = (
-        second[0] * 0.2126 + second[1] * 0.7152 + second[2] * 0.0722
-    )
+    first_luminance = first[0] * 0.2126 + first[1] * 0.7152 + first[2] * 0.0722
+    second_luminance = second[0] * 0.2126 + second[1] * 0.7152 + second[2] * 0.0722
     return (max(first_luminance, second_luminance) + 0.05) / (
         min(first_luminance, second_luminance) + 0.05
     )
@@ -254,6 +244,7 @@ def is_large_text(font_size_px: float, font_weight: float) -> bool:
     """Apply the WCAG 2.2 large-text boundary in CSS pixels."""
 
     return font_size_px >= 24 or (font_weight >= 700 and font_size_px >= 14 * 96 / 72)
+
 
 TAILWIND_CONFIG_FILES = (
     "tailwind.config.js",
@@ -451,11 +442,7 @@ def luminance(color: str) -> float:
     normalized = normalize_rendered_color(color)
     if normalized is None:
         return 1.0
-    return (
-        normalized[0] * 0.2126
-        + normalized[1] * 0.7152
-        + normalized[2] * 0.0722
-    )
+    return normalized[0] * 0.2126 + normalized[1] * 0.7152 + normalized[2] * 0.0722
 
 
 def contrast_ratio(hex1: str, hex2: str) -> float:

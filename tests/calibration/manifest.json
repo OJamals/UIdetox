@@ -2,11 +2,23 @@
   "schema_version": 1,
   "fixture_root": "fixtures",
   "catalog": {
-    "rule_count": 218,
-    "fingerprint": "385c308cc5adba954d8286bf6bb176142ff8f856d21062b8511f6e6cd004492c",
-    "manual_rule_count": 213,
-    "manual_rule_fingerprint": "f489012e5ac70ab424ad776388cc40017d77e74b1e98a056d98ad74c7fa1334d",
+    "rule_count": 217,
+    "fingerprint": "f39e1b0ea8dbe1b4c7a33133f40a2523c7d91a317815a893599226dfe018004a",
+    "manual_rule_count": 212,
+    "manual_rule_fingerprint": "8ed02a2ba3d2acffc73a4d84cfd9e92e60d95c78a35cf5e07a34655684ba08ea",
     "manual_rationale": "No deterministic corpus pair yet; qualification owned by plans/015-occurrence-complete-static-analysis.md."
+  },
+  "detector_budgets": {
+    "component-palette": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "contrast": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "focus": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "geometry-occlusion": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "hierarchy": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "interaction-states": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "target-spacing": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "themes": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "typography-rhythm-spacing": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "unsupported-backgrounds": {"tp_min": 1, "fp_max": 0, "fn_max": 0}
   },
   "cases": [
     {
@@ -517,6 +529,7 @@
       "language": "json",
       "capability": "rendered-design",
       "detector": "runtime-design",
+      "family": "contrast",
       "status": "positive",
       "expected_anchors": [
         {
@@ -531,7 +544,17 @@
       "rationale": "A resolved rendered foreground/backdrop pair below WCAG AA must emit a runtime contrast finding.",
       "expect": {
         "finding_ids": ["runtime-contrast"],
-        "exact_findings": true
+        "exact_findings": true,
+        "findings": [
+          {
+            "code": "runtime-contrast",
+            "selector": "#muted",
+            "metrics": {"required": 4.5, "large_text": false, "font_size_px": 16.0}
+          }
+        ],
+        "forbid_findings": [
+          {"code": "runtime-contrast", "selector": "#large-threshold"}
+        ]
       }
     },
     {
@@ -541,6 +564,7 @@
       "language": "json",
       "capability": "rendered-design",
       "detector": "runtime-design",
+      "family": "contrast",
       "status": "negative",
       "expected_anchors": [],
       "severity": "error",
@@ -553,6 +577,343 @@
         "exact_findings": true,
         "forbid_finding_ids": ["runtime-contrast", "runtime-color-unresolved"]
       }
+    },
+    {
+      "id": "runtime-component-palette-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "component-palette",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#component-outlier\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A repeated component and palette role may drift only after canonical source ownership corroborates the peer group.",
+      "expect": {
+        "finding_ids": ["runtime-component-drift", "runtime-palette-role-drift"],
+        "findings": [
+          {"code": "runtime-component-drift", "selector": "#component-outlier", "metrics": {"equivalence_group": "toolbar:button", "source_ownership": "src/Toolbar.tsx"}},
+          {"code": "runtime-palette-role-drift", "selector": "#component-outlier", "metrics": {"palette_role": "action", "source_ownership": "src/Toolbar.tsx"}}
+        ]
+      }
+    },
+    {
+      "id": "runtime-component-palette-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "component-palette",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#component-clean-three\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "Canonically owned peers with matching component and palette signatures must remain clean.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-hierarchy-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "hierarchy",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#heading-outlier\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A lower semantic heading in the same reading hierarchy must be visually subordinate.",
+      "expect": {
+        "finding_ids": ["runtime-type-hierarchy"],
+        "findings": [{"code": "runtime-type-hierarchy", "selector": "#heading-outlier", "metrics": {"hierarchy": "main", "font_size_px": 32.0, "parent_font_size_px": 32.0}}]
+      }
+    },
+    {
+      "id": "runtime-hierarchy-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "hierarchy",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#heading-clean-secondary\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A subordinate heading scale in the same hierarchy must remain clean.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-rhythm-spacing-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "typography-rhythm-spacing",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#rhythm-outlier\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A measured repeated-flow gap outside the median tolerance must be anchored to the causal item.",
+      "expect": {
+        "finding_ids": ["runtime-spatial-rhythm"],
+        "findings": [{"code": "runtime-spatial-rhythm", "selector": "#rhythm-outlier", "metrics": {"gap_px": 40.0, "median_gap_px": 20.0, "tolerance_px": 5.0}}]
+      }
+    },
+    {
+      "id": "runtime-rhythm-spacing-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "typography-rhythm-spacing",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#rhythm-clean-four\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A regular repeated-flow rhythm must remain clean.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-geometry-occlusion-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "geometry-occlusion",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#covered\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "Measured coverage by a fixed element must emit a causal occlusion finding.",
+      "expect": {
+        "finding_ids": ["runtime-sticky-occlusion"],
+        "findings": [{"code": "runtime-sticky-occlusion", "selector": "#covered", "metrics": {"occluded_fraction": 0.8, "covering_selector": "#sticky", "covering_position": "fixed"}}]
+      }
+    },
+    {
+      "id": "runtime-geometry-occlusion-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "geometry-occlusion",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#geometry-clean\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A fully visible in-viewport control must remain clean.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-focus-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "focus",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#focus-no-delta\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A permanent shadow with no focus-specific computed delta cannot clear focus visibility.",
+      "expect": {
+        "finding_ids": ["runtime-focus-visible"],
+        "findings": [{"code": "runtime-focus-visible", "selector": "#focus-no-delta", "metrics": {"wcag": "2.4.7", "captured_state": "focused"}}]
+      }
+    },
+    {
+      "id": "runtime-focus-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "focus",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#focus-clean\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A distinguishable focus-specific computed delta must clear focus visibility.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-target-spacing-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "target-spacing",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#target-intersects\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A 20 pixel target whose 24 pixel test circle touches its peer must not receive a spacing exception.",
+      "expect": {
+        "finding_ids": ["runtime-target-size"],
+        "findings": [{"code": "runtime-target-size", "selector": "#target-intersects", "metrics": {"width_px": 20.0, "height_px": 20.0, "required_px": 24}}]
+      }
+    },
+    {
+      "id": "runtime-target-spacing-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "target-spacing",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#target-clean\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A same-pass geometric spacing exception must clear an otherwise undersized target.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-unsupported-background-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "unsupported-backgrounds",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#unsupported-text\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "Actual painted text over a gradient must remain unresolved instead of being guessed clean.",
+      "expect": {
+        "finding_ids": ["runtime-color-unresolved"],
+        "findings": [{"code": "runtime-color-unresolved", "selector": "#unsupported-text", "metrics": {"coverage": "unresolved"}}],
+        "forbid_findings": [{"code": "runtime-color-unresolved", "selector": "#unsupported-surface"}]
+      }
+    },
+    {
+      "id": "runtime-unsupported-background-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "unsupported-backgrounds",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#unsupported-clean-surface\""}],
+      "severity": "warning",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A non-text decorative gradient surface must not enter the text-contrast detector.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-theme-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "themes",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#theme-dark\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "Contrast must be calibrated against the captured dark-theme paint stack.",
+      "expect": {
+        "finding_ids": ["runtime-contrast"],
+        "findings": [{"code": "runtime-contrast", "selector": "#theme-dark", "metrics": {"theme": {"name": "dark", "colorScheme": "dark"}, "states": {}}}]
+      }
+    },
+    {
+      "id": "runtime-theme-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "themes",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#theme-clean\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A captured high-contrast dark-theme paint stack must remain clean.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-interaction-state-positive",
+      "fixture": "runtime-design/detector-families-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "interaction-states",
+      "status": "positive",
+      "expected_anchors": [{"path": "runtime-design/detector-families-positive.json", "contains": "\"selector\": \"#state-hover\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "focus",
+      "viewport": "desktop",
+      "rationale": "A low-contrast captured hover state must retain its interaction-state anchor.",
+      "expect": {
+        "finding_ids": ["runtime-contrast"],
+        "findings": [{"code": "runtime-contrast", "selector": "#state-hover", "metrics": {"states": {"hovered": true}}}]
+      }
+    },
+    {
+      "id": "runtime-interaction-state-negative",
+      "fixture": "runtime-design/detector-families-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "family": "interaction-states",
+      "status": "negative",
+      "expected_anchors": [{"path": "runtime-design/detector-families-negative.json", "contains": "\"selector\": \"#state-disabled-clean\""}],
+      "severity": "error",
+      "route": "/dashboard",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A disabled control is excluded from actionable contrast and target-size failures.",
+      "expect": {"finding_ids": [], "exact_findings": true}
     }
   ]
 }

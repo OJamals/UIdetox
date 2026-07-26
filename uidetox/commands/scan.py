@@ -3,6 +3,7 @@ Implements the desloppify flow: Scan Codebase -> generate score -> both
 Mechanical Issues (static analyzer) AND Subjective Analysis (LLM review)
 happen together, with mechanical informing subjective.
 """
+
 import argparse
 import json
 import os
@@ -207,7 +208,6 @@ _AUTO_CATEGORIES = {
         "IMG_ALT_MISSING_SLOP",
         "ICON_ARIA_MISSING_SLOP",
         "ORPHANED_LABEL_SLOP",
-        "LOW_CONTRAST_SLOP",
         "MODAL_NO_ARIA_SLOP",
         "TOUCH_TARGET_SLOP",
         "AUTOFOCUS_SLOP",

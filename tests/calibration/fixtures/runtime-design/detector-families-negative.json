@@ -1,0 +1,254 @@
+{
+  "url": "http://localhost:3000/dashboard",
+  "title": "Rendered detector negatives",
+  "viewport": {"name": "desktop", "width": 1280, "height": 800},
+  "elements": [
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Readable body",
+      "selector": "#contrast-clean",
+      "order": 0,
+      "bounds": {"x": 20, "y": 20, "width": 200, "height": 24},
+      "styles": {"fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {
+        "paintedText": true,
+        "paint": {
+          "foreground": {"raw": "black", "rgba": [0.0, 0.0, 0.0, 1.0]},
+          "background_layers": [
+            {"selector": "body", "raw": "white", "rgba": [1.0, 1.0, 1.0, 1.0]}
+          ],
+          "unresolved": []
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Large text threshold",
+      "selector": "#contrast-large-clean",
+      "order": 1,
+      "bounds": {"x": 20, "y": 50, "width": 240, "height": 32},
+      "styles": {"fontSize": "24px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {
+        "paintedText": true,
+        "paint": {
+          "foreground": {"raw": "gray", "rgba": [0.28, 0.28, 0.28, 1.0]},
+          "background_layers": [
+            {"selector": "body", "raw": "white", "rgba": [1.0, 1.0, 1.0, 1.0]}
+          ],
+          "unresolved": []
+        }
+      }
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Action one",
+      "selector": "#component-clean-one",
+      "order": 2,
+      "bounds": {"x": 20, "y": 100, "width": 100, "height": 32},
+      "styles": {"color": "black", "backgroundColor": "white", "fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {"equivalenceGroup": "toolbar:button", "equivalenceEvidence": "source-ownership", "sourceOwnershipKey": "src/Toolbar.tsx", "paletteRole": "action"}
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Action two",
+      "selector": "#component-clean-two",
+      "order": 3,
+      "bounds": {"x": 130, "y": 100, "width": 100, "height": 32},
+      "styles": {"color": "black", "backgroundColor": "white", "fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {"equivalenceGroup": "toolbar:button", "equivalenceEvidence": "source-ownership", "sourceOwnershipKey": "src/Toolbar.tsx", "paletteRole": "action"}
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Action three",
+      "selector": "#component-clean-three",
+      "order": 4,
+      "bounds": {"x": 240, "y": 100, "width": 100, "height": 32},
+      "styles": {"color": "black", "backgroundColor": "white", "fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {"equivalenceGroup": "toolbar:button", "equivalenceEvidence": "source-ownership", "sourceOwnershipKey": "src/Toolbar.tsx", "paletteRole": "action"}
+    },
+    {
+      "kind": "text",
+      "tag": "h1",
+      "role": "",
+      "name": "Primary",
+      "selector": "#heading-clean-primary",
+      "order": 5,
+      "bounds": {"x": 20, "y": 170, "width": 300, "height": 40},
+      "styles": {"fontSize": "32px", "fontWeight": "700"},
+      "states": {},
+      "measurements": {"readingHierarchySelector": "main"}
+    },
+    {
+      "kind": "text",
+      "tag": "h2",
+      "role": "",
+      "name": "Secondary",
+      "selector": "#heading-clean-secondary",
+      "order": 6,
+      "bounds": {"x": 20, "y": 220, "width": 300, "height": 32},
+      "styles": {"fontSize": "24px", "fontWeight": "600"},
+      "states": {},
+      "measurements": {"readingHierarchySelector": "main"}
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Item one",
+      "selector": "#rhythm-clean-one",
+      "order": 7,
+      "bounds": {"x": 400, "y": 170, "width": 120, "height": 20},
+      "styles": {},
+      "states": {},
+      "measurements": {"layoutParentSelector": "#list", "equivalenceGroup": "list:item", "equivalenceEvidence": "layout"}
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Item two",
+      "selector": "#rhythm-clean-two",
+      "order": 8,
+      "bounds": {"x": 400, "y": 210, "width": 120, "height": 20},
+      "styles": {},
+      "states": {},
+      "measurements": {"layoutParentSelector": "#list", "equivalenceGroup": "list:item", "equivalenceEvidence": "layout"}
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Item three",
+      "selector": "#rhythm-clean-three",
+      "order": 9,
+      "bounds": {"x": 400, "y": 250, "width": 120, "height": 20},
+      "styles": {},
+      "states": {},
+      "measurements": {"layoutParentSelector": "#list", "equivalenceGroup": "list:item", "equivalenceEvidence": "layout"}
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Item four",
+      "selector": "#rhythm-clean-four",
+      "order": 10,
+      "bounds": {"x": 400, "y": 290, "width": 120, "height": 20},
+      "styles": {},
+      "states": {},
+      "measurements": {"layoutParentSelector": "#list", "equivalenceGroup": "list:item", "equivalenceEvidence": "layout"}
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Visible action",
+      "selector": "#geometry-clean",
+      "order": 11,
+      "bounds": {"x": 20, "y": 370, "width": 100, "height": 32},
+      "styles": {},
+      "states": {},
+      "measurements": {"occludedFraction": 0.0}
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Focus delta",
+      "selector": "#focus-clean",
+      "order": 12,
+      "bounds": {"x": 140, "y": 370, "width": 100, "height": 32},
+      "styles": {},
+      "states": {"focused": true},
+      "measurements": {"focusIndicator": {"visible": true, "changed": true, "distinguishable": true, "area": 268, "minimum_area": 264}}
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Spaced target",
+      "selector": "#target-clean",
+      "order": 13,
+      "bounds": {"x": 280, "y": 370, "width": 20, "height": 20},
+      "styles": {},
+      "states": {},
+      "measurements": {"targetSpacing": {"status": "clear", "total_targets": 1, "indexed_targets": 1, "truncated": false}}
+    },
+    {
+      "kind": "region",
+      "tag": "div",
+      "role": "region",
+      "name": "Decorative gradient",
+      "selector": "#unsupported-clean-surface",
+      "order": 14,
+      "bounds": {"x": 20, "y": 440, "width": 120, "height": 24},
+      "styles": {},
+      "states": {},
+      "measurements": {
+        "paintedText": false,
+        "paint": {
+          "foreground": {"raw": "black", "rgba": [0.0, 0.0, 0.0, 1.0]},
+          "background_layers": [],
+          "unresolved": [{"selector": "#unsupported-clean-surface", "property": "background-image", "value": "linear-gradient(red, blue)"}]
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Dark theme readable",
+      "selector": "#theme-clean",
+      "order": 15,
+      "bounds": {"x": 20, "y": 480, "width": 220, "height": 24},
+      "styles": {"fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {
+        "paintedText": true,
+        "theme": {"name": "dark", "colorScheme": "dark"},
+        "paint": {
+          "foreground": {"raw": "white", "rgba": [1.0, 1.0, 1.0, 1.0]},
+          "background_layers": [{"selector": "body", "raw": "black", "rgba": [0.0, 0.0, 0.0, 1.0]}],
+          "unresolved": []
+        }
+      }
+    },
+    {
+      "kind": "action",
+      "tag": "button",
+      "role": "button",
+      "name": "Disabled small target",
+      "selector": "#state-disabled-clean",
+      "order": 16,
+      "bounds": {"x": 20, "y": 520, "width": 12, "height": 12},
+      "styles": {"fontSize": "16px", "fontWeight": "400"},
+      "states": {"disabled": true},
+      "measurements": {
+        "paintedText": true,
+        "paint": {
+          "foreground": {"raw": "gray", "rgba": [0.28, 0.28, 0.28, 1.0]},
+          "background_layers": [{"selector": "body", "raw": "white", "rgba": [1.0, 1.0, 1.0, 1.0]}],
+          "unresolved": []
+        }
+      }
+    }
+  ],
+  "capture_id": "runtime-detector-negative",
+  "scenario": "quality",
+  "state": "initial"
+}

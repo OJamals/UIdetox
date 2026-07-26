@@ -6,7 +6,7 @@ from uidetox.rule_registry import RULE_REGISTRY, get_rule
 
 
 def test_registry_covers_analyzer_catalog_with_provenance():
-    assert len(RULE_REGISTRY) == len(RULES) == 218
+    assert len(RULE_REGISTRY) == len(RULES) == 217
     assert tuple(RULE_REGISTRY) == tuple(rule["id"] for rule in RULES)
     assert all(spec.category for spec in RULE_REGISTRY.values())
     assert all(

@@ -15,6 +15,42 @@ from uidetox.state import load_state
 from uidetox.visual_evidence import VisualEvidenceStatus
 
 
+def _validated_review_map(tmp_path: Path) -> FrontendMap:
+    return FrontendMap(
+        schema_version=SCHEMA_VERSION,
+        generated_at="2026-07-26T00:00:00Z",
+        root=str(tmp_path),
+        target=".",
+        nodes=(
+            FrontendNode(
+                id="runtime-card",
+                kind="runtime_region",
+                name="Card",
+                file="",
+                line=0,
+                metadata={"selector": "#card"},
+            ),
+        ),
+        edges=(),
+        contracts=ExperienceContract((), (), ()),
+        fingerprint={},
+        evidence={
+            "source_status": "current",
+            "runtime_status": "current",
+            "runtime_findings": [{"fingerprint": "finding-1", "id": "finding-1"}],
+            "runtime_capture_matrix": [
+                {
+                    "scenario": "checkout",
+                    "state": "error",
+                    "url": "http://localhost:3000/checkout",
+                    "viewport": {"name": "mobile"},
+                    "status": "completed",
+                }
+            ],
+        },
+    )
+
+
 def test_review_score_gate_requires_fresh_visual_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -174,6 +210,9 @@ def test_review_stores_structured_dimensions_and_current_evidence_hashes(
         "current_evidence_hashes",
         lambda: {"source": "s", "map": "m", "runtime": "r"},
     )
+    monkeypatch.setattr(
+        review, "_load_review_map", lambda: _validated_review_map(tmp_path)
+    )
     review.run(
         argparse.Namespace(
             score=None,
@@ -197,6 +236,45 @@ def test_review_stores_structured_dimensions_and_current_evidence_hashes(
     assert stored["dimensions"] == {"A": 36, "B": 27, "C": 18, "D": 9}
     assert stored["evidence_hashes"] == {"source": "s", "map": "m", "runtime": "r"}
     assert stored["region_links"] == ["runtime-card"]
+    assert stored["scope_validation"]["status"] == "validated"
+    assert stored["scope_validation"]["capture_matrix"] == [
+        {"route": "/checkout", "state": "error", "viewport": "mobile"}
+    ]
+
+
+def test_structured_review_rejects_stale_links_and_incomplete_capture_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        review, "_load_review_map", lambda: _validated_review_map(tmp_path)
+    )
+    monkeypatch.setattr(
+        review,
+        "current_evidence_hashes",
+        lambda: {"source": "s", "map": "m", "runtime": "r"},
+    )
+
+    with pytest.raises(SystemExit):
+        review._store_structured_review(
+            argparse.Namespace(
+                rationale="Reviewed the matrix.",
+                reviewer="qa-agent",
+                finding_link=["stale-finding"],
+                region_link=["stale-region"],
+                route=["/checkout"],
+                state=["error", "success"],
+                viewport=["mobile"],
+            ),
+            {"A": 36, "B": 27, "C": 18, "D": 9},
+        )
+
+    error = capsys.readouterr().err
+    assert "stale-finding" in error
+    assert "stale-region" in error
+    assert "/checkout/success/mobile" in error
 
 
 def test_structured_review_requires_citations_and_coverage(

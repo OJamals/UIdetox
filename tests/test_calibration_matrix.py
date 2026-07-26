@@ -43,6 +43,18 @@ _REQUIRED_CASE_KEYS = {
     "severity",
     "rationale",
 }
+_RUNTIME_FAMILIES = {
+    "component-palette",
+    "contrast",
+    "focus",
+    "geometry-occlusion",
+    "hierarchy",
+    "interaction-states",
+    "target-spacing",
+    "themes",
+    "typography-rhythm-spacing",
+    "unsupported-backgrounds",
+}
 
 
 @dataclass(frozen=True)
@@ -64,9 +76,16 @@ def validate_manifest(
     manifest: Mapping[str, object], calibration_root: Path = CALIBRATION_ROOT
 ) -> None:
     errors: list[str] = []
-    if set(manifest) != {"schema_version", "fixture_root", "catalog", "cases"}:
+    if set(manifest) != {
+        "schema_version",
+        "fixture_root",
+        "catalog",
+        "detector_budgets",
+        "cases",
+    }:
         errors.append(
-            "manifest keys must be schema_version, fixture_root, catalog, and cases"
+            "manifest keys must be schema_version, fixture_root, catalog, "
+            "detector_budgets, and cases"
         )
     if manifest.get("schema_version") != 1:
         errors.append("schema_version must be 1")
@@ -84,6 +103,22 @@ def validate_manifest(
     if not isinstance(cases, list):
         errors.append("cases must be a list")
         cases = []
+    budgets = manifest.get("detector_budgets")
+    if not isinstance(budgets, dict) or set(budgets) != _RUNTIME_FAMILIES:
+        errors.append("detector_budgets must cover every runtime detector family")
+    else:
+        for family, budget in budgets.items():
+            if (
+                not isinstance(budget, dict)
+                or set(budget) != {"tp_min", "fp_max", "fn_max"}
+                or any(
+                    not isinstance(value, int) or value < 0 for value in budget.values()
+                )
+            ):
+                errors.append(
+                    f"detector_budgets.{family} must contain non-negative "
+                    "tp_min, fp_max, and fn_max integers"
+                )
 
     seen: set[str] = set()
     for index, raw_case in enumerate(cases):
@@ -93,7 +128,8 @@ def validate_manifest(
             continue
         case = raw_case
         if set(case) - (
-            _REQUIRED_CASE_KEYS | {"route", "state", "viewport", "rule_id", "expect"}
+            _REQUIRED_CASE_KEYS
+            | {"route", "state", "viewport", "rule_id", "expect", "family"}
         ):
             errors.append(f"{label} has unknown keys")
         missing = _REQUIRED_CASE_KEYS - set(case)
@@ -118,15 +154,17 @@ def validate_manifest(
                 errors.append(f"{label} unknown rule_id: {rule_id}")
         elif rule_id is not None:
             errors.append(f"{label}.rule_id is only valid for static-analyzer")
+        if detector == "runtime-design" and case.get("family") not in _RUNTIME_FAMILIES:
+            errors.append(f"{label}.family must name a runtime detector family")
+        elif detector != "runtime-design" and "family" in case:
+            errors.append(f"{label}.family is only valid for runtime-design")
         executable_case = case.get("status") in {"positive", "negative"}
         if (
             detector in {"semantic-adapter", "project-map", "runtime-design"}
             and executable_case
             and not isinstance(case.get("expect"), dict)
         ):
-            errors.append(
-                f"{label}.expect must be an object for {detector}"
-            )
+            errors.append(f"{label}.expect must be an object for {detector}")
         elif (
             detector not in {"semantic-adapter", "project-map", "runtime-design"}
             and "expect" in case
@@ -284,8 +322,10 @@ def evaluate_cases(
         status = str(case["status"])
         key = f"{case['capability']}::{case['framework']}"
         detector = str(case["detector"])
-        if detector == "semantic-adapter" or detector == "runtime-design" or (
-            detector == "project-map" and status in {"positive", "negative"}
+        if (
+            detector == "semantic-adapter"
+            or detector == "runtime-design"
+            or (detector == "project-map" and status in {"positive", "negative"})
         ):
             if detector == "semantic-adapter":
                 failure = _evaluate_semantic_case(fixture_root, case)
@@ -439,11 +479,13 @@ def _evaluate_runtime_design_case(
     if not isinstance(value, dict):
         return "runtime fixture must contain an object"
     page = RuntimePage.from_dict(value)
-    actual = {
-        finding.code
-        for findings in detect_design_findings(page)
+    aligned = detect_design_findings(page)
+    actual_findings = [
+        (element.selector, finding)
+        for element, findings in zip(page.elements, aligned, strict=True)
         for finding in findings
-    }
+    ]
+    actual = {finding.code for _selector, finding in actual_findings}
     expected = case["expect"]
     assert isinstance(expected, dict)
     required = set(expected.get("finding_ids", []))
@@ -454,6 +496,40 @@ def _evaluate_runtime_design_case(
         return f"forbidden findings {sorted(unexpected)}"
     if expected.get("exact_findings") is True and actual != required:
         return f"expected findings {sorted(required)}, found {sorted(actual)}"
+    for expected_finding in expected.get("findings", []):
+        if not isinstance(expected_finding, dict):
+            return "expected findings entries must be objects"
+        code = str(expected_finding.get("code", ""))
+        selector = str(expected_finding.get("selector", ""))
+        matches = [
+            finding
+            for actual_selector, finding in actual_findings
+            if actual_selector == selector and finding.code == code
+        ]
+        if not matches:
+            return f"missing anchored finding {code}@{selector}"
+        expected_metrics = expected_finding.get("metrics", {})
+        if not isinstance(expected_metrics, dict):
+            return f"metrics for {code}@{selector} must be an object"
+        if not any(
+            all(
+                finding.metrics.get(key) == value
+                for key, value in expected_metrics.items()
+            )
+            for finding in matches
+        ):
+            return (
+                f"metrics mismatch for {code}@{selector}: "
+                f"expected {expected_metrics}, found {[dict(item.metrics) for item in matches]}"
+            )
+    for forbidden in expected.get("forbid_findings", []):
+        if not isinstance(forbidden, dict):
+            return "forbid_findings entries must be objects"
+        key = (str(forbidden.get("selector", "")), str(forbidden.get("code", "")))
+        if any(
+            (selector, finding.code) == key for selector, finding in actual_findings
+        ):
+            return f"forbidden anchored finding {key[1]}@{key[0]}"
     return None
 
 
@@ -500,6 +576,34 @@ def test_calibration_signal_has_no_unclassified_fp_or_fn() -> None:
     assert report.by_capability_framework
 
 
+def test_runtime_detector_families_meet_explicit_tp_fp_fn_budgets() -> None:
+    manifest = _load_manifest()
+    fixture_root = CALIBRATION_ROOT / str(manifest["fixture_root"])
+    counts: dict[str, Counter[str]] = defaultdict(Counter)
+    statuses: dict[str, Counter[str]] = defaultdict(Counter)
+    for case in manifest["cases"]:
+        if case["detector"] != "runtime-design":
+            continue
+        family = str(case["family"])
+        status = str(case["status"])
+        statuses[family][status] += 1
+        failure = _evaluate_runtime_design_case(fixture_root, case)
+        if status == "positive":
+            counts[family]["tp" if failure is None else "fn"] += 1
+        elif status == "negative" and failure is not None:
+            counts[family]["fp"] += 1
+
+    budgets = manifest["detector_budgets"]
+    assert set(counts) == _RUNTIME_FAMILIES
+    for family in sorted(_RUNTIME_FAMILIES):
+        budget = budgets[family]
+        assert statuses[family]["positive"] >= 1
+        assert statuses[family]["negative"] >= 1
+        assert counts[family]["tp"] >= budget["tp_min"]
+        assert counts[family]["fp"] <= budget["fp_max"]
+        assert counts[family]["fn"] <= budget["fn_max"]
+
+
 def test_calibration_reports_one_injected_unexpected_result_as_one_fp() -> None:
     def inject(path: Path) -> list[dict[str, Any]]:
         issues = analyze_file(path)
@@ -518,9 +622,7 @@ def test_calibration_reports_one_removed_expected_result_as_one_fn() -> None:
         issues = analyze_file(path)
         if path.as_posix().endswith("react-next/positive.tsx"):
             return [
-                issue
-                for issue in issues
-                if issue["detector_id"] != "LOREM_IPSUM_SLOP"
+                issue for issue in issues if issue["detector_id"] != "LOREM_IPSUM_SLOP"
             ]
         return issues
 

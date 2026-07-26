@@ -15,12 +15,12 @@ from uidetox.frontend_map import (
     FrontendMap,
     FrontendNode,
 )
+from uidetox.runtime_layout import RuntimeFinding
 from uidetox.runtime_observer import (
     RuntimeElement,
     RuntimePage,
     RuntimeViewport,
 )
-from uidetox.runtime_layout import RuntimeFinding
 from uidetox.visual_evidence import (
     VisualEvidenceCase,
     VisualEvidenceRequest,
@@ -178,6 +178,157 @@ export function App() {
 
     assert regions[0].source_targets == ("src/App.tsx",)
     assert "map:unresolved" not in regions[0].provenance
+
+
+def test_component_drift_requires_canonical_shared_source_ownership(
+    tmp_path: Path,
+) -> None:
+    from uidetox.frontend_map import map_frontend
+    from uidetox.runtime_observer import RuntimeObservation
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "Toolbar.tsx").write_text(
+        """
+export function Toolbar() {
+  return <div className="toolbar">
+    <button data-testid="toolbar-action">One</button>
+    <button data-testid="toolbar-action">Two</button>
+    <button data-testid="toolbar-action">Three</button>
+  </div>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    for index in range(3):
+        (src / f"Sibling{index}.tsx").write_text(
+            f"""
+export function Sibling{index}() {{
+  return <button data-testid="sibling-{index}">Sibling</button>;
+}}
+""".strip(),
+            encoding="utf-8",
+        )
+
+    def element(
+        selector: str,
+        order: int,
+        *,
+        source_selector: str,
+        group: str,
+        color: str = "rgb(0, 0, 0)",
+    ) -> RuntimeElement:
+        return RuntimeElement(
+            kind="action",
+            tag="button",
+            role="button",
+            name=selector,
+            selector=selector,
+            source_selectors=(source_selector,),
+            order=order,
+            bounds={
+                "x": order * 100,
+                "y": 0 if group == "toolbar:button" else 80,
+                "width": 80,
+                "height": 32 if not selector.endswith("outlier") else 44,
+            },
+            styles={
+                "color": color,
+                "backgroundColor": "rgb(255, 255, 255)",
+                "fontSize": "16px",
+                "fontWeight": "400",
+            },
+            measurements={
+                "equivalenceGroup": group,
+                "equivalenceEvidence": "same-parent-role",
+                "paletteRole": "action",
+                "layoutParentSelector": (
+                    "#toolbar" if group == "toolbar:button" else "#siblings"
+                ),
+            },
+        )
+
+    page = RuntimePage(
+        url="http://localhost:3000/",
+        title="App",
+        viewport=RuntimeViewport("desktop", 1280, 800),
+        elements=(
+            element(
+                "#tool-one",
+                0,
+                source_selector='[data-testid="toolbar-action"]',
+                group="toolbar:button",
+            ),
+            element(
+                "#tool-two",
+                1,
+                source_selector='[data-testid="toolbar-action"]',
+                group="toolbar:button",
+            ),
+            element(
+                "#tool-outlier",
+                2,
+                source_selector='[data-testid="toolbar-action"]',
+                group="toolbar:button",
+                color="rgb(255, 0, 0)",
+            ),
+            element(
+                "#sibling-one",
+                3,
+                source_selector='[data-testid="sibling-0"]',
+                group="siblings:button",
+            ),
+            element(
+                "#sibling-two",
+                4,
+                source_selector='[data-testid="sibling-1"]',
+                group="siblings:button",
+            ),
+            element(
+                "#sibling-outlier",
+                5,
+                source_selector='[data-testid="sibling-2"]',
+                group="siblings:button",
+                color="rgb(255, 0, 0)",
+            ),
+        ),
+        capture_id="capture-source-owned",
+        scenario="quality",
+        state="initial",
+    )
+
+    frontend_map = map_frontend(
+        tmp_path,
+        runtime=RuntimeObservation(
+            generated_at="2026-07-25T00:00:00Z",
+            requested_urls=(page.url,),
+            pages=(page,),
+        ),
+    )
+    runtime_nodes = {
+        node.metadata["selector"]: node
+        for node in frontend_map.nodes
+        if node.kind == "runtime_action"
+    }
+    outlier_codes = {
+        finding["code"]
+        for finding in runtime_nodes["#tool-outlier"].metadata["findings"]
+    }
+    sibling_codes = {
+        finding["code"]
+        for finding in runtime_nodes["#sibling-outlier"].metadata["findings"]
+    }
+
+    assert "runtime-component-drift" in outlier_codes, {
+        selector: node.metadata["source_ownership"]
+        for selector, node in runtime_nodes.items()
+    }
+    assert (
+        runtime_nodes["#tool-outlier"].metadata["measurements"]["equivalenceEvidence"]
+        == "source-ownership"
+    )
+    assert "runtime-component-drift" not in sibling_codes
+    assert "runtime-palette-role-drift" not in sibling_codes
 
 
 def test_runtime_region_provenance_cites_capture_findings_and_sources() -> None:

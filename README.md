@@ -223,7 +223,7 @@ Use `--refresh-map` to force a rebuild, `--map-file` or `--file` to consume a sp
 | `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution. |
 | `uidetox setup` | Interactively capture website/app purpose, audience, primary job, tone, brand, preserved contracts, and constraints; persist typed design dials, `dev_server`, and auto-commit behavior. Use `--no-intent-prompt` for automation. |
 | `uidetox intent` | Inspect effective intent with per-field source, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`). |
-| `uidetox scan` | Run 218-rule static analysis + dynamic WCAG theme audit + subjective rubric injection. |
+| `uidetox scan` | Run 217-rule static analysis + runtime-evidence design audit + subjective rubric injection. |
 | `uidetox map [target]` | Build a persistent semantic frontend graph; optionally detect rendered layout, clipping, typography, and spacing defects (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`). |
 | `uidetox redesign [target]` | Generate 1–5 structurally divergent, contract-preserving redesign plans (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`). |
 | `uidetox compare` | Compare redesign proposals across topology, navigation, ownership, action placement, interaction, responsive model, density, and pairwise distance (`--file`, `--json`). |
@@ -286,7 +286,7 @@ Intent persists under `design_intent` in `.uidetox/config.json`. Every field car
 
 ## Anti-Pattern Coverage
 
-The analyzer includes **218 deterministic rules** in a canonical registry. Every rule has a stable ID, applicability extensions, category, upstream provenance, and exact prompt-routing keys. `uidetox next` routes by rule ID first; manual findings use token-boundary fallback matching.
+The analyzer includes **217 deterministic rules** in a canonical registry. Every rule has a stable ID, applicability extensions, category, upstream provenance, and exact prompt-routing keys. `uidetox next` routes by rule ID first; manual findings use token-boundary fallback matching.
 
 | Category | Examples |
 | :--- | :--- |
