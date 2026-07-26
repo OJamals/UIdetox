@@ -21,21 +21,27 @@
 - **Planned at**: commit `a97a7ad`, refreshed 2026-07-26
 - **Refresh note**: the obsolete `d5898c9` base drifted by 3,131 insertions and
   657 deletions across eight originally scoped files while plans 015-018 landed.
-  Current `master`, `origin/master`, and `HEAD` are
-  `a97a7ad8b1775ad6a296ad29a0f34608f235eb83`. Baseline collection is 1,376
-  tests. The root worktree was clean when this refresh was written.
-- **Execution branch**: `codex/019-semantic-design-quality` in isolated worktree
-  `/Users/omar/Documents/Projects/.uidetox-worktrees/019-semantic-design-quality`
+  Baseline `master`, `origin/master`, and `HEAD` were
+  `a97a7ad8b1775ad6a296ad29a0f34608f235eb83`, with 1,376 tests and a clean
+  root worktree.
+- **Integration**: merged into `master` as
+  `591f306f81e04e6a55f23d5ab45419865c957668`; the isolated worktree and local
+  and remote feature branches were removed after remote parity was proved.
 - **Reviewed implementation SHA**:
   `0b60a1dfbe3eb6235836f781971a9622470a16ab`
 - **Owner follow-up review**: `APPROVE`. The tangent target boundary is fixed
   and browser-covered; the retired token/config color subsystem, dead analyzer
-  parameters, and obsolete tests are deleted. Warning-strict pytest passes with
-  1,394 tests. Focused tests, Ruff, format, compileall, diff, wheel/install,
-  module-import, CLI, dependency, secret, and orphan gates pass.
-- **Performance evidence**: alternating frozen-base/current 6+6 measured
-  -0.37% for the generic fixture and +0.06% for controls, both within the ≤10%
-  gate.
+  parameters, and obsolete tests are deleted. Post-integration review also
+  bound palette comparisons to an exact semantic role and bounded pathological
+  spatial-grid geometry with an exact linear fallback. Warning-strict pytest
+  passes with 1,396 tests. Focused tests, Ruff, format, compileall, diff,
+  wheel/install, module-import, CLI, dependency, secret, and orphan gates pass.
+- **Performance evidence**: corrected isolated `python -P` alternating
+  frozen-base/current 6+6 measured generic medians
+  `4.216271s`/`4.634882s` (+9.93%) and control medians
+  `4.836277s`/`4.942637s` (+2.20%), both within the ≤10% gate. Earlier
+  -0.37%/+0.06% values were invalid because the frozen-base process imported
+  the current checkout through Python's working-directory path.
 - **Open gates**: none.
 
 ## Why this matters
@@ -48,7 +54,7 @@ single semantic design engine can detect actual contrast, palette-role drift,
 weak hierarchy, inconsistent rhythm, collisions, focus/target issues, and
 component inconsistency with source-owned evidence.
 
-## Current state
+## Baseline state at `a97a7ad`
 
 - `uidetox/color_utils.py:223-274` still selects tokens by naming conventions and
   Cartesian-products foreground and background sets.
@@ -333,19 +339,19 @@ artifacts.
 
 ## Done criteria
 
-- [ ] Contrast uses actual rendered element/background pairs.
-- [ ] Modern colors, alpha, themes, and states are represented.
-- [ ] Hierarchy/rhythm/occlusion/focus/component drift are calibrated.
-- [ ] Every finding carries route/state/viewport/source evidence.
-- [ ] Subjective review consumes—not duplicates—the evidence graph.
-- [ ] Token-name Cartesian products and duplicate detectors are deleted.
-- [ ] One DOM evaluation and one canonical runtime/map evidence model remain.
-- [ ] Fresh environment proves `tree-sitter>=0.25,<0.26`.
-- [ ] Ruff E4/E7/E9/F/I, compileall, wheel metadata/install/CLI smoke pass.
-- [ ] Benchmark, LOC/deletion accounting, and orphan checks are reported.
-- [ ] `docs/decisions/visual-evidence-capability.md` is byte-for-byte unchanged.
-- [ ] Production-code delta and removed code are reported.
-- [ ] Full suite passes; plan status updated.
+- [x] Contrast uses actual rendered element/background pairs.
+- [x] Modern colors, alpha, themes, and states are represented.
+- [x] Hierarchy/rhythm/occlusion/focus/component drift are calibrated.
+- [x] Every finding carries route/state/viewport/source evidence.
+- [x] Subjective review consumes—not duplicates—the evidence graph.
+- [x] Token-name Cartesian products and duplicate detectors are deleted.
+- [x] One DOM evaluation and one canonical runtime/map evidence model remain.
+- [x] Fresh environment proves `tree-sitter>=0.25,<0.26`.
+- [x] Ruff E4/E7/E9/F/I, compileall, wheel metadata/install/CLI smoke pass.
+- [x] Benchmark, LOC/deletion accounting, and orphan checks are reported.
+- [x] `docs/decisions/visual-evidence-capability.md` is byte-for-byte unchanged.
+- [x] Production-code delta and removed code are reported.
+- [x] Full suite passes; plan status updated.
 
 ## STOP conditions
 

@@ -336,14 +336,15 @@ def _component_and_palette_findings(
     elements: Sequence[DesignElement],
 ) -> dict[int, list[Finding]]:
     findings: dict[int, list[Finding]] = defaultdict(list)
-    groups: dict[tuple[str, str], list[int]] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     for index, element in enumerate(elements):
         group = str(element.measurements.get("equivalenceGroup", "")).strip()
         evidence = str(element.measurements.get("equivalenceEvidence", "")).strip()
         ownership_key = str(element.measurements.get("sourceOwnershipKey", "")).strip()
+        palette_role = str(element.measurements.get("paletteRole", "")).strip()
         if group and evidence == "source-ownership" and ownership_key:
-            groups[(ownership_key, group)].append(index)
-    for (ownership_key, group), indexes in groups.items():
+            groups[(ownership_key, group, palette_role)].append(index)
+    for (ownership_key, group, palette_role), indexes in groups.items():
         if len(indexes) >= 3:
             signatures = [_style_signature(elements[index]) for index in indexes]
             for index in _outlier_indexes(indexes, signatures):
@@ -379,22 +380,19 @@ def _component_and_palette_findings(
                     )
                 )
 
-        palette_indexes = [
-            index
-            for index in indexes
-            if str(elements[index].measurements.get("paletteRole", "")).strip()
-        ]
+        if not palette_role:
+            continue
         palette_signatures = [
             (
                 elements[index].styles.get("color", ""),
                 elements[index].styles.get("backgroundColor", ""),
             )
-            for index in palette_indexes
+            for index in indexes
         ]
-        for index in _outlier_indexes(palette_indexes, palette_signatures):
+        for index in _outlier_indexes(indexes, palette_signatures):
             peers = [
                 elements[peer].selector
-                for peer in palette_indexes
+                for peer in indexes
                 if peer != index and elements[peer].selector
             ]
             findings[index].append(
@@ -408,9 +406,7 @@ def _component_and_palette_findings(
                         {
                             "equivalence_group": group,
                             "source_ownership": ownership_key,
-                            "palette_role": str(
-                                elements[index].measurements.get("paletteRole", "")
-                            ),
+                            "palette_role": palette_role,
                             "foreground": elements[index].styles.get("color", ""),
                             "background": elements[index].styles.get(
                                 "backgroundColor", ""

@@ -1416,6 +1416,42 @@ def test_palette_role_and_component_drift_require_evidenced_equivalence_groups()
     assert "runtime-palette-role-drift" not in findings["#unrelated"]
 
 
+def test_palette_drift_compares_only_elements_with_the_same_semantic_role() -> None:
+    common = {
+        "equivalenceGroup": "toolbar:item",
+        "equivalenceEvidence": "source-ownership",
+        "sourceOwnershipKey": "src/Toolbar.tsx",
+    }
+    elements = [
+        _design_element(
+            f"#action-{index}",
+            order=index,
+            styles={
+                "color": "rgb(0, 0, 0)",
+                "backgroundColor": "rgb(255, 255, 255)",
+            },
+            measurements={**common, "paletteRole": "action"},
+        )
+        for index in range(2)
+    ]
+    elements.append(
+        _design_element(
+            "#surface",
+            order=2,
+            styles={
+                "color": "rgb(255, 255, 255)",
+                "backgroundColor": "rgb(0, 0, 0)",
+            },
+            measurements={**common, "paletteRole": "surface"},
+        )
+    )
+
+    findings = _design_findings(_design_page(*elements))
+
+    assert "runtime-palette-role-drift" not in findings["#surface"]
+    assert "runtime-component-drift" not in findings["#surface"]
+
+
 def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> None:
     heading_one = _design_element(
         "#h1",
@@ -2072,6 +2108,42 @@ def test_browser_target_spacing_uses_circle_against_large_target_rectangle(
         assert "runtime-target-size" not in {
             finding.code for finding in elements[selector].findings
         }
+
+
+@pytest.mark.browser
+def test_browser_target_spacing_bounds_pathological_spatial_cells(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "target-spacing-budget.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; }
+  button { position: absolute; height: 20px; }
+  #wide { left: 0; top: 20px; width: 300000px; }
+  #peer { left: 20px; top: 80px; width: 20px; }
+</style>
+<button id="wide">Wide</button>
+<button id="peer">Peer</button>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    elements = {element.selector: element for element in observation.pages[0].elements}
+    spacing = elements["#wide"].measurements["targetSpacing"]
+    assert spacing["status"] == "clear"
+    assert spacing["index"] == "bounded-linear-fallback"
+    assert spacing["truncated"] is False
 
 
 @pytest.mark.browser

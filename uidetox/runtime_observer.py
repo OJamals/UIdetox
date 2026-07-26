@@ -2397,18 +2397,22 @@ async () => {
   });
   const targetGeometryTruncated = totalElements > allElements.length;
   const targetCellSize = 64;
+  const targetCellBudget = 4096;
   const targetRecords = visibleTargets.map(element => ({
     element,
     selector: selectorFor(element),
     rect: baseMeasurement(element).rect
   }));
-  const targetSpatialIndex = new Map();
   const targetCells = (rect, expansion = 0) => {
     const cells = [];
     const left = Math.floor((rect.left - expansion) / targetCellSize);
     const right = Math.floor((rect.right + expansion) / targetCellSize);
     const top = Math.floor((rect.top - expansion) / targetCellSize);
     const bottom = Math.floor((rect.bottom + expansion) / targetCellSize);
+    const cellCount = (right - left + 1) * (bottom - top + 1);
+    if (!Number.isSafeInteger(cellCount) || cellCount > targetCellBudget) {
+      return null;
+    }
     for (let x = left; x <= right; x += 1) {
       for (let y = top; y <= bottom; y += 1) {
         cells.push(`${x}:${y}`);
@@ -2416,13 +2420,24 @@ async () => {
     }
     return cells;
   };
-  for (const record of targetRecords) {
-    for (const cell of targetCells(record.rect)) {
-      const bucket = targetSpatialIndex.get(cell) || [];
-      bucket.push(record);
-      targetSpatialIndex.set(cell, bucket);
+  const buildSpatialIndex = records => {
+    const byCell = new Map();
+    const overflow = [];
+    for (const record of records) {
+      const cells = targetCells(record.rect);
+      if (cells === null) {
+        overflow.push(record);
+        continue;
+      }
+      for (const cell of cells) {
+        const bucket = byCell.get(cell) || [];
+        bucket.push(record);
+        byCell.set(cell, bucket);
+      }
     }
-  }
+    return {byCell, overflow};
+  };
+  const targetSpatialIndex = buildSpatialIndex(targetRecords);
   const targetSpacingEvidence = element => {
     if (targetGeometryTruncated) {
       return {
@@ -2435,9 +2450,18 @@ async () => {
     }
     const rect = baseMeasurement(element).rect;
     const candidates = new Set();
-    for (const cell of targetCells(rect, 24)) {
-      for (const candidate of targetSpatialIndex.get(cell) || []) {
-        if (candidate.element !== element) candidates.add(candidate);
+    const cells = targetCells(rect, 24);
+    const addCandidate = candidate => {
+      if (candidate.element !== element) candidates.add(candidate);
+    };
+    if (cells === null) {
+      targetRecords.forEach(addCandidate);
+    } else {
+      targetSpatialIndex.overflow.forEach(addCandidate);
+      for (const cell of cells) {
+        for (const candidate of targetSpatialIndex.byCell.get(cell) || []) {
+          addCandidate(candidate);
+        }
       }
     }
     let nearest = null;
@@ -2491,6 +2515,9 @@ async () => {
       indexed_targets: targetRecords.length,
       truncated: false
     };
+    if (cells === null) {
+      evidence.index = "bounded-linear-fallback";
+    }
     return evidence;
   };
   const potentialOccluderRecords = allElements
@@ -2513,14 +2540,7 @@ async () => {
       element,
       rect: baseMeasurement(element).rect
     }));
-  const occluderSpatialIndex = new Map();
-  for (const record of potentialOccluderRecords) {
-    for (const cell of targetCells(record.rect)) {
-      const bucket = occluderSpatialIndex.get(cell) || [];
-      bucket.push(record);
-      occluderSpatialIndex.set(cell, bucket);
-    }
-  }
+  const occluderSpatialIndex = buildSpatialIndex(potentialOccluderRecords);
   // Ephemeral per-capture index; this is never retained in Python or artifacts.
   const semanticSiblingGroups = new WeakMap();
   const semanticSiblingEvidence = element => {
@@ -2578,18 +2598,27 @@ async () => {
   };
   const occlusionEvidence = (element, rect) => {
     const possibleOccluders = new Set();
-    for (const cell of targetCells(rect)) {
-      for (const candidate of occluderSpatialIndex.get(cell) || []) {
-        if (
-          candidate.element !== element
-          && !candidate.element.contains(element)
-          && !element.contains(candidate.element)
-          && candidate.rect.right > rect.left
-          && candidate.rect.left < rect.right
-          && candidate.rect.bottom > rect.top
-          && candidate.rect.top < rect.bottom
-        ) {
-          possibleOccluders.add(candidate.element);
+    const addOccluder = candidate => {
+      if (
+        candidate.element !== element
+        && !candidate.element.contains(element)
+        && !element.contains(candidate.element)
+        && candidate.rect.right > rect.left
+        && candidate.rect.left < rect.right
+        && candidate.rect.bottom > rect.top
+        && candidate.rect.top < rect.bottom
+      ) {
+        possibleOccluders.add(candidate.element);
+      }
+    };
+    const cells = targetCells(rect);
+    if (cells === null) {
+      potentialOccluderRecords.forEach(addOccluder);
+    } else {
+      occluderSpatialIndex.overflow.forEach(addOccluder);
+      for (const cell of cells) {
+        for (const candidate of occluderSpatialIndex.byCell.get(cell) || []) {
+          addOccluder(candidate);
         }
       }
     }
