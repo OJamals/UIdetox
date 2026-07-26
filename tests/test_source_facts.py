@@ -78,6 +78,36 @@ createBrowserRouter(routes);
     assert facts.parse_errors is False
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "export default function () { return <button>Hi</button>; }",
+        "export default class extends React.Component { render() { return <main />; } }",
+        "export default () => <section />;",
+    ],
+)
+def test_source_facts_name_anonymous_default_components_from_module(source):
+    facts = extract_source_facts(Path("my-widget.tsx"), source)
+
+    assert facts is not None
+    assert any(
+        item.exported == "default" and item.local == "MyWidget"
+        for item in facts.exports
+    )
+    assert SourceOccurrence("MyWidget", 1) in facts.declared_ui_modules
+
+
+def test_source_facts_do_not_name_anonymous_non_ui_defaults():
+    facts = extract_source_facts(
+        Path("plain.ts"),
+        "export default function () { return 42; }",
+    )
+
+    assert facts is not None
+    assert facts.declared_ui_modules == ()
+    assert all(item.local != "Plain" for item in facts.exports)
+
+
 def test_source_facts_extract_local_fetch_wrapper_calls_without_probe_duplicates():
     facts = _tsx_facts(
         """

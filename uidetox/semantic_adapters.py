@@ -248,13 +248,18 @@ class ApplicationSemantics:
         source_hint: str = "",
         source_selectors: Iterable[str] = (),
         runtime_url: str = "",
+        route_sources: tuple[str, ...] | None = None,
     ) -> SourceOwnership:
         if source_hint in self._index.modules:
             return SourceOwnership(
                 "resolved", 1.0, "runtime:source-hook", (source_hint,)
             )
         candidates = tuple(dict.fromkeys((selector, *source_selectors)))
-        route_sources = self._route_sources(runtime_url)
+        route_sources = (
+            self.route_sources(runtime_url)
+            if route_sources is None
+            else route_sources
+        )
         exact = _matching_sources(self._index.exact_selectors, candidates)
         if len(exact) == 1:
             return SourceOwnership(
@@ -297,7 +302,7 @@ class ApplicationSemantics:
             )
         return SourceOwnership("unresolved", 0.0, "source-signature:absent", ())
 
-    def _route_sources(self, runtime_url: str) -> tuple[str, ...]:
+    def route_sources(self, runtime_url: str) -> tuple[str, ...]:
         runtime_route = _normalize_route_path(runtime_url)
         if not runtime_route:
             return ()

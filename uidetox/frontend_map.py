@@ -845,6 +845,7 @@ def _merge_runtime_evidence(
         page_key = f"{page.url}@{page.viewport.name}"
         page_id = _node_id("runtime_page", "", page_key)
         page_finding_count = sum(len(element.findings) for element in page.elements)
+        route_sources = application.route_sources(page.url)
         nodes.append(
             FrontendNode(
                 id=page_id,
@@ -871,6 +872,7 @@ def _merge_runtime_evidence(
                 source_hint=element.source_hint,
                 source_selectors=element.source_selectors,
                 runtime_url=page.url,
+                route_sources=route_sources,
             )
             if element.kind == "action":
                 node_kind = "runtime_action"

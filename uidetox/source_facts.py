@@ -315,7 +315,7 @@ def extract_source_facts(
 
     root_node = tree.root_node
     imports, aliases = _extract_imports(_walk(root_node))
-    exports = _extract_exports(_walk(root_node))
+    exports, default_component = _extract_exports(_walk(root_node), path)
     bindings = _extract_bindings(_walk(root_node))
     callables = _extract_callables(_walk(root_node))
     calls = _extract_calls(_walk(root_node))
@@ -333,7 +333,7 @@ def extract_source_facts(
         *(item.local for item in react_aliases if item.imported == "useState"),
     }
 
-    components: list[SourceOccurrence] = []
+    components = [default_component] if default_component is not None else []
     rendered_modules: list[str] = []
     rendered_bindings: list[RenderFact] = []
     selectors: list[SelectorFact] = []
@@ -501,8 +501,12 @@ def _extract_imports(
     return imports, tuple(aliases)
 
 
-def _extract_exports(nodes: Iterable[object]) -> tuple[ExportFact, ...]:
+def _extract_exports(
+    nodes: Iterable[object],
+    path: Path,
+) -> tuple[tuple[ExportFact, ...], SourceOccurrence | None]:
     exports: list[ExportFact] = []
+    default_component = None
     for node in nodes:
         if node.type != "export_statement":
             continue
@@ -523,7 +527,11 @@ def _extract_exports(nodes: Iterable[object]) -> tuple[ExportFact, ...]:
                         exports.append(ExportFact(local, local))
         value = node.child_by_field_name("value")
         if value is not None:
-            local = _text(value.child_by_field_name("name")) or _text(value)
+            local = _text(value.child_by_field_name("name"))
+            if not local and _is_anonymous_ui_value(value):
+                local = _module_display_name(path)
+                default_component = SourceOccurrence(local, _line(value))
+            local = local or _text(value)
             if local:
                 exports.append(ExportFact("default", local))
         for child in node.named_children:
@@ -544,7 +552,24 @@ def _extract_exports(nodes: Iterable[object]) -> tuple[ExportFact, ...]:
             and any(child.type == "*" for child in node.children)
         ):
             exports.append(ExportFact("*", "*", source))
-    return tuple(dict.fromkeys(exports))
+    return tuple(dict.fromkeys(exports)), default_component
+
+
+def _is_anonymous_ui_value(node) -> bool:
+    return bool(
+        node.type in {"arrow_function", "class", "function_expression"}
+        and not _text(node.child_by_field_name("name"))
+        and any(
+            child.type in {"jsx_element", "jsx_self_closing_element"}
+            for child in _walk(node)
+        )
+    )
+
+
+def _module_display_name(path: Path) -> str:
+    parts = re.findall(r"[A-Za-z0-9]+", path.stem)
+    name = "".join(part[:1].upper() + part[1:] for part in parts)
+    return name if name and _is_identifier(name) else "DefaultComponent"
 
 
 def _extract_bindings(nodes: Iterable[object]) -> tuple[BindingFact, ...]:

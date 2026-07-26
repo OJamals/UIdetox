@@ -331,6 +331,38 @@ export function App() { return <main><Button /></main>; }
     )
 
 
+def test_render_topology_resolves_aliased_anonymous_default_component(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "Anon.tsx").write_text(
+        "export default function () { return <button>Hi</button>; }",
+        encoding="utf-8",
+    )
+    (src / "App.tsx").write_text(
+        """
+import Renamed from "./Anon";
+export function App() { return <Renamed />; }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    nodes = {node.id: node for node in frontend_map.nodes}
+    target = next(
+        nodes[edge.target]
+        for edge in frontend_map.edges
+        if edge.kind == "renders"
+        and nodes.get(edge.source) is not None
+        and nodes[edge.source].name == "App"
+    )
+
+    assert (target.kind, target.name, target.file) == (
+        "component",
+        "Anon",
+        "src/Anon.tsx",
+    )
+
+
 def test_runtime_source_ownership_uses_exact_selector_or_stays_unresolved(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
@@ -591,6 +623,66 @@ export function SharedSecondary() {
         "candidates": ["src/SharedPrimary.tsx", "src/SharedSecondary.tsx"],
     }
     assert type(frontend_map).from_dict(frontend_map.to_dict()) == frontend_map
+
+
+def test_dynamic_route_candidates_are_computed_once_per_runtime_page(
+    tmp_path, monkeypatch
+):
+    from uidetox import semantic_adapters
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "ItemPage.tsx").write_text(
+        """
+export function ItemPage() {
+  return <main><Route path="/items/:itemId" /></main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    match_calls = 0
+    route_matches = semantic_adapters._route_matches
+
+    def counted_route_match(pattern: str, runtime_route: str) -> bool:
+        nonlocal match_calls
+        match_calls += 1
+        return route_matches(pattern, runtime_route)
+
+    monkeypatch.setattr(semantic_adapters, "_route_matches", counted_route_match)
+    elements = tuple(
+        RuntimeElement(
+            kind="region",
+            tag="canvas",
+            role="",
+            name=f"Element {index}",
+            selector=f"#missing-{index}",
+            order=index,
+            bounds={"x": 0, "y": index * 10, "width": 100, "height": 10},
+            styles={},
+        )
+        for index in range(12)
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/items/42",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/items/42",
+                title="Item",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=elements,
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+
+    assert match_calls == 1
+    assert all(
+        node.metadata["source_targets"] == ["src/ItemPage.tsx"]
+        for node in frontend_map.nodes
+        if node.kind == "runtime_region"
+    )
 
 
 def test_frontend_map_serializes_network_type_references(tmp_path):
