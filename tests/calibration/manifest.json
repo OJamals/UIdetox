@@ -389,6 +389,66 @@
         "framework": "astro",
         "selectors": ["[data-testid=\"panel\"]"]
       }
+    },
+    {
+      "id": "contract-lineage-match-negative",
+      "fixture": "contract-lineage/matched/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "negative",
+      "expected_anchors": [
+        {"path": "contract-lineage/matched/client.ts", "contains": "CreateUser"},
+        {"path": "contract-lineage/matched/openapi.json", "contains": "\"/users\""}
+      ],
+      "severity": "warning",
+      "rationale": "Equivalent typed request and response contracts must not produce a mismatch.",
+      "expect": {
+        "finding_ids": [],
+        "exact_findings": true,
+        "node_kinds": ["client_operation", "route", "request_schema", "response_schema"]
+      }
+    },
+    {
+      "id": "contract-lineage-field-mismatch-positive",
+      "fixture": "contract-lineage/mismatch/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/mismatch/client.ts", "contains": "email: number"},
+        {"path": "contract-lineage/mismatch/openapi.json", "contains": "\"email\": {\"type\": \"string\"}"}
+      ],
+      "severity": "warning",
+      "rationale": "Contradictory field types must emit the smallest typed mismatch.",
+      "expect": {
+        "finding_ids": ["contract-request-field-type-mismatch"],
+        "exact_findings": true,
+        "node_kinds": ["schema_field"]
+      }
+    },
+    {
+      "id": "contract-lineage-unknown-positive",
+      "fixture": "contract-lineage/unknown/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/unknown/client.ts", "contains": "fetch(\"/users\")"},
+        {"path": "contract-lineage/unknown/openapi.json", "contains": "\"/users\""}
+      ],
+      "severity": "info",
+      "rationale": "Missing frontend type evidence must remain unknown instead of implying compatibility.",
+      "expect": {
+        "finding_ids": ["contract-evidence-unknown"],
+        "exact_findings": true,
+        "forbid_finding_ids": ["contract-response-field-type-mismatch"]
+      }
     }
   ]
 }

@@ -12,6 +12,8 @@ import pytest
 
 from uidetox.analyzer import analyze_file
 from uidetox.fileset import ProjectFileSet
+from uidetox.frontend_map import map_frontend
+from uidetox.project_map import ProjectMap
 from uidetox.rule_registry import RULE_REGISTRY
 from uidetox.semantic_adapters import SourceDocument, build_application_semantics
 
@@ -113,10 +115,19 @@ def validate_manifest(
                 errors.append(f"{label} unknown rule_id: {rule_id}")
         elif rule_id is not None:
             errors.append(f"{label}.rule_id is only valid for static-analyzer")
-        if detector == "semantic-adapter" and not isinstance(case.get("expect"), dict):
-            errors.append(f"{label}.expect must be an object for semantic-adapter")
-        elif detector != "semantic-adapter" and "expect" in case:
-            errors.append(f"{label}.expect is only valid for semantic-adapter")
+        executable_case = case.get("status") in {"positive", "negative"}
+        if (
+            detector in {"semantic-adapter", "project-map"}
+            and executable_case
+            and not isinstance(case.get("expect"), dict)
+        ):
+            errors.append(
+                f"{label}.expect must be an object for {detector}"
+            )
+        elif detector not in {"semantic-adapter", "project-map"} and "expect" in case:
+            errors.append(
+                f"{label}.expect is only valid for semantic-adapter or project-map"
+            )
 
         status = case["status"]
         if status not in _STATUSES:
@@ -265,8 +276,15 @@ def evaluate_cases(
     for case in cases:
         status = str(case["status"])
         key = f"{case['capability']}::{case['framework']}"
-        if case["detector"] == "semantic-adapter":
-            failure = _evaluate_semantic_case(fixture_root, case)
+        detector = str(case["detector"])
+        if detector == "semantic-adapter" or (
+            detector == "project-map" and status in {"positive", "negative"}
+        ):
+            failure = (
+                _evaluate_semantic_case(fixture_root, case)
+                if detector == "semantic-adapter"
+                else _evaluate_project_map_case(fixture_root, case)
+            )
             if failure is None:
                 counter = status if status in {"degraded", "unsupported"} else "tp"
                 totals[counter] += 1
@@ -376,6 +394,31 @@ def _evaluate_semantic_case(
     missing_selectors = set(expected.get("selectors", [])) - actual_selectors
     if missing_selectors:
         return f"missing selectors {sorted(missing_selectors)}"
+    return None
+
+
+def _evaluate_project_map_case(
+    fixture_root: Path,
+    case: Mapping[str, object],
+) -> str | None:
+    fixture = fixture_root / str(case["fixture"])
+    graph = ProjectMap.from_dict(map_frontend(fixture.parent, ".").project_map)
+    expected = case["expect"]
+    assert isinstance(expected, dict)
+
+    finding_ids = {finding.detector_id for finding in graph.findings}
+    required = set(expected.get("finding_ids", []))
+    forbidden = set(expected.get("forbid_finding_ids", []))
+    if missing := required - finding_ids:
+        return f"missing findings {sorted(missing)}"
+    if unexpected := forbidden & finding_ids:
+        return f"forbidden findings {sorted(unexpected)}"
+    if expected.get("exact_findings") is True and finding_ids != required:
+        return f"expected findings {sorted(required)}, found {sorted(finding_ids)}"
+
+    node_kinds = {node.kind for node in graph.nodes}
+    if missing_kinds := set(expected.get("node_kinds", [])) - node_kinds:
+        return f"missing node kinds {sorted(missing_kinds)}"
     return None
 
 

@@ -22,11 +22,9 @@
     "method_mismatch": [],
     "unresolved": []
   },
-  "expected_parity_counts": {
-    "frontend_only": 0,
-    "backend_only": 0,
-    "method_mismatch": 0,
-    "unresolved": 0
+  "expected_contract_counts": {
+    "contract_mismatch": 2,
+    "coverage_gap": 26
   },
   "baseline_parity_counts": {
     "frontend_only": 10,
@@ -49,7 +47,7 @@
     "fixed-height records with clipped text and weak responsive behavior"
   ],
   "remediation_targets": [
-    "zero operation parity findings",
+    "typed contract mismatches and coverage gaps explicitly accounted for",
     "zero deterministic analyzer findings",
     "all visible actions verified against persisted API state",
     "responsive and accessible route coverage",

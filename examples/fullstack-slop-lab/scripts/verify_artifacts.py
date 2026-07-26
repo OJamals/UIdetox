@@ -60,18 +60,22 @@ def main() -> None:
     require(not missing_routes, f"missing frontend routes: {missing_routes}")
 
     findings = frontend_map.get("project_map", {}).get("findings", [])
-    actual_parity = {
-        kind: sum(finding.get("kind") == kind for finding in findings)
-        for kind in ("frontend_only", "backend_only", "method_mismatch", "unresolved")
+    actual_contracts = {
+        "contract_mismatch": sum(
+            finding.get("status") != "investigate" for finding in findings
+        ),
+        "coverage_gap": sum(
+            finding.get("status") == "investigate" for finding in findings
+        ),
     }
-    expected_parity = expectations["expected_parity_counts"]
+    expected_contracts = expectations["expected_contract_counts"]
     require(
-        actual_parity == expected_parity,
-        f"parity mismatch: {actual_parity} != {expected_parity}",
+        actual_contracts == expected_contracts,
+        f"contract lineage mismatch: {actual_contracts} != {expected_contracts}",
     )
     require(
-        redesigns.get("parity", {}).get("counts") == expected_parity,
-        "redesign artifact did not preserve parity findings",
+        redesigns.get("contract_lineage", {}).get("counts") == expected_contracts,
+        "redesign artifact did not preserve contract lineage findings",
     )
 
     proposals = redesigns.get("proposals", [])
@@ -135,7 +139,7 @@ def main() -> None:
         "intent_provenance": intent.get("provenance", {}),
         "minimum_pairwise_distance": min(distances, default=None),
         "nodes": len(frontend_map.get("nodes", [])),
-        "parity": actual_parity,
+        "contract_lineage": actual_contracts,
         "proposals": len(proposals),
         "routes": sorted(expected_routes),
         "runtime_pages": evidence.get("runtime_pages"),

@@ -1,0 +1,63 @@
+# ADR: Versioned full-stack contract lineage
+
+Status: Accepted
+Date: 2026-07-25
+
+## Decision
+
+UIdetox stores one schema-version-2 contract graph inside the frontend-map
+artifact. Typed nodes represent UI actions and states, client calls, request,
+response, and error schemas and fields, routes, handlers, services,
+authorization requirements, entities, and database fields. Directed edges
+carry provenance, confidence, a source anchor, and capability status.
+
+`project_map.py` is the graph builder and backend-adapter boundary.
+`frontend_map.py` projects plan-016 application semantics into frontend graph
+facts. Commands, workflow artifacts, redesigns, prototype briefs, and fixture
+verification consume the graph and canonical plan-015 `Finding` objects. They
+do not rebuild a route-only operation view.
+
+Schema version 1 has one read-only migration adapter. Loads convert legacy
+operations directly into graph nodes and edges; every write emits only version
+2. The old operation model, reconciler, schema-reference cache, and derived
+compatibility properties are deleted.
+
+## Evidence states and reconciliation
+
+`present`, `absent`, and `unknown` are distinct capability states. Unsupported,
+dynamic, or incomplete extraction produces an investigative coverage gap.
+Unknown evidence never proves compatibility.
+
+Reconciliation traverses graph edges and compares the smallest compatible
+frontend/backend slice in this order:
+
+1. normalized route and method;
+2. request and response fields, types, requiredness, nullability, enums, and
+   validation attributes;
+3. authentication, authorization, and tenant evidence;
+4. success and error variants;
+5. visible error-state and mutation cache-invalidation evidence.
+
+Each difference emits one source-anchored canonical finding. No runtime
+database access, code generation, DTO generation, or business-equivalence
+claim is made.
+
+## Adapter qualification
+
+OpenAPI supplies referenced request, response, error, status, and security
+evidence. Qualified FastAPI/Pydantic/SQLAlchemy source supplies
+route-to-handler-to-service-to-entity fields. Qualified JavaScript framework
+routes supply static handler evidence. TypeScript object contracts are bounded
+to simple interface and object-alias declarations selected by the semantic
+adapter; unsupported or nested dynamic shapes remain unknown.
+
+The calibration corpus includes a clean typed match, one deliberate field-type
+mismatch, and an incomplete frontend contract. Prisma and route-less backend
+fixtures remain explicitly degraded until their adapters are qualified.
+
+## Consequences
+
+Graph artifacts are larger than route summaries but have one canonical model.
+Adding a framework requires adapter evidence and positive, negative, and
+unknown calibration cases. Consumers use `contract_mismatch` and
+`coverage_gap` summaries while retaining typed findings for remediation.
