@@ -6,6 +6,7 @@ import math
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
+from itertools import pairwise
 from typing import Any, Protocol
 
 from uidetox.color_utils import (
@@ -442,7 +443,7 @@ def _rhythm_findings(elements: Sequence[DesignElement]) -> dict[int, list[Findin
                 _number(elements[previous].bounds.get("y"))
                 + _number(elements[previous].bounds.get("height"))
             )
-            for previous, current in zip(ordered, ordered[1:])
+            for previous, current in pairwise(ordered)
         ]
         median = statistics.median(gaps)
         tolerance = max(4.0, abs(median) * 0.25)
