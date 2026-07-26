@@ -11,10 +11,12 @@ from typing import Any
 import pytest
 
 from uidetox.analyzer import analyze_file
+from uidetox.design_semantics import detect_design_findings
 from uidetox.fileset import ProjectFileSet
 from uidetox.frontend_map import map_frontend
 from uidetox.project_map import ProjectMap
 from uidetox.rule_registry import RULE_REGISTRY
+from uidetox.runtime_observer import RuntimePage
 from uidetox.semantic_adapters import SourceDocument, build_application_semantics
 
 CALIBRATION_ROOT = Path(__file__).parent / "calibration"
@@ -26,6 +28,7 @@ _DETECTORS = {
     "frontend-map",
     "project-map",
     "runtime-layout",
+    "runtime-design",
     "semantic-adapter",
 }
 _REQUIRED_CASE_KEYS = {
@@ -117,16 +120,20 @@ def validate_manifest(
             errors.append(f"{label}.rule_id is only valid for static-analyzer")
         executable_case = case.get("status") in {"positive", "negative"}
         if (
-            detector in {"semantic-adapter", "project-map"}
+            detector in {"semantic-adapter", "project-map", "runtime-design"}
             and executable_case
             and not isinstance(case.get("expect"), dict)
         ):
             errors.append(
                 f"{label}.expect must be an object for {detector}"
             )
-        elif detector not in {"semantic-adapter", "project-map"} and "expect" in case:
+        elif (
+            detector not in {"semantic-adapter", "project-map", "runtime-design"}
+            and "expect" in case
+        ):
             errors.append(
-                f"{label}.expect is only valid for semantic-adapter or project-map"
+                f"{label}.expect is only valid for semantic-adapter, "
+                "project-map, or runtime-design"
             )
 
         status = case["status"]
@@ -277,14 +284,15 @@ def evaluate_cases(
         status = str(case["status"])
         key = f"{case['capability']}::{case['framework']}"
         detector = str(case["detector"])
-        if detector == "semantic-adapter" or (
+        if detector == "semantic-adapter" or detector == "runtime-design" or (
             detector == "project-map" and status in {"positive", "negative"}
         ):
-            failure = (
-                _evaluate_semantic_case(fixture_root, case)
-                if detector == "semantic-adapter"
-                else _evaluate_project_map_case(fixture_root, case)
-            )
+            if detector == "semantic-adapter":
+                failure = _evaluate_semantic_case(fixture_root, case)
+            elif detector == "runtime-design":
+                failure = _evaluate_runtime_design_case(fixture_root, case)
+            else:
+                failure = _evaluate_project_map_case(fixture_root, case)
             if failure is None:
                 counter = status if status in {"degraded", "unsupported"} else "tp"
                 totals[counter] += 1
@@ -422,6 +430,33 @@ def _evaluate_project_map_case(
     return None
 
 
+def _evaluate_runtime_design_case(
+    fixture_root: Path,
+    case: Mapping[str, object],
+) -> str | None:
+    fixture = fixture_root / str(case["fixture"])
+    value = json.loads(fixture.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        return "runtime fixture must contain an object"
+    page = RuntimePage.from_dict(value)
+    actual = {
+        finding.code
+        for findings in detect_design_findings(page)
+        for finding in findings
+    }
+    expected = case["expect"]
+    assert isinstance(expected, dict)
+    required = set(expected.get("finding_ids", []))
+    forbidden = set(expected.get("forbid_finding_ids", []))
+    if missing := required - actual:
+        return f"missing findings {sorted(missing)}"
+    if unexpected := forbidden & actual:
+        return f"forbidden findings {sorted(unexpected)}"
+    if expected.get("exact_findings") is True and actual != required:
+        return f"expected findings {sorted(required)}, found {sorted(actual)}"
+    return None
+
+
 def _load_manifest(path: Path = MANIFEST_PATH) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -450,6 +485,7 @@ def test_calibration_manifest_seeds_required_framework_and_boundary_shapes() -> 
         "orm-schema",
         "application-semantics",
         "framework-semantics",
+        "rendered-design",
     } <= capabilities
 
 

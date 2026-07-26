@@ -509,6 +509,50 @@
         "exact_findings": true,
         "node_kinds": ["auth_requirement"]
       }
+    },
+    {
+      "id": "runtime-rendered-contrast-positive",
+      "fixture": "runtime-design/contrast-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "status": "positive",
+      "expected_anchors": [
+        {
+          "path": "runtime-design/contrast-positive.json",
+          "contains": "\"selector\": \"#muted\""
+        }
+      ],
+      "severity": "error",
+      "route": "/",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A resolved rendered foreground/backdrop pair below WCAG AA must emit a runtime contrast finding.",
+      "expect": {
+        "finding_ids": ["runtime-contrast"],
+        "exact_findings": true
+      }
+    },
+    {
+      "id": "runtime-rendered-contrast-negative",
+      "fixture": "runtime-design/contrast-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-design",
+      "status": "negative",
+      "expected_anchors": [],
+      "severity": "error",
+      "route": "/",
+      "state": "initial",
+      "viewport": "desktop",
+      "rationale": "A resolved black-on-white rendered pair must remain clean.",
+      "expect": {
+        "finding_ids": [],
+        "exact_findings": true,
+        "forbid_finding_ids": ["runtime-contrast", "runtime-color-unresolved"]
+      }
     }
   ]
 }
