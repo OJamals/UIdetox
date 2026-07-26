@@ -5323,14 +5323,13 @@ def test_unused_state_skips_when_state_var_is_read():
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_low_contrast_slop_fires_for_poor_contrast(tmp_path):
+def test_static_contrast_guess_does_not_fire_for_tailwind_class_names(tmp_path):
     code = '<p className="bg-yellow-300 text-white font-bold">Warning text</p>'
     p = tmp_path / "Component.tsx"
     p.write_text(code, encoding="utf-8")
-    # yellow-300 (~#fde047) on white (#ffffff) has near-1:1 contrast ratio
     dynamic_colors = {"yellow-300": "#fde047", "white": "#ffffff"}
     issues = analyze_file(p, dynamic_colors=dynamic_colors)
-    assert any(i.get("detector_id") == "LOW_CONTRAST_SLOP" for i in issues)
+    assert not any(i.get("detector_id") == "LOW_CONTRAST_SLOP" for i in issues)
 
 
 def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
@@ -5342,14 +5341,16 @@ def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
     assert not any(i.get("id") == "LOW_CONTRAST_SLOP" for i in issues)
 
 
-def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_path):
+def test_static_contrast_guess_does_not_infer_css_token_pair(tmp_path):
     from uidetox.analyzer import analyze_directory
 
-    (tmp_path / "pyproject.toml").write_text(
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "globals.css").write_text(
         dedent("""\
-            [project]
-            name = "tool-only"
-            version = "0.1.0"
+            :root {
+              --background: #777777;
+              --foreground: #777777;
+            }
         """),
         encoding="utf-8",
     )
@@ -5357,8 +5358,7 @@ def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_p
     issues = analyze_directory(str(tmp_path))
 
     assert not any(
-        i.get("id") == "LOW_CONTRAST_SLOP"
-        and "Dynamic color audit" in i.get("issue", "")
+        i.get("detector_id") == "LOW_CONTRAST_SLOP"
         for i in issues
     )
 
@@ -5433,51 +5433,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
     analyzed.clear()
     assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []
     assert analyzed == []
-
-
-def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
-    tmp_path, monkeypatch
-):
-    import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
-
-    component = tmp_path / "src" / "Component.tsx"
-    component.parent.mkdir()
-    component.write_text("export default null", encoding="utf-8")
-    color_source = tmp_path / "tailwind.config.js"
-    color_source.write_text(
-        "module.exports = { theme: { colors: {} } }", encoding="utf-8"
-    )
-
-    audit_calls = []
-    monkeypatch.setattr(analyzer_module, "analyze_file", lambda *args, **kwargs: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
-    monkeypatch.setattr(
-        color_utils,
-        "audit_project_colors",
-        lambda root: audit_calls.append(Path(root).resolve()) or [],
-    )
-
-    analyzer_module.analyze_directory(str(tmp_path), target_files=[component])
-    assert audit_calls == []
-
-    analyzer_module.analyze_directory(str(tmp_path), target_files=[color_source])
-    assert audit_calls == [tmp_path.resolve()]
-
-
-def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(
-    tmp_path,
-):
-    from uidetox.color_utils import audit_project_colors
-
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "globals.css").write_text(
-        ":root { --brand: #123456; --accent: #abcdef; }",
-        encoding="utf-8",
-    )
-
-    violations = audit_project_colors(tmp_path)
-    assert violations == []
 
 
 # ──────────────────────────────────────────────────────────────────────────────

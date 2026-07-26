@@ -447,105 +447,15 @@ def _hsl_string_to_hex(hsl_str: str) -> str | None:
         return None
 
 
-def audit_project_colors(project_root: Path) -> list[dict]:
-    """Cross-reference project colors against WCAG accessibility standards.
-
-    Returns a list of WCAG violations found in the project's color configuration.
-    """
-    if not find_color_config_sources(project_root):
-        return []
-
-    colors, declared_colors = _load_project_color_data(project_root)
-    if not declared_colors:
-        return []
-
-    violations = []
-
-    # Find likely background/foreground pairings from CSS variable naming conventions
-    bg_names = {
-        k: v
-        for k, v in colors.items()
-        if k in declared_colors
-        and any(x in k.lower() for x in ["background", "bg", "surface", "card", "base"])
-    }
-    fg_names = {
-        k: v
-        for k, v in colors.items()
-        if k in declared_colors
-        and any(x in k.lower() for x in ["foreground", "fg", "text", "content", "body"])
-    }
-
-    # Check declared foreground/background pairs
-    for fg_name, fg_hex in fg_names.items():
-        if not fg_hex.startswith("#"):
-            continue
-        for bg_name, bg_hex in bg_names.items():
-            if not bg_hex.startswith("#"):
-                continue
-            ratio = contrast_ratio(fg_hex, bg_hex)
-            if ratio < WCAG_AA_NORMAL:
-                violations.append(
-                    {
-                        "type": "WCAG_AA_VIOLATION",
-                        "foreground": f"{fg_name} ({fg_hex})",
-                        "background": f"{bg_name} ({bg_hex})",
-                        "ratio": round(ratio, 2),
-                        "required": WCAG_AA_NORMAL,
-                        "severity": "critical" if ratio < WCAG_AA_LARGE else "warning",
-                    }
-                )
-
-    # Check common Tailwind pairings
-    _check_common_pairings(colors, violations, declared_colors)
-
-    return violations
-
-
-def _check_common_pairings(
-    colors: dict[str, str],
-    violations: list[dict],
-    declared_colors: set[str] | None = None,
-):
-    """Check commonly paired Tailwind colors for contrast issues."""
-    common_pairs = [
-        # (text_color_key, bg_color_key)
-        ("gray-400", "white"),
-        ("gray-500", "gray-100"),
-        ("gray-300", "gray-800"),
-        ("gray-400", "gray-900"),
-    ]
-    for text_key, bg_key in common_pairs:
-        if declared_colors is not None and (
-            text_key not in declared_colors or bg_key not in declared_colors
-        ):
-            continue
-        text_hex = colors.get(text_key)
-        bg_hex = colors.get(bg_key)
-        if text_hex and bg_hex and text_hex.startswith("#") and bg_hex.startswith("#"):
-            ratio = contrast_ratio(text_hex, bg_hex)
-            if ratio < WCAG_AA_NORMAL:
-                violations.append(
-                    {
-                        "type": "WCAG_COMMON_PAIR",
-                        "foreground": f"{text_key} ({text_hex})",
-                        "background": f"{bg_key} ({bg_hex})",
-                        "ratio": round(ratio, 2),
-                        "required": WCAG_AA_NORMAL,
-                    }
-                )
-
-
-def luminance(hex_code: str) -> float:
-    try:
-        hex_code = hex_code.lstrip("#")
-        if len(hex_code) in (3, 4):
-            hex_code = "".join(c + c for c in hex_code)
-        r, g, b = tuple(int(hex_code[i : i + 2], 16) for i in (0, 2, 4))
-        a = [v / 255.0 for v in (r, g, b)]
-        a = [(v / 12.92) if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in a]
-        return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722
-    except ValueError:
+def luminance(color: str) -> float:
+    normalized = normalize_rendered_color(color)
+    if normalized is None:
         return 1.0
+    return (
+        normalized[0] * 0.2126
+        + normalized[1] * 0.7152
+        + normalized[2] * 0.0722
+    )
 
 
 def contrast_ratio(hex1: str, hex2: str) -> float:

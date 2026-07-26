@@ -564,55 +564,6 @@ def _analyze_unused_state_custom_rule(
     return None
 
 
-def _analyze_contrast_custom_rule(
-    rule: dict,
-    filepath: Path,
-    content: str,
-    ext: str,
-    dynamic_colors: dict[str, str] | None,
-) -> list[dict] | None:
-    """Run configured color-contrast analysis."""
-    issues = []
-    custom = rule.get("_custom_check")
-    # Custom check: contrast_ratio
-    if custom == "contrast_ratio" and dynamic_colors:
-        for m in re.finditer(
-            r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE
-        ):
-            classes = m.group(1).split()
-            bg_color = None
-            text_color = None
-
-            for c in classes:
-                if c.startswith("bg-"):
-                    bg_name = c[3:].split("/")[0]
-                    if bg_name in dynamic_colors:
-                        bg_color = dynamic_colors[bg_name]
-                elif c.startswith("text-"):
-                    text_name = c[5:].split("/")[0]
-                    if text_name in dynamic_colors:
-                        text_color = dynamic_colors[text_name]
-
-            if bg_color and text_color:
-                from uidetox.color_utils import contrast_ratio
-
-                ratio = contrast_ratio(text_color, bg_color)
-                if ratio < 4.5:
-                    issues.append(
-                        {
-                            "id": rule["id"],
-                            "file": str(filepath.resolve()),
-                            "tier": rule["tier"],
-                            "issue": f"Low contrast detected: {text_color} on {bg_color} (ratio {ratio:.1f}:1).",
-                            "command": rule["command"],
-                        }
-                    )
-                    break
-        return issues
-
-    return None
-
-
 def _analyze_accessibility_custom_rule(
     rule: dict,
     filepath: Path,
@@ -1889,7 +1840,6 @@ _CUSTOM_CHECK_HANDLERS = {
     "nested_ternary": _analyze_document_structure_custom_rule,
     "disabled_cursor": _analyze_interaction_custom_rule,
     "commented_code": _analyze_commented_code_custom_rule,
-    "contrast_ratio": _analyze_contrast_custom_rule,
     "unused_import": _analyze_unused_import_custom_rule,
     "unused_state": _analyze_unused_state_custom_rule,
     "video_no_captions": _analyze_accessibility_custom_rule,

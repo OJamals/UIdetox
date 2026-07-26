@@ -21,7 +21,6 @@ from uidetox.analyzer_custom import (
     _analyze_browser_security_custom_rule,
     _analyze_commented_code_custom_rule,
     _analyze_component_layout,
-    _analyze_contrast_custom_rule,
     _analyze_control_custom_rule,
     _analyze_css_custom_rule,
     _analyze_design_pattern_custom_rule,

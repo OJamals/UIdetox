@@ -119,3 +119,13 @@ def test_alpha_compositing_and_wcag_large_text_boundaries_are_exact():
     assert is_large_text(24.0, 400) is True
     assert is_large_text(18.65, 700) is False
     assert is_large_text(18.6667, 700) is True
+
+
+def test_public_luminance_and_contrast_accept_modern_rendered_colors():
+    from uidetox.color_utils import contrast_ratio, luminance
+
+    assert luminance("oklch(0% 0 0)") == 0.0
+    assert luminance("color(srgb 1 1 1)") == 1.0
+    assert contrast_ratio("rgb(0 0 0)", "hsl(0 0% 100%)") == pytest.approx(
+        21.0
+    )
