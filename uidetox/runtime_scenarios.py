@@ -7,9 +7,10 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 from uidetox.fileset import ProjectFileSet
@@ -73,6 +74,21 @@ class RuntimeObservationLimits:
 
 
 RUNTIME_OBSERVATION_LIMITS = RuntimeObservationLimits()
+_T = TypeVar("_T")
+
+
+def bounded_tuple(
+    values: Iterable[_T],
+    *,
+    limit: int,
+    label: str,
+) -> tuple[_T, ...]:
+    """Collect at most ``limit + 1`` items and reject without exhausting input."""
+
+    collected = tuple(islice(values, limit + 1))
+    if len(collected) > limit:
+        raise ValueError(f"{label} exceeds {limit}.")
+    return collected
 
 
 def sanitize_runtime_url(value: str) -> str:
@@ -128,7 +144,15 @@ def _safe_identifier(value: str, label: str) -> None:
 
 
 def normalize_runtime_urls(urls: str | Iterable[str]) -> tuple[str, ...]:
-    values = (urls,) if isinstance(urls, str) else urls
+    values = (
+        (urls,)
+        if isinstance(urls, str)
+        else bounded_tuple(
+            urls,
+            limit=RUNTIME_OBSERVATION_LIMITS.scenarios,
+            label="Runtime URL count",
+        )
+    )
     normalized: list[str] = []
     for value in values:
         url = str(value).strip()
@@ -137,11 +161,6 @@ def normalize_runtime_urls(urls: str | Iterable[str]) -> tuple[str, ...]:
             raise ValueError(f"Runtime URL must be absolute HTTP(S): {url}")
         if url not in normalized:
             normalized.append(url)
-            if len(normalized) > RUNTIME_OBSERVATION_LIMITS.scenarios:
-                raise ValueError(
-                    "Runtime URL count exceeds "
-                    f"{RUNTIME_OBSERVATION_LIMITS.scenarios}."
-                )
     if not normalized:
         raise ValueError("At least one runtime URL is required.")
     return tuple(normalized)
@@ -242,11 +261,13 @@ def discover_runtime_viewports(
         raise ValueError(
             f"Runtime responsive boundary budget must be 1-{_MAX_RESPONSIVE_BOUNDARIES}."
         )
-    base = tuple(base_viewports)
-    if not 1 <= len(base) <= RUNTIME_OBSERVATION_LIMITS.viewports:
-        raise ValueError(
-            f"Runtime viewport count must be 1-{RUNTIME_OBSERVATION_LIMITS.viewports}."
-        )
+    base = bounded_tuple(
+        base_viewports,
+        limit=RUNTIME_OBSERVATION_LIMITS.viewports,
+        label="Runtime viewport count",
+    )
+    if not base:
+        raise ValueError("At least one runtime viewport is required.")
     root_path = Path(root).expanduser().resolve()
     discovered: dict[int, dict[str, set[str]]] = {}
     for path in ProjectFileSet(root_path).discover():
@@ -635,8 +656,16 @@ def validate_runtime_observation_plan(
     """Reject an observation plan whose complete execution exceeds one policy."""
 
     limits = RUNTIME_OBSERVATION_LIMITS
-    scenario_list = tuple(scenarios)
-    viewport_list = tuple(viewports)
+    scenario_list = bounded_tuple(
+        scenarios,
+        limit=limits.scenarios,
+        label="Runtime scenario count",
+    )
+    viewport_list = bounded_tuple(
+        viewports,
+        limit=limits.viewports,
+        label="Runtime viewport count",
+    )
     if not 1 <= timeout_ms <= limits.timeout_ms:
         raise ValueError(f"timeout_ms must be 1-{limits.timeout_ms}.")
     if not 0 <= settle_ms <= limits.settle_ms:

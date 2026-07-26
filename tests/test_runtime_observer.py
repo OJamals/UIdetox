@@ -35,6 +35,8 @@ from uidetox.runtime_scenarios import (
     RuntimeScenarioAction,
     discover_runtime_viewports,
     load_runtime_scenarios,
+    normalize_runtime_urls,
+    validate_runtime_observation_plan,
 )
 
 
@@ -315,6 +317,119 @@ def test_runtime_work_limits_reject_before_playwright_launch(
         )
 
 
+def test_public_runtime_iterables_stop_at_limit_plus_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uidetox import runtime_scenarios
+
+    limits = RUNTIME_OBSERVATION_LIMITS
+
+    def guarded(factory, limit):
+        for index in range(limit + 1):
+            yield factory(index)
+        raise AssertionError("iterable consumed past limit+1")
+
+    with pytest.raises(ValueError, match="URL count"):
+        normalize_runtime_urls(
+            guarded(lambda _index: "https://example.invalid", limits.scenarios)
+        )
+
+    original_import = builtins.__import__
+
+    def reject_playwright(name, *args, **kwargs):
+        if name.startswith("playwright"):
+            pytest.fail("bounded iterable reached Playwright import")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_playwright)
+    monkeypatch.setattr(
+        runtime_observer,
+        "discover_runtime_viewports",
+        lambda *_args, **_kwargs: pytest.fail(
+            "over-budget viewports reached source discovery"
+        ),
+    )
+    with pytest.raises(ValueError, match="viewport count"):
+        observe_frontend(
+            "https://example.invalid",
+            viewports=guarded(
+                lambda index: RuntimeViewport(
+                    f"viewport-{index}",
+                    320 + index,
+                    800,
+                ),
+                limits.viewports,
+            ),
+            source_root=tmp_path,
+        )
+
+    with pytest.raises(ValueError, match="scenario count"):
+        observe_frontend(
+            "https://example.invalid",
+            scenarios=guarded(
+                lambda index: RuntimeScenario(
+                    name=f"scenario-{index}",
+                    url="https://example.invalid",
+                ),
+                limits.scenarios,
+            ),
+        )
+
+    monkeypatch.setattr(
+        runtime_scenarios.ProjectFileSet,
+        "discover",
+        lambda _self: pytest.fail(
+            "over-budget base viewports reached project source scan"
+        ),
+    )
+    with pytest.raises(ValueError, match="viewport count"):
+        discover_runtime_viewports(
+            tmp_path,
+            base_viewports=guarded(
+                lambda index: RuntimeViewport(
+                    f"base-{index}",
+                    320 + index,
+                    800,
+                ),
+                limits.viewports,
+            ),
+        )
+
+    with pytest.raises(ValueError, match="scenario count"):
+        validate_runtime_observation_plan(
+            guarded(
+                lambda index: RuntimeScenario(
+                    name=f"direct-{index}",
+                    url="https://example.invalid",
+                ),
+                limits.scenarios,
+            ),
+            (VIEWPORT_REGISTRY["desktop"],),
+            timeout_ms=1_000,
+            settle_ms=0,
+        )
+    with pytest.raises(ValueError, match="viewport count"):
+        validate_runtime_observation_plan(
+            (
+                RuntimeScenario(
+                    name="direct",
+                    url="https://example.invalid",
+                ),
+            ),
+            guarded(
+                lambda index: RuntimeViewport(
+                    f"direct-{index}",
+                    320 + index,
+                    800,
+                ),
+                limits.viewports,
+            ),
+            timeout_ms=1_000,
+            settle_ms=0,
+        )
+
+
 def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> None:
     (tmp_path / "responsive.css").write_text(
         """
@@ -482,6 +597,81 @@ def test_context_close_diagnostics_are_finalized_on_capture(
     assert [diagnostic.code for diagnostic in captures[0].diagnostics] == [
         "browser-console-error"
     ]
+
+
+def test_finalization_preserves_capture_local_coverage_diagnostic(
+    tmp_path: Path,
+) -> None:
+    from uidetox.frontend_map import map_frontend
+
+    coverage_diagnostic = RuntimeDiagnostic(
+        kind="coverage",
+        code="runtime-dom-budget-exceeded",
+        message="DOM coverage truncated.",
+        severity="warning",
+        scenario="default",
+        state="initial",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="dom-budget",
+    )
+    late_diagnostic = RuntimeDiagnostic(
+        kind="console",
+        code="browser-console-error",
+        message="late console failure",
+        severity="error",
+        scenario="default",
+        state="initial",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="console",
+    )
+    capture = replace(
+        _capture_record("coverage", status="completed"),
+        coverage=RuntimeCoverage(
+            total=20,
+            candidates=10,
+            eligible=10,
+            emitted=4,
+            budget=4,
+            truncated=True,
+        ),
+        diagnostics=(coverage_diagnostic,),
+    )
+    finalized = runtime_observer._finalize_capture_diagnostics(
+        (capture,),
+        (late_diagnostic, late_diagnostic),
+    )
+
+    assert [diagnostic.code for diagnostic in finalized[0].diagnostics] == [
+        "runtime-dom-budget-exceeded",
+        "browser-console-error",
+    ]
+    page = RuntimePage(
+        url=capture.url,
+        title="Coverage",
+        viewport=capture.viewport,
+        elements=(),
+        capture_id=capture.capture_id,
+        scenario=capture.scenario,
+        state=capture.state,
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(capture.url,),
+        pages=(page,),
+        captures=finalized,
+    )
+    (tmp_path / "index.html").write_text("<main>Coverage</main>", encoding="utf-8")
+    frontend_map = map_frontend(tmp_path, runtime=observation)
+
+    assert {
+        finding["code"]
+        for finding in frontend_map.evidence["runtime_findings"]
+    } == {
+        "runtime-dom-budget-exceeded",
+        "browser-console-error",
+    }
 
 
 def test_runtime_diagnostics_are_sanitized_before_serialization(

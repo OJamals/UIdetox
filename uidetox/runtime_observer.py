@@ -26,6 +26,7 @@ from uidetox.findings import Finding
 from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.runtime_scenarios import (
     DEFAULT_VIEWPORTS,
+    RUNTIME_OBSERVATION_LIMITS,
     RuntimeCaptureRecord,
     RuntimeCoverage,
     RuntimeDiagnostic,
@@ -36,6 +37,7 @@ from uidetox.runtime_scenarios import (
     RuntimeScenarioAction,
     RuntimeViewport,
     RuntimeViewportDiscovery,
+    bounded_tuple,
     discover_runtime_viewports,
     normalize_runtime_urls,
     runtime_capture_id,
@@ -291,7 +293,11 @@ def observe_frontend(
     """
 
     normalized_urls = normalize_runtime_urls(urls)
-    normalized_viewports = tuple(viewports)
+    normalized_viewports = bounded_tuple(
+        viewports,
+        limit=RUNTIME_OBSERVATION_LIMITS.viewports,
+        label="Runtime viewport count",
+    )
     if not normalized_viewports:
         raise ValueError("At least one runtime viewport is required.")
     if viewport_discovery is not None and source_root is not None:
@@ -309,7 +315,11 @@ def observe_frontend(
     if effective_discovery is not None:
         normalized_viewports = effective_discovery.viewports
     active_scenarios = (
-        tuple(scenarios)
+        bounded_tuple(
+            scenarios,
+            limit=RUNTIME_OBSERVATION_LIMITS.scenarios,
+            label="Runtime scenario count",
+        )
         if scenarios is not None
         else tuple(
             RuntimeScenario(
@@ -420,26 +430,32 @@ def _finalize_capture_diagnostics(
     diagnostics: Iterable[RuntimeDiagnostic],
 ) -> tuple[RuntimeCaptureRecord, ...]:
     by_state: dict[str, list[RuntimeDiagnostic]] = {}
-    seen: set[tuple[str, ...]] = set()
     for diagnostic in diagnostics:
-        key = (
-            diagnostic.kind,
-            diagnostic.code,
-            diagnostic.message,
-            diagnostic.scenario,
-            diagnostic.state,
-            diagnostic.url,
-            diagnostic.viewport,
-            diagnostic.source,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
         by_state.setdefault(diagnostic.state, []).append(diagnostic)
-    return tuple(
-        replace(capture, diagnostics=tuple(by_state.get(capture.state, ())))
-        for capture in captures
-    )
+    finalized = []
+    for capture in captures:
+        merged = []
+        seen: set[tuple[str, ...]] = set()
+        for diagnostic in (
+            *capture.diagnostics,
+            *by_state.get(capture.state, ()),
+        ):
+            key = (
+                diagnostic.kind,
+                diagnostic.code,
+                diagnostic.message,
+                diagnostic.scenario,
+                diagnostic.state,
+                diagnostic.url,
+                diagnostic.viewport,
+                diagnostic.source,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(diagnostic)
+        finalized.append(replace(capture, diagnostics=tuple(merged)))
+    return tuple(finalized)
 
 
 def _observe_scenario(
