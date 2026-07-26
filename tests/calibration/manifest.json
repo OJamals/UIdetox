@@ -267,6 +267,123 @@
       "expected_anchors": [{"path": "orm/schema.prisma", "contains": "model Order"}],
       "severity": "info",
       "rationale": "ORM field lineage belongs to plans/017-fullstack-contract-lineage.md."
+    },
+    {
+      "id": "application-semantics-imported-clients-positive",
+      "fixture": "semantic-adapters/App.tsx",
+      "framework": "react",
+      "language": "tsx",
+      "capability": "application-semantics",
+      "detector": "semantic-adapter",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "semantic-adapters/App.tsx", "contains": "fetchItems"},
+        {"path": "semantic-adapters/api.ts", "contains": "axios.create"}
+      ],
+      "severity": "error",
+      "rationale": "Imported wrappers, query clients, generated hooks, and ky calls must remain visible through module resolution.",
+      "expect": {
+        "capability_status": "native",
+        "framework": "react",
+        "selectors": ["[data-testid=\"application\"]"],
+        "network_calls": [
+          {
+            "target": "fetchItems",
+            "client_family": "axios",
+            "method": "GET",
+            "url": "/api/items",
+            "resolution": "resolved"
+          },
+          {
+            "target": "useQuery",
+            "client_family": "tanstack-query",
+            "url": null,
+            "resolution": "resolved"
+          },
+          {
+            "target": "useApolloQuery",
+            "client_family": "apollo",
+            "url": null,
+            "resolution": "resolved"
+          },
+          {
+            "target": "useGetUsersQuery",
+            "client_family": "imported-client",
+            "url": null,
+            "resolution": "unresolved"
+          },
+          {
+            "target": "generatedClient.users.list",
+            "client_family": "imported-client",
+            "url": null,
+            "resolution": "unresolved"
+          },
+          {
+            "target": "ky.post",
+            "client_family": "ky",
+            "method": "POST",
+            "url": "/api/events",
+            "resolution": "resolved"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vue-semantic-adapter-degraded",
+      "fixture": "vue/semantics.vue",
+      "framework": "vue",
+      "language": "vue",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "vue/semantics.vue", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Vue must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "vue",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
+    },
+    {
+      "id": "svelte-semantic-adapter-degraded",
+      "fixture": "svelte/semantics.svelte",
+      "framework": "svelte",
+      "language": "svelte",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "svelte/semantics.svelte", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Svelte must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "svelte",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
+    },
+    {
+      "id": "astro-semantic-adapter-degraded",
+      "fixture": "astro/Semantics.astro",
+      "framework": "astro",
+      "language": "astro",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "astro/Semantics.astro", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Astro must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "astro",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
     }
   ]
 }

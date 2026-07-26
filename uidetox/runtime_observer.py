@@ -10,9 +10,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -57,6 +58,8 @@ class RuntimeElement:
     order: int
     bounds: dict[str, float]
     styles: dict[str, str]
+    source_hint: str = ""
+    source_selectors: tuple[str, ...] = ()
     states: dict[str, Any] = field(default_factory=dict)
     measurements: dict[str, Any] = field(default_factory=dict)
     findings: tuple[Finding, ...] = ()
@@ -76,6 +79,12 @@ class RuntimeElement:
             order=int(value.get("order", 0)),
             bounds={str(key): float(item) for key, item in dict(bounds).items()},
             styles={str(key): str(item) for key, item in dict(styles).items()},
+            source_hint=str(value.get("source_hint", "")),
+            source_selectors=tuple(
+                str(item)
+                for item in value.get("source_selectors", [])
+                if isinstance(item, str)
+            ),
             states=dict(states),
             measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
             findings=tuple(
@@ -439,10 +448,25 @@ async () => {
     return "";
   };
 
-  const selectorFor = (element) => {
+  const sourceSelectorsFor = (element) => {
+    const selectors = [];
     const testId = element.getAttribute("data-testid");
-    if (testId) return `[data-testid="${testId.replaceAll('"', '\\"')}"]`;
-    if (element.id) return `#${CSS.escape(element.id)}`;
+    if (testId) selectors.push(`[data-testid="${testId.replaceAll('"', '\\"')}"]`);
+    const dataTest = element.getAttribute("data-test");
+    if (dataTest) selectors.push(`[data-test="${dataTest.replaceAll('"', '\\"')}"]`);
+    if (element.id) selectors.push(`#${CSS.escape(element.id)}`);
+    for (const className of element.classList) {
+      if (/^[-_A-Za-z][-\w]*$/.test(className)) selectors.push(`.${className}`);
+    }
+    selectors.push(element.tagName.toLowerCase());
+    return Array.from(new Set(selectors));
+  };
+
+  const selectorFor = (element, sourceSelectors = sourceSelectorsFor(element)) => {
+    const stable = sourceSelectors.find(
+      selector => selector.startsWith("#") || selector.startsWith("[data-")
+    );
+    if (stable) return stable;
     const parts = [];
     let current = element;
     while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
@@ -1006,7 +1030,9 @@ async () => {
       value => value === semanticKeys[0]
     );
     measurements.layoutPeerProvenance = peerGroup.provenance;
-    measurements.layoutPeerSelectors = peerGroup.members.map(selectorFor);
+    measurements.layoutPeerSelectors = peerGroup.members.map(
+      member => selectorFor(member)
+    );
     if (equivalentPeers && peerGroup.deviation > 0) {
       measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
       measurements.layoutDeviation = round(peerGroup.deviation);
@@ -1084,13 +1110,16 @@ async () => {
     }
     if ("disabled" in element) states.disabled = Boolean(element.disabled);
     states.tabIndex = element.tabIndex;
+    const sourceSelectors = sourceSelectorsFor(element);
 
     return {
       kind,
       tag,
       role,
       name: nameFor(element),
-      selector: selectorFor(element),
+      selector: selectorFor(element, sourceSelectors),
+      source_hint: element.getAttribute("data-uidetox-source") || "",
+      source_selectors: sourceSelectors,
       order: documentOrder.get(element) ?? candidateOrder,
       bounds: {
         x: round(rect.x),

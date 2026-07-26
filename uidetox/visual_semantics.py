@@ -45,7 +45,7 @@ def _runtime_node(
     if frontend_map is None:
         return None
     for node in frontend_map.nodes:
-        if node.kind not in {"runtime_region", "runtime_action"}:
+        if node.kind not in {"runtime_region", "runtime_action", "runtime_text"}:
             continue
         metadata = node.metadata
         if (

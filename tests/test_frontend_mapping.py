@@ -291,6 +291,201 @@ export const Shell = () => {
     )
 
 
+def test_render_topology_uses_import_identity_not_global_component_name(tmp_path):
+    src = tmp_path / "src"
+    (src / "primary").mkdir(parents=True)
+    (src / "secondary").mkdir()
+    (src / "primary" / "Button.tsx").write_text(
+        "export default function Button() { return <button>Primary</button>; }",
+        encoding="utf-8",
+    )
+    (src / "secondary" / "Button.tsx").write_text(
+        "export default function Button() { return <button>Secondary</button>; }",
+        encoding="utf-8",
+    )
+    (src / "App.tsx").write_text(
+        """
+import Button from "./secondary/Button";
+export function App() { return <main><Button /></main>; }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    nodes = {node.id: node for node in frontend_map.nodes}
+    render_edges = [
+        edge
+        for edge in frontend_map.edges
+        if edge.kind == "renders"
+        and nodes.get(edge.source) is not None
+        and nodes[edge.source].name == "App"
+    ]
+
+    assert len(render_edges) == 1
+    target = nodes[render_edges[0].target]
+    assert target.name == "Button"
+    assert target.file == "src/secondary/Button.tsx"
+    assert not any(
+        node.kind == "external_component" and node.name == "Button"
+        for node in frontend_map.nodes
+    )
+
+
+def test_runtime_source_ownership_uses_exact_selector_or_stays_unresolved(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        """
+export function App() {
+  return <main>
+    <nav data-testid="sidebar">Projects</nav>
+    <div className="profile-panel">Profile</div>
+  </main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=(
+                    RuntimeElement(
+                        kind="region",
+                        tag="nav",
+                        role="navigation",
+                        name="Projects",
+                        selector='[data-testid="sidebar"]',
+                        order=0,
+                        bounds={"x": 0, "y": 0, "width": 240, "height": 800},
+                        styles={},
+                    ),
+                    RuntimeElement(
+                        kind="region",
+                        tag="div",
+                        role="region",
+                        name="Profile",
+                        selector="main > div",
+                        order=1,
+                        bounds={"x": 250, "y": 0, "width": 100, "height": 20},
+                        styles={},
+                        source_selectors=(".profile-panel", "div"),
+                    ),
+                    RuntimeElement(
+                        kind="text",
+                        tag="p",
+                        role="",
+                        name="Unknown",
+                        selector="#missing",
+                        order=2,
+                        bounds={"x": 250, "y": 0, "width": 100, "height": 20},
+                        styles={},
+                    ),
+                    RuntimeElement(
+                        kind="region",
+                        tag="section",
+                        role="region",
+                        name="Explicit",
+                        selector="#not-static",
+                        order=3,
+                        bounds={"x": 0, "y": 100, "width": 100, "height": 100},
+                        styles={},
+                        source_hint="src/App.tsx",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_nodes = {
+        node.metadata["selector"]: node
+        for node in frontend_map.nodes
+        if node.kind in {"runtime_region", "runtime_text"}
+    }
+
+    owned = runtime_nodes['[data-testid="sidebar"]']
+    assert owned.metadata["source_targets"] == ["src/App.tsx"]
+    assert owned.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 1.0,
+        "provenance": "selector:exact",
+        "candidates": ["src/App.tsx"],
+    }
+    heuristic = runtime_nodes["main > div"]
+    assert heuristic.metadata["source_targets"] == ["src/App.tsx"]
+    assert heuristic.metadata["source_selectors"] == [".profile-panel", "div"]
+    assert heuristic.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.65,
+        "provenance": "selector:unique-heuristic",
+        "candidates": ["src/App.tsx"],
+    }
+    unresolved = runtime_nodes["#missing"]
+    assert unresolved.metadata["source_targets"] == []
+    assert unresolved.metadata["source_ownership"]["status"] == "unresolved"
+    explicit = runtime_nodes["#not-static"]
+    assert explicit.metadata["source_ownership"]["provenance"] == (
+        "runtime:source-hook"
+    )
+    assert explicit.metadata["source_targets"] == ["src/App.tsx"]
+    assert frontend_map.evidence["adapter_capabilities"]["react"]["status"] == "native"
+
+
+def test_runtime_source_ownership_rejects_ambiguous_selector_matches(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("Primary", "Secondary"):
+        (src / f"{name}.tsx").write_text(
+            f"""
+export function {name}() {{
+  return <button data-testid="save">{name}</button>;
+}}
+""".strip(),
+            encoding="utf-8",
+        )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=(
+                    RuntimeElement(
+                        kind="action",
+                        tag="button",
+                        role="button",
+                        name="Save",
+                        selector='[data-testid="save"]',
+                        order=0,
+                        bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+                        styles={},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_node = next(
+        node for node in frontend_map.nodes if node.kind == "runtime_action"
+    )
+
+    assert runtime_node.metadata["source_targets"] == []
+    assert runtime_node.metadata["source_ownership"] == {
+        "status": "ambiguous",
+        "confidence": 0.0,
+        "provenance": "selector:ambiguous",
+        "candidates": ["src/Primary.tsx", "src/Secondary.tsx"],
+    }
+
+
 def test_frontend_map_freshness_tracks_add_change_and_delete(tmp_path):
     _write_frontend(tmp_path)
     frontend_map = map_frontend(tmp_path, "src")

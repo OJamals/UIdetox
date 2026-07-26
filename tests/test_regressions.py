@@ -10294,12 +10294,16 @@ def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):
     from uidetox.fileset import FRONTEND_EXTENSIONS, ProjectFileSet
 
     expected_extensions = {
+        ".astro",
+        ".cjs",
         ".css",
+        ".htm",
         ".html",
         ".js",
         ".jsx",
         ".less",
         ".md",
+        ".mjs",
         ".sass",
         ".scss",
         ".svelte",

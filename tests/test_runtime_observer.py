@@ -575,6 +575,7 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         _skip_missing_browser(exc)
         raise
 
+    assert observation.pages, observation.errors
     findings_by_selector = {
         element.selector: {finding.code for finding in element.findings}
         for element in observation.pages[0].elements

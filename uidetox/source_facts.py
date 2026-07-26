@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import importlib
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable
 
 tree_sitter = None
 _CORE_AST_ERROR: str | None = None
@@ -138,11 +138,67 @@ class SourceOccurrence:
 
 @dataclass(frozen=True)
 class ImportAlias:
-    """One named import alias resolved to its imported symbol."""
+    """One import binding resolved to its module symbol."""
 
     source: str
     imported: str
     local: str
+    kind: str = "named"
+
+
+@dataclass(frozen=True)
+class ExportFact:
+    """One module export, including re-exports."""
+
+    exported: str
+    local: str
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class BindingFact:
+    """One local symbol bound to another symbol or call target."""
+
+    local: str
+    target: str
+    line: int
+
+
+@dataclass(frozen=True)
+class CallableFact:
+    """One named callable with normalized parameter names."""
+
+    name: str
+    parameters: tuple[str, ...]
+    line: int
+
+
+@dataclass(frozen=True)
+class CallFact:
+    """One call site without parser-node leakage."""
+
+    target: str
+    arguments: tuple[str, ...]
+    line: int
+    owner: str
+    method_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class RenderFact:
+    """One rendered UI binding before module resolution."""
+
+    binding: str
+    line: int
+
+
+@dataclass(frozen=True)
+class SelectorFact:
+    """One static selector/source signature."""
+
+    selector: str
+    line: int
+    strength: str
 
 
 @dataclass(frozen=True)
@@ -153,6 +209,24 @@ class EndpointFact:
     line: int
     method: str | None
     dynamic: bool
+
+
+@dataclass(frozen=True)
+class NetworkCallFact:
+    """One locally classified network/query call."""
+
+    target: str
+    client_family: str
+    method: str | None
+    url: str | None
+    url_expression: str | None
+    line: int
+    dynamic: bool
+    owner: str
+    resolution: str
+    unresolved_evidence: str | None = None
+    request_type_refs: tuple[str, ...] = ()
+    response_type_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,20 +250,28 @@ class SourceFacts:
 
     path: Path
     extension: str
-    imports: tuple[str, ...]
-    import_aliases: tuple[ImportAlias, ...]
-    react_aliases: tuple[ImportAlias, ...]
-    rendered_modules: tuple[str, ...]
-    declared_ui_modules: tuple[SourceOccurrence, ...]
-    regions: tuple[SourceOccurrence, ...]
-    actions: tuple[SourceOccurrence, ...]
-    states: tuple[SourceOccurrence, ...]
-    endpoints: tuple[EndpointFact, ...]
-    routes: tuple[SourceOccurrence, ...]
-    analyzer: AnalyzerObservations
-    extractor: str
-    confidence: float
-    parse_errors: bool
+    imports: tuple[str, ...] = ()
+    import_aliases: tuple[ImportAlias, ...] = ()
+    exports: tuple[ExportFact, ...] = ()
+    bindings: tuple[BindingFact, ...] = ()
+    callables: tuple[CallableFact, ...] = ()
+    calls: tuple[CallFact, ...] = ()
+    react_aliases: tuple[ImportAlias, ...] = ()
+    rendered_modules: tuple[str, ...] = ()
+    rendered_bindings: tuple[RenderFact, ...] = ()
+    selectors: tuple[SelectorFact, ...] = ()
+    declared_ui_modules: tuple[SourceOccurrence, ...] = ()
+    regions: tuple[SourceOccurrence, ...] = ()
+    actions: tuple[SourceOccurrence, ...] = ()
+    states: tuple[SourceOccurrence, ...] = ()
+    network_calls: tuple[NetworkCallFact, ...] = ()
+    network_symbols: tuple[NetworkCallFact, ...] = ()
+    endpoints: tuple[EndpointFact, ...] = ()
+    routes: tuple[SourceOccurrence, ...] = ()
+    analyzer: AnalyzerObservations = field(default_factory=AnalyzerObservations)
+    extractor: str = "none"
+    confidence: float = 0.0
+    parse_errors: bool = False
 
 
 ParserFactory = Callable[[str], object | None]
@@ -203,9 +285,8 @@ def extract_source_facts(
 ) -> SourceFacts | None:
     """Parse ``content`` once and return normalized facts.
 
-    ``None`` means no parser exists or parsing failed, allowing existing regex
-    fallbacks to run. A recovered syntax tree is returned with ``parse_errors``
-    set and reduced confidence.
+    ``None`` means no qualified parser exists or parsing failed. A recovered
+    syntax tree returns facts with ``parse_errors`` set and reduced confidence.
     """
     extension = path.suffix.lower()
     parser = (parser_factory or get_parser)(extension)
@@ -216,9 +297,18 @@ def extract_source_facts(
     except Exception:
         return None
 
-    nodes = tuple(_walk(tree.root_node))
-    imports, aliases = _extract_imports(nodes)
-    http_wrapper_names = _http_wrapper_names(nodes)
+    root_node = tree.root_node
+    imports, aliases = _extract_imports(_walk(root_node))
+    exports = _extract_exports(_walk(root_node))
+    bindings = _extract_bindings(_walk(root_node))
+    callables = _extract_callables(_walk(root_node))
+    calls = _extract_calls(_walk(root_node))
+    network_calls, network_symbols = _classify_network_calls(
+        aliases=aliases,
+        bindings=bindings,
+        callables=callables,
+        calls=calls,
+    )
     alias_map = {item.local: item.imported for item in aliases}
     react_aliases = tuple(item for item in aliases if item.source == "react")
     use_state_names = {
@@ -229,27 +319,28 @@ def extract_source_facts(
 
     components: list[SourceOccurrence] = []
     rendered_modules: list[str] = []
+    rendered_bindings: list[RenderFact] = []
+    selectors: list[SelectorFact] = []
     regions: list[SourceOccurrence] = []
     actions: list[SourceOccurrence] = []
     states: list[SourceOccurrence] = []
-    endpoints: list[EndpointFact] = []
     routes: list[SourceOccurrence] = []
     config_routes: list[SourceOccurrence] = []
     has_router_signal = False
 
     analyzer_state = _MutableAnalyzerState()
-    for node in nodes:
+    for node in _walk(root_node):
         _collect_semantic_node(
             node,
             alias_map=alias_map,
-            http_wrapper_names=http_wrapper_names,
             use_state_names=use_state_names,
             components=components,
             rendered_modules=rendered_modules,
+            rendered_bindings=rendered_bindings,
+            selectors=selectors,
             regions=regions,
             actions=actions,
             states=states,
-            endpoints=endpoints,
             routes=routes,
             config_routes=config_routes,
         )
@@ -266,13 +357,32 @@ def extract_source_facts(
         extension=extension,
         imports=tuple(dict.fromkeys(item for item in imports if item)),
         import_aliases=aliases,
+        exports=exports,
+        bindings=bindings,
+        callables=callables,
+        calls=calls,
         react_aliases=react_aliases,
         rendered_modules=tuple(dict.fromkeys(rendered_modules)),
+        rendered_bindings=_unique_rendered_bindings(rendered_bindings),
+        selectors=_unique_selectors(selectors),
         declared_ui_modules=_unique_occurrences(components),
         regions=tuple(regions),
         actions=tuple(actions),
         states=_unique_occurrences(states),
-        endpoints=_unique_endpoints(endpoints),
+        network_calls=network_calls,
+        network_symbols=network_symbols,
+        endpoints=_unique_endpoints(
+            [
+                EndpointFact(
+                    item.url,
+                    item.line,
+                    item.method,
+                    item.dynamic,
+                )
+                for item in network_calls
+                if item.client_family in {"fetch", "axios", "ky", "http-wrapper"}
+            ]
+        ),
         routes=_unique_occurrences(routes),
         analyzer=analyzer_state.freeze(),
         extractor="tree-sitter",
@@ -331,7 +441,7 @@ class _MutableAnalyzerState:
 
 
 def _extract_imports(
-    nodes: tuple[object, ...],
+    nodes: Iterable[object],
 ) -> tuple[list[str], tuple[ImportAlias, ...]]:
     imports: list[str] = []
     aliases: list[ImportAlias] = []
@@ -344,40 +454,307 @@ def _extract_imports(
             imports.append(source)
         if node.type != "import_statement":
             continue
-        for child in node.named_children:
-            if child.type != "import_clause":
-                continue
-            for specifier in _walk(child):
-                if specifier.type != "import_specifier":
-                    continue
-                identifiers = [
-                    _text(item)
-                    for item in specifier.named_children
-                    if item.type == "identifier"
-                ]
-                if identifiers:
-                    aliases.append(
-                        ImportAlias(
-                            source=source,
-                            imported=identifiers[0],
-                            local=identifiers[-1],
-                        )
-                    )
+        clause = next(
+            (child for child in node.named_children if child.type == "import_clause"),
+            None,
+        )
+        if clause is None:
+            continue
+        for child in clause.named_children:
+            if child.type == "identifier":
+                aliases.append(ImportAlias(source, "default", _text(child), "default"))
+            elif child.type == "namespace_import":
+                local = next(
+                    (
+                        _text(item)
+                        for item in child.named_children
+                        if item.type == "identifier"
+                    ),
+                    "",
+                )
+                if local:
+                    aliases.append(ImportAlias(source, "*", local, "namespace"))
+            elif child.type == "named_imports":
+                for specifier in child.named_children:
+                    if specifier.type != "import_specifier":
+                        continue
+                    imported = _text(specifier.child_by_field_name("name"))
+                    local = _text(specifier.child_by_field_name("alias")) or imported
+                    if imported and local:
+                        aliases.append(ImportAlias(source, imported, local))
     return imports, tuple(aliases)
+
+
+def _extract_exports(nodes: Iterable[object]) -> tuple[ExportFact, ...]:
+    exports: list[ExportFact] = []
+    for node in nodes:
+        if node.type != "export_statement":
+            continue
+        source = _literal(node.child_by_field_name("source")) or None
+        is_default = any(child.type == "default" for child in node.children)
+        declaration = node.child_by_field_name("declaration")
+        if declaration is not None:
+            if declaration.type in {"function_declaration", "class_declaration"}:
+                name = _text(declaration.child_by_field_name("name"))
+                if name:
+                    exports.append(ExportFact("default" if is_default else name, name))
+            else:
+                for descendant in _walk(declaration):
+                    if descendant.type != "variable_declarator":
+                        continue
+                    local = _text(descendant.child_by_field_name("name"))
+                    if local and _is_identifier(local):
+                        exports.append(ExportFact(local, local))
+        value = node.child_by_field_name("value")
+        if value is not None:
+            local = _text(value.child_by_field_name("name")) or _text(value)
+            if local:
+                exports.append(ExportFact("default", local))
+        for child in node.named_children:
+            if child.type != "export_clause":
+                continue
+            for specifier in child.named_children:
+                if specifier.type != "export_specifier":
+                    continue
+                local = _text(specifier.child_by_field_name("name"))
+                exported = _text(specifier.child_by_field_name("alias")) or local
+                if local and exported:
+                    exports.append(ExportFact(exported, local, source))
+        if (
+            source
+            and declaration is None
+            and value is None
+            and not any(child.type == "export_clause" for child in node.named_children)
+            and any(child.type == "*" for child in node.children)
+        ):
+            exports.append(ExportFact("*", "*", source))
+    return tuple(dict.fromkeys(exports))
+
+
+def _extract_bindings(nodes: Iterable[object]) -> tuple[BindingFact, ...]:
+    bindings: list[BindingFact] = []
+    for node in nodes:
+        if node.type != "variable_declarator":
+            continue
+        name_node = node.child_by_field_name("name")
+        value_node = node.child_by_field_name("value")
+        if name_node is None or value_node is None:
+            continue
+        target = (
+            _text(value_node.child_by_field_name("function"))
+            if value_node.type == "call_expression"
+            else _text(value_node)
+        )
+        if not target:
+            continue
+        if name_node.type == "identifier" and value_node.type in {
+            "call_expression",
+            "identifier",
+            "member_expression",
+        }:
+            bindings.append(BindingFact(_text(name_node), target, _line(node)))
+        elif name_node.type == "object_pattern":
+            for child in name_node.named_children:
+                if child.type == "pair_pattern":
+                    key = _text(child.child_by_field_name("key"))
+                    local = _text(child.child_by_field_name("value"))
+                elif child.type == "shorthand_property_identifier_pattern":
+                    key = local = _text(child)
+                else:
+                    continue
+                if key and local:
+                    bindings.append(BindingFact(local, f"{target}.{key}", _line(child)))
+    return tuple(dict.fromkeys(bindings))
+
+
+def _extract_callables(nodes: Iterable[object]) -> tuple[CallableFact, ...]:
+    callables: list[CallableFact] = []
+    for node in nodes:
+        name = _callable_name(node)
+        if not name:
+            continue
+        callables.append(
+            CallableFact(
+                name,
+                _parameter_names(node.child_by_field_name("parameters")),
+                _line(node),
+            )
+        )
+    return tuple(dict.fromkeys(callables))
+
+
+def _extract_calls(nodes: Iterable[object]) -> tuple[CallFact, ...]:
+    calls: list[CallFact] = []
+    for node in nodes:
+        if node.type != "call_expression":
+            continue
+        target = _text(node.child_by_field_name("function"))
+        if not target:
+            continue
+        arguments = node.child_by_field_name("arguments")
+        values = (
+            tuple(_text(child) for child in arguments.named_children)
+            if arguments is not None
+            else ()
+        )
+        calls.append(
+            CallFact(
+                target=target,
+                arguments=values,
+                line=_line(node),
+                owner=_containing_callable(node),
+                method_hint=_call_method_hint(arguments),
+            )
+        )
+    return tuple(calls)
+
+
+def _classify_network_calls(
+    *,
+    aliases: tuple[ImportAlias, ...],
+    bindings: tuple[BindingFact, ...],
+    callables: tuple[CallableFact, ...],
+    calls: tuple[CallFact, ...],
+) -> tuple[tuple[NetworkCallFact, ...], tuple[NetworkCallFact, ...]]:
+    families: dict[str, str] = {"fetch": "fetch", "axios": "axios", "ky": "ky"}
+    binding_targets = {binding.local: binding.target for binding in bindings}
+    for alias in aliases:
+        family = _client_family_for_source(alias.source)
+        if family:
+            families[alias.local] = family
+
+    changed = True
+    while changed:
+        changed = False
+        for binding in bindings:
+            base = binding.target.split(".", 1)[0]
+            family = families.get(base)
+            if family and families.get(binding.local) != family:
+                families[binding.local] = family
+                changed = True
+
+    parameters_by_callable: dict[str, set[str]] = {}
+    for callable_fact in callables:
+        parameters_by_callable.setdefault(callable_fact.name, set()).update(
+            callable_fact.parameters
+        )
+    wrapper_methods: dict[str, str | None] = {}
+    wrapper_families: dict[str, str] = {}
+    for call in calls:
+        if not call.owner or not call.arguments:
+            continue
+        base, method = _call_family_and_method(call.target, families, binding_targets)
+        if base not in {"fetch", "axios", "ky"}:
+            continue
+        if call.arguments[0] not in parameters_by_callable.get(call.owner, set()):
+            continue
+        wrapper_families[call.owner] = base
+        wrapper_methods[call.owner] = method or call.method_hint or "GET"
+
+    classified: list[NetworkCallFact] = []
+    for call in calls:
+        family, method = _call_family_and_method(
+            call.target,
+            {**families, **wrapper_families},
+            binding_targets,
+        )
+        if family is None:
+            continue
+        if family in {"axios", "ky"} and call.target.rsplit(".", 1)[-1] in {
+            "create",
+            "extend",
+        }:
+            continue
+        if call.owner in wrapper_families and family in {"fetch", "axios", "ky"}:
+            continue
+        if call.target in wrapper_families:
+            family = "http-wrapper"
+            method = call.method_hint or wrapper_methods.get(call.target)
+        elif family == "fetch":
+            method = call.method_hint or "GET"
+        elif family in {"axios", "ky"}:
+            method = method or call.method_hint
+
+        expression = call.arguments[0] if call.arguments else None
+        url = literal_text(expression) if expression is not None else None
+        dynamic = expression is None or url is None or "${" in url
+        unresolved = None
+        if family in {"tanstack-query", "apollo", "rtk-query"} and url is None:
+            unresolved = "client family resolved; endpoint URL not statically available"
+        classified.append(
+            NetworkCallFact(
+                target=call.target,
+                client_family=family,
+                method=method,
+                url=url,
+                url_expression=expression,
+                line=call.line,
+                dynamic=dynamic,
+                owner=call.owner,
+                resolution="resolved",
+                unresolved_evidence=unresolved,
+            )
+        )
+    symbols: dict[str, NetworkCallFact] = {}
+
+    def remember(name: str, candidate: NetworkCallFact) -> None:
+        existing = symbols.get(name)
+        if existing is None or (existing.url is None and candidate.url is not None):
+            symbols[name] = candidate
+        elif candidate.url is not None and candidate != existing:
+            symbols[name] = replace(
+                candidate,
+                client_family=(
+                    existing.client_family
+                    if existing.client_family == candidate.client_family
+                    else "mixed-client"
+                ),
+                method=existing.method if existing.method == candidate.method else None,
+                url=None,
+                url_expression=None,
+                dynamic=True,
+            )
+
+    for local, family in families.items():
+        remember(
+            local,
+            NetworkCallFact(
+                local, family, None, None, None, 0, True, local, "definition"
+            ),
+        )
+    for owner, family in wrapper_families.items():
+        remember(
+            owner,
+            NetworkCallFact(
+                owner,
+                family,
+                wrapper_methods[owner],
+                None,
+                None,
+                0,
+                True,
+                owner,
+                "definition",
+            ),
+        )
+    for call in classified:
+        if call.owner:
+            remember(call.owner, replace(call, resolution="definition"))
+    return tuple(classified), tuple(symbols.values())
 
 
 def _collect_semantic_node(
     node,
     *,
     alias_map: dict[str, str],
-    http_wrapper_names: set[str],
     use_state_names: set[str],
     components: list[SourceOccurrence],
     rendered_modules: list[str],
+    rendered_bindings: list[RenderFact],
+    selectors: list[SelectorFact],
     regions: list[SourceOccurrence],
     actions: list[SourceOccurrence],
     states: list[SourceOccurrence],
-    endpoints: list[EndpointFact],
     routes: list[SourceOccurrence],
     config_routes: list[SourceOccurrence],
 ) -> None:
@@ -410,14 +787,28 @@ def _collect_semantic_node(
         if not tag:
             return
         rendered = alias_map.get(tag, tag)
-        if rendered[:1].isupper():
-            rendered_modules.append(rendered)
+        if tag[:1].isupper():
+            rendered_modules.append(rendered if rendered[:1].isupper() else tag)
+            rendered_bindings.append(RenderFact(tag, _line(node)))
+        selectors.append(SelectorFact(tag.lower(), _line(node), "heuristic"))
         if tag.lower() in _REGION_TAGS:
             regions.append(SourceOccurrence(tag.lower(), _line(node)))
         for child in node.named_children:
             if child.type != "jsx_attribute":
                 continue
             attribute = _text(child)
+            named_children = list(child.named_children)
+            name_node = child.child_by_field_name("name") or (
+                named_children[0] if named_children else None
+            )
+            value_node = child.child_by_field_name("value") or (
+                named_children[1] if len(named_children) > 1 else None
+            )
+            attribute_name = _text(name_node)
+            attribute_value = _literal(value_node)
+            selectors.extend(
+                selector_facts(attribute_name, attribute_value, _line(child))
+            )
             action_match = _ACTION_ATTRIBUTE_RE.match(attribute)
             if action_match:
                 actions.append(SourceOccurrence(action_match.group(1), _line(child)))
@@ -425,10 +816,6 @@ def _collect_semantic_node(
                 route_match = _ROUTE_ATTRIBUTE_RE.match(attribute)
                 if route_match:
                     routes.append(SourceOccurrence(route_match.group(1), _line(child)))
-    elif node.type == "call_expression":
-        endpoint = _extract_endpoint(node, http_wrapper_names=http_wrapper_names)
-        if endpoint is not None:
-            endpoints.append(endpoint)
     elif node.type == "pair":
         key = _text(node.child_by_field_name("key")).strip("\"'")
         if key == "path":
@@ -496,103 +883,57 @@ def _collect_analyzer_node(node, state: _MutableAnalyzerState) -> None:
             )
 
 
-def _http_wrapper_names(nodes: tuple) -> set[str]:
-    wrappers: set[str] = set()
-    for node in nodes:
-        if node.type == "function_declaration":
-            name = _text(node.child_by_field_name("name"))
-            parameters = node.child_by_field_name("parameters")
-            body = node.child_by_field_name("body")
-        elif node.type == "variable_declarator":
-            name = _text(node.child_by_field_name("name"))
-            value = node.child_by_field_name("value")
-            parameters = (
-                value.child_by_field_name("parameters")
-                if value is not None
-                else None
-            )
-            body = (
-                value
-                if value is not None
-                and value.type in {"arrow_function", "function_expression"}
-                else None
-            )
-        else:
-            continue
-        if not name or body is None:
-            continue
-        parameter_names = {
-            _text(descendant)
-            for descendant in _walk(parameters)
-            if descendant.type == "identifier"
-        } if parameters is not None else set()
-        if any(
-            descendant.type == "call_expression"
-            and _text(descendant.child_by_field_name("function")) == "fetch"
-            and (
-                (
-                    arguments := descendant.child_by_field_name("arguments")
-                ) is not None
-                and arguments.named_children
-                and _text(arguments.named_children[0]) in parameter_names
-            )
-            for descendant in _walk(body)
-        ):
-            wrappers.add(name)
-    return wrappers
-
-
-def _containing_callable_name(node) -> str:
+def _containing_callable(node) -> str:
     parent = node.parent
     while parent is not None:
-        if parent.type == "function_declaration":
-            return _text(parent.child_by_field_name("name"))
-        if parent.type in {"arrow_function", "function_expression"}:
-            declarator = parent.parent
-            if declarator is not None and declarator.type == "variable_declarator":
-                return _text(declarator.child_by_field_name("name"))
+        name = _callable_name(parent)
+        if name:
+            return name
         parent = parent.parent
     return ""
 
 
-def _extract_endpoint(
-    node,
-    *,
-    http_wrapper_names: set[str] | None = None,
-) -> EndpointFact | None:
-    call_name = _text(node.child_by_field_name("function"))
-    lowered = call_name.lower()
-    wrappers = http_wrapper_names or set()
-    axios_methods = {
-        "axios.get": "GET",
-        "axios.post": "POST",
-        "axios.put": "PUT",
-        "axios.patch": "PATCH",
-        "axios.delete": "DELETE",
-    }
-    if call_name == "fetch" and _containing_callable_name(node) in wrappers:
+def _callable_name(node) -> str:
+    if node.type == "function_declaration":
+        return _text(node.child_by_field_name("name"))
+    if node.type not in {"arrow_function", "function_expression"}:
+        return ""
+    container = node.parent
+    if container is None:
+        return ""
+    if container.type == "variable_declarator":
+        name = _text(container.child_by_field_name("name"))
+        return name if _is_identifier(name) else ""
+    if container.type == "pair":
+        return _object_member_name(container)
+    return ""
+
+
+def _object_member_name(pair) -> str:
+    members: list[str] = []
+    current = pair
+    while current is not None and current.type == "pair":
+        member = _text(current.child_by_field_name("key")).strip("\"'")
+        if not _is_identifier(member):
+            return ""
+        members.append(member)
+        object_node = current.parent
+        if object_node is None or object_node.type != "object":
+            return ""
+        container = object_node.parent
+        if container is not None and container.type == "variable_declarator":
+            root = _text(container.child_by_field_name("name"))
+            if not _is_identifier(root):
+                return ""
+            return ".".join((root, *reversed(members)))
+        current = container
+    return ""
+
+
+def _call_method_hint(arguments) -> str | None:
+    if arguments is None:
         return None
-    if call_name != "fetch" and lowered not in axios_methods and call_name not in wrappers:
-        return None
-
-    arguments = node.child_by_field_name("arguments")
-    values = list(arguments.named_children) if arguments is not None else []
-    url = _literal(values[0]) if values else ""
-    method: str | None = axios_methods.get(lowered)
-    if call_name == "fetch" or call_name in wrappers:
-        method = _fetch_method(values)
-    return EndpointFact(
-        url=url or None,
-        line=_line(node),
-        method=method,
-        dynamic=not bool(url) or "${" in url,
-    )
-
-
-def _fetch_method(arguments: list[object]) -> str | None:
-    if len(arguments) < 2:
-        return "GET"
-    for options in arguments[1:]:
+    for options in arguments.named_children:
         if options.type != "object":
             continue
         for child in options.named_children:
@@ -603,7 +944,93 @@ def _fetch_method(arguments: list[object]) -> str | None:
                 continue
             method = _literal(child.child_by_field_name("value")).upper()
             return method if method in _HTTP_METHODS else None
-    return "GET"
+    return None
+
+
+def _parameter_names(parameters) -> tuple[str, ...]:
+    if parameters is None:
+        return ()
+    names: list[str] = []
+    for child in parameters.named_children:
+        pattern = child.child_by_field_name("pattern") or child
+        if pattern.type == "identifier":
+            names.append(_text(pattern))
+            continue
+        names.extend(
+            _text(item) for item in _walk(pattern) if item.type == "identifier"
+        )
+    return tuple(dict.fromkeys(name for name in names if name))
+
+
+def _client_family_for_source(source: str) -> str | None:
+    lowered = source.lower()
+    if lowered == "axios" or lowered.startswith("axios/"):
+        return "axios"
+    if lowered == "ky" or lowered.startswith("ky/"):
+        return "ky"
+    if "@tanstack/react-query" in lowered:
+        return "tanstack-query"
+    if "@apollo/client" in lowered:
+        return "apollo"
+    if "@reduxjs/toolkit/query" in lowered:
+        return "rtk-query"
+    return None
+
+
+def _call_family_and_method(
+    target: str,
+    families: dict[str, str],
+    binding_targets: dict[str, str],
+) -> tuple[str | None, str | None]:
+    resolved = binding_targets.get(target, target)
+    parts = resolved.split(".")
+    family = families.get(parts[0]) or families.get(target)
+    method = parts[-1].upper() if parts[-1].upper() in _HTTP_METHODS else None
+    if family in {"tanstack-query", "apollo", "rtk-query"}:
+        return family, method
+    if family in {"fetch", "axios", "ky"}:
+        return family, method
+    if target in families:
+        return families[target], method
+    return None, None
+
+
+def selector_facts(
+    name: str,
+    value: str,
+    line: int,
+) -> tuple[SelectorFact, ...]:
+    if not name or not value:
+        return ()
+    if name == "id":
+        return (SelectorFact(f"#{value}", line, "exact"),)
+    if name in {"data-testid", "data-test"}:
+        escaped = value.replace('"', '\\"')
+        return (SelectorFact(f'[{name}="{escaped}"]', line, "exact"),)
+    if name in {"class", "className", ":class"}:
+        return tuple(
+            SelectorFact(f".{class_name}", line, "heuristic")
+            for class_name in value.split()
+            if re.fullmatch(r"[-_A-Za-z][-\w]*", class_name)
+        )
+    return ()
+
+
+def literal_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if (
+        len(stripped) >= 2
+        and stripped[0] in {'"', "'", "`"}
+        and stripped[-1] == stripped[0]
+    ):
+        return stripped[1:-1]
+    return None
+
+
+def _is_identifier(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z_$][\w$]*", value))
 
 
 def _walk(node):
@@ -639,6 +1066,14 @@ def _unique_occurrences(
     for item in items:
         unique.setdefault(item.name, item)
     return tuple(unique.values())
+
+
+def _unique_rendered_bindings(items: list[RenderFact]) -> tuple[RenderFact, ...]:
+    return tuple(dict.fromkeys(items))
+
+
+def _unique_selectors(items: list[SelectorFact]) -> tuple[SelectorFact, ...]:
+    return tuple(dict.fromkeys(items))
 
 
 def _unique_endpoints(items: list[EndpointFact]) -> tuple[EndpointFact, ...]:
