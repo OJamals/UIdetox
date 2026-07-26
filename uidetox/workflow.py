@@ -73,7 +73,7 @@ PHASES = (
         "semantic_map",
         ("static_analysis",),
         ("source",),
-        ("frontend_map", "project_map"),
+        ("frontend_map", "contract_graph"),
     ),
     PhaseDefinition(
         "issue_planning",
@@ -665,13 +665,13 @@ def in_process_adapters() -> WorkflowAdapters:
         return AdapterResult(
             artifacts={
                 "frontend_map": str(output),
-                "project_map": f"{output}#project_map",
+                "contract_graph": f"{output}#project_map",
             },
             artifact_validation={
                 "frontend_map": "content",
-                "project_map": "content",
+                "contract_graph": "content",
             },
-            evidence="Semantic frontend/project map persisted.",
+            evidence="Semantic frontend map and contract graph persisted.",
             signals={"verification_fresh": verification_fresh},
         )
     def issue_plan(context: WorkflowContext) -> AdapterResult:

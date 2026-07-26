@@ -3,15 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.project_map import (
-    OperationEvidence,
+    ContractEdge,
+    ContractNode,
     ProjectMap,
     SourceAnchor,
     build_project_map,
     normalize_route_path,
-    reconcile_operations,
+    reconcile_contract_graph,
 )
-from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.prototype import build_prototype_brief
 from uidetox.redesign import RedesignBrief, propose_redesigns
 
@@ -38,24 +39,10 @@ def _frontend_node(
     }
 
 
-def _operation(
-    side: str,
-    method: str | None,
-    path: str | None,
-    *,
-    dynamic: bool = False,
-    classification: str = "application",
-) -> OperationEvidence:
-    normalized, parameters, unresolved = normalize_route_path(path)
-    return OperationEvidence(
-        side=side,
-        method=method,
-        path=path,
-        normalized_path=normalized,
-        parameters=parameters,
-        dynamic=dynamic or unresolved,
-        classification=classification,
-        sources=(SourceAnchor(f"{side}.ts", 1, "test", "test", 1.0),),
+def _operation_nodes(project: ProjectMap, side: str) -> tuple[ContractNode, ...]:
+    kind = "client_operation" if side == "frontend" else "route"
+    return tuple(
+        node for node in project.nodes if node.side == side and node.kind == kind
     )
 
 
@@ -124,21 +111,19 @@ paths:
         [_frontend_node("/users/${id}", "GET")],
     )
 
-    backend = project.backend_operations
+    backend = _operation_nodes(project, "backend")
     assert len(backend) == 1
-    assert backend[0].normalized_path == "/users/{}"
-    assert backend[0].parameters == ("id", "userId")
-    assert backend[0].schemas == ("User",)
-    assert [source.framework for source in backend[0].sources] == [
+    assert backend[0].attributes["normalized_path"] == "/users/{}"
+    assert backend[0].attributes["parameters"] == ["id", "userId"]
+    assert [source["framework"] for source in backend[0].attributes["sources"]] == [
         "openapi",
         "openapi",
     ]
-    assert project.counts == {
-        "frontend_only": 0,
-        "backend_only": 0,
-        "method_mismatch": 0,
-        "unresolved": 0,
-    }
+    assert any(
+        node.kind == "response_schema" and node.name == "User"
+        for node in project.nodes
+    )
+    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 1}
 
 
 def test_fastapi_and_flask_decorator_adapters(tmp_path) -> None:
@@ -170,8 +155,12 @@ def widgets():
 
     project = build_project_map(tmp_path)
     observed = {
-        (item.method, item.normalized_path, item.sources[0].framework)
-        for item in project.backend_operations
+        (
+            item.attributes["method"],
+            item.attributes["normalized_path"],
+            item.source.framework,
+        )
+        for item in _operation_nodes(project, "backend")
     }
 
     assert ("GET", "/api/widgets/{}", "fastapi") in observed
@@ -212,61 +201,18 @@ export class OrdersController {
 
     project = build_project_map(tmp_path)
     observed = {
-        (item.method, item.normalized_path, item.sources[0].framework)
-        for item in project.backend_operations
+        (
+            item.attributes["method"],
+            item.attributes["normalized_path"],
+            item.source.framework,
+        )
+        for item in _operation_nodes(project, "backend")
     }
 
     assert ("POST", "/express-api/orders/{}", "express") in observed
     assert ("PATCH", "/fast-api/orders/{}", "fastify") in observed
     assert ("DELETE", "/orders/{}", "nest") in observed
     assert project.evidence["adapters"] == ["express", "fastify", "nest"]
-
-
-def test_reconciliation_reports_each_parity_class_and_suppresses_internal() -> None:
-    frontend = (
-        _operation("frontend", "GET", "/matched"),
-        _operation("frontend", "POST", "/method"),
-        _operation("frontend", "GET", "/frontend-only"),
-        _operation("frontend", None, None, dynamic=True),
-    )
-    backend = (
-        _operation("backend", "GET", "/matched"),
-        _operation("backend", "PUT", "/method"),
-        _operation("backend", "GET", "/backend-only"),
-        _operation(
-            "backend",
-            "GET",
-            "/health",
-            classification="internal",
-        ),
-    )
-
-    findings, suppressed = reconcile_operations(frontend, backend)
-    kinds = [finding.kind for finding in findings]
-
-    assert kinds.count("frontend_only") == 1
-    assert kinds.count("backend_only") == 1
-    assert kinds.count("method_mismatch") == 1
-    assert kinds.count("unresolved") == 1
-    assert suppressed == ["backend:GET:/health"]
-
-
-def test_partial_method_overlap_reports_only_unmatched_methods() -> None:
-    frontend = (
-        _operation("frontend", "GET", "/items"),
-        _operation("frontend", "POST", "/items"),
-    )
-    backend = (
-        _operation("backend", "GET", "/items"),
-        _operation("backend", "PUT", "/items"),
-    )
-
-    findings, _ = reconcile_operations(frontend, backend)
-
-    assert len(findings) == 1
-    assert findings[0].kind == "method_mismatch"
-    assert findings[0].frontend == ("frontend:POST:/items",)
-    assert findings[0].backend == ("backend:PUT:/items",)
 
 
 def test_unknown_route_syntax_is_unresolved_not_false_match(tmp_path) -> None:
@@ -276,18 +222,18 @@ def test_unknown_route_syntax_is_unresolved_not_false_match(tmp_path) -> None:
     )
     project = build_project_map(tmp_path, [_frontend_node("/users", "GET")])
 
-    assert project.backend_operations == ()
-    assert project.counts["frontend_only"] == 1
+    assert _operation_nodes(project, "backend") == ()
+    assert project.counts == {"contract_mismatch": 1, "coverage_gap": 0}
 
     (tmp_path / "unknown.ts").write_text(
         "mystery.route(dynamicPath, handler);",
         encoding="utf-8",
     )
     project = build_project_map(tmp_path, [_frontend_node("/users", "GET")])
-    assert len(project.backend_operations) == 1
-    assert project.backend_operations[0].dynamic is True
-    assert project.counts["unresolved"] == 1
-    assert project.counts["frontend_only"] == 1
+    backend = _operation_nodes(project, "backend")
+    assert len(backend) == 1
+    assert backend[0].attributes["dynamic"] is True
+    assert project.counts == {"contract_mismatch": 1, "coverage_gap": 1}
 
 
 def test_backend_discovery_ignores_route_syntax_in_test_sources(tmp_path) -> None:
@@ -300,7 +246,7 @@ def test_backend_discovery_ignores_route_syntax_in_test_sources(tmp_path) -> Non
 
     project = build_project_map(tmp_path)
 
-    assert project.backend_operations == ()
+    assert _operation_nodes(project, "backend") == ()
     assert project.evidence["backend_files_scanned"] == 0
     assert project.evidence["unknown_backend_evidence"] == 0
 
@@ -332,9 +278,10 @@ router.get("/orders", handler);
 
     assert project.evidence["adapters"] == []
     assert project.evidence["unknown_backend_evidence"] == 2
-    assert all(item.dynamic for item in project.backend_operations)
-    assert all(item.classification == "unknown" for item in project.backend_operations)
-    assert project.counts["unresolved"] == 2
+    backend = _operation_nodes(project, "backend")
+    assert all(item.attributes["dynamic"] for item in backend)
+    assert all(item.attributes["classification"] == "unknown" for item in backend)
+    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 2}
 
 
 def test_framework_imports_do_not_promote_unrelated_route_receivers(
@@ -369,15 +316,20 @@ cache.get("/js-cache", handler);
     )
 
     project = build_project_map(tmp_path)
+    backend = _operation_nodes(project, "backend")
     comparable = {
-        (item.method, item.normalized_path, item.sources[0].framework)
-        for item in project.backend_operations
-        if item.classification != "unknown"
+        (
+            item.attributes["method"],
+            item.attributes["normalized_path"],
+            item.source.framework,
+        )
+        for item in backend
+        if item.attributes["classification"] != "unknown"
     }
     unresolved = {
-        item.normalized_path
-        for item in project.backend_operations
-        if item.classification == "unknown"
+        item.attributes["normalized_path"]
+        for item in backend
+        if item.attributes["classification"] == "unknown"
     }
 
     assert comparable == {
@@ -436,15 +388,20 @@ app.get("/fake-express", handler);
     )
 
     project = build_project_map(tmp_path)
+    backend = _operation_nodes(project, "backend")
     comparable = {
-        (item.method, item.normalized_path, item.sources[0].framework)
-        for item in project.backend_operations
-        if item.classification != "unknown"
+        (
+            item.attributes["method"],
+            item.attributes["normalized_path"],
+            item.source.framework,
+        )
+        for item in backend
+        if item.attributes["classification"] != "unknown"
     }
     unresolved = {
-        item.normalized_path
-        for item in project.backend_operations
-        if item.classification == "unknown"
+        item.attributes["normalized_path"]
+        for item in backend
+        if item.attributes["classification"] == "unknown"
     }
 
     assert comparable == {
@@ -485,9 +442,10 @@ app.get("/fake-js", handler);
     )
 
     project = build_project_map(tmp_path)
+    backend = _operation_nodes(project, "backend")
 
-    assert all(item.classification == "unknown" for item in project.backend_operations)
-    assert {item.normalized_path for item in project.backend_operations} == {
+    assert all(item.attributes["classification"] == "unknown" for item in backend)
+    assert {item.attributes["normalized_path"] for item in backend} == {
         "/fake-js",
         "/fake-python",
     }
@@ -528,7 +486,7 @@ export function App() {
 """.strip(),
         encoding="utf-8",
     )
-    (source / "api.ts").write_text(
+    (tmp_path / "api.ts").write_text(
         """
 import express from "express";
 const app = express();
@@ -542,9 +500,9 @@ app.get("/api/users/:id", handler);
     redesign = propose_redesigns(frontend_map, RedesignBrief(variants=1))
     brief = build_prototype_brief(redesign, redesign.proposals[0].id)
 
-    assert project.counts["method_mismatch"] == 1
-    assert redesign.parity["counts"]["method_mismatch"] == 1
-    assert "Cross-stack parity findings:" in brief
+    assert project.counts == {"contract_mismatch": 1, "coverage_gap": 0}
+    assert redesign.contract_lineage["counts"] == project.counts
+    assert "Full-stack contract lineage findings:" in brief
     assert "method_mismatch: /api/users/{}" in brief
 
     legacy = frontend_map.to_dict()
@@ -572,14 +530,9 @@ def test_fullstack_fixture_reconciles_without_duplicate_probe_manifest() -> None
     frontend_map = map_frontend(fixture, ".")
     project = ProjectMap.from_dict(frontend_map.project_map)
 
-    assert project.counts == {
-        "frontend_only": 0,
-        "backend_only": 0,
-        "method_mismatch": 0,
-        "unresolved": 0,
-    }
+    assert project.counts == {"contract_mismatch": 2, "coverage_gap": 26}
     assert project.evidence["unknown_backend_evidence"] == 0
-    assert len(project.frontend_operations) == 28
+    assert len(_operation_nodes(project, "frontend")) == 28
 
 
 def test_frontend_map_preserves_same_path_requests_by_method(tmp_path) -> None:
@@ -603,10 +556,306 @@ app.post("/same", postHandler);
     )
 
     frontend_map = map_frontend(tmp_path, "src")
-    operations = ProjectMap.from_dict(frontend_map.project_map).frontend_operations
+    operations = _operation_nodes(
+        ProjectMap.from_dict(frontend_map.project_map), "frontend"
+    )
 
-    assert [(item.method, item.normalized_path) for item in operations] == [
+    assert [
+        (item.attributes["method"], item.attributes["normalized_path"])
+        for item in operations
+    ] == [
         ("GET", "/same"),
         ("POST", "/same"),
     ]
     assert len({node.id for node in frontend_map.nodes}) == len(frontend_map.nodes)
+
+
+def test_contract_graph_v2_roundtrip_and_legacy_migration_distinguish_unknown() -> None:
+    node = ContractNode(
+        id="client:POST:/users",
+        kind="client_operation",
+        name="POST /users",
+        side="frontend",
+        capability_status="unknown",
+        source=SourceAnchor("src/client.ts", 8, "react", "tree-sitter", 1.0),
+        attributes={"method": "POST", "normalized_path": "/users"},
+    )
+    graph = ProjectMap(nodes=(node,))
+
+    payload = graph.to_dict()
+    assert payload["schema_version"] == 2
+    assert set(payload) == {"schema_version", "nodes", "edges", "findings", "evidence"}
+    assert ProjectMap.from_dict(payload) == graph
+
+    legacy = {
+        "schema_version": 1,
+        "frontend_operations": [
+            {
+                "side": "frontend",
+                "method": "POST",
+                "path": "/users",
+                "normalized_path": "/users",
+                "parameters": [],
+                "schemas": [],
+                "dynamic": False,
+                "classification": "application",
+                "sources": [],
+            }
+        ],
+        "backend_operations": [],
+        "findings": [],
+        "evidence": {},
+    }
+    migrated = ProjectMap.from_dict(legacy)
+    assert migrated.schema_version == 2
+    assert migrated.nodes[0].capability_status == "unknown"
+    assert migrated.to_dict()["schema_version"] == 2
+
+
+def test_contract_reconciliation_reports_one_smallest_field_mismatch() -> None:
+    source = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+    common = {
+        "method": "POST",
+        "normalized_path": "/users",
+        "status_codes": ["201"],
+        "mutation": True,
+        "cache_invalidation": "present",
+    }
+    frontend = ContractNode(
+        "client:POST:/users",
+        "client_operation",
+        "POST /users",
+        "frontend",
+        "present",
+        source,
+        common,
+    )
+    backend = ContractNode(
+        "route:POST:/users",
+        "route",
+        "POST /users",
+        "backend",
+        "present",
+        source,
+        common,
+    )
+    front_schema = ContractNode(
+        "front-request",
+        "request_schema",
+        "CreateUser",
+        "frontend",
+        "present",
+        source,
+        {"type": "object"},
+    )
+    back_schema = ContractNode(
+        "back-request",
+        "request_schema",
+        "CreateUser",
+        "backend",
+        "present",
+        source,
+        {"type": "object"},
+    )
+    front_email = ContractNode(
+        "front-email",
+        "schema_field",
+        "email",
+        "frontend",
+        "present",
+        source,
+        {"type": "string", "required": True},
+    )
+    back_email = ContractNode(
+        "back-email",
+        "schema_field",
+        "email",
+        "backend",
+        "present",
+        source,
+        {"type": "integer", "required": True},
+    )
+    edges = (
+        ContractEdge(frontend.id, front_schema.id, "accepts", "test", 1.0, source),
+        ContractEdge(backend.id, back_schema.id, "accepts", "test", 1.0, source),
+        ContractEdge(
+            front_schema.id, front_email.id, "has_field", "test", 1.0, source
+        ),
+        ContractEdge(
+            back_schema.id, back_email.id, "has_field", "test", 1.0, source
+        ),
+    )
+
+    findings = reconcile_contract_graph(
+        (frontend, backend, front_schema, back_schema, front_email, back_email),
+        edges,
+    )
+
+    assert [finding.detector_id for finding in findings] == [
+        "contract-request-field-type-mismatch"
+    ]
+    assert findings[0].contract_anchor["field"] == "email"
+    assert findings[0].source_anchor["path"] == "contract.ts"
+
+
+def test_unknown_contract_evidence_never_reports_parity() -> None:
+    source = SourceAnchor("client.ts", 1, "test", "test", 1.0)
+    frontend = ContractNode(
+        "client:GET:/users",
+        "client_operation",
+        "GET /users",
+        "frontend",
+        "unknown",
+        source,
+        {"method": "GET", "normalized_path": "/users"},
+    )
+    backend = ContractNode(
+        "route:GET:/users",
+        "route",
+        "GET /users",
+        "backend",
+        "present",
+        source,
+        {
+            "method": "GET",
+            "normalized_path": "/users",
+            "response_schema": {"type": "array", "items": {"type": "string"}},
+        },
+    )
+
+    findings = reconcile_contract_graph((frontend, backend), ())
+
+    assert len(findings) == 1
+    assert findings[0].detector_id == "contract-evidence-unknown"
+    assert findings[0].status == "investigate"
+
+
+def test_openapi_contract_fields_status_errors_and_auth_are_graph_nodes(tmp_path) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "components": {
+            "securitySchemes": {"BearerAuth": {"type": "http", "scheme": "bearer"}},
+            "schemas": {
+                "UserCreate": {
+                    "type": "object",
+                    "required": ["email", "role"],
+                    "properties": {
+                        "email": {"type": "string", "format": "email"},
+                        "role": {"type": "string", "enum": ["admin", "member"]},
+                    },
+                },
+                "User": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "nickname": {"type": ["string", "null"]},
+                    },
+                },
+                "Error": {
+                    "type": "object",
+                    "required": ["detail"],
+                    "properties": {"detail": {"type": "string"}},
+                },
+            },
+        },
+        "paths": {
+            "/users": {
+                "post": {
+                    "security": [{"BearerAuth": []}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/UserCreate"}
+                            }
+                        },
+                    },
+                    "responses": {
+                        "201": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/User"}
+                                }
+                            }
+                        },
+                        "422": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Error"}
+                                }
+                            }
+                        },
+                    },
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    kinds = {node.kind for node in project.nodes}
+    names = {node.name for node in project.nodes}
+
+    assert {"route", "request_schema", "response_schema", "error_schema"} <= kinds
+    assert {"email", "role", "id", "nickname", "BearerAuth"} <= names
+    route = next(node for node in project.nodes if node.kind == "route")
+    assert route.attributes["status_codes"] == ["201", "422"]
+    auth = next(node for node in project.nodes if node.kind == "auth_requirement")
+    assert auth.capability_status == "present"
+
+
+def test_fastapi_handler_service_entity_and_column_lineage(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import Depends, FastAPI
+from pydantic import BaseModel
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+app = FastAPI()
+
+class Input(BaseModel):
+    email: str
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+
+def require_user():
+    return object()
+
+def create_user(payload: Input):
+    return User(email=payload.email)
+
+@app.post("/users", response_model=Input, status_code=201)
+def post_user(payload: Input, user=Depends(require_user)):
+    return create_user(payload)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project = build_project_map(tmp_path)
+    route = next(node for node in project.nodes if node.kind == "route")
+    reachable = {
+        edge.target
+        for edge in project.edges
+        if edge.source == route.id or edge.source.startswith(("handler:", "service:", "entity:"))
+    }
+    node_by_id = {node.id: node for node in project.nodes}
+
+    assert any(node_by_id[node_id].kind == "handler" for node_id in reachable)
+    assert any(node_by_id[node_id].kind == "service_operation" for node_id in reachable)
+    assert any(node_by_id[node_id].kind == "entity" for node_id in reachable)
+    assert {"id", "email"} <= {
+        node.name for node in project.nodes if node.kind == "database_field"
+    }
+    assert any(
+        edge.source == route.id
+        and edge.kind == "requires"
+        and node_by_id[edge.target].capability_status == "present"
+        for edge in project.edges
+    )

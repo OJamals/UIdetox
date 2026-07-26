@@ -14,7 +14,7 @@ from uidetox.findings import (
     evaluate_eligibility,
     score_current_snapshot,
 )
-from uidetox.project_map import OperationEvidence, SourceAnchor, reconcile_operations
+from uidetox.project_map import ContractNode, SourceAnchor, reconcile_contract_graph
 from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.state import load_state, save_state
 
@@ -573,29 +573,27 @@ def test_runtime_and_contract_producers_return_canonical_findings() -> None:
         }
 
     runtime = detect_runtime_findings(Element())
-    frontend = OperationEvidence(
-        side="frontend",
-        method="GET",
-        path="/api/items",
-        normalized_path="/api/items",
-        parameters=(),
-        dynamic=False,
-        classification="api",
-        sources=(
-            SourceAnchor(
-                file="src/items.ts",
-                line=4,
-                framework="fetch",
-                extractor="test",
-                confidence=1.0,
-            ),
-        ),
+    anchor = SourceAnchor(
+        file="src/items.ts",
+        line=4,
+        framework="fetch",
+        extractor="test",
+        confidence=1.0,
     )
-    parity, _suppressed = reconcile_operations((frontend,), ())
+    frontend = ContractNode(
+        id="client:GET:/api/items",
+        kind="client_operation",
+        name="GET /api/items",
+        side="frontend",
+        capability_status="present",
+        source=anchor,
+        attributes={"method": "GET", "normalized_path": "/api/items"},
+    )
+    contract_findings = reconcile_contract_graph((frontend,), ())
 
     assert runtime
     assert all(isinstance(item, Finding) for item in runtime)
     assert runtime[0].provenance == "runtime"
-    assert all(isinstance(item, Finding) for item in parity)
-    assert parity[0].provenance == "contract"
-    assert parity[0].contract_anchor["normalized_path"] == "/api/items"
+    assert all(isinstance(item, Finding) for item in contract_findings)
+    assert contract_findings[0].provenance == "contract"
+    assert contract_findings[0].contract_anchor["normalized_path"] == "/api/items"

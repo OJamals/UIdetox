@@ -510,23 +510,23 @@ def run(args: argparse.Namespace):
         target_files=since_targets,
     )
     slop_issues = [coerce_finding(issue) for issue in slop_issues]
-    parity = None
+    contract_graph = None
     has_fullstack = bool(backends or databases or apis)
     if has_fullstack:
         try:
-            parity = ProjectMap.from_dict(
+            contract_graph = ProjectMap.from_dict(
                 map_frontend(project_root, Path(scan_path).resolve()).project_map
             )
         except (OSError, TypeError, ValueError) as error:
             if table_output:
-                print(f"  Full-stack operation parity unavailable: {error}")
+                print(f"  Full-stack contract lineage unavailable: {error}")
     mapped_findings, map_qualified = current_map_findings(project_root)
     findings = list(
         {
             finding.fingerprint: finding
             for finding in [
                 *slop_issues,
-                *(parity.findings if parity else ()),
+                *(contract_graph.findings if contract_graph else ()),
                 *mapped_findings,
             ]
         }.values()
@@ -578,18 +578,17 @@ def run(args: argparse.Namespace):
     # Full-stack integration checks
     if has_fullstack:
         print()
-        if parity is not None:
-            counts = parity.counts
+        if contract_graph is not None:
+            counts = contract_graph.counts
             print(
-                "  Full-stack operation parity: "
-                f"frontend-only={counts['frontend_only']}, "
-                f"backend-only={counts['backend_only']}, "
-                f"method-mismatch={counts['method_mismatch']}, "
-                f"unresolved={counts['unresolved']}."
+                "  Full-stack contract lineage: "
+                f"mismatches={counts['contract_mismatch']}, "
+                f"coverage-gaps={counts['coverage_gap']}, "
+                f"nodes={len(contract_graph.nodes)}, edges={len(contract_graph.edges)}."
             )
             print(
-                "  Evidence scope: static HTTP routes and schema references only; "
-                "auth, UI error states, and business equivalence remain unverified."
+                "  Evidence scope: static source contracts only; unknown evidence "
+                "never implies parity, and business equivalence remains unverified."
             )
     print("  Run `uidetox review` for the evidence-bound A/B/C/D review brief.")
     print()

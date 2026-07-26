@@ -13,6 +13,7 @@ from uidetox.frontend_map import (
     map_frontend,
     save_frontend_map,
 )
+from uidetox.project_map import ProjectMap
 from uidetox.prototype import build_prototype_brief, save_prototype_brief
 from uidetox.redesign import (
     RedesignBrief,
@@ -751,9 +752,11 @@ def items():
     frontend_map = map_frontend(tmp_path, "src")
 
     assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is True
+    project_map = ProjectMap.from_dict(frontend_map.project_map)
     assert {
-        operation["method"]
-        for operation in frontend_map.project_map["backend_operations"]
+        node.attributes["method"]
+        for node in project_map.nodes
+        if node.side == "backend" and node.kind == "route"
     } == {"GET"}
 
     api.write_text(
@@ -764,8 +767,11 @@ def items():
 
     refreshed = map_frontend(tmp_path, "src")
     assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
+    refreshed_project_map = ProjectMap.from_dict(refreshed.project_map)
     assert {
-        operation["method"] for operation in refreshed.project_map["backend_operations"]
+        node.attributes["method"]
+        for node in refreshed_project_map.nodes
+        if node.side == "backend" and node.kind == "route"
     } == {"POST"}
 
 
@@ -1016,3 +1022,156 @@ def test_compare_and_prototype_commands_consume_redesign_artifact(
     assert prototype_artifact.exists()
     assert redesigns.proposals[0].name in prototype_artifact.read_text(encoding="utf-8")
     assert "Prototype brief created:" in capsys.readouterr().out
+
+
+def test_frontend_contract_lineage_uses_semantic_types_states_and_mutation(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        """
+import axios, { AxiosResponse } from "axios";
+import { useState } from "react";
+
+interface CreateUser {
+  email: string;
+  role?: "admin" | "member";
+}
+
+interface User {
+  id: string;
+  nickname: string | null;
+}
+
+export function App() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [empty, setEmpty] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  async function submit() {
+    await axios.post<User, AxiosResponse<User>, CreateUser>("/users");
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  }
+
+  return <button onClick={submit}>Create</button>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/users": {
+                        "post": {
+                            "requestBody": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "required": ["email"],
+                                            "properties": {
+                                                "email": {"type": "string"},
+                                                "role": {
+                                                    "type": "string",
+                                                    "enum": ["admin", "member"],
+                                                },
+                                            },
+                                        }
+                                    }
+                                }
+                            },
+                            "responses": {
+                                "200": {
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {
+                                                "type": "object",
+                                                "required": ["id", "nickname"],
+                                                "properties": {
+                                                    "id": {"type": "string"},
+                                                    "nickname": {
+                                                        "type": "string",
+                                                        "nullable": True,
+                                                    },
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path, "src")
+    project_map = frontend_map.project_map
+    client = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "client_operation"
+    )
+    request = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "request_schema" and node["side"] == "frontend"
+    )
+    response = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "response_schema" and node["side"] == "frontend"
+    )
+    email = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "schema_field"
+        and node["name"] == "email"
+        and any(
+            edge["source"] == request["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    nickname = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "schema_field"
+        and node["name"] == "nickname"
+        and any(
+            edge["source"] == response["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    assert email["attributes"]["type"] == "string"
+    assert nickname["attributes"] == {
+        "nullable": True,
+        "required": True,
+        "type": "string",
+    }
+    ui_states = sorted(
+        node["name"]
+        for node in project_map["nodes"]
+        if node["kind"] == "ui_state"
+        and any(
+            edge["source"] == client["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    assert ui_states == [
+        "empty",
+        "error",
+        "loading",
+        "success",
+    ]
+    assert client["attributes"]["cache_invalidation"] == "present"
+    action = next(node for node in project_map["nodes"] if node["kind"] == "ui_action")
+    assert any(
+        edge["source"] == action["id"]
+        and edge["target"] == client["id"]
+        and edge["kind"] == "triggers"
+        for edge in project_map["edges"]
+    )

@@ -79,7 +79,7 @@ class FakeWorkflow:
             artifact.write_text('{"schema_version": 1}\n', encoding="utf-8")
             artifacts = {
                 "frontend_map": str(artifact),
-                "project_map": f"{artifact}#project_map",
+                "contract_graph": f"{artifact}#project_map",
             }
         else:
             artifacts = {

@@ -630,7 +630,10 @@ def _extract_calls(nodes: Iterable[object]) -> tuple[CallFact, ...]:
     for node in nodes:
         if node.type != "call_expression":
             continue
-        target = _text(node.child_by_field_name("function"))
+        function = node.child_by_field_name("function")
+        if function is not None and function.type == "await_expression":
+            function = next(iter(function.named_children), function)
+        target = _text(function)
         if not target:
             continue
         arguments = node.child_by_field_name("arguments")

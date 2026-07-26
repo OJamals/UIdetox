@@ -345,6 +345,23 @@ def map_frontend(
             name = call.url or call.url_expression or call.target
             identity = f"{call.target}:{call.method or '?'}:{name}:{call.line}:{index}"
             data_id = _node_id("data", relative_path, identity)
+            state_names = {
+                state
+                for state in (
+                    _contract_ui_state(item.name) for item in facts.states
+                )
+                if state is not None
+            }
+            request_contracts = {
+                reference: module.contracts[reference]
+                for reference in call.request_type_refs
+                if reference in module.contracts
+            }
+            response_contracts = {
+                reference: module.contracts[reference]
+                for reference in call.response_type_refs
+                if reference in module.contracts
+            }
             metadata = {
                 "transport": (
                     "graphql"
@@ -363,6 +380,31 @@ def map_frontend(
                 "unresolved_evidence": call.unresolved_evidence,
                 "request_type_refs": list(call.request_type_refs),
                 "response_type_refs": list(call.response_type_refs),
+                "request_contracts": request_contracts,
+                "response_contracts": response_contracts,
+                "ui_actions": sorted({item.name for item in facts.actions}),
+                "ui_states": sorted(state_names),
+                "mutation": call.method not in {None, "GET", "HEAD", "OPTIONS"},
+                "cache_invalidation": (
+                    "present"
+                    if re.search(
+                        r"\b(?:invalidateQueries|invalidateTags|mutate|refetch)\s*\(",
+                        content,
+                    )
+                    else (
+                        "absent"
+                        if call.method not in {None, "GET", "HEAD", "OPTIONS"}
+                        else "unknown"
+                    )
+                ),
+                "auth": (
+                    "present"
+                    if re.search(
+                        r"\b(?:Authorization|credentials)\b\s*[:=]",
+                        content,
+                    )
+                    else "unknown"
+                ),
                 "extractor": facts.extractor,
                 "confidence": facts.confidence,
             }
@@ -1161,6 +1203,14 @@ def _node_id(kind: str, file_path: str, name: str, ordinal: int = 0) -> str:
 
 def _line_number(content: str, offset: int) -> int:
     return content.count("\n", 0, max(0, offset)) + 1
+
+
+def _contract_ui_state(name: str) -> str | None:
+    lowered = name.lower()
+    return next(
+        (state for state in ("loading", "error", "empty", "success") if state in lowered),
+        None,
+    )
 
 
 def _unique(values: Iterable[str]) -> list[str]:

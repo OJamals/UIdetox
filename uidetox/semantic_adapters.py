@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
 from uidetox.source_facts import (
@@ -81,6 +81,17 @@ _ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _QUERY_HOOK_RE = re.compile(r"^use[A-Z][A-Za-z0-9]*(?:Query|Mutation)$")
+_TYPE_BLOCK_RE = re.compile(
+    r"\b(?:export\s+)?(?:interface\s+(?P<interface>[A-Za-z_$][\w$]*)"
+    r"(?:\s+extends\s+[^{]+)?|type\s+(?P<alias>[A-Za-z_$][\w$]*)\s*=)"
+    r"\s*\{(?P<body>[^{}]*)\}",
+    re.DOTALL,
+)
+_TYPE_FIELD_RE = re.compile(
+    r"(?:^|[;,\n])\s*(?:readonly\s+)?"
+    r"(?P<name>[A-Za-z_$][\w$]*|[\"'][^\"']+[\"'])"
+    r"(?P<optional>\?)?\s*:\s*(?P<type>[^;,\n]+)"
+)
 
 
 @dataclass(frozen=True)
@@ -107,6 +118,7 @@ class ModuleSemantics:
     framework: str
     capability: AdapterCapability
     facts: SourceFacts
+    contracts: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -581,6 +593,7 @@ def _module(
         framework,
         capability,
         source_facts,
+        extract_type_contracts(document.content),
     )
 
 
@@ -1125,3 +1138,67 @@ def _line_number(content: str, offset: int) -> int:
 
 def _unresolved_symbol(reason: str) -> ResolvedSymbol:
     return ResolvedSymbol("unresolved", None, None, None, None, reason, 0.0)
+
+
+def extract_type_contracts(content: str) -> dict[str, dict[str, Any]]:
+    """Extract conservative object contracts inside the selected JS/TS adapter."""
+
+    contracts: dict[str, dict[str, Any]] = {}
+    for match in _TYPE_BLOCK_RE.finditer(content):
+        name = match.group("interface") or match.group("alias")
+        properties: dict[str, dict[str, Any]] = {}
+        required: list[str] = []
+        for field_match in _TYPE_FIELD_RE.finditer(match.group("body")):
+            field_name = field_match.group("name").strip("\"'")
+            properties[field_name] = _typescript_type_shape(
+                field_match.group("type").strip()
+            )
+            if field_match.group("optional") is None:
+                required.append(field_name)
+        contracts[name] = {
+            "type": "object",
+            "properties": dict(sorted(properties.items())),
+            "required": sorted(required),
+        }
+    return contracts
+
+
+def _typescript_type_shape(value: str) -> dict[str, Any]:
+    union = [item.strip() for item in value.split("|")]
+    nullable = any(item in {"null", "undefined"} for item in union)
+    concrete = [item for item in union if item not in {"null", "undefined"}]
+    literals = [
+        item[1:-1]
+        for item in concrete
+        if len(item) >= 2 and item[0] == item[-1] and item[0] in {"'", '"'}
+    ]
+    if literals and len(literals) == len(concrete):
+        result: dict[str, Any] = {"type": "string", "enum": sorted(literals)}
+    else:
+        candidate = concrete[0] if len(concrete) == 1 else value
+        array_match = re.fullmatch(r"(?:Array|ReadonlyArray)<(.+)>", candidate)
+        if candidate.endswith("[]"):
+            result = {
+                "type": "array",
+                "items": _typescript_type_shape(candidate[:-2].strip()),
+            }
+        elif array_match:
+            result = {
+                "type": "array",
+                "items": _typescript_type_shape(array_match.group(1).strip()),
+            }
+        else:
+            scalar = {
+                "string": "string",
+                "number": "number",
+                "boolean": "boolean",
+                "object": "object",
+                "unknown": "unknown",
+                "any": "unknown",
+            }
+            result = {"type": scalar.get(candidate, "object")}
+            if candidate not in scalar:
+                result["reference"] = candidate
+    if nullable:
+        result["nullable"] = True
+    return result

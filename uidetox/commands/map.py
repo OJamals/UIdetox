@@ -53,8 +53,8 @@ def run(args: argparse.Namespace) -> None:
         for item in frontend_map.evidence.get("runtime_findings", [])
         if isinstance(item, dict)
     ]
-    contract_findings = ProjectMap.from_dict(frontend_map.project_map).findings
-    queued = add_issues([*runtime_findings, *contract_findings])
+    contract_graph = ProjectMap.from_dict(frontend_map.project_map)
+    queued = add_issues([*runtime_findings, *contract_graph.findings])
 
     if getattr(args, "json", False):
         print(json.dumps(frontend_map.to_dict(), indent=2, sort_keys=True))
@@ -70,6 +70,12 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Routes      : {counts['route']}")
     print(f"  Actions     : {counts['action']}")
     print(f"  Data sources: {counts['data']}")
+    print(
+        "  Contracts   : "
+        f"{len(contract_graph.nodes)} nodes, {len(contract_graph.edges)} edges, "
+        f"{contract_graph.counts['contract_mismatch']} mismatch(es), "
+        f"{contract_graph.counts['coverage_gap']} coverage gap(s)"
+    )
     print(f"  Artifact    : {output_path}")
     print(f"  Queued      : {queued} current finding(s)")
     if frontend_map.evidence.get("runtime_observed"):
