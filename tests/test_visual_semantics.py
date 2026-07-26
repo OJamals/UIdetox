@@ -20,6 +20,7 @@ from uidetox.runtime_observer import (
     RuntimePage,
     RuntimeViewport,
 )
+from uidetox.runtime_layout import RuntimeFinding
 from uidetox.visual_evidence import (
     VisualEvidenceCase,
     VisualEvidenceRequest,
@@ -177,6 +178,47 @@ export function App() {
 
     assert regions[0].source_targets == ("src/App.tsx",)
     assert "map:unresolved" not in regions[0].provenance
+
+
+def test_runtime_region_provenance_cites_capture_findings_and_sources() -> None:
+    page = RuntimePage(
+        url="http://127.0.0.1:4173/projects",
+        title="Projects",
+        viewport=RuntimeViewport("desktop", 1280, 800),
+        elements=(
+            RuntimeElement(
+                kind="region",
+                tag="nav",
+                role="navigation",
+                name="Project navigation",
+                selector='[data-testid="sidebar"]',
+                order=0,
+                bounds={"x": 0, "y": 0, "width": 240, "height": 800},
+                styles={},
+                findings=(
+                    RuntimeFinding(
+                        code="runtime-component-drift",
+                        category="consistency",
+                        severity="warning",
+                        message="Peer surface differs.",
+                    ),
+                ),
+            ),
+        ),
+        capture_id="projects-ready-desktop",
+        scenario="projects",
+        state="ready",
+    )
+
+    region = semantic_regions_from_runtime(
+        page,
+        frontend_map=_frontend_map(),
+    )[0]
+
+    assert "capture:projects-ready-desktop" in region.provenance
+    assert "state:projects/ready" in region.provenance
+    assert "finding:runtime-component-drift" in region.provenance
+    assert "source:frontend/src/components/Sidebar.tsx" in region.provenance
 
 
 def test_visual_context_hashes_map_and_field_level_intent_provenance() -> None:

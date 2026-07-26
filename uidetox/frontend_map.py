@@ -759,6 +759,7 @@ def map_frontend(
         "eligible": sum(capture.coverage.eligible for capture in runtime_captures),
         "emitted": sum(capture.coverage.emitted for capture in runtime_captures),
     }
+    runtime_semantic_coverage = _runtime_semantic_coverage(runtime_pages)
     project_map = build_project_map(root_path, nodes)
 
     return FrontendMap(
@@ -825,6 +826,7 @@ def map_frontend(
             ],
             "runtime_diagnostics": runtime_diagnostics,
             "runtime_coverage": runtime_coverage,
+            "runtime_semantic_coverage": runtime_semantic_coverage,
             "runtime_viewport_discovery": (
                 asdict(runtime.viewport_discovery)
                 if runtime is not None
@@ -1091,6 +1093,47 @@ def _runtime_diagnostic_findings(
     return tuple(findings)
 
 
+def _runtime_semantic_coverage(pages: Iterable[Any]) -> dict[str, int]:
+    coverage = Counter(
+        {
+            "elements": 0,
+            "equivalence_grouped": 0,
+            "paint_resolved": 0,
+            "paint_unresolved": 0,
+            "paint_unobserved": 0,
+        }
+    )
+    for page in pages:
+        for element in page.elements:
+            coverage["elements"] += 1
+            measurements = element.measurements
+            if measurements.get("equivalenceGroup"):
+                coverage["equivalence_grouped"] += 1
+            paint = measurements.get("paint")
+            if not isinstance(paint, dict):
+                coverage["paint_unobserved"] += 1
+                continue
+            foreground = paint.get("foreground")
+            layers = paint.get("background_layers")
+            unresolved = paint.get("unresolved")
+            resolved = (
+                isinstance(foreground, dict)
+                and isinstance(foreground.get("rgba"), list)
+                and isinstance(layers, list)
+                and bool(layers)
+                and all(
+                    isinstance(layer, dict)
+                    and isinstance(layer.get("rgba"), list)
+                    for layer in layers
+                )
+                and not unresolved
+            )
+            coverage[
+                "paint_resolved" if resolved else "paint_unresolved"
+            ] += 1
+    return dict(coverage)
+
+
 def _merge_runtime_evidence(
     nodes: list[FrontendNode],
     edges: list[FrontendEdge],
@@ -1106,6 +1149,7 @@ def _merge_runtime_evidence(
         capture_identity = page.capture_id
         page_id = _node_id("runtime_page", "", capture_identity)
         page_finding_count = sum(len(element.findings) for element in page.elements)
+        page_semantic_coverage = _runtime_semantic_coverage((page,))
         route_sources = application.route_sources(page.url)
         nodes.append(
             FrontendNode(
@@ -1127,9 +1171,11 @@ def _merge_runtime_evidence(
                     "state": page.state,
                     "screenshot": page.screenshot,
                     "finding_count": page_finding_count,
+                    "semantic_coverage": page_semantic_coverage,
                 },
             )
         )
+        runtime_elements: list[tuple[str, Any]] = []
         for element in page.elements:
             ownership = application.source_ownership(
                 selector=element.selector,
@@ -1191,6 +1237,7 @@ def _merge_runtime_evidence(
                     },
                 )
             )
+            runtime_elements.append((element_id, element))
             _append_edge_once(
                 edges,
                 edge_keys,
@@ -1217,6 +1264,66 @@ def _merge_runtime_evidence(
                 signal_counts["sidebar"] += 1
             if node_kind == "runtime_action":
                 signal_counts["runtime_action"] += 1
+
+        selector_to_id = {
+            element.selector: element_id
+            for element_id, element in runtime_elements
+            if element.selector
+        }
+        equivalence_groups: defaultdict[str, list[tuple[str, Any]]] = defaultdict(
+            list
+        )
+        for element_id, element in runtime_elements:
+            parent_selector = str(
+                element.measurements.get("layoutParentSelector", "")
+            )
+            parent_id = selector_to_id.get(parent_selector)
+            if parent_id is not None and parent_id != element_id:
+                _append_edge_once(
+                    edges,
+                    edge_keys,
+                    FrontendEdge(
+                        parent_id,
+                        element_id,
+                        "runtime_contains",
+                        {
+                            "selector": parent_selector,
+                            "capture_id": page.capture_id,
+                        },
+                    ),
+                )
+            equivalence_group = str(
+                element.measurements.get("equivalenceGroup", "")
+            )
+            if equivalence_group:
+                equivalence_groups[equivalence_group].append(
+                    (element_id, element)
+                )
+        for group, members in sorted(equivalence_groups.items()):
+            ordered = sorted(members, key=lambda item: item[1].order)
+            if len(ordered) < 2:
+                continue
+            representative_id, representative = ordered[0]
+            for member_id, member in ordered[1:]:
+                _append_edge_once(
+                    edges,
+                    edge_keys,
+                    FrontendEdge(
+                        representative_id,
+                        member_id,
+                        "runtime_equivalent",
+                        {
+                            "group": group,
+                            "evidence": (
+                                member.measurements.get("equivalenceEvidence")
+                                or representative.measurements.get(
+                                    "equivalenceEvidence"
+                                )
+                            ),
+                            "capture_id": page.capture_id,
+                        },
+                    ),
+                )
 
 
 def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
