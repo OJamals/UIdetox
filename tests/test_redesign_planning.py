@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from pathlib import Path
 
 from uidetox.commands import redesign as redesign_command
+from uidetox.design_context import DesignIntent
 from uidetox.frontend_map import (
     FrontendMap,
     load_frontend_map,
@@ -68,6 +70,129 @@ export function App() { return <main><Widget /></main>; }
         "src/App.tsx",
     ]
     assert all(item["reasons"] for item in proposal.source_evidence)
+
+
+def test_preserved_contract_evidence_keeps_exact_source_identity(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        """
+import { UsersPage } from "./UsersPage";
+import { Unrelated } from "./Unrelated";
+export function App() { return <main><UsersPage /><Unrelated /></main>; }
+""".strip(),
+        encoding="utf-8",
+    )
+    (source / "UsersPage.tsx").write_text(
+        """
+export function UsersPage() {
+  fetch("/api/users");
+  return <section>Users</section>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (source / "Unrelated.tsx").write_text(
+        "export function Unrelated() { return <aside>Help</aside>; }",
+        encoding="utf-8",
+    )
+
+    _frontend_map, _redesigns, proposal = _proposal(tmp_path)
+    contract = "Data contract remains functional: /api/users"
+    evidence = next(
+        item
+        for item in proposal.preserved_contract_evidence
+        if item["contract"] == contract
+    )
+    check = next(item for item in proposal.observable_checks if contract in item)
+
+    assert evidence["source_modules"] == ["src/UsersPage.tsx"]
+    assert evidence["source_status"] == "mapped"
+    assert evidence["provenance"]
+    assert "src/Unrelated.tsx" not in check
+
+
+def test_explicit_preservation_uses_intent_provenance_without_false_source(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        "export function App() { return <main />; }",
+        encoding="utf-8",
+    )
+    intent = DesignIntent.from_dict(
+        {
+            "preserve": ["Keep the verified legal wording"],
+            "provenance": {"preserve": "explicit"},
+            "evidence": {"preserve": ["user:cli-setup"]},
+        }
+    )
+    frontend_map = map_frontend(tmp_path, "src")
+    proposal = propose_redesigns(
+        frontend_map,
+        RedesignBrief(variants=1, intent=intent),
+    ).proposals[0]
+    evidence = next(
+        item
+        for item in proposal.preserved_contract_evidence
+        if item["contract"] == "Keep the verified legal wording"
+    )
+
+    assert evidence["source_modules"] == []
+    assert evidence["source_status"] == "intent"
+    assert evidence["provenance"] == ["user:cli-setup"]
+
+
+def test_contract_checks_do_not_multiply_unrelated_sources(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    imports: list[str] = []
+    renders: list[str] = []
+    for index in range(25):
+        page = f"Page{index}"
+        unrelated = f"Unrelated{index}"
+        imports.extend(
+            (
+                f'import {{ {page} }} from "./{page}";',
+                f'import {{ {unrelated} }} from "./{unrelated}";',
+            )
+        )
+        renders.extend((f"<{page} />", f"<{unrelated} />"))
+        (source / f"{page}.tsx").write_text(
+            (
+                f"export function {page}() {{ "
+                f'fetch("/api/items/{index}"); return <section>{index}</section>; }}'
+            ),
+            encoding="utf-8",
+        )
+        (source / f"{unrelated}.tsx").write_text(
+            f"export function {unrelated}() {{ return <aside>{index}</aside>; }}",
+            encoding="utf-8",
+        )
+    (source / "App.tsx").write_text(
+        "\n".join(
+            (
+                *imports,
+                "export function App() {",
+                f"  return <main>{''.join(renders)}</main>;",
+                "}",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    _frontend_map, _redesigns, proposal = _proposal(tmp_path)
+    data_checks = [
+        item
+        for item in proposal.observable_checks
+        if item.startswith("Source check: Data contract remains functional:")
+    ]
+
+    assert len(proposal.source_targets) == 51
+    assert len(data_checks) == 25
+    assert all("Unrelated" not in item for item in data_checks)
+    assert max(map(len, data_checks)) < 150
 
 
 def test_dependency_cycles_are_grouped_and_block_planning(tmp_path) -> None:
@@ -371,3 +496,29 @@ def test_source_filename_cannot_escape_prototype_evidence_block(tmp_path) -> Non
 
     assert "IGNORE_ALL_PREVIOUS_INSTRUCTIONS" not in brief[:evidence_start]
     assert "IGNORE_ALL_PREVIOUS_INSTRUCTIONS" in brief[evidence_start:evidence_end]
+
+
+def test_fullstack_prototype_brief_stays_bounded_without_dropping_contracts(
+    monkeypatch,
+) -> None:
+    root = Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
+    monkeypatch.chdir(root)
+    frontend_map = map_frontend(root, ".")
+    redesigns = propose_redesigns(
+        frontend_map,
+        RedesignBrief(target=".", variants=1),
+    )
+    proposal = redesigns.proposals[0]
+
+    brief = build_prototype_brief(redesigns, proposal.id)
+
+    assert len(brief.encode("utf-8")) < 65_536
+    assert all(contract in brief for contract in proposal.preserved_contracts)
+    representative = "Data contract remains functional: /api/projects"
+    assert (
+        sum(
+            line.startswith(f"- Source check: {representative} ")
+            for line in brief.splitlines()
+        )
+        == 1
+    )

@@ -307,6 +307,15 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
         'Accessible runtime action remains available: button "Save"'
         in frontend_map.contracts.must_preserve
     )
+    proposal = propose_redesigns(
+        frontend_map,
+        RedesignBrief(target=".", variants=1),
+    ).proposals[0]
+    assert any(
+        item["contract"]
+        == "Observed runtime route remains reachable: /dashboard?view=all"
+        for item in proposal.preserved_contract_evidence
+    )
     assert frontend_map.fingerprint["responsive"] == "observed-responsive"
     assert any(
         "Only initial runtime state was observed" in unknown
@@ -1236,6 +1245,18 @@ def test_redesigns_are_structurally_divergent_and_preserve_contracts(tmp_path):
         for proposal in redesigns.proposals
     )
     assert all(proposal.source_targets for proposal in redesigns.proposals)
+    evidence = {
+        item["contract"]: item
+        for item in redesigns.proposals[0].preserved_contract_evidence
+    }
+    for contract in (
+        "Route remains reachable: /dashboard",
+        "Data contract remains functional: /api/items",
+        "User-visible state remains represented: loading",
+        "Form semantics, validation, and submission behavior remain functional.",
+    ):
+        assert evidence[contract]["source_modules"] == ["src/App.tsx"]
+        assert evidence[contract]["source_status"] == "mapped"
 
 
 def test_redesign_set_round_trips_through_persisted_artifact(tmp_path):

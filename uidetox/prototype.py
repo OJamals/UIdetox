@@ -47,14 +47,6 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
         for item in proposal.migration_plan
         if item.get("kind") == "strategy"
     ]
-    contract_evidence = [
-        (
-            f"- {item.get('contract', 'unknown')}: "
-            f"source={', '.join(item.get('source_modules', [])) or 'unknown'}; "
-            f"runtime={item.get('runtime_status', 'unknown')}"
-        )
-        for item in proposal.preserved_contract_evidence
-    ]
     source_freshness = proposal.evidence_freshness.get("source", {})
     runtime_freshness = proposal.evidence_freshness.get("runtime", {})
 
@@ -133,10 +125,6 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             *(source_evidence or ["- None mapped."]),
             "Dependency-aware migration plan:",
             *(migration_evidence or ["- None mapped."]),
-            "Contracts to preserve:",
-            *_bullets(proposal.preserved_contracts),
-            "Preserved contract evidence:",
-            *(contract_evidence or ["- None mapped."]),
             "Evidence freshness:",
             f"- Source: {source_freshness.get('status', 'unknown')}",
             f"- Runtime: {runtime_freshness.get('status', 'unknown')}",

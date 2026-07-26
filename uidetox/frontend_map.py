@@ -1365,7 +1365,7 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
         )
         for node in runtime_pages
     }
-    runtime_routes = sorted({_runtime_route(node.name) for node in runtime_pages})
+    runtime_routes = sorted({runtime_route(node.name) for node in runtime_pages})
     runtime_actions = sorted(
         {
             (
@@ -1577,7 +1577,7 @@ def _build_fingerprint(
     }
 
 
-def _runtime_route(url: str) -> str:
+def runtime_route(url: str) -> str:
     parsed = urlsplit(url)
     return parsed.path + (f"?{parsed.query}" if parsed.query else "")
 
