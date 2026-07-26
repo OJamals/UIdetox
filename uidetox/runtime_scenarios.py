@@ -34,6 +34,8 @@ _SUPPORTED_ACTIONS = frozenset(
     {
         "click",
         "fill",
+        "focus",
+        "hover",
         "key",
         "wait-for-selector",
         "wait-for-state",
@@ -45,6 +47,8 @@ _LOAD_STATES = frozenset({"load", "domcontentloaded", "networkidle"})
 _ACTION_FIELDS = {
     "click": {"kind", "selector", "timeout_ms"},
     "fill": {"kind", "selector", "env", "timeout_ms"},
+    "focus": {"kind", "selector", "timeout_ms"},
+    "hover": {"kind", "selector", "timeout_ms"},
     "key": {"kind", "selector", "key", "timeout_ms"},
     "wait-for-selector": {"kind", "selector", "timeout_ms"},
     "wait-for-state": {"kind", "selector", "state", "timeout_ms"},
@@ -487,7 +491,13 @@ class RuntimeScenarioAction:
             raise ValueError(
                 f"Runtime action timeout_ms must be 1-{_MAX_ACTION_TIMEOUT_MS}."
             )
-        if self.kind in {"click", "fill", "wait-for-selector"} and not self.selector:
+        if self.kind in {
+            "click",
+            "fill",
+            "focus",
+            "hover",
+            "wait-for-selector",
+        } and not self.selector:
             raise ValueError(f"Runtime {self.kind} action requires selector.")
         if self.kind == "key" and (not self.selector or not self.key):
             raise ValueError("Runtime key action requires selector and key.")

@@ -22,6 +22,8 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
+from uidetox.color_utils import normalize_rendered_color
+from uidetox.design_semantics import detect_design_findings
 from uidetox.findings import Finding
 from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.runtime_scenarios import (
@@ -46,6 +48,69 @@ from uidetox.runtime_scenarios import (
     validate_runtime_observation_plan,
 )
 from uidetox.utils import now_iso
+
+
+def _normalized_runtime_measurements(value: object) -> dict[str, Any]:
+    measurements = dict(value) if isinstance(value, dict) else {}
+    raw_paint = measurements.get("paint")
+    if not isinstance(raw_paint, dict):
+        return measurements
+    paint = dict(raw_paint)
+    unresolved = [
+        dict(item)
+        for item in paint.get("unresolved", [])
+        if isinstance(item, dict)
+    ]
+
+    def normalize_entry(
+        raw_entry: object,
+        *,
+        selector: str,
+        property_name: str,
+    ) -> dict[str, Any]:
+        entry = dict(raw_entry) if isinstance(raw_entry, dict) else {}
+        raw = str(entry.get("raw", ""))
+        existing = entry.get("rgba")
+        if (
+            isinstance(existing, (list, tuple))
+            and len(existing) == 4
+            and all(isinstance(channel, (int, float)) for channel in existing)
+        ):
+            entry["rgba"] = [float(channel) for channel in existing]
+            return entry
+        normalized = normalize_rendered_color(raw)
+        entry["rgba"] = list(normalized) if normalized is not None else None
+        if normalized is None:
+            cause = {
+                "selector": selector,
+                "property": property_name,
+                "value": raw,
+            }
+            if cause not in unresolved:
+                unresolved.append(cause)
+        return entry
+
+    paint["foreground"] = normalize_entry(
+        paint.get("foreground"),
+        selector=str(paint.get("selector", "")),
+        property_name="color",
+    )
+    layers: list[dict[str, Any]] = []
+    for raw_layer in paint.get("background_layers", []):
+        if not isinstance(raw_layer, dict):
+            continue
+        selector = str(raw_layer.get("selector", ""))
+        layers.append(
+            normalize_entry(
+                raw_layer,
+                selector=selector,
+                property_name="background-color",
+            )
+        )
+    paint["background_layers"] = layers
+    paint["unresolved"] = unresolved
+    measurements["paint"] = paint
+    return measurements
 
 
 @dataclass(frozen=True)
@@ -86,7 +151,7 @@ class RuntimeElement:
                 if isinstance(item, str)
             ),
             states=dict(states),
-            measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
+            measurements=_normalized_runtime_measurements(measurements),
             findings=tuple(
                 Finding.from_dict(dict(item))
                 for item in value.get("findings", [])
@@ -159,6 +224,23 @@ class RuntimePage:
             scenario=str(value.get("scenario", "default")),
             state=str(value.get("state", "initial")),
         )
+
+
+def _attach_design_findings(page: RuntimePage) -> RuntimePage:
+    semantic_findings = detect_design_findings(page)
+    if not any(semantic_findings):
+        return page
+    return replace(
+        page,
+        elements=tuple(
+            replace(element, findings=(*element.findings, *findings))
+            for element, findings in zip(
+                page.elements,
+                semantic_findings,
+                strict=True,
+            )
+        ),
+    )
 
 
 def _legacy_capture(page: RuntimePage, generated_at: str) -> RuntimeCaptureRecord:
@@ -637,26 +719,18 @@ def _wait_for_readiness(
             )
         elif policy.mutation_idle_ms:
             strategy = "mutation-idle"
-            outcome = page.evaluate(
+            page.wait_for_function(
                 """
                 policy => new Promise(resolve => {
-                  const finish = outcome => {
+                  const finish = () => {
                     observer.disconnect();
                     clearTimeout(idleTimer);
-                    clearTimeout(limitTimer);
-                    resolve(outcome);
+                    resolve(true);
                   };
-                  let idleTimer = setTimeout(() => finish("idle"), policy.idle);
-                  const limitTimer = setTimeout(
-                    () => finish("timeout"),
-                    policy.timeout
-                  );
+                  let idleTimer = setTimeout(finish, policy.idle);
                   const observer = new MutationObserver(() => {
                     clearTimeout(idleTimer);
-                    idleTimer = setTimeout(
-                      () => finish("idle"),
-                      policy.idle
-                    );
+                    idleTimer = setTimeout(finish, policy.idle);
                   });
                   observer.observe(document, {
                     subtree: true,
@@ -668,12 +742,9 @@ def _wait_for_readiness(
                 """,
                 {
                     "idle": policy.mutation_idle_ms,
-                    "timeout": timeout_ms,
                 },
+                timeout=timeout_ms,
             )
-            if outcome == "timeout":
-                status = "degraded"
-                detail = "mutation-idle timed out"
         elif policy.request_idle_ms:
             strategy = "request-idle"
             page.wait_for_load_state(
@@ -715,6 +786,10 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
                 f"Runtime fill failed for selector {action.selector}: "
                 f"{type(exc).__name__}"
             ) from exc
+    elif action.kind == "hover":
+        page.locator(action.selector).hover(timeout=action.timeout_ms)
+    elif action.kind == "focus":
+        page.locator(action.selector).focus(timeout=action.timeout_ms)
     elif action.kind == "key":
         page.locator(action.selector).press(action.key, timeout=action.timeout_ms)
     elif action.kind == "wait-for-selector":
@@ -779,15 +854,17 @@ def _capture_scenario_state(
         ),
         full_page=full_page,
     )
-    runtime_page = RuntimePage(
-        url=page.url,
-        title=page.title(),
-        viewport=viewport,
-        elements=elements,
-        screenshot=screenshot,
-        capture_id=capture_id,
-        scenario=scenario.name,
-        state=state,
+    runtime_page = _attach_design_findings(
+        RuntimePage(
+            url=page.url,
+            title=page.title(),
+            viewport=viewport,
+            elements=elements,
+            screenshot=screenshot,
+            capture_id=capture_id,
+            scenario=scenario.name,
+            state=state,
+        )
     )
     return runtime_page, RuntimeCaptureRecord(
         capture_id=capture_id,
@@ -1047,6 +1124,32 @@ async () => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   };
+  const computedAlpha = value => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized || normalized === "transparent") return 0;
+    const slash = normalized.match(/\/\s*([+-]?(?:\d+\.?\d*|\.\d+)%?)\s*\)$/);
+    if (slash) {
+      const parsed = Number.parseFloat(slash[1]);
+      return Number.isFinite(parsed)
+        ? Math.max(0, Math.min(1, slash[1].endsWith("%") ? parsed / 100 : parsed))
+        : null;
+    }
+    const body = normalized.match(/^rgba?\((.*)\)$/)?.[1] || "";
+    const commaParts = body.split(",").map(part => part.trim());
+    if (commaParts.length === 4) {
+      const parsed = Number.parseFloat(commaParts[3]);
+      return Number.isFinite(parsed)
+        ? Math.max(
+            0,
+            Math.min(
+              1,
+              commaParts[3].endsWith("%") ? parsed / 100 : parsed
+            )
+          )
+        : null;
+    }
+    return 1;
+  };
 
   const implicitRole = (element) => {
     const tag = element.tagName.toLowerCase();
@@ -1272,6 +1375,119 @@ async () => {
     )
   );
 
+  const paletteRoleFor = (element, role, visualContainer) => {
+    const tag = element.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return "heading";
+    if (isControl(element, role)) return "action";
+    if (visualContainer) return "surface";
+    if ((element.textContent || "").trim()) return "body";
+    return "";
+  };
+
+  const paintEvidence = (element, style) => {
+    const unresolved = [];
+    const backgroundLayers = [];
+    let current = element;
+    let opaque = false;
+    while (current) {
+      const currentStyle = geometryFor(current).style;
+      const selector = selectorFor(current);
+      const raw = currentStyle.backgroundColor;
+      backgroundLayers.push({selector, raw});
+      const before = unresolved.length;
+      const properties = [
+        ["background-image", currentStyle.backgroundImage, "none"],
+        ["background-blend-mode", currentStyle.backgroundBlendMode, "normal"],
+        ["mix-blend-mode", currentStyle.mixBlendMode, "normal"],
+        ["filter", currentStyle.filter, "none"],
+        [
+          "backdrop-filter",
+          currentStyle.backdropFilter || currentStyle.webkitBackdropFilter,
+          "none"
+        ]
+      ];
+      for (const [property, value, clean] of properties) {
+        if (value && value !== clean) {
+          unresolved.push({selector, property, value});
+        }
+      }
+      const opacity = Number.parseFloat(currentStyle.opacity);
+      if (Number.isFinite(opacity) && opacity < 0.999) {
+        unresolved.push({
+          selector,
+          property: "opacity",
+          value: currentStyle.opacity
+        });
+      }
+      for (const pseudo of ["::before", "::after"]) {
+        const pseudoStyle = getComputedStyle(current, pseudo);
+        const content = pseudoStyle.content;
+        if (content && !["none", "normal", '""'].includes(content)) {
+          const pseudoAlpha = computedAlpha(pseudoStyle.backgroundColor);
+          if (
+            pseudoStyle.backgroundImage !== "none"
+            || (pseudoAlpha !== null && pseudoAlpha > 0)
+          ) {
+            unresolved.push({
+              selector,
+              property: pseudo,
+              value: `${content};${pseudoStyle.backgroundColor};${pseudoStyle.backgroundImage}`
+            });
+          }
+        }
+      }
+      const alpha = computedAlpha(raw);
+      if (alpha === 1 && unresolved.length === before) {
+        opaque = true;
+        break;
+      }
+      current = current.parentElement;
+    }
+    if (!opaque) {
+      backgroundLayers.push({
+        selector: "viewport",
+        raw: "rgb(255, 255, 255)"
+      });
+    }
+    return {
+      selector: selectorFor(element),
+      foreground: {raw: style.color},
+      background_layers: backgroundLayers,
+      unresolved
+    };
+  };
+
+  const themeEvidence = (element, style) => ({
+    name: element.closest("[data-theme]")?.getAttribute("data-theme") || "",
+    colorScheme: style.colorScheme || ""
+  });
+
+  const focusIndicator = (element, style, rect) => {
+    const outlineWidth = pixels(style.outlineWidth);
+    const outlineVisible = (
+      !["none", "hidden"].includes(style.outlineStyle)
+      && outlineWidth > 0
+      && computedAlpha(style.outlineColor) !== 0
+    );
+    const shadowVisible = style.boxShadow && style.boxShadow !== "none";
+    const thickness = outlineVisible ? outlineWidth : shadowVisible ? 1 : 0;
+    const area = thickness > 0
+      ? (
+          (rect.width + thickness * 2) * (rect.height + thickness * 2)
+          - rect.width * rect.height
+        )
+      : 0;
+    return {
+      visible: Boolean(outlineVisible || shadowVisible),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: round(outlineWidth),
+      outlineColor: style.outlineColor,
+      boxShadow: style.boxShadow,
+      area: round(area),
+      minimum_area: round(2 * 2 * (rect.width + rect.height))
+    };
+  };
+
   const paintedSurface = (element, style) => {
     const parentBackground = element.parentElement
       ? geometryFor(element.parentElement).style.backgroundColor
@@ -1489,6 +1705,7 @@ async () => {
     const control = isControl(element, role);
     const visualContainer = isVisualContainer(element, style);
     const boxControl = isBoxControl(element, role, style);
+    const paletteRole = paletteRoleFor(element, role, visualContainer);
     const scrollAxes = scrollAxesFor(element);
     const descendantSummary = descendantCache.get(element);
     const containsScrollRegionX = Boolean(
@@ -1579,7 +1796,18 @@ async () => {
       paddingInlineStart: round(pixels(style.paddingInlineStart)),
       paddingInlineEnd: round(pixels(style.paddingInlineEnd)),
       paddingBlockStart: round(pixels(style.paddingBlockStart)),
-      paddingBlockEnd: round(pixels(style.paddingBlockEnd))
+      paddingBlockEnd: round(pixels(style.paddingBlockEnd)),
+      layoutParentSelector: element.parentElement
+        ? selectorFor(element.parentElement)
+        : "",
+      paletteRole,
+      readingOrder: documentOrder.get(element) ?? 0,
+      prominence: round(
+        pixels(style.fontSize)
+        * Math.max(1, pixels(style.fontWeight) / 400)
+        + Math.log2(Math.max(1, rect.width * rect.height))
+        + (/^h[1-6]$/i.test(element.tagName) ? 12 : 0)
+      )
     };
     if (text) {
       measurements.textInsetTop = round(text.insets.top);
@@ -1841,9 +2069,116 @@ async () => {
       || (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
     ));
   const selected = eligible.slice(0, __UIDETOX_CANDIDATES__);
+  const selectedTargets = selected.filter(element => {
+    const measured = baseMeasurement(element);
+    return isControl(element, measured.role);
+  });
+  // Ephemeral per-capture index; this is never retained in Python or artifacts.
+  const semanticSiblingGroups = new WeakMap();
+  const semanticSiblingEvidence = element => {
+    const parent = element.parentElement;
+    if (!parent) return null;
+    const measured = baseMeasurement(element);
+    const key = `${element.tagName.toLowerCase()}:${measured.role}`;
+    let groups = semanticSiblingGroups.get(parent);
+    if (!groups) {
+      groups = new Map();
+      semanticSiblingGroups.set(parent, groups);
+    }
+    if (groups.has(key)) return groups.get(key);
+    const peers = Array.from(parent.children).filter(candidate => {
+      if (!geometryCache.has(candidate) || !isVisible(candidate)) return false;
+      const candidateRole = baseMeasurement(candidate).role;
+      return `${candidate.tagName.toLowerCase()}:${candidateRole}` === key;
+    });
+    const evidence = peers.length < 3
+      ? null
+      : {
+          group: `${selectorFor(parent)}:${key}`,
+          evidence: "same-parent-role",
+          peers: peers.slice(0, 20).map(peer => selectorFor(peer))
+        };
+    groups.set(key, evidence);
+    return evidence;
+  };
+  const nearestTargetDistance = element => {
+    const rect = baseMeasurement(element).rect;
+    const center = {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    };
+    const distances = selectedTargets
+      .filter(candidate => candidate !== element)
+      .map(candidate => {
+        const candidateRect = baseMeasurement(candidate).rect;
+        return Math.hypot(
+          center.x - (candidateRect.left + candidateRect.width / 2),
+          center.y - (candidateRect.top + candidateRect.height / 2)
+        );
+      });
+    return distances.length ? round(Math.min(...distances)) : null;
+  };
+  const targetException = (element, role, style) => {
+    if (element.getAttribute("data-uidetox-essential") === "true") {
+      return "essential";
+    }
+    if (role === "link" && style.display === "inline") {
+      return "inline";
+    }
+    if (
+      ["input", "select", "textarea"].includes(element.tagName.toLowerCase())
+      && style.appearance === "auto"
+    ) {
+      return "user-agent";
+    }
+    return "";
+  };
+  const occlusionEvidence = (element, rect) => {
+    const insetX = Math.min(2, Math.max(0, rect.width / 4));
+    const insetY = Math.min(2, Math.max(0, rect.height / 4));
+    const points = [
+      [rect.left + rect.width / 2, rect.top + rect.height / 2],
+      [rect.left + insetX, rect.top + insetY],
+      [rect.right - insetX, rect.top + insetY],
+      [rect.left + insetX, rect.bottom - insetY],
+      [rect.right - insetX, rect.bottom - insetY]
+    ].filter(([x, y]) => (
+      x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight
+    ));
+    const covering = new Map();
+    for (const [x, y] of points) {
+      const top = document.elementFromPoint(x, y);
+      if (!top || top === element || element.contains(top)) continue;
+      const selector = selectorFor(top);
+      covering.set(selector, (covering.get(selector) || 0) + 1);
+    }
+    if (!covering.size || !points.length) {
+      return {selector: "", fraction: 0};
+    }
+    const [selector, count] = [...covering.entries()].sort(
+      (first, second) => second[1] - first[1]
+    )[0];
+    return {selector, fraction: count / points.length};
+  };
   const elements = selected.map((element, candidateOrder) => {
     const {style, rect, role, measurements} = baseMeasurement(element);
+    measurements.theme = themeEvidence(element, style);
+    measurements.paint = paintEvidence(element, style);
+    measurements.focusIndicator = focusIndicator(element, style, rect);
     enrichPeerMeasurements(element, measurements);
+    const equivalence = semanticSiblingEvidence(element);
+    if (equivalence) {
+      measurements.equivalenceGroup = equivalence.group;
+      measurements.equivalenceEvidence = equivalence.evidence;
+      measurements.equivalentPeerSelectors = equivalence.peers;
+    }
+    if (isControl(element, role)) {
+      measurements.nearestTargetDistance = nearestTargetDistance(element);
+      measurements.targetException = targetException(element, role, style);
+    }
+    const occlusion = occlusionEvidence(element, rect);
+    measurements.occludedBy = occlusion.selector;
+    measurements.occludedFraction = round(occlusion.fraction);
 
     const tag = element.tagName.toLowerCase();
     const kind = isControl(element, role)
@@ -1856,6 +2191,12 @@ async () => {
       if (element.hasAttribute(attribute)) states[attribute] = element.getAttribute(attribute);
     }
     if ("disabled" in element) states.disabled = Boolean(element.disabled);
+    states.hovered = element.matches(":hover");
+    states.focused = document.activeElement === element;
+    states.error = (
+      element.getAttribute("aria-invalid") === "true"
+      || (typeof element.matches === "function" && element.matches(":invalid"))
+    );
     states.tabIndex = element.tabIndex;
     const sourceSelectors = sourceSelectorsFor(element);
 
@@ -1879,6 +2220,12 @@ async () => {
         position: style.position,
         color: style.color,
         backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        backgroundBlendMode: style.backgroundBlendMode,
+        mixBlendMode: style.mixBlendMode,
+        filter: style.filter,
+        backdropFilter: style.backdropFilter || style.webkitBackdropFilter,
+        opacity: style.opacity,
         fontFamily: style.fontFamily,
         fontSize: style.fontSize,
         fontWeight: style.fontWeight,
@@ -1900,7 +2247,17 @@ async () => {
         alignItems: style.alignItems,
         flexDirection: style.flexDirection,
         gap: style.gap,
-        gridTemplateColumns: style.gridTemplateColumns
+        gridTemplateColumns: style.gridTemplateColumns,
+        borderRadius: style.borderRadius,
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        outlineColor: style.outlineColor,
+        boxShadow: style.boxShadow,
+        zIndex: style.zIndex,
+        cursor: style.cursor,
+        pointerEvents: style.pointerEvents,
+        appearance: style.appearance,
+        colorScheme: style.colorScheme
       },
       states,
       measurements

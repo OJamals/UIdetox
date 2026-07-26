@@ -139,6 +139,21 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
         )
     assert "never-print-this-value" not in str(fill_error.value)
 
+    action_events: list[tuple[str, int]] = []
+    state_locator = SimpleNamespace(
+        hover=lambda **kwargs: action_events.append(("hover", kwargs["timeout"])),
+        focus=lambda **kwargs: action_events.append(("focus", kwargs["timeout"])),
+    )
+    for kind in ("hover", "focus"):
+        parsed = RuntimeScenarioAction.from_dict(
+            {"kind": kind, "selector": "#account", "timeout_ms": 250}
+        )
+        runtime_observer._perform_action(
+            SimpleNamespace(locator=lambda _selector: state_locator),
+            parsed,
+        )
+    assert action_events == [("hover", 250), ("focus", 250)]
+
     outside = tmp_path.parent / "outside-runtime-scenarios.json"
     outside.write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError, match="inside"):
@@ -504,6 +519,53 @@ def test_runtime_payload_exposes_truncation_instead_of_silent_slicing() -> None:
     assert coverage.truncated is True
     assert coverage.emitted == 4
     assert coverage.candidates == 12
+
+
+def test_runtime_payload_normalizes_computed_paint_and_round_trips_semantics() -> None:
+    element = RuntimeElement.from_dict(
+        {
+            "kind": "text",
+            "tag": "p",
+            "selector": "#copy",
+            "bounds": {"x": 1, "y": 2, "width": 100, "height": 20},
+            "styles": {"color": "rgba(0, 0, 0, 0.5)"},
+            "measurements": {
+                "layoutParentSelector": "main",
+                "equivalenceGroup": "main:p:",
+                "equivalenceEvidence": "same-parent-role",
+                "paint": {
+                    "foreground": {"raw": "rgba(0, 0, 0, 0.5)"},
+                    "background_layers": [
+                        {
+                            "selector": "main",
+                            "raw": "rgb(255, 255, 255)",
+                        }
+                    ],
+                    "unresolved": [],
+                },
+            },
+        }
+    )
+
+    assert element.measurements["paint"]["foreground"]["rgba"] == [
+        0.0,
+        0.0,
+        0.0,
+        0.5,
+    ]
+    assert element.measurements["paint"]["background_layers"][0]["rgba"] == [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ]
+    page = _design_page(element, state="hover")
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+    )
+    assert RuntimeObservation.from_dict(observation.to_dict()) == observation
 
 
 def test_default_viewports_are_canonical_registry_members() -> None:
@@ -1457,6 +1519,7 @@ class _Page:
         self.events.append(("wait", value))
 
     def evaluate(self, _script: str) -> list[dict[str, object]]:
+        self.events.append(("evaluate",))
         return [
             {
                 "kind": "region",
@@ -1579,6 +1642,7 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
     )
 
     assert sum(event[0] == "launch" for event in events) == 1
+    assert sum(event[0] == "evaluate" for event in events) == len(viewports)
     assert all(
         event[1]["reduced_motion"] == "reduce"
         for event in events
@@ -1624,6 +1688,123 @@ def test_observer_screenshot_failure_preserves_existing_file(
     assert observation.errors
     assert existing.read_bytes() == b"known-good"
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+@pytest.mark.browser
+def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "design-semantics.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  html { color-scheme: light; }
+  body { margin: 0; background: rgb(255, 255, 255); }
+  #alpha { color: rgb(0 0 0 / 50%); background: transparent; }
+  #modern { color: oklch(70% 0.1 250); background: hsl(0 0% 100%); }
+  #gradient { color: white; background: linear-gradient(red, blue); }
+  #hover:hover { color: rgb(119, 119, 119); }
+  #focus:focus { outline: none; box-shadow: none; }
+  #small, #near-small { width: 20px; height: 20px; padding: 0; }
+  #small { position: absolute; left: 200px; top: 200px; }
+  #near-small { position: absolute; left: 218px; top: 200px; }
+  #sticky { position: fixed; z-index: 5; left: 0; top: 300px; width: 180px; height: 40px; }
+  #covered { position: absolute; left: 20px; top: 310px; width: 80px; height: 30px; }
+  .toolbar { display: flex; gap: 8px; margin-top: 380px; }
+  .tool { width: 100px; height: 32px; }
+  #tool-outlier { height: 44px; color: red; }
+  h1, h2 { font-size: 32px; font-weight: 700; }
+  .list { display: flex; flex-direction: column; gap: 20px; }
+  .list > p { height: 20px; margin: 0; }
+  .list > p:last-child { margin-top: 20px; }
+</style>
+<main data-theme="light">
+  <p id="alpha">Inherited alpha text</p>
+  <p id="modern">Modern computed color</p>
+  <p id="gradient">Unknown gradient backdrop</p>
+  <button id="hover">Hover target</button>
+  <button id="focus">Focus target</button>
+  <button id="disabled" disabled>Disabled target</button>
+  <input id="error" aria-invalid="true" value="bad">
+  <button id="small">A</button><button id="near-small">B</button>
+  <div id="sticky">Sticky overlay</div><button id="covered">Covered</button>
+  <div class="toolbar">
+    <button class="tool" data-uidetox-source="ToolbarAction">One</button>
+    <button class="tool" data-uidetox-source="ToolbarAction">Two</button>
+    <button class="tool" id="tool-outlier" data-uidetox-source="ToolbarAction">Three</button>
+  </div>
+  <h1>Primary</h1><h2>Secondary</h2>
+  <section class="list">
+    <p>First</p><p>Second</p><p>Third</p><p id="rhythm-outlier">Fourth</p>
+  </section>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+    scenario = RuntimeScenario(
+        name="states",
+        url=url,
+        actions=(
+            RuntimeScenarioAction(kind="hover", selector="#hover"),
+            RuntimeScenarioAction(kind="capture", state="hover"),
+            RuntimeScenarioAction(kind="focus", selector="#focus"),
+            RuntimeScenarioAction(kind="capture", state="focus"),
+        ),
+        expected_state="focus",
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    assert [page.state for page in observation.pages] == ["hover", "focus"]
+    assert len(observation.captures) == 2
+    hover = {element.selector: element for element in observation.pages[0].elements}
+    focus = {element.selector: element for element in observation.pages[1].elements}
+    assert hover["#hover"].states["hovered"] is True
+    assert focus["#focus"].states["focused"] is True
+    assert focus["#disabled"].states["disabled"] is True
+    assert focus["#error"].states["error"] is True
+    assert focus["#modern"].measurements["paint"]["foreground"]["rgba"] is not None
+    assert focus["#modern"].measurements["theme"] == {
+        "name": "light",
+        "colorScheme": "light",
+    }
+    assert "runtime-contrast" in {
+        finding.code for finding in focus["#alpha"].findings
+    }
+    assert {
+        finding.code for finding in focus["#gradient"].findings
+    } == {"runtime-color-unresolved"}
+    assert "runtime-focus-visible" in {
+        finding.code for finding in focus["#focus"].findings
+    }
+    assert "runtime-target-size" in {
+        finding.code for finding in focus["#small"].findings
+    }
+    assert "runtime-sticky-occlusion" in {
+        finding.code for finding in focus["#covered"].findings
+    }
+    assert "runtime-component-drift" in {
+        finding.code for finding in focus["#tool-outlier"].findings
+    }
+    rendered_h2 = next(
+        element for element in observation.pages[1].elements if element.tag == "h2"
+    )
+    assert "runtime-type-hierarchy" in {
+        finding.code for finding in rendered_h2.findings
+    }
+    assert "runtime-spatial-rhythm" in {
+        finding.code for finding in focus["#rhythm-outlier"].findings
+    }
 
 
 @pytest.mark.browser
