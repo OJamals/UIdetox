@@ -1,5 +1,7 @@
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 
 const client = axios.create();
 
-export const request = (path: string) => client.get(path);
+export function request<TRequest, TResponse>(path: string, body: TRequest) {
+  return client.post<TResponse, AxiosResponse<TResponse>, TRequest>(path, body);
+}

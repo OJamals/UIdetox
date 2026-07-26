@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
 from uidetox.source_facts import (
     CallFact,
@@ -22,6 +23,7 @@ from uidetox.source_facts import (
     SelectorFact,
     SourceFacts,
     SourceOccurrence,
+    classify_network_type_references,
     extract_source_facts,
     has_ast_for,
     literal_text,
@@ -166,6 +168,7 @@ class _ApplicationIndex:
     extensions: tuple[str, ...]
     exact_selectors: Mapping[str, tuple[str, ...]]
     heuristic_selectors: Mapping[str, tuple[str, ...]]
+    routes: Mapping[str, tuple[str, ...]]
     network_symbols: Mapping[str, Mapping[str, NetworkCallFact]]
 
 
@@ -244,21 +247,29 @@ class ApplicationSemantics:
         tag: str,
         source_hint: str = "",
         source_selectors: Iterable[str] = (),
+        runtime_url: str = "",
     ) -> SourceOwnership:
         if source_hint in self._index.modules:
             return SourceOwnership(
                 "resolved", 1.0, "runtime:source-hook", (source_hint,)
             )
         candidates = tuple(dict.fromkeys((selector, *source_selectors)))
+        route_sources = self._route_sources(runtime_url)
         exact = _matching_sources(self._index.exact_selectors, candidates)
-        if exact:
-            status = "resolved" if len(exact) == 1 else "ambiguous"
+        if len(exact) == 1:
             return SourceOwnership(
-                status,
-                1.0 if status == "resolved" else 0.0,
-                "selector:exact" if status == "resolved" else "selector:ambiguous",
+                "resolved",
+                1.0,
+                "selector:exact",
                 exact,
             )
+        if exact:
+            narrowed = _narrow_sources(exact, route_sources)
+            if len(narrowed) == 1:
+                return SourceOwnership(
+                    "resolved", 0.9, "selector:exact+route", narrowed
+                )
+            return SourceOwnership("ambiguous", 0.0, "selector:ambiguous", narrowed)
         heuristic = _matching_sources(
             self._index.heuristic_selectors,
             (*candidates, tag.lower()),
@@ -268,10 +279,41 @@ class ApplicationSemantics:
                 "resolved", 0.65, "selector:unique-heuristic", heuristic
             )
         if heuristic:
+            narrowed = _narrow_sources(heuristic, route_sources)
+            if len(narrowed) == 1:
+                return SourceOwnership(
+                    "resolved", 0.6, "selector:heuristic+route", narrowed
+                )
             return SourceOwnership(
-                "ambiguous", 0.0, "selector:ambiguous-heuristic", heuristic
+                "ambiguous", 0.0, "selector:ambiguous-heuristic", narrowed
+            )
+        if len(route_sources) == 1:
+            return SourceOwnership(
+                "resolved", 0.4, "route:unique-context", route_sources
+            )
+        if route_sources:
+            return SourceOwnership(
+                "ambiguous", 0.0, "route:ambiguous-context", route_sources
             )
         return SourceOwnership("unresolved", 0.0, "source-signature:absent", ())
+
+    def _route_sources(self, runtime_url: str) -> tuple[str, ...]:
+        runtime_route = _normalize_route_path(runtime_url)
+        if not runtime_route:
+            return ()
+        exact = self._index.routes.get(runtime_route, ())
+        if exact:
+            return exact
+        return tuple(
+            sorted(
+                {
+                    source
+                    for route, sources in self._index.routes.items()
+                    if _route_matches(route, runtime_route)
+                    for source in sources
+                }
+            )
+        )
 
     def _resolve_specifier(self, source_path: str, specifier: str) -> str | None:
         if not specifier.startswith((".", "/")):
@@ -665,6 +707,7 @@ def _build_application_index(
     by_path = {module.relative_path: module for module in modules}
     exact_selectors: dict[str, set[str]] = {}
     heuristic_selectors: dict[str, set[str]] = {}
+    routes: dict[str, set[str]] = {}
     network_symbols: dict[str, Mapping[str, NetworkCallFact]] = {}
     for module in modules:
         for selector in module.facts.selectors:
@@ -674,6 +717,10 @@ def _build_application_index(
                 else heuristic_selectors
             )
             index.setdefault(selector.selector, set()).add(module.relative_path)
+        for route in module.facts.routes:
+            normalized_route = _normalize_route_path(route.name)
+            if normalized_route:
+                routes.setdefault(normalized_route, set()).add(module.relative_path)
         symbols = {item.owner: item for item in module.facts.network_symbols}
         for name, symbol in tuple(symbols.items()):
             symbols.setdefault(name.partition(".")[0], symbol)
@@ -691,6 +738,7 @@ def _build_application_index(
         ),
         exact_selectors=_freeze_source_index(exact_selectors),
         heuristic_selectors=_freeze_source_index(heuristic_selectors),
+        routes=_freeze_source_index(routes),
         network_symbols=MappingProxyType(network_symbols),
     )
 
@@ -717,6 +765,41 @@ def _matching_sources(
             }
         )
     )
+
+
+def _narrow_sources(
+    sources: tuple[str, ...],
+    route_sources: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not route_sources:
+        return sources
+    narrowed = tuple(sorted(set(sources) & set(route_sources)))
+    return narrowed or sources
+
+
+def _normalize_route_path(value: str) -> str:
+    if not value:
+        return ""
+    path = urlsplit(value).path or "/"
+    normalized = "/" + "/".join(part for part in path.split("/") if part)
+    return "/" if normalized == "/" else normalized.rstrip("/")
+
+
+def _route_matches(pattern: str, runtime_route: str) -> bool:
+    pattern_parts = pattern.strip("/").split("/") if pattern != "/" else []
+    runtime_parts = runtime_route.strip("/").split("/") if runtime_route != "/" else []
+    for index, pattern_part in enumerate(pattern_parts):
+        if pattern_part == "*" or pattern_part.startswith(":") and pattern_part.endswith(
+            "*"
+        ):
+            return index == len(pattern_parts) - 1 and index <= len(runtime_parts)
+        if index >= len(runtime_parts):
+            return False
+        if pattern_part.startswith(":"):
+            continue
+        if pattern_part != runtime_parts[index]:
+            return False
+    return len(pattern_parts) == len(runtime_parts)
 
 
 def _resolve_network_calls(
@@ -791,6 +874,13 @@ def _resolve_network_calls(
                         )
                     )
                 continue
+            request_refs, response_refs = _resolved_type_references(
+                application,
+                symbol.module_path,
+                symbol.local_name,
+                capability,
+                call,
+            )
             expression = call.arguments[0] if call.arguments else None
             literal_url = literal_text(expression)
             url = literal_url or capability.url
@@ -815,6 +905,8 @@ def _resolve_network_calls(
                     owner=call.owner,
                     resolution="resolved",
                     unresolved_evidence=None,
+                    request_type_refs=request_refs,
+                    response_type_refs=response_refs,
                 )
             )
         modules.append(
@@ -860,9 +952,59 @@ def _import_binding(
     return None
 
 
+def _resolved_type_references(
+    application: ApplicationSemantics,
+    module_path: str,
+    local_name: str,
+    capability: NetworkCallFact,
+    call: CallFact,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    module = application.module(module_path)
+    definition = (
+        next(
+            (
+                item
+                for item in module.facts.callables
+                if item.name in {local_name, capability.owner}
+            ),
+            None,
+        )
+        if module is not None
+        else None
+    )
+    substitutions = (
+        dict(zip(definition.type_parameters, call.type_arguments, strict=False))
+        if definition is not None
+        else {}
+    )
+
+    def substitute(references: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                resolved
+                for reference in references
+                for resolved in substitutions.get(reference, (reference,))
+            )
+        )
+
+    request_refs = substitute(capability.request_type_refs)
+    response_refs = substitute(capability.response_type_refs)
+    direct_request, direct_response = classify_network_type_references(
+        capability.client_family,
+        call.target,
+        call.type_arguments,
+    )
+    return request_refs or direct_request, response_refs or direct_response
+
+
 def _unresolved_network_call(call: CallFact, evidence: str) -> NetworkCallFact:
     expression = call.arguments[0] if call.arguments else None
     url = literal_text(expression)
+    request_refs, response_refs = classify_network_type_references(
+        "imported-client",
+        call.target,
+        call.type_arguments,
+    )
     return NetworkCallFact(
         target=call.target,
         client_family="imported-client",
@@ -874,6 +1016,8 @@ def _unresolved_network_call(call: CallFact, evidence: str) -> NetworkCallFact:
         owner=call.owner,
         resolution="unresolved",
         unresolved_evidence=evidence,
+        request_type_refs=request_refs,
+        response_type_refs=response_refs,
     )
 
 

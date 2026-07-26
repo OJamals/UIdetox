@@ -870,6 +870,7 @@ def _merge_runtime_evidence(
                 tag=element.tag,
                 source_hint=element.source_hint,
                 source_selectors=element.source_selectors,
+                runtime_url=page.url,
             )
             if element.kind == "action":
                 node_kind = "runtime_action"

@@ -22,8 +22,9 @@ cache, source discovery walk, global component-name index, or regex endpoint
 fallback.
 
 One immutable application index owns module paths, extension candidates,
-network symbols, and selector-to-source signatures. Module, import, export,
-and runtime ownership lookups reuse it; consumers must not add parallel caches.
+network symbols, routes, and selector-to-source signatures. Module candidate
+and runtime ownership lookups reuse it. Import/export traversal reads canonical
+per-module facts through that index; consumers must not add parallel caches.
 
 ## Capability contract
 
@@ -47,6 +48,10 @@ reproducer, the bounded-source-anchor regression, and the complete suite.
 Unknown network calls remain unresolved facts with provenance. Import and
 re-export traversal is bounded by visited `(module, export)` identities, so
 cycles terminate deterministically.
+TypeScript generic-call evidence is bounded and classified by client-family
+conventions. Callable type parameters substitute concrete call arguments
+through imported and re-exported wrappers; this records source type references
+without claiming the backend DTO lineage owned by the next phase.
 
 ## Source ownership
 
@@ -58,8 +63,10 @@ Runtime ownership follows this precedence:
 
 1. application-provided `data-uidetox-source` path;
 2. unique exact static selector (`id`, `data-testid`, or `data-test`);
-3. unique tag heuristic;
-4. ambiguous or unresolved provenance with no `source_targets`.
+3. route-disambiguated exact selector candidates;
+4. unique or route-disambiguated class/tag heuristic;
+5. unique route context at low confidence;
+6. ambiguous or unresolved provenance with no `source_targets`.
 
 UIdetox never injects source annotations into target applications.
 

@@ -126,6 +126,20 @@ _REGION_TAGS = frozenset(
 )
 _SCRIPT_EXTENSIONS = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"})
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+_TYPE_CONTAINERS = frozenset(
+    {
+        "Array",
+        "AxiosPromise",
+        "AxiosResponse",
+        "Partial",
+        "Pick",
+        "Promise",
+        "Readonly",
+        "ReadonlyArray",
+        "Record",
+        "Response",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -171,6 +185,7 @@ class CallableFact:
     name: str
     parameters: tuple[str, ...]
     line: int
+    type_parameters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -182,6 +197,7 @@ class CallFact:
     line: int
     owner: str
     method_hint: str | None = None
+    type_arguments: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -578,6 +594,7 @@ def _extract_callables(nodes: Iterable[object]) -> tuple[CallableFact, ...]:
                 name,
                 _parameter_names(node.child_by_field_name("parameters")),
                 _line(node),
+                _type_parameter_names(node.child_by_field_name("type_parameters")),
             )
         )
     return tuple(dict.fromkeys(callables))
@@ -604,6 +621,9 @@ def _extract_calls(nodes: Iterable[object]) -> tuple[CallFact, ...]:
                 line=_line(node),
                 owner=_containing_callable(node),
                 method_hint=_call_method_hint(arguments),
+                type_arguments=_type_argument_references(
+                    node.child_by_field_name("type_arguments")
+                ),
             )
         )
     return tuple(calls)
@@ -640,6 +660,7 @@ def _classify_network_calls(
         )
     wrapper_methods: dict[str, str | None] = {}
     wrapper_families: dict[str, str] = {}
+    wrapper_type_refs: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
     for call in calls:
         if not call.owner or not call.arguments:
             continue
@@ -650,6 +671,18 @@ def _classify_network_calls(
             continue
         wrapper_families[call.owner] = base
         wrapper_methods[call.owner] = method or call.method_hint or "GET"
+        request_refs, response_refs = classify_network_type_references(
+            base,
+            call.target,
+            call.type_arguments,
+        )
+        previous_request, previous_response = wrapper_type_refs.get(
+            call.owner, ((), ())
+        )
+        wrapper_type_refs[call.owner] = (
+            tuple(dict.fromkeys((*previous_request, *request_refs))),
+            tuple(dict.fromkeys((*previous_response, *response_refs))),
+        )
 
     classified: list[NetworkCallFact] = []
     for call in calls:
@@ -681,6 +714,11 @@ def _classify_network_calls(
         unresolved = None
         if family in {"tanstack-query", "apollo", "rtk-query"} and url is None:
             unresolved = "client family resolved; endpoint URL not statically available"
+        request_refs, response_refs = classify_network_type_references(
+            family,
+            call.target,
+            call.type_arguments,
+        )
         classified.append(
             NetworkCallFact(
                 target=call.target,
@@ -693,6 +731,8 @@ def _classify_network_calls(
                 owner=call.owner,
                 resolution="resolved",
                 unresolved_evidence=unresolved,
+                request_type_refs=request_refs,
+                response_type_refs=response_refs,
             )
         )
     symbols: dict[str, NetworkCallFact] = {}
@@ -723,6 +763,7 @@ def _classify_network_calls(
             ),
         )
     for owner, family in wrapper_families.items():
+        request_refs, response_refs = wrapper_type_refs.get(owner, ((), ()))
         remember(
             owner,
             NetworkCallFact(
@@ -735,6 +776,8 @@ def _classify_network_calls(
                 True,
                 owner,
                 "definition",
+                request_type_refs=request_refs,
+                response_type_refs=response_refs,
             ),
         )
     for call in classified:
@@ -960,6 +1003,86 @@ def _parameter_names(parameters) -> tuple[str, ...]:
             _text(item) for item in _walk(pattern) if item.type == "identifier"
         )
     return tuple(dict.fromkeys(name for name in names if name))
+
+
+def _type_parameter_names(type_parameters) -> tuple[str, ...]:
+    if type_parameters is None:
+        return ()
+    return tuple(
+        name
+        for parameter in type_parameters.named_children[:8]
+        if parameter.type == "type_parameter"
+        and (name := _text(parameter.child_by_field_name("name")))
+    )
+
+
+def _type_argument_references(
+    type_arguments,
+) -> tuple[tuple[str, ...], ...]:
+    if type_arguments is None:
+        return ()
+    return tuple(
+        _bounded_type_references(argument)
+        for argument in type_arguments.named_children[:8]
+    )
+
+
+def _bounded_type_references(node) -> tuple[str, ...]:
+    references: list[str] = []
+    pending = [node]
+    visited = 0
+    while pending and visited < 64 and len(references) < 16:
+        current = pending.pop()
+        visited += 1
+        if current.type == "nested_type_identifier":
+            references.append(_text(current))
+            continue
+        if current.type == "type_identifier":
+            name = _text(current)
+            if name not in _TYPE_CONTAINERS:
+                references.append(name)
+            continue
+        pending.extend(reversed(current.named_children))
+    return tuple(dict.fromkeys(reference for reference in references if reference))
+
+
+def classify_network_type_references(
+    family: str,
+    target: str,
+    type_arguments: tuple[tuple[str, ...], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Classify bounded generic-call evidence without inferring DTO lineage."""
+
+    if not type_arguments:
+        return (), ()
+    method = target.rsplit(".", 1)[-1].lower()
+
+    def refs(*indexes: int) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                reference
+                for index in indexes
+                if index < len(type_arguments)
+                for reference in type_arguments[index]
+            )
+        )
+
+    if family == "axios":
+        return refs(2), refs(0, 1)
+    if family == "tanstack-query":
+        return (
+            refs(2) if "mutation" in method else (),
+            refs(0, 2) if "query" in method else refs(0),
+        )
+    if family in {"apollo", "rtk-query"}:
+        return refs(1), refs(0)
+    if family == "ky":
+        return (), refs(0)
+    if method.startswith("use") and method.endswith(("query", "mutation")):
+        return refs(1), refs(0)
+    if len(type_arguments) == 1:
+        return (), refs(0)
+    return refs(0), refs(1)
 
 
 def _client_family_for_source(source: str) -> str | None:

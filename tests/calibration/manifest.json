@@ -290,21 +290,26 @@
           {
             "target": "fetchItems",
             "client_family": "axios",
-            "method": "GET",
+            "method": "POST",
             "url": "/api/items",
-            "resolution": "resolved"
+            "resolution": "resolved",
+            "request_type_refs": ["ItemRequest"],
+            "response_type_refs": ["ItemResponse"]
           },
           {
             "target": "useQuery",
             "client_family": "tanstack-query",
             "url": null,
-            "resolution": "resolved"
+            "resolution": "resolved",
+            "response_type_refs": ["ItemResponse"]
           },
           {
             "target": "useApolloQuery",
             "client_family": "apollo",
             "url": null,
-            "resolution": "resolved"
+            "resolution": "resolved",
+            "request_type_refs": ["ItemVariables"],
+            "response_type_refs": ["ItemResponse"]
           },
           {
             "target": "useGetUsersQuery",

@@ -334,6 +334,48 @@ export function App() {
     )
 
 
+def test_network_type_references_survive_reexported_wrapper_resolution(tmp_path):
+    sources = {
+        "api.ts": """
+import axios, { type AxiosResponse } from "axios";
+const client = axios.create();
+export function save<TRequest, TResponse>(path: string, body: TRequest) {
+  return client.post<TResponse, AxiosResponse<TResponse>, TRequest>(path, body);
+}
+""".strip(),
+        "barrel.ts": 'export { save as saveItem } from "./api";',
+        "App.tsx": """
+import { useMutation } from "@tanstack/react-query";
+import { useQuery as useApolloQuery } from "@apollo/client";
+import { saveItem } from "./barrel";
+declare const payload: SaveItemRequest;
+export function App() {
+  saveItem<SaveItemRequest, SaveItemResponse>("/api/items", payload);
+  useMutation<SaveItemResponse, Error, SaveItemRequest>({ mutationFn: saveItem });
+  useApolloQuery<ItemsResponse, ItemsVariables>(GET_ITEMS);
+  return <main />;
+}
+""".strip(),
+    }
+    documents = []
+    for relative_path, content in sources.items():
+        path = tmp_path / relative_path
+        path.write_text(content, encoding="utf-8")
+        documents.append(SourceDocument(path, relative_path, content))
+
+    application = build_application_semantics(tmp_path, tmp_path, documents)
+    app = application.module("App.tsx")
+
+    assert app is not None
+    calls = {call.target: call for call in app.facts.network_calls}
+    assert calls["saveItem"].request_type_refs == ("SaveItemRequest",)
+    assert calls["saveItem"].response_type_refs == ("SaveItemResponse",)
+    assert calls["useMutation"].request_type_refs == ("SaveItemRequest",)
+    assert calls["useMutation"].response_type_refs == ("SaveItemResponse",)
+    assert calls["useApolloQuery"].request_type_refs == ("ItemsVariables",)
+    assert calls["useApolloQuery"].response_type_refs == ("ItemsResponse",)
+
+
 def test_application_semantics_resolve_exported_client_object_methods(tmp_path):
     sources = {
         "api.ts": """

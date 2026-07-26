@@ -358,6 +358,8 @@ def _evaluate_semantic_case(
             "method": call.method,
             "url": call.url,
             "resolution": call.resolution,
+            "request_type_refs": list(call.request_type_refs),
+            "response_type_refs": list(call.response_type_refs),
         }
         for call in module.facts.network_calls
     ]

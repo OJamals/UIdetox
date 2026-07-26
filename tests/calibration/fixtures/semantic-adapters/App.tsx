@@ -6,10 +6,12 @@ import { useGetUsersQuery } from "./generated";
 import { createClient } from "@acme/generated";
 
 const generatedClient = createClient();
+declare const request: ItemRequest;
 
 export function App() {
-  useQuery({ queryKey: ["items"], queryFn: () => fetchItems("/api/items") });
-  useApolloQuery(GET_ITEMS);
+  useQuery<ItemResponse>({ queryKey: ["items"], queryFn: () => fetchItems("/api/items", request) });
+  fetchItems<ItemRequest, ItemResponse>("/api/items", request);
+  useApolloQuery<ItemResponse, ItemVariables>(GET_ITEMS);
   useGetUsersQuery();
   generatedClient.users.list();
   ky.post("/api/events");

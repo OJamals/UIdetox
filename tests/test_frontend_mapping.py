@@ -486,6 +486,145 @@ export function {name}() {{
     }
 
 
+def test_runtime_source_ownership_uses_route_context_conservatively(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    sources = {
+        "Alpha.tsx": """
+export function Alpha() {
+  return <main><Route path="/alpha" /><button data-testid="shared">Alpha</button></main>;
+}
+""",
+        "Beta.tsx": """
+export function Beta() {
+  return <main><Route path="/beta" /><button data-testid="shared">Beta</button></main>;
+}
+""",
+        "Unique.tsx": """
+export function Unique() {
+  return <main><Route path="/unique" /></main>;
+}
+""",
+        "SharedPrimary.tsx": """
+export function SharedPrimary() {
+  return <main><Route path="/shared" /></main>;
+}
+""",
+        "SharedSecondary.tsx": """
+export function SharedSecondary() {
+  return <main><Route path="/shared" /></main>;
+}
+""",
+    }
+    for name, content in sources.items():
+        (src / name).write_text(content.strip(), encoding="utf-8")
+
+    def page(path: str, selector: str) -> RuntimePage:
+        return RuntimePage(
+            url=f"http://localhost:3000{path}",
+            title=path,
+            viewport=RuntimeViewport("desktop", 1280, 800),
+            elements=(
+                RuntimeElement(
+                    kind="region",
+                    tag="canvas",
+                    role="",
+                    name=path,
+                    selector=selector,
+                    order=0,
+                    bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+                    styles={},
+                ),
+            ),
+        )
+
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=(
+            "http://localhost:3000/alpha?tab=current",
+            "http://localhost:3000/unique",
+            "http://localhost:3000/shared",
+        ),
+        pages=(
+            page("/alpha?tab=current", '[data-testid="shared"]'),
+            page("/unique", "#missing-unique"),
+            page("/shared", "#missing-shared"),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_nodes = {
+        (node.metadata["runtime_url"], node.metadata["selector"]): node
+        for node in frontend_map.nodes
+        if node.kind == "runtime_region"
+    }
+
+    narrowed = runtime_nodes[
+        (
+            "http://localhost:3000/alpha?tab=current",
+            '[data-testid="shared"]',
+        )
+    ]
+    assert narrowed.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.9,
+        "provenance": "selector:exact+route",
+        "candidates": ["src/Alpha.tsx"],
+    }
+    route_only = runtime_nodes[
+        ("http://localhost:3000/unique", "#missing-unique")
+    ]
+    assert route_only.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.4,
+        "provenance": "route:unique-context",
+        "candidates": ["src/Unique.tsx"],
+    }
+    ambiguous = runtime_nodes[
+        ("http://localhost:3000/shared", "#missing-shared")
+    ]
+    assert ambiguous.metadata["source_targets"] == []
+    assert ambiguous.metadata["source_ownership"] == {
+        "status": "ambiguous",
+        "confidence": 0.0,
+        "provenance": "route:ambiguous-context",
+        "candidates": ["src/SharedPrimary.tsx", "src/SharedSecondary.tsx"],
+    }
+    assert type(frontend_map).from_dict(frontend_map.to_dict()) == frontend_map
+
+
+def test_frontend_map_serializes_network_type_references(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+import axios, { type AxiosResponse } from "axios";
+declare const body: SaveRequest;
+export function save() {
+  return axios.post<SaveResponse, AxiosResponse<SaveResponse>, SaveRequest>(
+    "/api/items",
+    body,
+  );
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    data = next(
+        node
+        for node in frontend_map.nodes
+        if node.kind == "data" and node.name == "/api/items"
+    )
+
+    assert data.metadata["request_type_refs"] == ["SaveRequest"]
+    assert data.metadata["response_type_refs"] == ["SaveResponse"]
+    loaded = type(frontend_map).from_dict(frontend_map.to_dict())
+    loaded_data = next(node for node in loaded.nodes if node.id == data.id)
+    assert loaded_data.metadata["request_type_refs"] == ["SaveRequest"]
+    assert loaded_data.metadata["response_type_refs"] == ["SaveResponse"]
+
+
 def test_frontend_map_freshness_tracks_add_change_and_delete(tmp_path):
     _write_frontend(tmp_path)
     frontend_map = map_frontend(tmp_path, "src")
