@@ -42,6 +42,7 @@ from uidetox.runtime_scenarios import (
     normalize_runtime_urls,
     runtime_capture_id,
     sanitize_runtime_text,
+    sanitize_runtime_url,
     validate_runtime_observation_plan,
 )
 from uidetox.utils import now_iso
@@ -436,10 +437,18 @@ def _finalize_capture_diagnostics(
     for capture in captures:
         merged = []
         seen: set[tuple[str, ...]] = set()
+        capture_url = sanitize_runtime_url(capture.url)
         for diagnostic in (
             *capture.diagnostics,
             *by_state.get(capture.state, ()),
         ):
+            if (
+                diagnostic.scenario != capture.scenario
+                or diagnostic.state != capture.state
+                or diagnostic.url != capture_url
+                or diagnostic.viewport != capture.viewport.name
+            ):
+                continue
             key = (
                 diagnostic.kind,
                 diagnostic.code,

@@ -674,6 +674,83 @@ def test_finalization_preserves_capture_local_coverage_diagnostic(
     }
 
 
+def test_finalization_keeps_diagnostics_on_their_exact_capture() -> None:
+    first_state = RuntimeDiagnostic(
+        kind="console",
+        code="first-state-error",
+        message="failure before opening",
+        severity="error",
+        scenario="checkout",
+        state="closed",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="console",
+    )
+    coverage = RuntimeDiagnostic(
+        kind="coverage",
+        code="runtime-dom-budget-exceeded",
+        message="DOM coverage truncated.",
+        severity="warning",
+        scenario="checkout",
+        state="open",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="dom-budget",
+    )
+    late_current_state = RuntimeDiagnostic(
+        kind="console",
+        code="late-current-state-error",
+        message="failure while open",
+        severity="error",
+        scenario="checkout",
+        state="open",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="console",
+    )
+    mismatched_current_state = tuple(
+        replace(late_current_state, code=code, **changes)
+        for code, changes in (
+            ("wrong-scenario", {"scenario": "other"}),
+            ("wrong-url", {"url": "https://other.invalid"}),
+            ("wrong-viewport", {"viewport": "tablet"}),
+        )
+    )
+    first_capture = replace(
+        _capture_record("closed", status="completed"),
+        scenario="checkout",
+        state="closed",
+        diagnostics=(first_state,),
+    )
+    second_capture = replace(
+        _capture_record("open", status="completed"),
+        scenario="checkout",
+        state="open",
+        diagnostics=(first_state, coverage, *mismatched_current_state),
+    )
+
+    finalized = runtime_observer._finalize_capture_diagnostics(
+        (first_capture, second_capture),
+        (first_state, late_current_state, late_current_state),
+    )
+
+    assert [diagnostic.code for diagnostic in finalized[0].diagnostics] == [
+        "first-state-error"
+    ]
+    assert [diagnostic.code for diagnostic in finalized[1].diagnostics] == [
+        "runtime-dom-budget-exceeded",
+        "late-current-state-error",
+    ]
+    assert all(
+        diagnostic.state == capture.state
+        and diagnostic.scenario == capture.scenario
+        and diagnostic.url == capture.url
+        and diagnostic.viewport == capture.viewport.name
+        for capture in finalized
+        for diagnostic in capture.diagnostics
+    )
+
+
 def test_runtime_diagnostics_are_sanitized_before_serialization(
     tmp_path: Path,
 ) -> None:
