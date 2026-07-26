@@ -16,6 +16,42 @@
 - **Depends on**: `plans/013-secure-evidence-boundaries.md`, `plans/014-calibration-and-qualification-matrix.md`
 - **Category**: tech-debt
 - **Planned at**: commit `d5898c9`, 2026-07-25
+- **Completed at**: 2026-07-25
+- **Execution review**: PASS on `codex/015-verified-finding-lifecycle` at
+  `ee2d410`.
+
+### Completion evidence
+
+The repaired implementation closes every reproduced review gap:
+
+- Manual findings derive stable detector identity from normalized
+  file/issue/fix-command evidence, preserve random display IDs, and report
+  duplicate insertion truthfully.
+- TSC, lint, and mechanical verification share one configured-or-detected tool
+  resolver. Explicit-root verification reads that root's config.
+- Batch resolution reuses one mechanical evidence run per tool recipe within a
+  command and never across separate commands.
+- Legacy runtime/static confidence and source anchors pass through canonical
+  safe numeric parsing.
+
+Reviewer verification:
+
+- Blocker suite: 41 passed.
+- Full suite: 1,282 passed with warnings treated as errors.
+- Plan-scoped Ruff import/undefined/unused and preview blank-line checks passed.
+- `compileall`, `git diff --check`, wheel build, isolated wheel install, and
+  `uidetox 1.9.0` smoke test passed.
+- Tracked production Python delta versus dependency-complete `9d409ca`:
+  31,891/28,865 to 32,140/29,211 physical/nonblank lines
+  (`+249`/`+346`). The canonical finding and mechanical evidence models require
+  net growth, while the migration deletes 1,740 old lines overall and the final
+  repair removes 28 duplicated TSC/lint detection lines.
+
+Reviewed scope expansion: compatibility consumers, command adapters,
+documentation mirrors, and their contract tests necessarily changed so the
+replacement model had no parallel legacy lifecycle. Those files contribute
+314 additions and 417 deletions (net `-103`) and contain no unrelated feature
+work.
 
 ## Why this matters
 

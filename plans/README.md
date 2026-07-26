@@ -24,10 +24,10 @@ parallel implementations, and update its status row.
 | 012 | Separate analyzer policy from execution engine | P3 | L | 007, 008, 009 | DONE |
 | 013 | Secure repository evidence before persistence or agent injection | P0 | M | — | DONE |
 | 014 | Make every capability claim executable and measurable | P0 | L | — | DONE |
-| 015 | Replace fragmented issue handling with verified finding lifecycle | P0 | L | 013, 014 | TODO |
-| 016 | Replace shallow extraction with adapter-driven application semantics | P1 | L | 014 | TODO |
-| 017 | Replace route parity with typed full-stack contract lineage | P1 | L | 015, 016 | TODO |
-| 018 | Replace initial-frame capture with efficient scenario observation | P1 | L | 015, 016 | TODO |
+| 015 | Replace fragmented issue handling with verified finding lifecycle | P0 | L | 013, 014 | DONE — reviewed at `ee2d410`; 1,282 tests pass |
+| 016 | Replace shallow extraction with adapter-driven application semantics | P1 | L | 014 | DONE |
+| 017 | Replace route parity with typed full-stack contract lineage | P1 | L | 015, 016 | DONE — reviewed at `d0ec3b0`; 1,340 tests pass |
+| 018 | Replace initial-frame capture with efficient scenario observation | P1 | L | 015, 016 | DONE — reviewed at `43596ae`; 1,376 tests pass |
 | 019 | Replace guessed color checks with semantic design-quality evidence | P1 | L | 015, 018 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)

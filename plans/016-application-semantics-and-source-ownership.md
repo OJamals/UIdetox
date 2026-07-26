@@ -6,16 +6,34 @@
 > Run every gate and update `plans/README.md`.
 >
 > **Drift check (run first)**:
-> `git diff --stat d5898c9..HEAD -- pyproject.toml uidetox/source_facts.py uidetox/frontend_semantics.py uidetox/frontend_map.py uidetox/fileset.py uidetox/visual_semantics.py tests/test_source_facts.py tests/test_frontend_mapping.py tests/test_visual_semantics.py tests/test_calibration_matrix.py`
+> `git diff --stat 9d409ca..HEAD -- pyproject.toml uidetox/source_facts.py uidetox/frontend_semantics.py uidetox/frontend_map.py uidetox/fileset.py uidetox/visual_semantics.py tests/test_source_facts.py tests/test_frontend_mapping.py tests/test_visual_semantics.py tests/test_calibration_matrix.py`
 
 ## Status
 
+- **State**: DONE on isolated branch `codex/016-application-semantics`
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: HIGH
 - **Depends on**: `plans/014-calibration-and-qualification-matrix.md`
 - **Category**: tech-debt
-- **Planned at**: commit `d5898c9`, 2026-07-25
+- **Planned at**: commit `9d409ca`, 2026-07-25
+- **Refresh note**: Plan 014 changed only dev qualification metadata and the
+  calibration harness in this scope. Existing semantic implementation excerpts
+  remain current. Vue/Svelte are statically qualified only for existing rules;
+  Astro remains explicitly unsupported. Do not infer native semantic parser
+  support from file discovery.
+- **Delivered at**: commits `34977dc`, `d5db4f8`, and `fe9cf16`
+- **Acceptance evidence**: fresh `tree-sitter==0.25.2` environment completed
+  `1252 passed, 2 skipped` with warnings as errors; both skips require
+  Playwright. Scoped Ruff, `compileall`, wheel build/install, metadata, CLI,
+  anonymous-default topology, and request/response type-reference smoke checks
+  passed.
+- **Production delta**: affected production files changed from 3,830 to 5,377
+  physical lines (`+1,547`) and 3,487 to 4,877 nonblank lines (`+1,390`).
+  `frontend_map.py` shrank by 203 physical lines and 14 superseded helper
+  definitions were removed. The net increase is the canonical application
+  semantic graph, bounded symbol/type resolution, capability evidence, and
+  runtime source-ownership policy; no parallel parser/cache/model path remains.
 
 ## Why this matters
 
@@ -203,14 +221,14 @@ full suites pass.
 
 ## Done criteria
 
-- [ ] One adapter path supplies all semantic consumers.
-- [ ] Common imported client calls remain visible.
-- [ ] Framework support is native or explicitly degraded/unsupported.
-- [ ] Render topology uses module/export identity.
-- [ ] Runtime findings carry source targets or explicit unresolved provenance.
-- [ ] React-shaped fallback and global-name resolution are deleted.
-- [ ] Production-code delta and deleted helpers are reported.
-- [ ] Full suite passes; plan status updated.
+- [x] One adapter path supplies all semantic consumers.
+- [x] Common imported client calls remain visible.
+- [x] Framework support is native or explicitly degraded/unsupported.
+- [x] Render topology uses module/export identity.
+- [x] Runtime findings carry source targets or explicit unresolved provenance.
+- [x] React-shaped fallback and global-name resolution are deleted.
+- [x] Production-code delta and deleted helpers are reported.
+- [x] Full suite passes; plan status updated.
 
 ## STOP conditions
 
