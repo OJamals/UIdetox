@@ -701,15 +701,6 @@ RULES = [
         "description": "TypeScript suppression directive detected (@ts-ignore/@ts-nocheck).",
         "command": "Fix the type error instead of suppressing it. Use @ts-expect-error only as last resort with explanation.",
     },
-    {
-        "id": "LOW_CONTRAST_SLOP",
-        "pattern": None,
-        "tier": "T1",
-        "exts": _JSX_EXTS,
-        "description": "Text contrast ratio below WCAG AA standard (4.5:1).",
-        "command": "Increase text contrast against background color.",
-        "_custom_check": "contrast_ratio",
-    },
     # ──────────────────────────────────────────────
     # ACCESSIBILITY RULES
     # ──────────────────────────────────────────────

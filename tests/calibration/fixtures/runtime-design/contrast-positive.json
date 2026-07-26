@@ -1,0 +1,66 @@
+{
+  "url": "http://localhost:3000/",
+  "title": "Low contrast",
+  "viewport": {"name": "desktop", "width": 1280, "height": 800},
+  "elements": [
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Muted body copy",
+      "selector": "#muted",
+      "order": 0,
+      "bounds": {"x": 20, "y": 20, "width": 240, "height": 24},
+      "styles": {"fontSize": "16px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {
+        "paintedText": true,
+        "paint": {
+          "foreground": {
+            "raw": "rgb(119, 119, 119)",
+            "rgba": [0.18447499, 0.18447499, 0.18447499, 1.0]
+          },
+          "background_layers": [
+            {
+              "selector": "body",
+              "raw": "rgb(136, 136, 136)",
+              "rgba": [0.24620133, 0.24620133, 0.24620133, 1.0]
+            }
+          ],
+          "unresolved": []
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "tag": "p",
+      "role": "",
+      "name": "Large threshold copy",
+      "selector": "#large-threshold",
+      "order": 1,
+      "bounds": {"x": 20, "y": 60, "width": 260, "height": 32},
+      "styles": {"fontSize": "24px", "fontWeight": "400"},
+      "states": {},
+      "measurements": {
+        "paintedText": true,
+        "paint": {
+          "foreground": {
+            "raw": "gray",
+            "rgba": [0.28, 0.28, 0.28, 1.0]
+          },
+          "background_layers": [
+            {
+              "selector": "body",
+              "raw": "white",
+              "rgba": [1.0, 1.0, 1.0, 1.0]
+            }
+          ],
+          "unresolved": []
+        }
+      }
+    }
+  ],
+  "capture_id": "runtime-design-positive",
+  "scenario": "default",
+  "state": "initial"
+}

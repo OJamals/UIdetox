@@ -99,17 +99,13 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
             {"kind": "fill", "selector": "#nickname", "value": "inline-bypass"}
         )
     with pytest.raises(ValueError, match="environment variable"):
-        RuntimeScenarioAction.from_dict(
-            {"kind": "fill", "selector": "#nickname"}
-        )
+        RuntimeScenarioAction.from_dict({"kind": "fill", "selector": "#nickname"})
     with pytest.raises(ValueError, match="Unknown runtime action fields: key"):
         RuntimeScenarioAction.from_dict(
             {"kind": "click", "selector": "#save", "key": "Enter"}
         )
     with pytest.raises(ValueError, match="must be one of"):
-        RuntimeScenarioAction.from_dict(
-            {"kind": "wait-for-state", "state": "visible"}
-        )
+        RuntimeScenarioAction.from_dict({"kind": "wait-for-state", "state": "visible"})
     with pytest.raises(ValueError, match="must be one of"):
         RuntimeScenarioAction.from_dict(
             {
@@ -138,6 +134,21 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
             fill,
         )
     assert "never-print-this-value" not in str(fill_error.value)
+
+    action_events: list[tuple[str, int]] = []
+    state_locator = SimpleNamespace(
+        hover=lambda **kwargs: action_events.append(("hover", kwargs["timeout"])),
+        focus=lambda **kwargs: action_events.append(("focus", kwargs["timeout"])),
+    )
+    for kind in ("hover", "focus"):
+        parsed = RuntimeScenarioAction.from_dict(
+            {"kind": kind, "selector": "#account", "timeout_ms": 250}
+        )
+        runtime_observer._perform_action(
+            SimpleNamespace(locator=lambda _selector: state_locator),
+            parsed,
+        )
+    assert action_events == [("hover", 250), ("focus", 250)]
 
     outside = tmp_path.parent / "outside-runtime-scenarios.json"
     outside.write_text("[]", encoding="utf-8")
@@ -448,7 +459,9 @@ def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> Non
     assert discovery.total_boundaries == 2
     assert discovery.truncated is False
     assert {boundary.width for boundary in discovery.boundaries} == {500, 600}
-    probes = [viewport for viewport in discovery.viewports if viewport.kind == "boundary"]
+    probes = [
+        viewport for viewport in discovery.viewports if viewport.kind == "boundary"
+    ]
     assert {viewport.width for viewport in probes} == {499, 501, 599, 601}
     assert all(viewport.sources == ("responsive.css",) for viewport in probes)
 
@@ -474,9 +487,7 @@ def test_observation_status_never_promotes_partial_or_degraded_to_current() -> N
         generated_at="2026-07-26T00:00:00Z",
         requested_urls=("https://example.invalid",),
         pages=(page,),
-        captures=(
-            _capture_record("ok", status="completed", readiness="degraded"),
-        ),
+        captures=(_capture_record("ok", status="completed", readiness="degraded"),),
     )
 
     assert partial.status == "partial"
@@ -504,6 +515,53 @@ def test_runtime_payload_exposes_truncation_instead_of_silent_slicing() -> None:
     assert coverage.truncated is True
     assert coverage.emitted == 4
     assert coverage.candidates == 12
+
+
+def test_runtime_payload_normalizes_computed_paint_and_round_trips_semantics() -> None:
+    element = RuntimeElement.from_dict(
+        {
+            "kind": "text",
+            "tag": "p",
+            "selector": "#copy",
+            "bounds": {"x": 1, "y": 2, "width": 100, "height": 20},
+            "styles": {"color": "rgba(0, 0, 0, 0.5)"},
+            "measurements": {
+                "layoutParentSelector": "main",
+                "equivalenceGroup": "main:p:",
+                "equivalenceEvidence": "same-parent-role",
+                "paint": {
+                    "foreground": {"raw": "rgba(0, 0, 0, 0.5)"},
+                    "background_layers": [
+                        {
+                            "selector": "main",
+                            "raw": "rgb(255, 255, 255)",
+                        }
+                    ],
+                    "unresolved": [],
+                },
+            },
+        }
+    )
+
+    assert element.measurements["paint"]["foreground"]["rgba"] == [
+        0.0,
+        0.0,
+        0.0,
+        0.5,
+    ]
+    assert element.measurements["paint"]["background_layers"][0]["rgba"] == [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ]
+    page = _design_page(element, state="hover")
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+    )
+    assert RuntimeObservation.from_dict(observation.to_dict()) == observation
 
 
 def test_default_viewports_are_canonical_registry_members() -> None:
@@ -666,8 +724,7 @@ def test_finalization_preserves_capture_local_coverage_diagnostic(
     frontend_map = map_frontend(tmp_path, runtime=observation)
 
     assert {
-        finding["code"]
-        for finding in frontend_map.evidence["runtime_findings"]
+        finding["code"] for finding in frontend_map.evidence["runtime_findings"]
     } == {
         "runtime-dom-budget-exceeded",
         "browser-console-error",
@@ -757,7 +814,9 @@ def test_runtime_diagnostics_are_sanitized_before_serialization(
     from uidetox.frontend_map import map_frontend
 
     callbacks: dict[str, object] = {}
-    page = SimpleNamespace(on=lambda event, callback: callbacks.__setitem__(event, callback))
+    page = SimpleNamespace(
+        on=lambda event, callback: callbacks.__setitem__(event, callback)
+    )
     scenario = RuntimeScenario(
         name="safe",
         url="https://example.invalid/dashboard",
@@ -773,9 +832,7 @@ def test_runtime_diagnostics_are_sanitized_before_serialization(
     console_secret = "sk-1234567890abcdefghijkl"
     password_secret = "correct-horse-battery-staple"
     query_secret = "query-secret-value"
-    callbacks["console"](
-        SimpleNamespace(type="error", text=f"token={console_secret}")
-    )
+    callbacks["console"](SimpleNamespace(type="error", text=f"token={console_secret}"))
     callbacks["pageerror"](RuntimeError(f"password={password_secret}"))
     callbacks["requestfailed"](
         SimpleNamespace(
@@ -1104,6 +1161,513 @@ def test_inline_scroll_region_does_not_hide_block_padding_defects() -> None:
     assert _finding_codes(container) == {"runtime-vertical-padding"}
 
 
+def _design_findings(page: RuntimePage) -> dict[str, set[str]]:
+    from uidetox.design_semantics import detect_design_findings
+
+    return {
+        element.selector: {finding.code for finding in findings}
+        for element, findings in zip(
+            page.elements,
+            detect_design_findings(page),
+            strict=True,
+        )
+    }
+
+
+def _design_element(
+    selector: str,
+    *,
+    kind: str = "text",
+    tag: str = "p",
+    role: str = "",
+    order: int = 0,
+    x: float = 0,
+    y: float = 0,
+    width: float = 100,
+    height: float = 20,
+    styles: dict[str, str] | None = None,
+    states: dict[str, object] | None = None,
+    measurements: dict[str, object] | None = None,
+    source_hint: str = "",
+) -> RuntimeElement:
+    return RuntimeElement(
+        kind=kind,
+        tag=tag,
+        role=role,
+        name=selector,
+        selector=selector,
+        order=order,
+        bounds={"x": x, "y": y, "width": width, "height": height},
+        styles={
+            "fontSize": "16px",
+            "fontWeight": "400",
+            "lineHeight": "24px",
+            **(styles or {}),
+        },
+        states=states or {},
+        measurements=measurements or {},
+        source_hint=source_hint,
+    )
+
+
+def _design_page(*elements: RuntimeElement, state: str = "initial") -> RuntimePage:
+    return RuntimePage(
+        url="https://example.invalid/dashboard",
+        title="Dashboard",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        elements=elements,
+        capture_id=f"capture-{state}",
+        scenario="quality",
+        state=state,
+    )
+
+
+def _paint(
+    foreground: tuple[float, float, float, float] | None,
+    *backgrounds: tuple[float, float, float, float],
+    unresolved: tuple[dict[str, str], ...] = (),
+) -> dict[str, object]:
+    return {
+        "paintedText": True,
+        "paint": {
+            "foreground": {
+                "raw": "computed-foreground",
+                "rgba": list(foreground) if foreground is not None else None,
+            },
+            "background_layers": [
+                {
+                    "selector": f"layer-{index}",
+                    "raw": "computed-background",
+                    "rgba": list(color),
+                }
+                for index, color in enumerate(backgrounds)
+            ],
+            "unresolved": list(unresolved),
+        },
+    }
+
+
+def test_rendered_contrast_uses_actual_inherited_alpha_pair_and_large_text_rule() -> (
+    None
+):
+    inherited_alpha = _design_element(
+        "#body",
+        measurements=_paint(
+            (0.0, 0.0, 0.0, 0.5),
+            (0.0, 0.0, 0.0, 0.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ),
+    )
+    large = _design_element(
+        "#large",
+        y=40,
+        styles={"fontSize": "24px"},
+        measurements=_paint(
+            (0.28, 0.28, 0.28, 1.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ),
+    )
+    normal = replace(
+        large,
+        selector="#normal",
+        bounds={**large.bounds, "y": 80},
+        styles={**large.styles, "fontSize": "23.99px"},
+    )
+
+    findings = _design_findings(_design_page(inherited_alpha, large, normal))
+
+    assert "runtime-contrast" in findings["#body"]
+    assert "runtime-contrast" not in findings["#large"]
+    assert "runtime-contrast" in findings["#normal"]
+
+
+def test_rendered_contrast_marks_gradient_image_and_blend_as_unresolved_not_clean() -> (
+    None
+):
+    element = _design_element(
+        "#hero",
+        measurements=_paint(
+            (0.0, 0.0, 0.0, 1.0),
+            unresolved=(
+                {
+                    "selector": "#hero",
+                    "property": "background-image",
+                    "value": "linear-gradient(red, blue)",
+                },
+                {
+                    "selector": "#hero",
+                    "property": "mix-blend-mode",
+                    "value": "multiply",
+                },
+            ),
+        ),
+    )
+
+    findings = _design_findings(_design_page(element))["#hero"]
+
+    assert findings == {"runtime-color-unresolved"}
+
+
+def test_contrast_ignores_empty_containers_and_non_text_gradient_surfaces() -> None:
+    empty = _design_element(
+        "#empty",
+        kind="region",
+        measurements={
+            **_paint(
+                (0.7, 0.7, 0.7, 1.0),
+                (1.0, 1.0, 1.0, 1.0),
+            ),
+            "paintedText": False,
+        },
+    )
+    gradient_surface = _design_element(
+        "#gradient-surface",
+        kind="region",
+        y=40,
+        measurements={
+            **_paint(
+                (0.0, 0.0, 0.0, 1.0),
+                unresolved=(
+                    {
+                        "selector": "#gradient-surface",
+                        "property": "background-image",
+                        "value": "linear-gradient(red, blue)",
+                    },
+                ),
+            ),
+            "paintedText": False,
+        },
+    )
+
+    findings = _design_findings(_design_page(empty, gradient_surface))
+
+    assert findings["#empty"] == set()
+    assert findings["#gradient-surface"] == set()
+
+
+def test_palette_role_and_component_drift_require_evidenced_equivalence_groups() -> (
+    None
+):
+    common = {
+        "equivalenceGroup": "toolbar:button",
+        "equivalenceEvidence": "source-ownership",
+        "sourceOwnershipKey": "src/Toolbar.tsx",
+        "paletteRole": "action",
+    }
+    peers = [
+        _design_element(
+            f"#action-{index}",
+            kind="action",
+            tag="button",
+            role="button",
+            order=index,
+            x=index * 120,
+            width=100,
+            height=32,
+            styles={"color": "rgb(0, 0, 0)", "backgroundColor": "rgb(255, 255, 255)"},
+            measurements={
+                **common,
+                **_paint(
+                    (0.0, 0.0, 0.0, 1.0),
+                    (1.0, 1.0, 1.0, 1.0),
+                ),
+            },
+            source_hint="ToolbarAction",
+        )
+        for index in range(2)
+    ]
+    peers.append(
+        _design_element(
+            "#action-outlier",
+            kind="action",
+            tag="button",
+            role="button",
+            order=2,
+            x=240,
+            width=100,
+            height=44,
+            styles={"color": "rgb(255, 0, 0)", "backgroundColor": "rgb(255, 255, 255)"},
+            measurements={
+                **common,
+                **_paint(
+                    (1.0, 0.0, 0.0, 1.0),
+                    (1.0, 1.0, 1.0, 1.0),
+                ),
+            },
+            source_hint="ToolbarAction",
+        )
+    )
+    unrelated = _design_element(
+        "#unrelated",
+        y=80,
+        styles={"color": "rgb(255, 0, 0)"},
+        measurements={
+            "paletteRole": "action",
+            **_paint(
+                (1.0, 0.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0, 1.0),
+            ),
+        },
+    )
+
+    findings = _design_findings(_design_page(*peers, unrelated))
+
+    assert "runtime-component-drift" in findings["#action-outlier"]
+    assert "runtime-palette-role-drift" not in findings["#unrelated"]
+
+
+def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> None:
+    heading_one = _design_element(
+        "#h1",
+        tag="h1",
+        styles={"fontSize": "32px", "fontWeight": "700"},
+        measurements={"layoutParentSelector": "main"},
+    )
+    heading_two = _design_element(
+        "#h2",
+        tag="h2",
+        order=1,
+        y=60,
+        styles={"fontSize": "32px", "fontWeight": "700"},
+        measurements={"layoutParentSelector": "main"},
+    )
+    rhythm = [
+        _design_element(
+            f"#item-{index}",
+            order=index + 2,
+            y=120 + (index * 40) + (20 if index == 3 else 0),
+            height=20,
+            measurements={
+                "layoutParentSelector": "#list",
+                "equivalenceGroup": "list:item",
+                "equivalenceEvidence": "same-parent-role",
+            },
+        )
+        for index in range(4)
+    ]
+
+    findings = _design_findings(_design_page(heading_one, heading_two, *rhythm))
+
+    assert "runtime-type-hierarchy" in findings["#h2"]
+    assert "runtime-spatial-rhythm" in findings["#item-3"]
+
+    healthy_h2 = replace(
+        heading_two,
+        styles={**heading_two.styles, "fontSize": "24px", "fontWeight": "600"},
+    )
+    healthy_rhythm = tuple(
+        replace(item, bounds={**item.bounds, "y": 120 + index * 40})
+        for index, item in enumerate(rhythm)
+    )
+    healthy = _design_findings(_design_page(heading_one, healthy_h2, *healthy_rhythm))
+    assert "runtime-type-hierarchy" not in healthy["#h2"]
+    assert all("runtime-spatial-rhythm" not in codes for codes in healthy.values())
+
+
+def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound() -> (
+    None
+):
+    sticky = _design_element(
+        "#sticky",
+        kind="region",
+        y=0,
+        width=1440,
+        height=60,
+        styles={"position": "sticky"},
+        measurements={"layoutParentSelector": "body"},
+    )
+    occluded = _design_element(
+        "#occluded",
+        kind="action",
+        tag="button",
+        role="button",
+        y=20,
+        width=80,
+        height=30,
+        measurements={
+            "occludedBy": "#sticky",
+            "occludedFraction": 0.5,
+            "layoutParentSelector": "body",
+        },
+    )
+    offscreen = _design_element(
+        "#offscreen",
+        x=1435,
+        width=30,
+        measurements={"layoutParentSelector": "body"},
+    )
+    small = _design_element(
+        "#small",
+        kind="action",
+        tag="button",
+        role="button",
+        x=200,
+        y=100,
+        width=23.99,
+        height=24,
+        measurements={
+            "layoutParentSelector": "body",
+            "targetSpacing": {
+                "status": "intersects",
+                "center_distance_px": 24.0,
+                "shape_gap_px": 0.0,
+                "neighbor_shape": "circle",
+                "edge_gap_px": 4.0,
+                "total_targets": 2,
+                "indexed_targets": 2,
+                "truncated": False,
+            },
+        },
+    )
+    focused = _design_element(
+        "#focused",
+        kind="action",
+        tag="button",
+        role="button",
+        x=300,
+        y=100,
+        width=80,
+        height=30,
+        states={"focused": True},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": False,
+                "distinguishable": False,
+                "area": 220,
+                "minimum_area": 220,
+            },
+            "layoutParentSelector": "body",
+        },
+    )
+
+    findings = _design_findings(
+        _design_page(sticky, occluded, offscreen, small, focused, state="focus")
+    )
+
+    assert findings["#occluded"] == {"runtime-sticky-occlusion"}
+    assert "runtime-offscreen" in findings["#offscreen"]
+    assert "runtime-target-size" in findings["#small"]
+    assert "runtime-focus-visible" in findings["#focused"]
+    assert "runtime-focus-appearance-guidance" not in findings["#focused"]
+
+    boundary = replace(small, bounds={**small.bounds, "width": 24.0})
+    inline = replace(
+        small,
+        selector="#inline",
+        bounds={**small.bounds, "width": 12.0},
+        measurements={**small.measurements, "targetException": "inline"},
+    )
+    boundary_findings = _design_findings(_design_page(boundary, inline))
+    assert "runtime-target-size" not in boundary_findings["#small"]
+    assert "runtime-target-size" not in boundary_findings["#inline"]
+
+
+def test_target_spacing_uses_shape_intersection_and_reports_truncation() -> None:
+    intersecting = _design_element(
+        "#intersecting",
+        kind="action",
+        tag="button",
+        role="button",
+        width=20,
+        height=20,
+        measurements={
+            "targetSpacing": {
+                "status": "intersects",
+                "nearest_selector": "#peer",
+                "center_distance_px": 24.0,
+                "shape_gap_px": 0.0,
+                "neighbor_shape": "circle",
+                "edge_gap_px": 4.0,
+                "total_targets": 2,
+                "indexed_targets": 2,
+                "truncated": False,
+            },
+        },
+    )
+    truncated = replace(
+        intersecting,
+        selector="#truncated",
+        bounds={**intersecting.bounds, "x": 80},
+        measurements={
+            "targetSpacing": {
+                "status": "unresolved",
+                "total_targets": 5000,
+                "indexed_targets": 4096,
+                "truncated": True,
+            },
+        },
+    )
+
+    findings = _design_findings(_design_page(intersecting, truncated))
+
+    assert "runtime-target-size" in findings["#intersecting"]
+    assert "runtime-target-spacing-unresolved" in findings["#truncated"]
+
+
+def test_focus_indicator_requires_focus_specific_distinguishable_delta() -> None:
+    permanent_shadow = _design_element(
+        "#permanent-shadow",
+        kind="action",
+        tag="button",
+        role="button",
+        width=80,
+        height=30,
+        states={"focused": True},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": False,
+                "distinguishable": True,
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+    transparent_shadow = replace(
+        permanent_shadow,
+        selector="#transparent-shadow",
+        bounds={**permanent_shadow.bounds, "x": 100},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": True,
+                "distinguishable": False,
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+    focus_delta = replace(
+        permanent_shadow,
+        selector="#focus-delta",
+        bounds={**permanent_shadow.bounds, "x": 200},
+        measurements={
+            "focusIndicator": {
+                "visible": True,
+                "changed": True,
+                "distinguishable": True,
+                "perceptibleProperties": ["outline"],
+                "area": 220,
+                "minimum_area": 220,
+            },
+        },
+    )
+
+    findings = _design_findings(
+        _design_page(
+            permanent_shadow,
+            transparent_shadow,
+            focus_delta,
+            state="focus",
+        )
+    )
+
+    assert "runtime-focus-visible" in findings["#permanent-shadow"]
+    assert "runtime-focus-visible" in findings["#transparent-shadow"]
+    assert "runtime-focus-visible" not in findings["#focus-delta"]
+
+
 class _Page:
     def __init__(self, events: list[tuple], fail_screenshot: bool = False) -> None:
         self.events = events
@@ -1121,6 +1685,7 @@ class _Page:
         self.events.append(("wait", value))
 
     def evaluate(self, _script: str) -> list[dict[str, object]]:
+        self.events.append(("evaluate",))
         return [
             {
                 "kind": "region",
@@ -1243,6 +1808,7 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
     )
 
     assert sum(event[0] == "launch" for event in events) == 1
+    assert sum(event[0] == "evaluate" for event in events) == len(viewports)
     assert all(
         event[1]["reduced_motion"] == "reduce"
         for event in events
@@ -1288,6 +1854,311 @@ def test_observer_screenshot_failure_preserves_existing_file(
     assert observation.errors
     assert existing.read_bytes() == b"known-good"
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+@pytest.mark.browser
+def test_browser_emits_actual_paint_theme_interaction_and_semantic_evidence(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "design-semantics.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  html { color-scheme: light; }
+  body { margin: 0; background: rgb(255, 255, 255); }
+  #alpha { color: rgb(0 0 0 / 50%); background: transparent; }
+  #modern { color: oklch(70% 0.1 250); background: hsl(0 0% 100%); }
+  #gradient { color: white; background: linear-gradient(red, blue); }
+  #empty-gradient { width: 80px; height: 20px; background: linear-gradient(red, blue); }
+  #hover:hover { color: rgb(119, 119, 119); }
+  #focus { box-shadow: 0 0 0 2px rgb(0, 0, 0); }
+  #focus:focus { outline: none; box-shadow: 0 0 0 2px rgb(0, 0, 0); }
+  #small, #near-small { width: 20px; height: 20px; padding: 0; }
+  #small { position: absolute; left: 200px; top: 200px; }
+  #near-small { position: absolute; left: 218px; top: 200px; }
+  #sticky { position: fixed; z-index: 5; left: 0; top: 300px; width: 180px; height: 40px; }
+  #covered { position: absolute; left: 20px; top: 310px; width: 80px; height: 30px; }
+  .toolbar { display: flex; gap: 8px; margin-top: 380px; }
+  .tool { width: 100px; height: 32px; }
+  #tool-outlier { height: 44px; color: red; }
+  h1, h2 { font-size: 32px; font-weight: 700; }
+  .list { display: flex; flex-direction: column; gap: 20px; }
+  .list > p { height: 20px; margin: 0; }
+  .list > p:last-child { margin-top: 20px; }
+</style>
+<main data-theme="light">
+  <p id="alpha">Inherited alpha text</p>
+  <p id="modern">Modern computed color</p>
+  <p id="gradient">Unknown gradient backdrop</p>
+  <div id="empty-gradient" role="region"></div>
+  <button id="hover">Hover target</button>
+  <button id="focus">Focus target</button>
+  <button id="disabled" disabled>Disabled target</button>
+  <input id="error" aria-invalid="true" value="bad">
+  <button id="small">A</button><button id="near-small">B</button>
+  <div id="sticky">Sticky overlay</div><button id="covered">Covered</button>
+  <div class="toolbar">
+    <button class="tool" data-uidetox-source="ToolbarAction">One</button>
+    <button class="tool" data-uidetox-source="ToolbarAction">Two</button>
+    <button class="tool" id="tool-outlier" data-uidetox-source="ToolbarAction">Three</button>
+  </div>
+  <h1>Primary</h1><h2>Secondary</h2>
+  <section class="list">
+    <p>First</p><p>Second</p><p>Third</p><p id="rhythm-outlier">Fourth</p>
+  </section>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+    scenario = RuntimeScenario(
+        name="states",
+        url=url,
+        actions=(
+            RuntimeScenarioAction(kind="hover", selector="#hover"),
+            RuntimeScenarioAction(kind="capture", state="hover"),
+            RuntimeScenarioAction(kind="focus", selector="#focus"),
+            RuntimeScenarioAction(kind="capture", state="focus"),
+        ),
+        expected_state="focus",
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    assert [page.state for page in observation.pages] == ["hover", "focus"]
+    assert len(observation.captures) == 2
+    hover = {element.selector: element for element in observation.pages[0].elements}
+    focus = {element.selector: element for element in observation.pages[1].elements}
+    assert hover["#hover"].states["hovered"] is True
+    assert focus["#focus"].states["focused"] is True
+    assert focus["#disabled"].states["disabled"] is True
+    assert focus["#error"].states["error"] is True
+    assert focus["#modern"].measurements["paint"]["foreground"]["rgba"] is not None
+    assert focus["#modern"].measurements["theme"] == {
+        "name": "light",
+        "colorScheme": "light",
+    }
+    assert "runtime-contrast" in {finding.code for finding in focus["#alpha"].findings}
+    assert {finding.code for finding in focus["#gradient"].findings} == {
+        "runtime-color-unresolved"
+    }
+    assert "paint" not in focus["#empty-gradient"].measurements
+    assert not {
+        finding.code
+        for finding in focus["#empty-gradient"].findings
+        if finding.code in {"runtime-contrast", "runtime-color-unresolved"}
+    }
+    assert "runtime-focus-visible" in {
+        finding.code for finding in focus["#focus"].findings
+    }
+    assert "runtime-target-size" in {
+        finding.code for finding in focus["#small"].findings
+    }
+    assert focus["#small"].measurements["targetSpacing"] == {
+        "status": "intersects",
+        "nearest_selector": "#near-small",
+        "center_distance_px": 18,
+        "shape_gap_px": -6,
+        "neighbor_shape": "circle",
+        "edge_gap_px": 0,
+        "total_targets": 10,
+        "indexed_targets": 10,
+        "truncated": False,
+    }
+    assert "runtime-sticky-occlusion" in {
+        finding.code for finding in focus["#covered"].findings
+    }
+    assert "runtime-component-drift" not in {
+        finding.code for finding in focus["#tool-outlier"].findings
+    }
+    rendered_h2 = next(
+        element for element in observation.pages[1].elements if element.tag == "h2"
+    )
+    assert "runtime-type-hierarchy" in {
+        finding.code for finding in rendered_h2.findings
+    }
+    assert "runtime-spatial-rhythm" in {
+        finding.code for finding in focus["#rhythm-outlier"].findings
+    }
+
+
+@pytest.mark.browser
+def test_browser_target_spacing_uses_circle_against_large_target_rectangle(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "target-spacing-shapes.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; }
+  button {
+    box-sizing: border-box;
+    position: absolute;
+    margin: 0;
+    padding: 0;
+  }
+  .small { width: 20px; height: 20px; }
+  .large { width: 100px; height: 60px; }
+  #near-small { left: 100px; top: 100px; }
+  #near-large { left: 121px; top: 80px; }
+  #clear-small { left: 100px; top: 300px; }
+  #clear-large { left: 123px; top: 280px; }
+  #overlap-peer-a { left: 100px; top: 500px; }
+  #overlap-peer-b { left: 123px; top: 500px; }
+  #tangent-peer-a { left: 100px; top: 600px; }
+  #tangent-peer-b { left: 124px; top: 600px; }
+  #clear-peer-a { left: 100px; top: 700px; }
+  #clear-peer-b { left: 125px; top: 700px; }
+</style>
+<main>
+  <button class="small" id="near-small" aria-label="Near small"></button>
+  <button class="large" id="near-large">Near large</button>
+  <button class="small" id="clear-small" aria-label="Clear small"></button>
+  <button class="large" id="clear-large">Clear large</button>
+  <button class="small" id="overlap-peer-a" aria-label="Overlap A"></button>
+  <button class="small" id="overlap-peer-b" aria-label="Overlap B"></button>
+  <button class="small" id="tangent-peer-a" aria-label="Tangent A"></button>
+  <button class="small" id="tangent-peer-b" aria-label="Tangent B"></button>
+  <button class="small" id="clear-peer-a" aria-label="Clear peer A"></button>
+  <button class="small" id="clear-peer-b" aria-label="Clear peer B"></button>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    elements = {element.selector: element for element in observation.pages[0].elements}
+    assert elements["#near-small"].measurements["targetSpacing"]["status"] == (
+        "intersects"
+    )
+    assert (
+        elements["#near-small"].measurements["targetSpacing"]["nearest_selector"]
+        == "#near-large"
+    )
+    assert "runtime-target-size" in {
+        finding.code for finding in elements["#near-small"].findings
+    }
+    assert elements["#clear-small"].measurements["targetSpacing"]["status"] == "clear"
+    assert "runtime-target-size" not in {
+        finding.code for finding in elements["#clear-small"].findings
+    }
+    assert (
+        elements["#overlap-peer-a"].measurements["targetSpacing"]["status"]
+        == "intersects"
+    )
+    assert "runtime-target-size" in {
+        finding.code for finding in elements["#overlap-peer-a"].findings
+    }
+    for selector in ("#tangent-peer-a", "#clear-peer-a"):
+        assert elements[selector].measurements["targetSpacing"]["status"] == "clear"
+        assert "runtime-target-size" not in {
+            finding.code for finding in elements[selector].findings
+        }
+
+
+@pytest.mark.browser
+def test_browser_focus_evidence_requires_perceptible_computed_delta(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "focus-perceptibility.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; background: white; }
+  button {
+    display: block;
+    width: 120px;
+    height: 36px;
+    margin: 12px;
+    color: black;
+    background: white;
+    border: 2px solid transparent;
+    outline: none;
+    box-shadow: none;
+  }
+  #background:focus { background: black; }
+  #border:focus { border-color: black; }
+  #faint-shadow:focus { box-shadow: 0 0 0 2px rgb(0 0 0 / 1%); }
+  #outline:focus { outline: 2px solid black; }
+  #visible-shadow:focus { box-shadow: 0 0 0 2px black; }
+  #permanent-shadow { box-shadow: 0 0 0 2px black; }
+</style>
+<main>
+  <button id="background">Background</button>
+  <button id="border">Border</button>
+  <button id="faint-shadow">Faint shadow</button>
+  <button id="outline">Outline</button>
+  <button id="visible-shadow">Visible shadow</button>
+  <button id="permanent-shadow">Permanent shadow</button>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+    focus_cases = (
+        ("background", "#background"),
+        ("border", "#border"),
+        ("faint-shadow", "#faint-shadow"),
+        ("outline", "#outline"),
+        ("visible-shadow", "#visible-shadow"),
+        ("permanent-shadow", "#permanent-shadow"),
+    )
+    actions = tuple(
+        action
+        for state, selector in focus_cases
+        for action in (
+            RuntimeScenarioAction(kind="focus", selector=selector),
+            RuntimeScenarioAction(kind="capture", state=state),
+        )
+    )
+    scenario = RuntimeScenario(
+        name="focus-deltas",
+        url=url,
+        actions=actions,
+        expected_state="permanent-shadow",
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    pages = {page.state: page for page in observation.pages}
+    expected_failures = {"faint-shadow", "permanent-shadow"}
+    for state, selector in focus_cases:
+        element = next(
+            element for element in pages[state].elements if element.selector == selector
+        )
+        codes = {finding.code for finding in element.findings}
+        if state in expected_failures:
+            assert "runtime-focus-visible" in codes
+        else:
+            assert "runtime-focus-visible" not in codes
+            assert element.measurements["focusIndicator"]["perceptibleProperties"]
 
 
 @pytest.mark.browser
@@ -1520,11 +2391,10 @@ def test_scenario_observation_records_interaction_state_and_diagnostics(
 
     assert observation.status == "current"
     assert [page.state for page in observation.pages] == ["open"]
-    assert any(element.selector == "#modal" for element in observation.pages[0].elements)
-    assert {
-        diagnostic.code
-        for diagnostic in observation.captures[0].diagnostics
-    } >= {
+    assert any(
+        element.selector == "#modal" for element in observation.pages[0].elements
+    )
+    assert {diagnostic.code for diagnostic in observation.captures[0].diagnostics} >= {
         "browser-console-error",
         "browser-http-error",
         "browser-page-error",
@@ -1638,18 +2508,14 @@ def test_peer_analysis_covers_aligned_and_outlier_tails_after_twenty(
         settle_ms=0,
     )
     assert observation.pages, observation.errors
-    elements = {
-        element.selector: element for element in observation.pages[0].elements
-    }
+    elements = {element.selector: element for element in observation.pages[0].elements}
 
     assert elements["#tail-aligned"].measurements["layoutPeerCount"] == 25
     assert "runtime-layout-misalignment" not in _finding_codes(
         elements["#tail-aligned"]
     )
     assert elements["#tail-outlier"].measurements["layoutPeerCount"] == 25
-    assert "runtime-layout-misalignment" in _finding_codes(
-        elements["#tail-outlier"]
-    )
+    assert "runtime-layout-misalignment" in _finding_codes(elements["#tail-outlier"])
 
 
 @pytest.mark.browser
@@ -1722,9 +2588,7 @@ def test_source_boundary_text_zoom_and_long_localization_runtime_probes(
     }
     assert elements["#zoom-copy"].measurements["fontSize"] == 32
     assert "runtime-text-clipped" in _finding_codes(elements["#zoom-copy"])
-    assert "runtime-text-clipped" in _finding_codes(
-        elements["#localized-action"]
-    )
+    assert "runtime-text-clipped" in _finding_codes(elements["#localized-action"])
 
 
 @pytest.mark.browser
@@ -1785,8 +2649,7 @@ def test_readiness_distinguishes_slow_hydration_from_polling_degradation(
     )
 
     readiness = {
-        capture.scenario: capture.readiness.status
-        for capture in observation.captures
+        capture.scenario: capture.readiness.status for capture in observation.captures
     }
     assert readiness == {"hydrated": "current", "polling": "degraded"}
     assert observation.status == "degraded"

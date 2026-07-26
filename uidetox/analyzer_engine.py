@@ -20,7 +20,6 @@ def _analyze_rule(
     content: str,
     ext: str,
     design_variance: int,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[Finding]:
     """Analyze one configured rule against loaded source content."""
     issues = []
@@ -35,7 +34,7 @@ def _analyze_rule(
     custom = rule.get("_custom_check")
     handler = _CUSTOM_CHECK_HANDLERS.get(custom)
     if handler is not None:
-        custom_issues = handler(rule, filepath, content, ext, dynamic_colors)
+        custom_issues = handler(rule, filepath, content, ext)
         if custom_issues is not None:
             return [
                 _static_finding(item, filepath, content, rule=rule)
@@ -141,7 +140,6 @@ def _static_finding(
 def analyze_file(
     filepath: Path,
     design_variance: int = 8,
-    dynamic_colors: dict[str, str] | None = None,
     *,
     facts: SourceFacts | None = None,
 ) -> list[Finding]:
@@ -150,7 +148,6 @@ def analyze_file(
     Args:
         filepath: File to scan.
         design_variance: Current DESIGN_VARIANCE dial value (affects conditional rules).
-        dynamic_colors: Tailwind configuration colors mappings.
     """
     issues = []
     ext = filepath.suffix.lower()
@@ -182,14 +179,10 @@ def analyze_file(
     issues.extend(layout_issues)
 
     for rule in applicable_rules:
-        issues.extend(
-            _analyze_rule(rule, filepath, content, ext, design_variance, dynamic_colors)
-        )
+        issues.extend(_analyze_rule(rule, filepath, content, ext, design_variance))
 
     return [
-        item
-        if isinstance(item, Finding)
-        else _static_finding(item, filepath, content)
+        item if isinstance(item, Finding) else _static_finding(item, filepath, content)
         for item in issues
     ]
 
@@ -222,32 +215,14 @@ def analyze_directory(
         explicit_targets=target_files,
         scope_root=root,
     )
-    target_candidates = file_set.explicit_candidates(require_extension=False)
-    target_candidate_set = set(target_candidates or ())
     analysis_targets = file_set.discover()
 
     from concurrent.futures import ThreadPoolExecutor
 
-    from uidetox.color_utils import (
-        audit_project_colors,
-        find_color_config_sources,
-        load_dynamic_colors,
-    )
-
-    color_sources = find_color_config_sources(root)
-    dynamic_colors = load_dynamic_colors(root)
-    should_audit_colors = bool(color_sources) and (
-        target_candidates is None
-        or any(source.resolve() in target_candidate_set for source in color_sources)
-    )
-    color_audit_violations = audit_project_colors(root) if should_audit_colors else []
-    color_issue_file = str((color_sources[0] if color_sources else root).resolve())
     file_analyzer = _analyze_file or analyze_file
 
     def _analyze_wrapper(fp: Path) -> list:
-        return file_analyzer(
-            fp, design_variance=design_variance, dynamic_colors=dynamic_colors
-        )  # type: ignore
+        return file_analyzer(fp, design_variance=design_variance)  # type: ignore
 
     futures = []
     with ThreadPoolExecutor() as executor:
@@ -259,28 +234,12 @@ def analyze_directory(
 
     all_issues = reconcile_project_issues(all_issues, root)
 
-    # Project-level dynamic color audit based on actual Tailwind/theme tokens.
-    # Cap output to keep the queue actionable rather than overwhelming.
-    for violation in color_audit_violations[:8]:
-        all_issues.append(
-            {
-                "id": "LOW_CONTRAST_SLOP",
-                "file": color_issue_file,
-                "tier": "T1" if violation.get("severity") == "critical" else "T2",
-                "issue": (
-                    f"Dynamic color audit: {violation['foreground']} on {violation['background']} "
-                    f"fails WCAG AA ({violation['ratio']}:1 < {violation['required']}:1)."
-                ),
-                "command": "Adjust the theme token pair to meet WCAG AA contrast, then rescan to verify the updated palette.",
-            }
-        )
-
     canonical: list[Finding] = []
     for item in all_issues:
         if isinstance(item, Finding):
             canonical.append(item)
             continue
-        path = Path(str(item.get("file", color_issue_file)))
+        path = Path(str(item.get("file", root)))
         try:
             content = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):

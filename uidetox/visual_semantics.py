@@ -156,6 +156,14 @@ def semantic_regions_from_runtime(
             continue
         node = _runtime_node(page, element, frontend_map)
         node_marker = f";map:{node.id}" if node is not None else ";map:unresolved"
+        source_targets = _source_targets(node, frontend_map)
+        finding_markers = "".join(
+            f";finding:{finding.code}"
+            for finding in sorted(element.findings, key=lambda item: item.code)
+        )
+        source_markers = "".join(
+            f";source:{source_target}" for source_target in source_targets
+        )
         regions.append(
             VisualRegion(
                 region_id=_region_id(page, element),
@@ -163,9 +171,11 @@ def semantic_regions_from_runtime(
                 kind="semantic",
                 provenance=(
                     f"runtime:{element.selector or element.tag}:{element.order}"
-                    f"{node_marker}"
+                    f"{node_marker};capture:{page.capture_id}"
+                    f";state:{page.scenario}/{page.state}"
+                    f"{finding_markers}{source_markers}"
                 ),
-                source_targets=_source_targets(node, frontend_map),
+                source_targets=source_targets,
                 intent_fields=_intent_fields(intent),
                 preserve_contracts=_relevant_contracts(
                     element,

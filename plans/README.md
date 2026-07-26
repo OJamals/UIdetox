@@ -1,10 +1,11 @@
 # Implementation Plans
 
 Generated and extended by the `improve` skill. Plans 001-012 were generated
-against commit `55fc6f3`; plans 013-019 were generated on 2026-07-25 against
-commit `d5898c9`. Execute in dependency order. Each executor must read its plan
-fully, honor STOP conditions, replace superseded paths instead of accumulating
-parallel implementations, and update its status row.
+against commit `55fc6f3`; plans 013-018 were generated on 2026-07-25 against
+commit `d5898c9`; Plan 019 was refreshed on 2026-07-26 against `a97a7ad` after
+plans 015-018 landed. Execute in dependency order. Each executor must read its
+plan fully, honor STOP conditions, and replace superseded paths instead of
+accumulating parallel implementations. Root reviewer owns status updates.
 
 ## Execution order and status
 
@@ -28,7 +29,7 @@ parallel implementations, and update its status row.
 | 016 | Replace shallow extraction with adapter-driven application semantics | P1 | L | 014 | DONE |
 | 017 | Replace route parity with typed full-stack contract lineage | P1 | L | 015, 016 | DONE — reviewed at `d0ec3b0`; 1,340 tests pass |
 | 018 | Replace initial-frame capture with efficient scenario observation | P1 | L | 015, 016 | DONE — reviewed at `43596ae`; 1,376 tests pass |
-| 019 | Replace guessed color checks with semantic design-quality evidence | P1 | L | 015, 018 | TODO |
+| 019 | Replace guessed color checks with semantic design-quality evidence | P1 | L | 015, 016, 018 | DONE — owner follow-up review `APPROVE` at `0b60a1d`; 1,394 tests pass |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

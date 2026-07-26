@@ -34,6 +34,8 @@ _SUPPORTED_ACTIONS = frozenset(
     {
         "click",
         "fill",
+        "focus",
+        "hover",
         "key",
         "wait-for-selector",
         "wait-for-state",
@@ -45,6 +47,8 @@ _LOAD_STATES = frozenset({"load", "domcontentloaded", "networkidle"})
 _ACTION_FIELDS = {
     "click": {"kind", "selector", "timeout_ms"},
     "fill": {"kind", "selector", "env", "timeout_ms"},
+    "focus": {"kind", "selector", "timeout_ms"},
+    "hover": {"kind", "selector", "timeout_ms"},
     "key": {"kind", "selector", "key", "timeout_ms"},
     "wait-for-selector": {"kind", "selector", "timeout_ms"},
     "wait-for-state": {"kind", "selector", "state", "timeout_ms"},
@@ -135,7 +139,9 @@ def _reject_unknown(
     label: str,
 ) -> None:
     if unknown := set(value) - allowed:
-        raise ValueError(f"Unknown runtime {label} fields: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown runtime {label} fields: {', '.join(sorted(unknown))}"
+        )
 
 
 def _safe_identifier(value: str, label: str) -> None:
@@ -487,7 +493,17 @@ class RuntimeScenarioAction:
             raise ValueError(
                 f"Runtime action timeout_ms must be 1-{_MAX_ACTION_TIMEOUT_MS}."
             )
-        if self.kind in {"click", "fill", "wait-for-selector"} and not self.selector:
+        if (
+            self.kind
+            in {
+                "click",
+                "fill",
+                "focus",
+                "hover",
+                "wait-for-selector",
+            }
+            and not self.selector
+        ):
             raise ValueError(f"Runtime {self.kind} action requires selector.")
         if self.kind == "key" and (not self.selector or not self.key):
             raise ValueError("Runtime key action requires selector and key.")
@@ -515,9 +531,7 @@ class RuntimeScenarioAction:
             allowed_states = _SELECTOR_STATES if self.selector else _LOAD_STATES
             if self.state not in allowed_states:
                 domain = ", ".join(sorted(allowed_states))
-                raise ValueError(
-                    f"Runtime wait-for-state must be one of: {domain}."
-                )
+                raise ValueError(f"Runtime wait-for-state must be one of: {domain}.")
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeScenarioAction":
@@ -554,9 +568,7 @@ class RuntimeScenario:
             raise ValueError(
                 f"Unknown runtime viewports: {', '.join(sorted(unknown_viewports))}"
             )
-        states = [
-            action.state for action in self.actions if action.kind == "capture"
-        ]
+        states = [action.state for action in self.actions if action.kind == "capture"]
         if len(states) != len(set(states)):
             raise ValueError("Runtime scenario capture states must be unique.")
         if len(self.actions) > RUNTIME_OBSERVATION_LIMITS.actions_per_scenario:
@@ -674,9 +686,7 @@ def validate_runtime_observation_plan(
         raise ValueError(f"Runtime scenario count must be 1-{limits.scenarios}.")
     total_actions = sum(len(scenario.actions) for scenario in scenario_list)
     if total_actions > limits.actions_total:
-        raise ValueError(
-            f"Runtime total action count exceeds {limits.actions_total}."
-        )
+        raise ValueError(f"Runtime total action count exceeds {limits.actions_total}.")
     if not 1 <= len(viewport_list) <= limits.viewports:
         raise ValueError(f"Runtime viewport count must be 1-{limits.viewports}.")
 
@@ -692,21 +702,15 @@ def validate_runtime_observation_plan(
                 f"{', '.join(sorted(requested_viewports - available_names))}"
             )
         selected_viewports = (
-            len(requested_viewports)
-            if requested_viewports
-            else len(viewport_list)
+            len(requested_viewports) if requested_viewports else len(viewport_list)
         )
         capture_count = (
             sum(action.kind == "capture" for action in scenario.actions) or 1
         )
         matrix_size += selected_viewports * capture_count
-        work_units += selected_viewports * (
-            1 + len(scenario.actions) + capture_count
-        )
+        work_units += selected_viewports * (1 + len(scenario.actions) + capture_count)
         action_time = sum(
-            action.timeout_ms
-            for action in scenario.actions
-            if action.kind != "capture"
+            action.timeout_ms for action in scenario.actions if action.kind != "capture"
         )
         time_budget_ms += selected_viewports * (
             timeout_ms
@@ -715,17 +719,12 @@ def validate_runtime_observation_plan(
             + scenario.readiness.settle_ms
         )
     if matrix_size > limits.capture_matrix:
-        raise ValueError(
-            f"Runtime capture matrix exceeds {limits.capture_matrix}."
-        )
+        raise ValueError(f"Runtime capture matrix exceeds {limits.capture_matrix}.")
     if work_units > limits.work_units:
-        raise ValueError(
-            f"Runtime observation work exceeds {limits.work_units} units."
-        )
+        raise ValueError(f"Runtime observation work exceeds {limits.work_units} units.")
     if time_budget_ms > limits.time_budget_ms:
         raise ValueError(
-            "Runtime observation time budget exceeds "
-            f"{limits.time_budget_ms}ms."
+            f"Runtime observation time budget exceeds {limits.time_budget_ms}ms."
         )
 
 
@@ -737,11 +736,15 @@ def load_runtime_scenarios(
     scenario_root = Path(root).expanduser().resolve()
     scenario_path = Path(path).expanduser().resolve()
     if not scenario_path.is_relative_to(scenario_root):
-        raise ValueError("Runtime scenario file must be inside the allowed project root.")
+        raise ValueError(
+            "Runtime scenario file must be inside the allowed project root."
+        )
     try:
         file_size = scenario_path.stat().st_size
     except OSError as exc:
-        raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
+        raise ValueError(
+            f"Runtime scenario file is unreadable: {scenario_path}"
+        ) from exc
     if file_size > RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes:
         raise ValueError(
             "Runtime scenario file exceeds "
@@ -750,7 +753,9 @@ def load_runtime_scenarios(
     try:
         payload = scenario_path.read_bytes()
     except OSError as exc:
-        raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
+        raise ValueError(
+            f"Runtime scenario file is unreadable: {scenario_path}"
+        ) from exc
     if len(payload) > RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes:
         raise ValueError(
             "Runtime scenario file exceeds "
@@ -759,7 +764,9 @@ def load_runtime_scenarios(
     try:
         value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
+        raise ValueError(
+            f"Runtime scenario file is unreadable: {scenario_path}"
+        ) from exc
     if not isinstance(value, list):
         raise ValueError("Runtime scenario file must contain a JSON array.")
     if len(value) > RUNTIME_OBSERVATION_LIMITS.scenarios:
@@ -784,9 +791,7 @@ def load_runtime_scenarios(
             "Runtime total action count exceeds "
             f"{RUNTIME_OBSERVATION_LIMITS.actions_total}."
         )
-    scenarios = tuple(
-        RuntimeScenario.from_dict(dict(item)) for item in value
-    )
+    scenarios = tuple(RuntimeScenario.from_dict(dict(item)) for item in value)
     if len({scenario.name for scenario in scenarios}) != len(scenarios):
         raise ValueError("Runtime scenario names must be unique.")
     return scenarios

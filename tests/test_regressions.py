@@ -911,7 +911,9 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
+        scan_cmd,
+        "score_current_snapshot",
+        lambda state, **kwargs: {"blended_score": 100},
     )
 
     scan_cmd.run(argparse.Namespace(path=".", output="json", since=None))
@@ -3595,7 +3597,7 @@ def test_missing_key_prop_slop_skips_with_key():
 
 
 def test_missing_key_prop_slop_finds_key_beyond_arbitrary_context_window():
-    padding = " ".join(f'data-field-{index}={{item.value}}' for index in range(40))
+    padding = " ".join(f"data-field-{index}={{item.value}}" for index in range(40))
     code = f"const items = list.map(item => <ListItem {padding} key={{item.id}} />);"
     assert not _rule_fired(code, "MISSING_KEY_PROP_SLOP")
 
@@ -3894,8 +3896,7 @@ def test_hardcoded_dev_url_slop_skips_playwright_server_config(tmp_path):
         encoding="utf-8",
     )
     assert not any(
-        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
-        for issue in analyze_file(config)
+        issue.get("id") == "HARDCODED_DEV_URL_SLOP" for issue in analyze_file(config)
     )
 
 
@@ -4946,7 +4947,9 @@ def test_missing_focus_slop_fires_for_unverified_semantic_css_class() -> None:
     assert _rule_fired(code, "MISSING_FOCUS_SLOP")
 
 
-def test_semantic_css_class_states_are_verified_from_project_stylesheet(tmp_path) -> None:
+def test_semantic_css_class_states_are_verified_from_project_stylesheet(
+    tmp_path,
+) -> None:
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     source = tmp_path / "src"
     source.mkdir()
@@ -5258,9 +5261,7 @@ def test_unused_import_reports_local_alias_and_namespace_names():
         export const Card = () => React.createElement('div');
     """)
     issues = [
-        issue
-        for issue in _issues_for(code)
-        if issue["detector_id"] == "UNUSED_IMPORT"
+        issue for issue in _issues_for(code) if issue["detector_id"] == "UNUSED_IMPORT"
     ]
     assert len(issues) == 1
     assert "PrimaryButton" in issues[0]["issue"]
@@ -5318,56 +5319,10 @@ def test_unused_state_skips_when_state_var_is_read():
     assert not _rule_fired(code, "UNUSED_STATE")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# LOW_CONTRAST_SLOP — insufficient color contrast between text and background
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_low_contrast_slop_fires_for_poor_contrast(tmp_path):
-    code = '<p className="bg-yellow-300 text-white font-bold">Warning text</p>'
-    p = tmp_path / "Component.tsx"
-    p.write_text(code, encoding="utf-8")
-    # yellow-300 (~#fde047) on white (#ffffff) has near-1:1 contrast ratio
-    dynamic_colors = {"yellow-300": "#fde047", "white": "#ffffff"}
-    issues = analyze_file(p, dynamic_colors=dynamic_colors)
-    assert any(i.get("detector_id") == "LOW_CONTRAST_SLOP" for i in issues)
-
-
-def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
-    code = '<p className="bg-yellow-300 text-white font-bold">Warning text</p>'
-    p = tmp_path / "Component.tsx"
-    p.write_text(code, encoding="utf-8")
-    # Without dynamic_colors, the contrast check is skipped entirely
-    issues = analyze_file(p)
-    assert not any(i.get("id") == "LOW_CONTRAST_SLOP" for i in issues)
-
-
-def test_analyze_directory_skips_project_color_audit_without_color_sources(tmp_path):
-    from uidetox.analyzer import analyze_directory
-
-    (tmp_path / "pyproject.toml").write_text(
-        dedent("""\
-            [project]
-            name = "tool-only"
-            version = "0.1.0"
-        """),
-        encoding="utf-8",
-    )
-
-    issues = analyze_directory(str(tmp_path))
-
-    assert not any(
-        i.get("id") == "LOW_CONTRAST_SLOP"
-        and "Dynamic color audit" in i.get("issue", "")
-        for i in issues
-    )
-
-
 def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
     tmp_path, monkeypatch
 ):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
 
     files = [tmp_path / "src" / f"Component{index}.tsx" for index in range(4)]
     files[0].parent.mkdir()
@@ -5381,8 +5336,6 @@ def test_scan_since_analyze_directory_calls_analyze_file_for_exact_targets(
         return []
 
     monkeypatch.setattr(analyzer_module, "analyze_file", fake_analyze_file)
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     issues = analyzer_module.analyze_directory(
         str(tmp_path),
@@ -5399,7 +5352,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
     tmp_path, monkeypatch
 ):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
 
     accepted = tmp_path / "src" / "Accepted.tsx"
     excluded = tmp_path / "excluded" / "Excluded.tsx"
@@ -5417,8 +5369,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
         "analyze_file",
         lambda file_path, **kwargs: analyzed.append(Path(file_path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     issues = analyzer_module.analyze_directory(
         str(tmp_path),
@@ -5433,51 +5383,6 @@ def test_scan_since_analyze_directory_ignores_ineligible_targets_and_empty_list(
     analyzed.clear()
     assert analyzer_module.analyze_directory(str(tmp_path), target_files=[]) == []
     assert analyzed == []
-
-
-def test_scan_since_project_color_audit_runs_only_for_changed_color_source(
-    tmp_path, monkeypatch
-):
-    import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
-
-    component = tmp_path / "src" / "Component.tsx"
-    component.parent.mkdir()
-    component.write_text("export default null", encoding="utf-8")
-    color_source = tmp_path / "tailwind.config.js"
-    color_source.write_text(
-        "module.exports = { theme: { colors: {} } }", encoding="utf-8"
-    )
-
-    audit_calls = []
-    monkeypatch.setattr(analyzer_module, "analyze_file", lambda *args, **kwargs: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
-    monkeypatch.setattr(
-        color_utils,
-        "audit_project_colors",
-        lambda root: audit_calls.append(Path(root).resolve()) or [],
-    )
-
-    analyzer_module.analyze_directory(str(tmp_path), target_files=[component])
-    assert audit_calls == []
-
-    analyzer_module.analyze_directory(str(tmp_path), target_files=[color_source])
-    assert audit_calls == [tmp_path.resolve()]
-
-
-def test_audit_project_colors_ignores_default_tailwind_pairs_when_not_declared(
-    tmp_path,
-):
-    from uidetox.color_utils import audit_project_colors
-
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "globals.css").write_text(
-        ":root { --brand: #123456; --accent: #abcdef; }",
-        encoding="utf-8",
-    )
-
-    violations = audit_project_colors(tmp_path)
-    assert violations == []
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -6551,9 +6456,10 @@ def test_sticky_without_top_slop_skips_logical_block_offset():
 
 def test_window_confirm_slop_fires_exactly_once():
     """WINDOW_CONFIRM_SLOP must not be duplicated in RULES — should fire once per file."""
-    from uidetox.analyzer import analyze_file
-    import tempfile
     import os
+    import tempfile
+
+    from uidetox.analyzer import analyze_file
 
     code = 'if (window.confirm("sure?")) { doThing(); }'
     with tempfile.NamedTemporaryFile(
@@ -6575,9 +6481,10 @@ def test_window_confirm_slop_fires_exactly_once():
 
 def test_tabindex_positive_not_duplicated_with_removed_rule():
     """After removing POSITIVE_TABINDEX_SLOP, only TABINDEX_POSITIVE_SLOP should fire."""
-    from uidetox.analyzer import analyze_file
-    import tempfile
     import os
+    import tempfile
+
+    from uidetox.analyzer import analyze_file
 
     code = "<div tabIndex={5}>click me</div>"
     with tempfile.NamedTemporaryFile(
@@ -6605,10 +6512,11 @@ def test_tabindex_positive_not_duplicated_with_removed_rule():
 
 def test_analyze_ast_all_issues_have_id_field():
     """Every issue returned by _analyze_ast must have an 'id' key."""
-    from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_ast
 
     # Code that triggers multiple AST paths: dashboard + animation state + siblings
     code = """
@@ -6638,10 +6546,11 @@ export default function Dashboard() {
 
 def test_analyze_ast_dashboard_issue_has_correct_id():
     """Dashboard slop detected via AST should have id='HERO_DASHBOARD_SLOP'."""
-    from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_ast
 
     code = """
 export default function Dash() {
@@ -6668,10 +6577,11 @@ export default function Dash() {
 
 def test_analyze_ast_prop_drilling_issue_has_id():
     """Prop drilling detected via AST should have id='PROP_DRILLING_SLOP'."""
-    from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_ast
 
     # Pass same prop name through 4+ different components
     code = """
@@ -6814,10 +6724,11 @@ const [story, setStory] = useState(null);
 
 def test_analyze_ast_identical_siblings_has_id():
     """Identical sibling components detected via AST should have id='IDENTICAL_SIBLINGS_SLOP'."""
-    from uidetox.analyzer import _analyze_ast
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_ast
 
     code = """
 export default function Grid() {
@@ -6860,10 +6771,11 @@ def test_analyze_ast_identical_siblings_skips_route_declarations(tmp_path):
 
 def test_analyze_component_layout_all_issues_have_id():
     """Every issue returned by _analyze_component_layout must have an 'id' key."""
-    from uidetox.analyzer import _analyze_component_layout
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_component_layout
 
     # Code that triggers multiple heuristics: pricing + testimonials
     code = """
@@ -6896,10 +6808,11 @@ export default function Page() {
 
 def test_analyze_component_layout_pricing_table_id():
     """Pricing table heuristic should emit id='PRICING_TABLE_SLOP'."""
-    from uidetox.analyzer import _analyze_component_layout
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_component_layout
 
     code = """
 export default function Pricing() {
@@ -6941,10 +6854,11 @@ export function Projects() {
 
 def test_analyze_component_layout_testimonial_grid_id():
     """Testimonial grid heuristic should emit id='TESTIMONIAL_GRID_SLOP'."""
-    from uidetox.analyzer import _analyze_component_layout
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_component_layout
 
     code = """
 export default function Reviews() {
@@ -6974,10 +6888,11 @@ export default function Reviews() {
 
 def test_analyze_component_layout_static_component_id():
     """Zero-interactivity heuristic should emit id='STATIC_COMPONENT_SLOP'."""
-    from uidetox.analyzer import _analyze_component_layout
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_component_layout
 
     # A static component: many JSX elements, no handlers, no animation, no hooks
     code = (
@@ -7014,10 +6929,11 @@ export default function Static() {
 
 def test_analyze_component_layout_dashboard_id():
     """KPI dashboard heuristic should emit id='DASHBOARD_LAYOUT_SLOP'."""
-    from uidetox.analyzer import _analyze_component_layout
-    from pathlib import Path
-    import tempfile
     import os
+    import tempfile
+    from pathlib import Path
+
+    from uidetox.analyzer import _analyze_component_layout
 
     code = """
 export default function Dashboard() {
@@ -7087,8 +7003,8 @@ def test_auto_categories_no_positive_tabindex_slop():
 
 def test_auto_categories_all_rule_ids_exist_in_rules():
     """Every rule ID referenced in _AUTO_CATEGORIES must exist in the RULES list."""
-    from uidetox.commands.scan import _AUTO_CATEGORIES
     from uidetox.analyzer import RULES
+    from uidetox.commands.scan import _AUTO_CATEGORIES
 
     rule_ids_in_rules = {r["id"] for r in RULES}
     for cat, rule_ids in _AUTO_CATEGORIES.items():
@@ -7163,8 +7079,9 @@ def test_contrast_ratio_with_4_char_hex():
 
 def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
     """triggered_rules should be populated via issue['id'] not description substring match."""
-    import sys
     import argparse
+    import sys
+
     from uidetox.commands import scan as scan_cmd
 
     # Write a file that will trigger a well-known rule
@@ -8166,9 +8083,7 @@ def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(
 
     assert config["ignore_patterns"] == ["spacing"]
     assert [issue["id"] for issue in state["issues"]] == [live_keep["id"]]
-    assert [issue["id"] for issue in state["diff_baseline"]] == [
-        baseline_keep["id"]
-    ]
+    assert [issue["id"] for issue in state["diff_baseline"]] == [baseline_keep["id"]]
 
 
 def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(
@@ -8244,7 +8159,9 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
+        rescan_cmd,
+        "score_current_snapshot",
+        lambda state, **kwargs: {"blended_score": 100},
     )
     monkeypatch.setattr(rescan_cmd, "analyze_directory", fake_analyze_directory)
 
@@ -8253,9 +8170,7 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     assert analyzed_path == root.resolve()
 
 
-def test_rescan_invalid_path_preserves_queue_and_scan_stats(
-    tmp_path, monkeypatch
-):
+def test_rescan_invalid_path_preserves_queue_and_scan_stats(tmp_path, monkeypatch):
     from uidetox.commands import rescan as rescan_cmd
     from uidetox.findings import Finding
     from uidetox.state import save_state
@@ -8356,7 +8271,9 @@ def test_rescan_batches_all_current_findings_without_history_credit(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
+        rescan_cmd,
+        "score_current_snapshot",
+        lambda state, **kwargs: {"blended_score": 100},
     )
     monkeypatch.setattr(
         rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings
@@ -8382,9 +8299,7 @@ def test_rescan_batches_all_current_findings_without_history_credit(
     assert "Queued 4 mechanical anti-pattern issues" in output
 
 
-def test_rescan_requeues_current_runtime_and_contract_findings(
-    tmp_path, monkeypatch
-):
+def test_rescan_requeues_current_runtime_and_contract_findings(tmp_path, monkeypatch):
     from uidetox.commands import rescan as rescan_cmd
     from uidetox.findings import Finding
 
@@ -8413,7 +8328,9 @@ def test_rescan_requeues_current_runtime_and_contract_findings(
     )
     captured = {}
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(
+        rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []}
+    )
     monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
     monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
@@ -8426,10 +8343,9 @@ def test_rescan_requeues_current_runtime_and_contract_findings(
     monkeypatch.setattr(
         rescan_cmd,
         "add_issues",
-        lambda findings, **kwargs: captured.update(
-            findings=list(findings), **kwargs
-        )
-        or 2,
+        lambda findings, **kwargs: (
+            captured.update(findings=list(findings), **kwargs) or 2
+        ),
     )
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
@@ -8721,8 +8637,9 @@ def test_derive_component_name_sibling_dirs():
     as a child of '/src/components/button', returning 'button' instead of 'components'.
     os.path.commonpath() respects path boundaries and returns the correct ancestor.
     """
-    from uidetox.commands.batch_resolve import _derive_component_name
     import os
+
+    from uidetox.commands.batch_resolve import _derive_component_name
 
     # Use os.sep-joined paths so the test works on Windows too
     button = os.path.join(os.sep, "usr", "src", "components", "button", "Button.tsx")
@@ -8737,8 +8654,9 @@ def test_derive_component_name_sibling_dirs():
 
 def test_derive_component_name_same_dir():
     """Files in the same directory return that directory's name."""
-    from uidetox.commands.batch_resolve import _derive_component_name
     import os
+
+    from uidetox.commands.batch_resolve import _derive_component_name
 
     f1 = os.path.join(os.sep, "project", "src", "auth", "Login.tsx")
     f2 = os.path.join(os.sep, "project", "src", "auth", "Logout.tsx")
@@ -8748,8 +8666,9 @@ def test_derive_component_name_same_dir():
 
 def test_derive_component_name_single_file():
     """Single file returns parent directory name."""
-    from uidetox.commands.batch_resolve import _derive_component_name
     import os
+
+    from uidetox.commands.batch_resolve import _derive_component_name
 
     f = os.path.join(os.sep, "project", "src", "checkout", "CartSummary.tsx")
     result = _derive_component_name([f])
@@ -8775,7 +8694,7 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
     would produce wrong paths like /project/frontend/frontend/src/Button.tsx instead
     of /project/frontend/src/Button.tsx, causing all incremental issues to be dropped.
     """
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
 
     # Simulate:
     #   git root = /repo
@@ -8962,8 +8881,8 @@ class TestSubagentCodebaseMemoryPromptGuidance:
         assert legacy_tool not in prompt.lower()
 
     def test_fix_prompt_requires_codebase_memory_impact_check(self, monkeypatch):
-        import uidetox.subagent as sa
         import uidetox.commands.next as next_mod
+        import uidetox.subagent as sa
 
         monkeypatch.setattr(sa, "_build_memory_block", lambda *args, **kwargs: "")
         monkeypatch.setattr(
@@ -9418,6 +9337,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_config
 
         monkeypatch.chdir(tmp_path)
@@ -9456,6 +9376,7 @@ class TestStateAndMemoryChaosResilience:
 
     def test_load_config_normalizes_nested_tooling_entries(self, tmp_path, monkeypatch):
         import json
+
         from uidetox.state import load_config
 
         monkeypatch.chdir(tmp_path)
@@ -9492,6 +9413,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_config
 
         monkeypatch.chdir(tmp_path)
@@ -9549,6 +9471,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -9582,6 +9505,7 @@ class TestStateAndMemoryChaosResilience:
 
     def test_load_state_normalizes_diff_baseline_shapes(self, tmp_path, monkeypatch):
         import json
+
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -9602,14 +9526,15 @@ class TestStateAndMemoryChaosResilience:
 
         state = load_state()
 
-        assert [
-            (issue["id"], issue["file"]) for issue in state["diff_baseline"]
-        ] == [("BASE-1", "src/App.tsx")]
+        assert [(issue["id"], issue["file"]) for issue in state["diff_baseline"]] == [
+            ("BASE-1", "src/App.tsx")
+        ]
 
     def test_load_state_backfills_missing_diff_baseline_for_legacy_state(
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -9638,6 +9563,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -9672,6 +9598,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.state import load_state
 
         monkeypatch.chdir(tmp_path)
@@ -9713,6 +9640,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.commands import review as review_cmd
         from uidetox.state import load_state
 
@@ -9741,6 +9669,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import status as status_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -9768,6 +9697,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.history import load_run_history
 
         monkeypatch.chdir(tmp_path)
@@ -9806,12 +9736,14 @@ class TestStateAndMemoryChaosResilience:
         monkeypatch.setattr(
             history,
             "score_current_snapshot",
-            lambda state, **kwargs: received.update(kwargs)
-            or {
-                "blended_score": 0,
-                "objective_score": 0,
-                "subjective_score": None,
-            },
+            lambda state, **kwargs: (
+                received.update(kwargs)
+                or {
+                    "blended_score": 0,
+                    "objective_score": 0,
+                    "subjective_score": None,
+                }
+            ),
         )
 
         history.save_run_snapshot()
@@ -9822,6 +9754,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.history import load_run_history
 
         monkeypatch.chdir(tmp_path)
@@ -9842,6 +9775,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import history_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -9872,6 +9806,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import history_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -9909,6 +9844,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import history_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -9945,6 +9881,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import history_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -10014,6 +9951,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.memory import load_memory
 
         monkeypatch.chdir(tmp_path)
@@ -10052,9 +9990,10 @@ class TestStateAndMemoryChaosResilience:
     def test_load_memory_does_not_fabricate_session_checkpoint_for_missing_session(
         self, tmp_path, monkeypatch, capsys
     ):
-        import json
         import contextlib
         import io
+        import json
+
         from uidetox.commands import memory_cmd
         from uidetox.memory import get_session, load_memory
 
@@ -10079,6 +10018,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.memory import load_memory
         from uidetox.subagent import _build_memory_block
 
@@ -10112,6 +10052,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.memory import get_session, save_session
 
         monkeypatch.chdir(tmp_path)
@@ -10133,6 +10074,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.memory import load_memory
 
         monkeypatch.chdir(tmp_path)
@@ -10187,6 +10129,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch
     ):
         import json
+
         from uidetox.memory import load_memory
 
         monkeypatch.chdir(tmp_path)
@@ -10254,6 +10197,7 @@ class TestStateAndMemoryChaosResilience:
         self, tmp_path, monkeypatch, capsys
     ):
         import json
+
         from uidetox.commands import memory_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -10401,7 +10345,6 @@ def test_get_frontend_files_nested_cwd_uses_project_root_config(monkeypatch, tmp
 
 def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
     from uidetox.commands import diff as diff_cmd
     from uidetox.commands.watch import _snapshot
     from uidetox.fileset import ProjectFileSet
@@ -10455,8 +10398,6 @@ def test_frontend_fileset_consumer_parity(monkeypatch, tmp_path):
         "analyze_file",
         lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root_path: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root_path: {})
     analyzer_module.analyze_directory(
         str(root),
         exclude_paths=config["exclude"],
@@ -10542,8 +10483,8 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
     from uidetox.analyzer import RULES
 
     rule_ids = [rule["id"] for rule in RULES]
-    assert len(rule_ids) == 218
-    assert len(set(rule_ids)) == 218
+    assert len(rule_ids) == 217
+    assert len(set(rule_ids)) == 217
     assert rule_ids[:5] == [
         "TYPOGRAPHY_SLOP",
         "COLOR_GRADIENT_SLOP",
@@ -10559,21 +10500,24 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
         "FLEXBOX_PERCENTAGE_MATH_SLOP",
     ]
     assert _analyzer_catalog_fingerprint(RULES) == (
-        "389ca270d591e3182313deffc0f2fc21acab0cf2fc6f4458c0614d8bdaed336f"
+        "4c244846908ef670c6e13f2f1f14e69e298484714659e1a7af065497dbd445af"
     )
 
 
 def test_analyzer_public_import_contract():
     from uidetox.analyzer import RULES, analyze_directory, analyze_file
 
-    assert len(RULES) == 218
+    assert len(RULES) == 217
     assert callable(analyze_file)
     assert callable(analyze_directory)
 
 
 def _legacy_issue_view(issue):
     keys = ("file", "tier", "issue", "command", "line", "column", "snippet")
-    return {"id": issue["detector_id"], **{key: issue[key] for key in keys if key in issue}}
+    return {
+        "id": issue["detector_id"],
+        **{key: issue[key] for key in keys if key in issue},
+    }
 
 
 def test_analyzer_regex_issue_shape_and_order(tmp_path):
@@ -10703,7 +10647,6 @@ def test_analyzer_ast_issue_shape_and_missing_parser_fallback(tmp_path):
 
 def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
     import uidetox.analyzer as analyzer_module
-    import uidetox.color_utils as color_utils
     from uidetox.fileset import ProjectFileSet
 
     accepted = tmp_path / "src" / "Accepted.tsx"
@@ -10725,8 +10668,6 @@ def test_analyzer_explicit_targets_use_shared_discovery(monkeypatch, tmp_path):
         "analyze_file",
         lambda path, **kwargs: analyzed.append(Path(path).resolve()) or [],
     )
-    monkeypatch.setattr(color_utils, "find_color_config_sources", lambda root: [])
-    monkeypatch.setattr(color_utils, "load_dynamic_colors", lambda root: {})
 
     assert (
         analyzer_module.analyze_directory(

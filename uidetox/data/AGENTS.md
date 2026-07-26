@@ -25,7 +25,7 @@ The loop triggers `uidetox check --fix` to execute tsc → lint → format in se
 
 ### Phase 1: Exploration & Audit (The Scan)
 The loop triggers `uidetox scan` on the project. The scan auto-detects tooling (TypeScript, biome/eslint/prettier, backend frameworks, database ORMs, API layers) and performs:
-- **Static Slop Analysis:** A 218-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
+- **Static Slop Analysis:** A 217-rule deterministic analyzer scans all frontend files for known AI anti-patterns (glassmorphism, purple-blue gradients, bounce animations, oversized shadows, gray-on-color text, missing dark mode, etc.).
 - **Design Audit:** The agent reads frontend files and evaluates against SKILL.md.
 - **Full-Stack Integration:** If backend/database/API layers are detected, the agent checks for DTO mismatches, schema misalignment, missing error states, and type safety gaps across boundaries. **CRITICAL:** When generating or fixing code, the agent MUST enforce strict type safety and conform perfectly to existing backend architectures, API contracts, and database DTOs.
 
@@ -103,7 +103,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox visual-evidence` | Compare local single-frame PNGs with exact/masked metrics and optional reviewer artifacts (`--before`, `--after`, `--isolated`, repeatable `--allowed-root`). Isolation is bounded process separation, not a complete OS sandbox. |
 | `uidetox diff` | Compare fresh static analysis against stored baseline (NEW / FIXED / UNCHANGED). Supports `--since <sha>`, `--output table/json/github`, `--save`. |
 | `uidetox watch` | Poll directory for file changes and re-scan on modification (`--path`, `--interval`, `--no-clear`). |
-| `uidetox rescan` | Clear queue, run 218-rule static analyzer, re-audit from scratch |
+| `uidetox rescan` | Clear queue, run 217-rule static analyzer, re-audit from scratch |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly |
 | `uidetox exclude <path>` | Skip a directory during scanning |
 | `uidetox review` | LLM subjective UX quality review (use `--score N` to record assessment) |
@@ -195,7 +195,7 @@ UIdetox/
 │   ├── cli.py                    # Argparse router (52 commands, dynamic slash-command loading)
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
-│   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
+│   ├── analyzer.py               # 217-rule static slop detector (deterministic anti-pattern scan)
 │   ├── source_facts.py           # Shared AST parse lifecycle + immutable source facts
 │   ├── frontend_map.py           # Semantic frontend graph + artifact persistence
 │   ├── project_map.py            # Stable full-stack contract facade

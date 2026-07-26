@@ -9,7 +9,6 @@ from uidetox.analyzer_interactions import (
     is_development_proxy_url,
 )
 
-
 _REDUCED_MOTION_MEDIA = re.compile(
     r"@media\s*\([^)]*prefers-reduced-motion\s*:\s*reduce[^)]*\)\s*\{",
     re.IGNORECASE,
@@ -24,6 +23,7 @@ _REDUCED_MOTION_OVERRIDE_PROPERTIES = {
     "transition-delay",
     "transition-duration",
 }
+
 
 def _issue_for_match(
     rule: dict,
@@ -170,7 +170,9 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
         )
     )
     pricing_context = bool(
-        re.search(r"\b(?:pricing|price|plan|tier|subscription)\b", content, re.IGNORECASE)
+        re.search(
+            r"\b(?:pricing|price|plan|tier|subscription)\b", content, re.IGNORECASE
+        )
     )
     if (pricing_context and pricing_signals >= 3) or pricing_cards >= 3:
         issues.append(
@@ -243,7 +245,6 @@ def _analyze_document_structure_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run document-structure heuristics."""
     issues = []
@@ -300,7 +301,6 @@ def _analyze_interaction_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run interaction-state heuristics."""
     issues = []
@@ -334,9 +334,7 @@ def _analyze_interaction_custom_rule(
         ):
             tag = m.group(1).lower()
             classes = m.group(2)
-            if not class_list_has_interaction_state(
-                classes, filepath, "focus", tag
-            ):
+            if not class_list_has_interaction_state(classes, filepath, "focus", tag):
                 issues.append(
                     {
                         "id": rule["id"],
@@ -421,7 +419,6 @@ def _analyze_commented_code_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect blocks of commented-out source."""
     issues = []
@@ -510,7 +507,6 @@ def _analyze_unused_import_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect imported names unused outside import declarations."""
     if rule.get("_custom_check") != "unused_import":
@@ -538,7 +534,6 @@ def _analyze_unused_state_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Detect useState values never read."""
     issues = []
@@ -564,61 +559,11 @@ def _analyze_unused_state_custom_rule(
     return None
 
 
-def _analyze_contrast_custom_rule(
-    rule: dict,
-    filepath: Path,
-    content: str,
-    ext: str,
-    dynamic_colors: dict[str, str] | None,
-) -> list[dict] | None:
-    """Run configured color-contrast analysis."""
-    issues = []
-    custom = rule.get("_custom_check")
-    # Custom check: contrast_ratio
-    if custom == "contrast_ratio" and dynamic_colors:
-        for m in re.finditer(
-            r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE
-        ):
-            classes = m.group(1).split()
-            bg_color = None
-            text_color = None
-
-            for c in classes:
-                if c.startswith("bg-"):
-                    bg_name = c[3:].split("/")[0]
-                    if bg_name in dynamic_colors:
-                        bg_color = dynamic_colors[bg_name]
-                elif c.startswith("text-"):
-                    text_name = c[5:].split("/")[0]
-                    if text_name in dynamic_colors:
-                        text_color = dynamic_colors[text_name]
-
-            if bg_color and text_color:
-                from uidetox.color_utils import contrast_ratio
-
-                ratio = contrast_ratio(text_color, bg_color)
-                if ratio < 4.5:
-                    issues.append(
-                        {
-                            "id": rule["id"],
-                            "file": str(filepath.resolve()),
-                            "tier": rule["tier"],
-                            "issue": f"Low contrast detected: {text_color} on {bg_color} (ratio {ratio:.1f}:1).",
-                            "command": rule["command"],
-                        }
-                    )
-                    break
-        return issues
-
-    return None
-
-
 def _analyze_accessibility_custom_rule(
     rule: dict,
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run accessibility and document-shell heuristics."""
     issues = []
@@ -781,7 +726,6 @@ def _analyze_css_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run CSS foundation heuristics."""
     issues = []
@@ -945,7 +889,6 @@ def _analyze_tailwind_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run conflicting Tailwind utility heuristics."""
     issues = []
@@ -1071,7 +1014,6 @@ def _analyze_html_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run HTML element and attribute heuristics."""
     issues = []
@@ -1204,7 +1146,6 @@ def _analyze_browser_security_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run browser security and SSR-safety heuristics."""
     issues = []
@@ -1337,7 +1278,6 @@ def _analyze_react_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run React composition and dependency heuristics."""
     issues = []
@@ -1401,29 +1341,31 @@ def _analyze_react_custom_rule(
             for name in _extract_import_names(import_match)
         }
         setters = set(
-            re.findall(
-                r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content
-            )
+            re.findall(r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content)
         )
-        stable = imported | setters | {
-            "String",
-            "Number",
-            "Boolean",
-            "Date",
-            "Math",
-            "JSON",
-            "Promise",
-            "Error",
-            "Object",
-            "Array",
-            "console",
-            "document",
-            "window",
-            "undefined",
-            "null",
-            "true",
-            "false",
-        }
+        stable = (
+            imported
+            | setters
+            | {
+                "String",
+                "Number",
+                "Boolean",
+                "Date",
+                "Math",
+                "JSON",
+                "Promise",
+                "Error",
+                "Object",
+                "Array",
+                "console",
+                "document",
+                "window",
+                "undefined",
+                "null",
+                "true",
+                "false",
+            }
+        )
         effect_pattern = re.compile(
             r"useEffect\s*\(\s*\(\s*\)\s*=>\s*\{(?P<body>.*?)\}\s*,\s*\[\s*\]\s*\)",
             re.DOTALL,
@@ -1457,15 +1399,15 @@ def _analyze_react_custom_rule(
             callback_params = set(
                 re.findall(r"(?:\(|,)\s*([A-Za-z_$][\w$]*)\s*(?:\)|,)\s*=>", body)
             )
-            for destructured in re.findall(
-                r"\(\s*[\[{]([^\]}]+)[\]}]\s*\)\s*=>", body
-            ):
+            for destructured in re.findall(r"\(\s*[\[{]([^\]}]+)[\]}]\s*\)\s*=>", body):
                 callback_params.update(
                     re.findall(r"\b[A-Za-z_$][\w$]*\b", destructured)
                 )
             strings_removed = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "", body)
             identifiers = set(re.findall(r"\b[A-Za-z_$][\w$]*\b", strings_removed))
-            property_names = set(re.findall(r"\.\s*([A-Za-z_$][\w$]*)", strings_removed))
+            property_names = set(
+                re.findall(r"\.\s*([A-Za-z_$][\w$]*)", strings_removed)
+            )
             external = (
                 identifiers
                 - property_names
@@ -1526,7 +1468,6 @@ def _analyze_control_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run interactive-control accessibility heuristics."""
     issues = []
@@ -1618,9 +1559,7 @@ def _analyze_control_custom_rule(
             content,
             re.IGNORECASE,
         )
-        if has_modal_container and not (
-            has_native_dialog or has_dialog_role
-        ):
+        if has_modal_container and not (has_native_dialog or has_dialog_role):
             issues.append(
                 {
                     "id": rule["id"],
@@ -1659,7 +1598,6 @@ def _analyze_runtime_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run React runtime-state heuristics."""
     issues = []
@@ -1667,8 +1605,7 @@ def _analyze_runtime_custom_rule(
     if custom == "hardcoded_dev_url":
         matches = tuple(rule["pattern"].finditer(content))
         if any(
-            not is_development_proxy_url(filepath, content, match)
-            for match in matches
+            not is_development_proxy_url(filepath, content, match) for match in matches
         ):
             issues.append(
                 {
@@ -1734,14 +1671,27 @@ def _analyze_design_pattern_custom_rule(
     filepath: Path,
     content: str,
     ext: str,
-    dynamic_colors: dict[str, str] | None,
 ) -> list[dict] | None:
     """Run repeated design-pattern heuristics."""
     issues = []
     custom = rule.get("_custom_check")
     if custom == "card_nesting":
         stack: list[tuple[str, bool]] = []
-        void_tags = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+        void_tags = {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "source",
+            "track",
+            "wbr",
+        }
         for match in re.finditer(
             r"<(\/)?([A-Za-z][\w.]*)\b([^>]*)>", content, re.DOTALL
         ):
@@ -1889,7 +1839,6 @@ _CUSTOM_CHECK_HANDLERS = {
     "nested_ternary": _analyze_document_structure_custom_rule,
     "disabled_cursor": _analyze_interaction_custom_rule,
     "commented_code": _analyze_commented_code_custom_rule,
-    "contrast_ratio": _analyze_contrast_custom_rule,
     "unused_import": _analyze_unused_import_custom_rule,
     "unused_state": _analyze_unused_state_custom_rule,
     "video_no_captions": _analyze_accessibility_custom_rule,

@@ -14,6 +14,7 @@ from uidetox.findings import (
     VerificationResult,
     current_verification_fresh,
     evaluate_eligibility,
+    review_capture_matrix_digest,
     score_current_snapshot,
     verify_finding,
 )
@@ -55,7 +56,13 @@ def _static(path: Path, *, start: int = 0) -> Finding:
         message="Generic copy",
         provenance="static",
         evidence={"matched_text": "Unlock the power"},
-        source_anchor={"path": str(path), "line": 1, "column": 1, "start": start, "end": start + 16},
+        source_anchor={
+            "path": str(path),
+            "line": 1,
+            "column": 1,
+            "start": start,
+            "end": start + 16,
+        },
         verifier={"kind": "static", "detector_id": "GENERIC_COPY_SLOP"},
     )
 
@@ -97,7 +104,9 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
-    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: True)
+    monkeypatch.setattr(
+        frontend_map_module, "frontend_map_is_fresh", lambda *args: True
+    )
     runtime = Finding.create(
         detector_id="runtime-text-clipped",
         category="overflow",
@@ -221,7 +230,9 @@ def test_runtime_diagnostic_verifier_uses_exact_capture_evidence(
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
-    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: True)
+    monkeypatch.setattr(
+        frontend_map_module, "frontend_map_is_fresh", lambda *args: True
+    )
     anchor = {
         "url": "http://localhost:3000/cart",
         "viewport": "mobile",
@@ -274,7 +285,11 @@ def test_runtime_diagnostic_verifier_uses_exact_capture_evidence(
                     "scenario": anchor["scenario"],
                     "state": anchor["state"],
                     "url": anchor["url"],
-                    "viewport": {"name": anchor["viewport"], "width": 390, "height": 844},
+                    "viewport": {
+                        "name": anchor["viewport"],
+                        "width": 390,
+                        "height": 844,
+                    },
                     "status": "completed",
                     "diagnostics": [diagnostic],
                 }
@@ -306,6 +321,8 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
         verifier={"kind": "manual"},
     )
     hashes = {"source": "a", "map": "b", "runtime": "c"}
+    matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
+    matrix_digest = review_capture_matrix_digest(matrix)
     state = {
         "subjective": {
             "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
@@ -313,10 +330,20 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
             "rationale": "Reviewed repaired hierarchy.",
             "reviewer": "qa-agent",
             "finding_links": [finding.fingerprint],
+            "region_links": ["runtime-hierarchy"],
             "routes": ["/"],
             "states": ["default"],
             "viewports": ["desktop"],
             "evidence_hashes": dict(hashes),
+            "required_matrix_digest": matrix_digest,
+            "scope_validation": {
+                "status": "validated",
+                "evidence_hashes": dict(hashes),
+                "finding_links": [finding.fingerprint],
+                "region_links": ["runtime-hierarchy"],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
+            },
         }
     }
     with pytest.MonkeyPatch.context() as monkeypatch:
@@ -370,20 +397,32 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
     assert finding.provenance == "manual"
     assert finding.verifier["kind"] == "manual"
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(
-            "uidetox.findings.current_evidence_hashes", lambda _root: hashes
+        patch.setattr("uidetox.findings.current_evidence_hashes", lambda _root: hashes)
+        assert (
+            verify_finding(finding, state={}, root=tmp_path).outcome == "stale_evidence"
         )
-        assert verify_finding(finding, state={}, root=tmp_path).outcome == "stale_evidence"
+        matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
+        matrix_digest = review_capture_matrix_digest(matrix)
         review = {
             "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
             "score": 100,
             "rationale": "Reviewed the repaired hierarchy.",
             "reviewer": "qa-agent",
             "finding_links": [queue_id],
+            "region_links": ["runtime-hierarchy"],
             "routes": ["/"],
             "states": ["default"],
             "viewports": ["desktop"],
             "evidence_hashes": hashes,
+            "required_matrix_digest": matrix_digest,
+            "scope_validation": {
+                "status": "validated",
+                "evidence_hashes": hashes,
+                "finding_links": [queue_id],
+                "region_links": ["runtime-hierarchy"],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
+            },
         }
         assert (
             verify_finding(finding, state={"subjective": review}, root=tmp_path).outcome
@@ -445,7 +484,9 @@ def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypat
         "load_frontend_map",
         lambda *_args: SimpleNamespace(nodes=(), target="."),
     )
-    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: True)
+    monkeypatch.setattr(
+        frontend_map_module, "frontend_map_is_fresh", lambda *args: True
+    )
     monkeypatch.setattr(
         project_map_module,
         "build_project_map",
@@ -479,7 +520,9 @@ def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypat
     )
     # Contract detector IDs represent families: another route is independently resolvable.
     assert verify_finding(finding, root=tmp_path).outcome == "absent"
-    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: False)
+    monkeypatch.setattr(
+        frontend_map_module, "frontend_map_is_fresh", lambda *args: False
+    )
     assert verify_finding(finding, root=tmp_path).outcome == "stale_evidence"
 
 
@@ -512,12 +555,19 @@ def test_state_removal_rejects_unbound_absent_verification(tmp_path, monkeypatch
     assert load_state()["issues"]
 
 
-def test_batch_removal_is_atomic_when_any_verifier_does_not_clear(tmp_path, monkeypatch):
+def test_batch_removal_is_atomic_when_any_verifier_does_not_clear(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     one = _static(tmp_path / "one.md")
     two = Finding.create(
-        detector_id="OTHER", category="copy", severity="warning", confidence=1,
-        message="Other", provenance="static", source_anchor={"path": str(tmp_path / "two.md")},
+        detector_id="OTHER",
+        category="copy",
+        severity="warning",
+        confidence=1,
+        message="Other",
+        provenance="static",
+        source_anchor={"path": str(tmp_path / "two.md")},
         verifier={"kind": "static", "detector_id": "OTHER"},
     )
     save_state({"issues": [one, two], "resolved": [], "stats": {}})
@@ -525,7 +575,10 @@ def test_batch_removal_is_atomic_when_any_verifier_does_not_clear(tmp_path, monk
         one.id: VerificationResult("absent", "now", "static", evidence_hash="one"),
         two.id: VerificationResult("reproduced", "now", "static", evidence_hash="two"),
     }
-    assert batch_remove_issues([one.id, two.id], note="fixed", verifications=verifications) == []
+    assert (
+        batch_remove_issues([one.id, two.id], note="fixed", verifications=verifications)
+        == []
+    )
     assert len(load_state()["issues"]) == 2
 
 
@@ -536,7 +589,9 @@ def test_override_is_audited_and_remains_a_scored_finalization_blocker(
     finding = _static(tmp_path / "copy.md")
     save_state({"issues": [finding], "resolved": [], "stats": {}})
     record_verification_override(
-        [finding.id], actor="omar", reason="accepted risk",
+        [finding.id],
+        actor="omar",
+        reason="accepted risk",
         results={finding.id: VerificationResult("reproduced", "now", "static")},
     )
     state = load_state()
@@ -559,7 +614,9 @@ def test_skip_verify_does_not_bypass_finding_verifier(tmp_path, monkeypatch):
     finding = _static(source)
     save_state({"issues": [finding], "resolved": [], "stats": {}})
     with pytest.raises(SystemExit):
-        resolve.run(argparse.Namespace(issue_id=finding.id, note="fixed", skip_verify=True))
+        resolve.run(
+            argparse.Namespace(issue_id=finding.id, note="fixed", skip_verify=True)
+        )
     assert len(load_state()["issues"]) == 1
 
 

@@ -22,6 +22,12 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
+from uidetox.color_utils import (
+    composite_rendered_color,
+    contrast_ratio_rgba,
+    normalize_rendered_color,
+)
+from uidetox.design_semantics import detect_design_findings
 from uidetox.findings import Finding
 from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.runtime_scenarios import (
@@ -46,6 +52,237 @@ from uidetox.runtime_scenarios import (
     validate_runtime_observation_plan,
 )
 from uidetox.utils import now_iso
+
+_FOCUS_COLOR_PATTERN = re.compile(
+    r"(?:rgba?|hsla?|oklab|oklch|color)\([^)]*\)|#[0-9a-f]{3,8}|transparent",
+    re.IGNORECASE,
+)
+_FOCUS_CONTRAST_THRESHOLD = 3.0
+_WHITE = (1.0, 1.0, 1.0, 1.0)
+
+
+def _focus_effective_color(
+    raw: object,
+    backdrop: tuple[float, float, float, float] = _WHITE,
+) -> tuple[float, float, float, float] | None:
+    color = normalize_rendered_color(str(raw or ""))
+    return composite_rendered_color(color, backdrop) if color is not None else None
+
+
+def _focus_contrast(
+    first: tuple[float, float, float, float] | None,
+    second: tuple[float, float, float, float] | None,
+) -> float:
+    if first is None or second is None:
+        return 0.0
+    return contrast_ratio_rgba(first, second)
+
+
+def _normalize_focus_indicator(value: object) -> dict[str, Any]:
+    indicator = dict(value) if isinstance(value, dict) else {}
+    baseline = (
+        dict(indicator.get("baseline"))
+        if isinstance(indicator.get("baseline"), dict)
+        else {}
+    )
+    focused = (
+        dict(indicator.get("focused"))
+        if isinstance(indicator.get("focused"), dict)
+        else {}
+    )
+    if not baseline or not focused:
+        return indicator
+
+    baseline_background = _focus_effective_color(baseline.get("backgroundColor"))
+    focused_background = _focus_effective_color(focused.get("backgroundColor"))
+    perceptible: list[str] = []
+    ratios: dict[str, float] = {}
+
+    background_ratio = _focus_contrast(baseline_background, focused_background)
+    if (
+        baseline.get("backgroundColor") != focused.get("backgroundColor")
+        and background_ratio >= _FOCUS_CONTRAST_THRESHOLD
+    ):
+        perceptible.append("backgroundColor")
+        ratios["backgroundColor"] = round(background_ratio, 4)
+
+    for side in ("Top", "Right", "Bottom", "Left"):
+        property_name = f"border{side}Color"
+        width_name = f"border{side}Width"
+        width = float(str(focused.get(width_name, "0")).removesuffix("px") or 0)
+        baseline_width = float(
+            str(baseline.get(width_name, "0")).removesuffix("px") or 0
+        )
+        if width <= 0 or (
+            baseline.get(property_name) == focused.get(property_name)
+            and width == baseline_width
+        ):
+            continue
+        baseline_border = _focus_effective_color(
+            baseline.get(property_name),
+            baseline_background or _WHITE,
+        )
+        focused_border = _focus_effective_color(
+            focused.get(property_name),
+            focused_background or _WHITE,
+        )
+        ratio = _focus_contrast(baseline_border, focused_border)
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append(property_name)
+            ratios[property_name] = round(ratio, 4)
+
+    outline_width = float(str(focused.get("outlineWidth", "0")).removesuffix("px") or 0)
+    outline_changed = any(
+        baseline.get(property_name) != focused.get(property_name)
+        for property_name in ("outlineStyle", "outlineWidth", "outlineColor")
+    )
+    if (
+        outline_changed
+        and outline_width > 0
+        and focused.get("outlineStyle") not in {"none", "hidden"}
+    ):
+        baseline_outline = _focus_effective_color(
+            baseline.get("outlineColor"),
+            baseline_background or _WHITE,
+        )
+        if (
+            baseline.get("outlineStyle") in {"none", "hidden"}
+            or float(str(baseline.get("outlineWidth", "0")).removesuffix("px") or 0)
+            <= 0
+        ):
+            baseline_outline = baseline_background
+        focused_outline = _focus_effective_color(
+            focused.get("outlineColor"),
+            focused_background or _WHITE,
+        )
+        ratio = _focus_contrast(baseline_outline, focused_outline)
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append("outline")
+            ratios["outline"] = round(ratio, 4)
+
+    if baseline.get("boxShadow") != focused.get("boxShadow"):
+        baseline_shadow_colors = [
+            _focus_effective_color(
+                color,
+                baseline_background or _WHITE,
+            )
+            for color in _FOCUS_COLOR_PATTERN.findall(
+                str(baseline.get("boxShadow", ""))
+            )
+        ] or [baseline_background]
+        focused_shadow_colors = [
+            _focus_effective_color(
+                color,
+                focused_background or _WHITE,
+            )
+            for color in _FOCUS_COLOR_PATTERN.findall(str(focused.get("boxShadow", "")))
+        ]
+        ratio = max(
+            (
+                _focus_contrast(focused_color, baseline_color)
+                for focused_color in focused_shadow_colors
+                for baseline_color in baseline_shadow_colors
+            ),
+            default=0.0,
+        )
+        if ratio >= _FOCUS_CONTRAST_THRESHOLD:
+            perceptible.append("boxShadow")
+            ratios["boxShadow"] = round(ratio, 4)
+
+    raw_areas = (
+        indicator.get("areaByProperty")
+        if isinstance(indicator.get("areaByProperty"), dict)
+        else {}
+    )
+    area_keys = {
+        "backgroundColor": "backgroundColor",
+        "borderTopColor": "border",
+        "borderRightColor": "border",
+        "borderBottomColor": "border",
+        "borderLeftColor": "border",
+        "outline": "outline",
+        "boxShadow": "boxShadow",
+    }
+    areas = [
+        float(raw_areas.get(area_keys[property_name], 0) or 0)
+        for property_name in perceptible
+    ]
+    indicator.update(
+        {
+            "visible": bool(perceptible),
+            "changed": bool(indicator.get("changedProperties")),
+            "distinguishable": bool(perceptible),
+            "perceptibleProperties": perceptible,
+            "contrastRatios": ratios,
+            "area": round(max(areas, default=0.0), 2),
+        }
+    )
+    return indicator
+
+
+def _normalized_runtime_measurements(value: object) -> dict[str, Any]:
+    measurements = dict(value) if isinstance(value, dict) else {}
+    if isinstance(measurements.get("focusIndicator"), dict):
+        measurements["focusIndicator"] = _normalize_focus_indicator(
+            measurements["focusIndicator"]
+        )
+    raw_paint = measurements.get("paint")
+    if not isinstance(raw_paint, dict):
+        return measurements
+    paint = dict(raw_paint)
+    unresolved = [
+        dict(item) for item in paint.get("unresolved", []) if isinstance(item, dict)
+    ]
+
+    def normalize_entry(
+        raw_entry: object,
+        *,
+        selector: str,
+        property_name: str,
+    ) -> dict[str, Any]:
+        entry = dict(raw_entry) if isinstance(raw_entry, dict) else {}
+        raw = str(entry.get("raw", ""))
+        existing = entry.get("rgba")
+        if (
+            isinstance(existing, (list, tuple))
+            and len(existing) == 4
+            and all(isinstance(channel, (int, float)) for channel in existing)
+        ):
+            entry["rgba"] = [float(channel) for channel in existing]
+            return entry
+        normalized = normalize_rendered_color(raw)
+        entry["rgba"] = list(normalized) if normalized is not None else None
+        if normalized is None:
+            cause = {
+                "selector": selector,
+                "property": property_name,
+                "value": raw,
+            }
+            if cause not in unresolved:
+                unresolved.append(cause)
+        return entry
+
+    paint["foreground"] = normalize_entry(
+        paint.get("foreground"),
+        selector=str(paint.get("selector", "")),
+        property_name="color",
+    )
+    layers: list[dict[str, Any]] = []
+    for raw_layer in paint.get("background_layers", []):
+        if not isinstance(raw_layer, dict):
+            continue
+        selector = str(raw_layer.get("selector", ""))
+        layers.append(
+            normalize_entry(
+                raw_layer,
+                selector=selector,
+                property_name="background-color",
+            )
+        )
+    paint["background_layers"] = layers
+    paint["unresolved"] = unresolved
+    measurements["paint"] = paint
+    return measurements
 
 
 @dataclass(frozen=True)
@@ -86,7 +323,7 @@ class RuntimeElement:
                 if isinstance(item, str)
             ),
             states=dict(states),
-            measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
+            measurements=_normalized_runtime_measurements(measurements),
             findings=tuple(
                 Finding.from_dict(dict(item))
                 for item in value.get("findings", [])
@@ -106,8 +343,7 @@ def _attach_runtime_findings(
         element.selector
         for element in attached
         if any(
-            finding.code == "runtime-component-clipped"
-            for finding in element.findings
+            finding.code == "runtime-component-clipped" for finding in element.findings
         )
     }
     if not clipping_containers:
@@ -120,8 +356,7 @@ def _attach_runtime_findings(
                 for finding in element.findings
                 if not (
                     finding.code == "runtime-text-clipped"
-                    and finding.metrics.get("clipping_ancestor")
-                    in clipping_containers
+                    and finding.metrics.get("clipping_ancestor") in clipping_containers
                 )
             ),
         )
@@ -159,6 +394,23 @@ class RuntimePage:
             scenario=str(value.get("scenario", "default")),
             state=str(value.get("state", "initial")),
         )
+
+
+def _attach_design_findings(page: RuntimePage) -> RuntimePage:
+    semantic_findings = detect_design_findings(page)
+    if not any(semantic_findings):
+        return page
+    return replace(
+        page,
+        elements=tuple(
+            replace(element, findings=(*element.findings, *findings))
+            for element, findings in zip(
+                page.elements,
+                semantic_findings,
+                strict=True,
+            )
+        ),
+    )
 
 
 def _legacy_capture(page: RuntimePage, generated_at: str) -> RuntimeCaptureRecord:
@@ -220,15 +472,12 @@ class RuntimeObservation:
             object.__setattr__(self, "pages", pages)
         captures = self.captures
         if not captures and pages:
-            captures = tuple(
-                _legacy_capture(page, self.generated_at) for page in pages
-            )
+            captures = tuple(_legacy_capture(page, self.generated_at) for page in pages)
             object.__setattr__(self, "captures", captures)
         completed = sum(capture.status == "completed" for capture in captures)
         failed = sum(capture.status == "failed" for capture in captures)
         degraded = any(
-            capture.readiness.status == "degraded"
-            or capture.coverage.truncated
+            capture.readiness.status == "degraded" or capture.coverage.truncated
             for capture in captures
             if capture.status == "completed"
         )
@@ -327,17 +576,16 @@ def observe_frontend(
                 name="default",
                 url=url,
                 expected_state="initial",
-                readiness=readiness
-                or RuntimeReadinessPolicy(settle_ms=settle_ms),
+                readiness=readiness or RuntimeReadinessPolicy(settle_ms=settle_ms),
             )
             for url in normalized_urls
         )
     )
     if not active_scenarios:
         raise ValueError("At least one runtime scenario is required.")
-    unrequested_urls = {
-        scenario.url for scenario in active_scenarios
-    } - set(normalized_urls)
+    unrequested_urls = {scenario.url for scenario in active_scenarios} - set(
+        normalized_urls
+    )
     if unrequested_urls:
         raise ValueError("Runtime scenario URLs must be included in requested URLs.")
     validate_runtime_observation_plan(
@@ -637,26 +885,18 @@ def _wait_for_readiness(
             )
         elif policy.mutation_idle_ms:
             strategy = "mutation-idle"
-            outcome = page.evaluate(
+            page.wait_for_function(
                 """
                 policy => new Promise(resolve => {
-                  const finish = outcome => {
+                  const finish = () => {
                     observer.disconnect();
                     clearTimeout(idleTimer);
-                    clearTimeout(limitTimer);
-                    resolve(outcome);
+                    resolve(true);
                   };
-                  let idleTimer = setTimeout(() => finish("idle"), policy.idle);
-                  const limitTimer = setTimeout(
-                    () => finish("timeout"),
-                    policy.timeout
-                  );
+                  let idleTimer = setTimeout(finish, policy.idle);
                   const observer = new MutationObserver(() => {
                     clearTimeout(idleTimer);
-                    idleTimer = setTimeout(
-                      () => finish("idle"),
-                      policy.idle
-                    );
+                    idleTimer = setTimeout(finish, policy.idle);
                   });
                   observer.observe(document, {
                     subtree: true,
@@ -668,12 +908,9 @@ def _wait_for_readiness(
                 """,
                 {
                     "idle": policy.mutation_idle_ms,
-                    "timeout": timeout_ms,
                 },
+                timeout=timeout_ms,
             )
-            if outcome == "timeout":
-                status = "degraded"
-                detail = "mutation-idle timed out"
         elif policy.request_idle_ms:
             strategy = "request-idle"
             page.wait_for_load_state(
@@ -681,11 +918,7 @@ def _wait_for_readiness(
                 timeout=min(policy.request_idle_ms, timeout_ms),
             )
     except playwright_timeout_error as exc:
-        status = (
-            "failed"
-            if strategy in {"selector", "app-hook"}
-            else "degraded"
-        )
+        status = "failed" if strategy in {"selector", "app-hook"} else "degraded"
         detail = f"{strategy} timed out: {exc}"
     if policy.settle_ms:
         page.wait_for_timeout(policy.settle_ms)
@@ -715,6 +948,10 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
                 f"Runtime fill failed for selector {action.selector}: "
                 f"{type(exc).__name__}"
             ) from exc
+    elif action.kind == "hover":
+        page.locator(action.selector).hover(timeout=action.timeout_ms)
+    elif action.kind == "focus":
+        page.locator(action.selector).focus(timeout=action.timeout_ms)
     elif action.kind == "key":
         page.locator(action.selector).press(action.key, timeout=action.timeout_ms)
     elif action.kind == "wait-for-selector":
@@ -779,15 +1016,17 @@ def _capture_scenario_state(
         ),
         full_page=full_page,
     )
-    runtime_page = RuntimePage(
-        url=page.url,
-        title=page.title(),
-        viewport=viewport,
-        elements=elements,
-        screenshot=screenshot,
-        capture_id=capture_id,
-        scenario=scenario.name,
-        state=state,
+    runtime_page = _attach_design_findings(
+        RuntimePage(
+            url=page.url,
+            title=page.title(),
+            viewport=viewport,
+            elements=elements,
+            screenshot=screenshot,
+            capture_id=capture_id,
+            scenario=scenario.name,
+            state=state,
+        )
     )
     return runtime_page, RuntimeCaptureRecord(
         capture_id=capture_id,
@@ -961,9 +1200,7 @@ def _elements_and_coverage_from_payload(
 ) -> tuple[tuple[RuntimeElement, ...], RuntimeCoverage]:
     if isinstance(payload, list):
         elements = tuple(
-            RuntimeElement.from_dict(item)
-            for item in payload
-            if isinstance(item, dict)
+            RuntimeElement.from_dict(item) for item in payload if isinstance(item, dict)
         )
         count = len(elements)
         return elements, RuntimeCoverage(
@@ -990,10 +1227,9 @@ def _elements_and_coverage_from_payload(
 
 
 def _runtime_evaluate_script(budget: RuntimeDomBudget) -> str:
-    return (
-        _RUNTIME_EVALUATE_SCRIPT.replace("__UIDETOX_SCAN__", str(budget.scan))
-        .replace("__UIDETOX_CANDIDATES__", str(budget.candidates))
-    )
+    return _RUNTIME_EVALUATE_SCRIPT.replace(
+        "__UIDETOX_SCAN__", str(budget.scan)
+    ).replace("__UIDETOX_CANDIDATES__", str(budget.candidates))
 
 
 def _screenshot_name(url: str, viewport: RuntimeViewport) -> str:
@@ -1046,6 +1282,32 @@ async () => {
   const pixels = value => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const computedAlpha = value => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized || normalized === "transparent") return 0;
+    const slash = normalized.match(/\/\s*([+-]?(?:\d+\.?\d*|\.\d+)%?)\s*\)$/);
+    if (slash) {
+      const parsed = Number.parseFloat(slash[1]);
+      return Number.isFinite(parsed)
+        ? Math.max(0, Math.min(1, slash[1].endsWith("%") ? parsed / 100 : parsed))
+        : null;
+    }
+    const body = normalized.match(/^rgba?\((.*)\)$/)?.[1] || "";
+    const commaParts = body.split(",").map(part => part.trim());
+    if (commaParts.length === 4) {
+      const parsed = Number.parseFloat(commaParts[3]);
+      return Number.isFinite(parsed)
+        ? Math.max(
+            0,
+            Math.min(
+              1,
+              commaParts[3].endsWith("%") ? parsed / 100 : parsed
+            )
+          )
+        : null;
+    }
+    return 1;
   };
 
   const implicitRole = (element) => {
@@ -1109,23 +1371,55 @@ async () => {
     return Array.from(new Set(selectors));
   };
 
-  const selectorFor = (element, sourceSelectors = sourceSelectorsFor(element)) => {
-    const stable = sourceSelectors.find(
+  const selectorCache = new WeakMap();
+  const siblingPositionCache = new WeakMap();
+  const siblingPositionFor = element => {
+    const parent = element.parentElement;
+    if (!parent) return {count: 0, index: 0};
+    let positions = siblingPositionCache.get(parent);
+    if (!positions) {
+      positions = new WeakMap();
+      const childrenByTag = new Map();
+      for (const child of parent.children) {
+        const tag = child.tagName;
+        const siblings = childrenByTag.get(tag) || [];
+        siblings.push(child);
+        childrenByTag.set(tag, siblings);
+      }
+      for (const siblings of childrenByTag.values()) {
+        siblings.forEach((sibling, index) => {
+          positions.set(sibling, {count: siblings.length, index: index + 1});
+        });
+      }
+      siblingPositionCache.set(parent, positions);
+    }
+    return positions.get(element) || {count: 0, index: 0};
+  };
+
+  const selectorFor = (element, sourceSelectors = null) => {
+    if (selectorCache.has(element)) return selectorCache.get(element);
+    const resolvedSourceSelectors = sourceSelectors || sourceSelectorsFor(element);
+    const stable = resolvedSourceSelectors.find(
       selector => selector.startsWith("#") || selector.startsWith("[data-")
     );
-    if (stable) return stable;
+    if (stable) {
+      selectorCache.set(element, stable);
+      return stable;
+    }
     const parts = [];
     let current = element;
     while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
       const tag = current.tagName.toLowerCase();
-      const siblings = current.parentElement
-        ? Array.from(current.parentElement.children).filter(item => item.tagName === current.tagName)
-        : [];
-      const suffix = siblings.length > 1 ? `:nth-of-type(${siblings.indexOf(current) + 1})` : "";
+      const siblingPosition = siblingPositionFor(current);
+      const suffix = siblingPosition.count > 1
+        ? `:nth-of-type(${siblingPosition.index})`
+        : "";
       parts.unshift(`${tag}${suffix}`);
       current = current.parentElement;
     }
-    return parts.join(" > ");
+    const selector = parts.join(" > ");
+    selectorCache.set(element, selector);
+    return selector;
   };
 
   const nameFor = (element) => {
@@ -1271,6 +1565,230 @@ async () => {
       "button,a[href],input,select,textarea,[tabindex]:not([tabindex='-1'])"
     )
   );
+
+  const paletteRoleFor = (element, role, visualContainer) => {
+    const tag = element.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return "heading";
+    if (isControl(element, role)) return "action";
+    if (visualContainer) return "surface";
+    if ((element.textContent || "").trim()) return "body";
+    return "";
+  };
+
+  // Ephemeral ancestry cache shared by every emitted text node in this DOM pass.
+  const paintLayerCache = new WeakMap();
+  const pseudoPaintCandidates = new WeakSet();
+  let inspectAllPaintPseudos = false;
+  const collectPseudoPaintCandidates = rules => {
+    for (const rule of rules) {
+      if (rule.cssRules) {
+        collectPseudoPaintCandidates(rule.cssRules);
+      }
+      const selector = String(rule.selectorText || "");
+      if (!/::(?:before|after)\b/.test(selector)) continue;
+      const baseSelector = selector.replace(/::(?:before|after)\b/g, "");
+      try {
+        for (const element of document.querySelectorAll(baseSelector)) {
+          pseudoPaintCandidates.add(element);
+        }
+      } catch {
+        inspectAllPaintPseudos = true;
+      }
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      collectPseudoPaintCandidates(sheet.cssRules);
+    } catch {
+      // Cross-origin sheets cannot be inspected. Preserve correctness by
+      // falling back to computed pseudo styles for every painted layer.
+      inspectAllPaintPseudos = true;
+    }
+  }
+  const paintLayerFor = current => {
+    if (paintLayerCache.has(current)) return paintLayerCache.get(current);
+    const currentStyle = geometryFor(current).style;
+    const selector = selectorFor(current);
+    const raw = currentStyle.backgroundColor;
+    const unresolved = [];
+    const properties = [
+      ["background-image", currentStyle.backgroundImage, "none"],
+      ["background-blend-mode", currentStyle.backgroundBlendMode, "normal"],
+      ["mix-blend-mode", currentStyle.mixBlendMode, "normal"],
+      ["filter", currentStyle.filter, "none"],
+      [
+        "backdrop-filter",
+        currentStyle.backdropFilter || currentStyle.webkitBackdropFilter,
+        "none"
+      ]
+    ];
+    for (const [property, value, clean] of properties) {
+      if (value && value !== clean) {
+        unresolved.push({selector, property, value});
+      }
+    }
+    const opacity = Number.parseFloat(currentStyle.opacity);
+    if (Number.isFinite(opacity) && opacity < 0.999) {
+      unresolved.push({
+        selector,
+        property: "opacity",
+        value: currentStyle.opacity
+      });
+    }
+    if (inspectAllPaintPseudos || pseudoPaintCandidates.has(current)) {
+      for (const pseudo of ["::before", "::after"]) {
+        const pseudoStyle = getComputedStyle(current, pseudo);
+        const content = pseudoStyle.content;
+        if (content && !["none", "normal", '""'].includes(content)) {
+          const pseudoAlpha = computedAlpha(pseudoStyle.backgroundColor);
+          if (
+            pseudoStyle.backgroundImage !== "none"
+            || (pseudoAlpha !== null && pseudoAlpha > 0)
+          ) {
+            unresolved.push({
+              selector,
+              property: pseudo,
+              value: `${content};${pseudoStyle.backgroundColor};${pseudoStyle.backgroundImage}`
+            });
+          }
+        }
+      }
+    }
+    const result = {
+      selector,
+      raw,
+      alpha: computedAlpha(raw),
+      unresolved
+    };
+    paintLayerCache.set(current, result);
+    return result;
+  };
+
+  const paintEvidence = (element, style) => {
+    const unresolved = [];
+    const backgroundLayers = [];
+    let current = element;
+    let opaque = false;
+    while (current) {
+      const layer = paintLayerFor(current);
+      backgroundLayers.push({selector: layer.selector, raw: layer.raw});
+      unresolved.push(...layer.unresolved);
+      if (layer.alpha === 1 && layer.unresolved.length === 0) {
+        opaque = true;
+        break;
+      }
+      current = current.parentElement;
+    }
+    if (!opaque) {
+      backgroundLayers.push({
+        selector: "viewport",
+        raw: "rgb(255, 255, 255)"
+      });
+    }
+    return {
+      selector: selectorFor(element),
+      foreground: {raw: style.color},
+      background_layers: backgroundLayers,
+      unresolved
+    };
+  };
+
+  const themeEvidence = (element, style) => ({
+    name: element.closest("[data-theme]")?.getAttribute("data-theme") || "",
+    colorScheme: style.colorScheme || ""
+  });
+
+  const focusVisualSnapshot = style => ({
+    outlineStyle: style.outlineStyle,
+    outlineWidth: style.outlineWidth,
+    outlineColor: style.outlineColor,
+    boxShadow: style.boxShadow,
+    borderTopColor: style.borderTopColor,
+    borderTopWidth: style.borderTopWidth,
+    borderRightColor: style.borderRightColor,
+    borderRightWidth: style.borderRightWidth,
+    borderBottomColor: style.borderBottomColor,
+    borderBottomWidth: style.borderBottomWidth,
+    borderLeftColor: style.borderLeftColor,
+    borderLeftWidth: style.borderLeftWidth,
+    backgroundColor: style.backgroundColor,
+    color: style.color
+  });
+
+  const focusIndicatorProperties = new Set([
+    "outlineStyle", "outlineWidth", "outlineColor", "boxShadow",
+    "borderTopColor", "borderTopWidth",
+    "borderRightColor", "borderRightWidth",
+    "borderBottomColor", "borderBottomWidth",
+    "borderLeftColor", "borderLeftWidth",
+    "backgroundColor", "color"
+  ]);
+  const focusIndicator = (element, style, rect) => {
+    const focused = document.activeElement === element;
+    const current = focusVisualSnapshot(style);
+    let baseline = null;
+    if (focused && element.parentElement) {
+      const clone = element.cloneNode(false);
+      clone.removeAttribute("autofocus");
+      clone.setAttribute("aria-hidden", "true");
+      clone.setAttribute("tabindex", "-1");
+      clone.style.setProperty("position", "fixed", "important");
+      clone.style.setProperty("left", "-10000px", "important");
+      clone.style.setProperty("top", "-10000px", "important");
+      clone.style.setProperty("visibility", "hidden", "important");
+      clone.style.setProperty("pointer-events", "none", "important");
+      element.parentElement.appendChild(clone);
+      baseline = focusVisualSnapshot(getComputedStyle(clone));
+      clone.remove();
+    }
+    const changedProperties = baseline
+      ? Object.keys(current).filter(property => current[property] !== baseline[property])
+      : [];
+    const outlineWidth = pixels(current.outlineWidth);
+    const outlineVisible = (
+      !["none", "hidden"].includes(current.outlineStyle)
+      && outlineWidth > 0
+      && computedAlpha(current.outlineColor) !== 0
+    );
+    const outlineArea = outlineVisible
+      ? (
+          (rect.width + outlineWidth * 2) * (rect.height + outlineWidth * 2)
+          - rect.width * rect.height
+        )
+      : 0;
+    const borderArea = (
+      pixels(current.borderTopWidth) * rect.width
+      + pixels(current.borderRightWidth) * rect.height
+      + pixels(current.borderBottomWidth) * rect.width
+      + pixels(current.borderLeftWidth) * rect.height
+    );
+    const shadowArea = (
+      (rect.width + 2) * (rect.height + 2) - rect.width * rect.height
+    );
+    const changed = changedProperties.some(
+      property => focusIndicatorProperties.has(property)
+    );
+    return {
+      visible: false,
+      changed,
+      distinguishable: false,
+      changedProperties,
+      baseline: baseline || {},
+      focused: current,
+      outlineStyle: current.outlineStyle,
+      outlineWidth: round(outlineWidth),
+      outlineColor: current.outlineColor,
+      boxShadow: current.boxShadow,
+      areaByProperty: {
+        backgroundColor: round(rect.width * rect.height),
+        border: round(borderArea),
+        outline: round(outlineArea),
+        boxShadow: round(shadowArea)
+      },
+      area: 0,
+      minimum_area: round(2 * 2 * (rect.width + rect.height))
+    };
+  };
 
   const paintedSurface = (element, style) => {
     const parentBackground = element.parentElement
@@ -1487,8 +2005,21 @@ async () => {
     const {style, rect, role} = geometryFor(element);
     const text = textGeometry(element, style, rect);
     const control = isControl(element, role);
+    const tag = element.tagName.toLowerCase();
+    const directText = Array.from(element.childNodes).some(node => (
+      node.nodeType === Node.TEXT_NODE && (node.textContent || "").trim()
+    ));
+    const controlText = (
+      ["input", "textarea"].includes(tag)
+      && Boolean(element.value || element.getAttribute("placeholder"))
+    ) || (
+      tag === "select"
+      && Boolean(element.selectedOptions?.[0]?.textContent?.trim())
+    );
+    const paintedText = Boolean(directText || controlText);
     const visualContainer = isVisualContainer(element, style);
     const boxControl = isBoxControl(element, role, style);
+    const paletteRole = paletteRoleFor(element, role, visualContainer);
     const scrollAxes = scrollAxesFor(element);
     const descendantSummary = descendantCache.get(element);
     const containsScrollRegionX = Boolean(
@@ -1527,8 +2058,12 @@ async () => {
         ))
       );
     }
+    const readingHierarchy = element.closest(
+      "main,section,article,aside,nav,[role='region']"
+    );
     const measurements = {
       hasText: Boolean(text),
+      paintedText,
       isMultiline: Boolean(text && text.lineCount > 1),
       isTextFlow: Boolean(text && isSingleTextFlow(element)),
       lineCount: text?.lineCount || 0,
@@ -1579,7 +2114,21 @@ async () => {
       paddingInlineStart: round(pixels(style.paddingInlineStart)),
       paddingInlineEnd: round(pixels(style.paddingInlineEnd)),
       paddingBlockStart: round(pixels(style.paddingBlockStart)),
-      paddingBlockEnd: round(pixels(style.paddingBlockEnd))
+      paddingBlockEnd: round(pixels(style.paddingBlockEnd)),
+      layoutParentSelector: element.parentElement
+        ? selectorFor(element.parentElement)
+        : "",
+      readingHierarchySelector: readingHierarchy
+        ? selectorFor(readingHierarchy)
+        : "",
+      paletteRole,
+      readingOrder: documentOrder.get(element) ?? 0,
+      prominence: round(
+        pixels(style.fontSize)
+        * Math.max(1, pixels(style.fontWeight) / 400)
+        + Math.log2(Math.max(1, rect.width * rect.height))
+        + (/^h[1-6]$/i.test(element.tagName) ? 12 : 0)
+      )
     };
     if (text) {
       measurements.textInsetTop = round(text.insets.top);
@@ -1841,9 +2390,263 @@ async () => {
       || (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
     ));
   const selected = eligible.slice(0, __UIDETOX_CANDIDATES__);
+  const visibleTargets = allElements.filter(element => {
+    if (!isVisible(element)) return false;
+    const measured = baseMeasurement(element);
+    return isControl(element, measured.role);
+  });
+  const targetGeometryTruncated = totalElements > allElements.length;
+  const targetCellSize = 64;
+  const targetRecords = visibleTargets.map(element => ({
+    element,
+    selector: selectorFor(element),
+    rect: baseMeasurement(element).rect
+  }));
+  const targetSpatialIndex = new Map();
+  const targetCells = (rect, expansion = 0) => {
+    const cells = [];
+    const left = Math.floor((rect.left - expansion) / targetCellSize);
+    const right = Math.floor((rect.right + expansion) / targetCellSize);
+    const top = Math.floor((rect.top - expansion) / targetCellSize);
+    const bottom = Math.floor((rect.bottom + expansion) / targetCellSize);
+    for (let x = left; x <= right; x += 1) {
+      for (let y = top; y <= bottom; y += 1) {
+        cells.push(`${x}:${y}`);
+      }
+    }
+    return cells;
+  };
+  for (const record of targetRecords) {
+    for (const cell of targetCells(record.rect)) {
+      const bucket = targetSpatialIndex.get(cell) || [];
+      bucket.push(record);
+      targetSpatialIndex.set(cell, bucket);
+    }
+  }
+  const targetSpacingEvidence = element => {
+    if (targetGeometryTruncated) {
+      return {
+        status: "unresolved",
+        reason: "document-scan-truncated",
+        total_targets: targetRecords.length,
+        indexed_targets: targetRecords.length,
+        truncated: true
+      };
+    }
+    const rect = baseMeasurement(element).rect;
+    const candidates = new Set();
+    for (const cell of targetCells(rect, 24)) {
+      for (const candidate of targetSpatialIndex.get(cell) || []) {
+        if (candidate.element !== element) candidates.add(candidate);
+      }
+    }
+    let nearest = null;
+    for (const candidate of candidates) {
+      const other = candidate.rect;
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const otherCenterX = other.left + other.width / 2;
+      const otherCenterY = other.top + other.height / 2;
+      const centerDistance = Math.hypot(
+        centerX - otherCenterX,
+        centerY - otherCenterY
+      );
+      const horizontalGap = Math.max(
+        0,
+        Math.max(rect.left, other.left) - Math.min(rect.right, other.right)
+      );
+      const verticalGap = Math.max(
+        0,
+        Math.max(rect.top, other.top) - Math.min(rect.bottom, other.bottom)
+      );
+      const edgeGap = Math.hypot(horizontalGap, verticalGap);
+      const neighborUndersized = other.width < 24 || other.height < 24;
+      const closestX = Math.max(other.left, Math.min(centerX, other.right));
+      const closestY = Math.max(other.top, Math.min(centerY, other.bottom));
+      const shapeGap = neighborUndersized
+        ? centerDistance - 24
+        : Math.hypot(centerX - closestX, centerY - closestY) - 12;
+      const intersects = shapeGap < 0;
+      const score = shapeGap;
+      if (!nearest || score < nearest.score) {
+        nearest = {
+          score,
+          selector: candidate.selector,
+          centerDistance,
+          shapeGap,
+          edgeGap,
+          intersects,
+          neighborShape: neighborUndersized ? "circle" : "rectangle"
+        };
+      }
+    }
+    const evidence = {
+      status: nearest?.intersects ? "intersects" : "clear",
+      nearest_selector: nearest?.selector || "",
+      center_distance_px: nearest ? round(nearest.centerDistance) : null,
+      shape_gap_px: nearest ? round(nearest.shapeGap) : null,
+      neighbor_shape: nearest?.neighborShape || "",
+      edge_gap_px: nearest ? round(nearest.edgeGap) : null,
+      total_targets: targetRecords.length,
+      indexed_targets: targetRecords.length,
+      truncated: false
+    };
+    return evidence;
+  };
+  const potentialOccluderRecords = allElements
+    .filter(element => {
+      if (!isVisible(element)) return false;
+      const {style} = geometryFor(element);
+      const position = style.position;
+      return (
+        ["fixed", "sticky"].includes(position)
+        || (
+          position !== "static"
+          && style.zIndex !== "auto"
+          && Number.isFinite(Number.parseFloat(style.zIndex))
+        )
+        || (element.tagName.toLowerCase() === "dialog" && element.open)
+        || element.matches("[popover]:popover-open")
+      );
+    })
+    .map(element => ({
+      element,
+      rect: baseMeasurement(element).rect
+    }));
+  const occluderSpatialIndex = new Map();
+  for (const record of potentialOccluderRecords) {
+    for (const cell of targetCells(record.rect)) {
+      const bucket = occluderSpatialIndex.get(cell) || [];
+      bucket.push(record);
+      occluderSpatialIndex.set(cell, bucket);
+    }
+  }
+  // Ephemeral per-capture index; this is never retained in Python or artifacts.
+  const semanticSiblingGroups = new WeakMap();
+  const semanticSiblingEvidence = element => {
+    const parent = element.parentElement;
+    if (!parent) {
+      return null;
+    }
+    const measured = baseMeasurement(element);
+    const key = `${element.tagName.toLowerCase()}:${measured.role}`;
+    let groups = semanticSiblingGroups.get(parent);
+    if (!groups) {
+      groups = new Map();
+      semanticSiblingGroups.set(parent, groups);
+    }
+    if (groups.has(key)) {
+      return groups.get(key);
+    }
+    const peers = Array.from(parent.children).filter(candidate => {
+      if (!geometryCache.has(candidate) || !isVisible(candidate)) return false;
+      const candidateRole = baseMeasurement(candidate).role;
+      return `${candidate.tagName.toLowerCase()}:${candidateRole}` === key;
+    });
+    const parentStyle = geometryFor(parent).style;
+    const axis = (
+      parentStyle.display === "flex"
+      && ["row", "row-reverse"].includes(parentStyle.flexDirection)
+    )
+      ? "horizontal"
+      : "vertical";
+    const evidence = peers.length < 3
+      ? null
+      : {
+          group: `${selectorFor(parent)}:${key}`,
+          evidence: "same-parent-role",
+          axis,
+          peers: peers.slice(0, 20).map(peer => selectorFor(peer))
+        };
+    groups.set(key, evidence);
+    return evidence;
+  };
+  const targetException = (element, role, style) => {
+    if (element.getAttribute("data-uidetox-essential") === "true") {
+      return "essential";
+    }
+    if (role === "link" && style.display === "inline") {
+      return "inline";
+    }
+    if (
+      ["input", "select", "textarea"].includes(element.tagName.toLowerCase())
+      && style.appearance === "auto"
+    ) {
+      return "user-agent";
+    }
+    return "";
+  };
+  const occlusionEvidence = (element, rect) => {
+    const possibleOccluders = new Set();
+    for (const cell of targetCells(rect)) {
+      for (const candidate of occluderSpatialIndex.get(cell) || []) {
+        if (
+          candidate.element !== element
+          && !candidate.element.contains(element)
+          && !element.contains(candidate.element)
+          && candidate.rect.right > rect.left
+          && candidate.rect.left < rect.right
+          && candidate.rect.bottom > rect.top
+          && candidate.rect.top < rect.bottom
+        ) {
+          possibleOccluders.add(candidate.element);
+        }
+      }
+    }
+    if (!possibleOccluders.size) {
+      return {selector: "", fraction: 0};
+    }
+    const insetX = Math.min(2, Math.max(0, rect.width / 4));
+    const insetY = Math.min(2, Math.max(0, rect.height / 4));
+    const points = [
+      [rect.left + rect.width / 2, rect.top + rect.height / 2],
+      [rect.left + insetX, rect.top + insetY],
+      [rect.right - insetX, rect.top + insetY],
+      [rect.left + insetX, rect.bottom - insetY],
+      [rect.right - insetX, rect.bottom - insetY]
+    ].filter(([x, y]) => (
+      x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight
+    ));
+    const covering = new Map();
+    for (const [x, y] of points) {
+      const top = document.elementFromPoint(x, y);
+      if (!top || top === element || element.contains(top)) continue;
+      const selector = selectorFor(top);
+      covering.set(selector, (covering.get(selector) || 0) + 1);
+    }
+    if (!covering.size || !points.length) {
+      return {selector: "", fraction: 0};
+    }
+    const [selector, count] = [...covering.entries()].sort(
+      (first, second) => second[1] - first[1]
+    )[0];
+    const evidence = {selector, fraction: count / points.length};
+    return evidence;
+  };
   const elements = selected.map((element, candidateOrder) => {
     const {style, rect, role, measurements} = baseMeasurement(element);
+    measurements.theme = themeEvidence(element, style);
+    if (measurements.paintedText) {
+      measurements.paint = paintEvidence(element, style);
+    }
+    if (isControl(element, role) && document.activeElement === element) {
+      measurements.focusIndicator = focusIndicator(element, style, rect);
+    }
     enrichPeerMeasurements(element, measurements);
+    const equivalence = semanticSiblingEvidence(element);
+    if (equivalence) {
+      measurements.equivalenceGroup = equivalence.group;
+      measurements.equivalenceEvidence = equivalence.evidence;
+      measurements.equivalenceAxis = equivalence.axis;
+      measurements.equivalentPeerSelectors = equivalence.peers;
+    }
+    if (isControl(element, role)) {
+      measurements.targetSpacing = targetSpacingEvidence(element);
+      measurements.targetException = targetException(element, role, style);
+    }
+    const occlusion = occlusionEvidence(element, rect);
+    measurements.occludedBy = occlusion.selector;
+    measurements.occludedFraction = round(occlusion.fraction);
 
     const tag = element.tagName.toLowerCase();
     const kind = isControl(element, role)
@@ -1856,6 +2659,12 @@ async () => {
       if (element.hasAttribute(attribute)) states[attribute] = element.getAttribute(attribute);
     }
     if ("disabled" in element) states.disabled = Boolean(element.disabled);
+    states.hovered = element.matches(":hover");
+    states.focused = document.activeElement === element;
+    states.error = (
+      element.getAttribute("aria-invalid") === "true"
+      || (typeof element.matches === "function" && element.matches(":invalid"))
+    );
     states.tabIndex = element.tabIndex;
     const sourceSelectors = sourceSelectorsFor(element);
 
@@ -1900,7 +2709,8 @@ async () => {
         alignItems: style.alignItems,
         flexDirection: style.flexDirection,
         gap: style.gap,
-        gridTemplateColumns: style.gridTemplateColumns
+        gridTemplateColumns: style.gridTemplateColumns,
+        borderRadius: style.borderRadius,
       },
       states,
       measurements
@@ -1917,7 +2727,13 @@ async () => {
       truncated: (
         totalElements > allElements.length
         || eligible.length > elements.length
-      )
+      ),
+      target_geometry: {
+        visible: targetRecords.length,
+        indexed: targetRecords.length,
+        truncated: targetGeometryTruncated,
+        index: "spatial-grid"
+      }
     }
   };
 }
