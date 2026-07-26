@@ -1104,6 +1104,342 @@ def test_inline_scroll_region_does_not_hide_block_padding_defects() -> None:
     assert _finding_codes(container) == {"runtime-vertical-padding"}
 
 
+def _design_findings(page: RuntimePage) -> dict[str, set[str]]:
+    from uidetox.design_semantics import detect_design_findings
+
+    return {
+        element.selector: {finding.code for finding in findings}
+        for element, findings in zip(
+            page.elements,
+            detect_design_findings(page),
+            strict=True,
+        )
+    }
+
+
+def _design_element(
+    selector: str,
+    *,
+    kind: str = "text",
+    tag: str = "p",
+    role: str = "",
+    order: int = 0,
+    x: float = 0,
+    y: float = 0,
+    width: float = 100,
+    height: float = 20,
+    styles: dict[str, str] | None = None,
+    states: dict[str, object] | None = None,
+    measurements: dict[str, object] | None = None,
+    source_hint: str = "",
+) -> RuntimeElement:
+    return RuntimeElement(
+        kind=kind,
+        tag=tag,
+        role=role,
+        name=selector,
+        selector=selector,
+        order=order,
+        bounds={"x": x, "y": y, "width": width, "height": height},
+        styles={
+            "fontSize": "16px",
+            "fontWeight": "400",
+            "lineHeight": "24px",
+            **(styles or {}),
+        },
+        states=states or {},
+        measurements=measurements or {},
+        source_hint=source_hint,
+    )
+
+
+def _design_page(*elements: RuntimeElement, state: str = "initial") -> RuntimePage:
+    return RuntimePage(
+        url="https://example.invalid/dashboard",
+        title="Dashboard",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        elements=elements,
+        capture_id=f"capture-{state}",
+        scenario="quality",
+        state=state,
+    )
+
+
+def _paint(
+    foreground: tuple[float, float, float, float] | None,
+    *backgrounds: tuple[float, float, float, float],
+    unresolved: tuple[dict[str, str], ...] = (),
+) -> dict[str, object]:
+    return {
+        "paint": {
+            "foreground": {
+                "raw": "computed-foreground",
+                "rgba": list(foreground) if foreground is not None else None,
+            },
+            "background_layers": [
+                {
+                    "selector": f"layer-{index}",
+                    "raw": "computed-background",
+                    "rgba": list(color),
+                }
+                for index, color in enumerate(backgrounds)
+            ],
+            "unresolved": list(unresolved),
+        }
+    }
+
+
+def test_rendered_contrast_uses_actual_inherited_alpha_pair_and_large_text_rule() -> None:
+    inherited_alpha = _design_element(
+        "#body",
+        measurements=_paint(
+            (0.0, 0.0, 0.0, 0.5),
+            (0.0, 0.0, 0.0, 0.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ),
+    )
+    large = _design_element(
+        "#large",
+        y=40,
+        styles={"fontSize": "24px"},
+        measurements=_paint(
+            (0.18, 0.18, 0.18, 1.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ),
+    )
+
+    findings = _design_findings(_design_page(inherited_alpha, large))
+
+    assert "runtime-contrast" in findings["#body"]
+    assert "runtime-contrast" not in findings["#large"]
+
+
+def test_rendered_contrast_marks_gradient_image_and_blend_as_unresolved_not_clean() -> None:
+    element = _design_element(
+        "#hero",
+        measurements=_paint(
+            (0.0, 0.0, 0.0, 1.0),
+            unresolved=(
+                {
+                    "selector": "#hero",
+                    "property": "background-image",
+                    "value": "linear-gradient(red, blue)",
+                },
+                {
+                    "selector": "#hero",
+                    "property": "mix-blend-mode",
+                    "value": "multiply",
+                },
+            ),
+        ),
+    )
+
+    findings = _design_findings(_design_page(element))["#hero"]
+
+    assert findings == {"runtime-color-unresolved"}
+
+
+def test_palette_role_and_component_drift_require_evidenced_equivalence_groups() -> None:
+    common = {
+        "equivalenceGroup": "toolbar:button",
+        "equivalenceEvidence": "same-parent-role",
+        "paletteRole": "action",
+    }
+    peers = [
+        _design_element(
+            f"#action-{index}",
+            kind="action",
+            tag="button",
+            role="button",
+            order=index,
+            x=index * 120,
+            width=100,
+            height=32,
+            styles={"color": "rgb(0, 0, 0)", "backgroundColor": "rgb(255, 255, 255)"},
+            measurements={
+                **common,
+                **_paint(
+                    (0.0, 0.0, 0.0, 1.0),
+                    (1.0, 1.0, 1.0, 1.0),
+                ),
+            },
+            source_hint="ToolbarAction",
+        )
+        for index in range(2)
+    ]
+    peers.append(
+        _design_element(
+            "#action-outlier",
+            kind="action",
+            tag="button",
+            role="button",
+            order=2,
+            x=240,
+            width=100,
+            height=44,
+            styles={"color": "rgb(255, 0, 0)", "backgroundColor": "rgb(255, 255, 255)"},
+            measurements={
+                **common,
+                **_paint(
+                    (1.0, 0.0, 0.0, 1.0),
+                    (1.0, 1.0, 1.0, 1.0),
+                ),
+            },
+            source_hint="ToolbarAction",
+        )
+    )
+    unrelated = _design_element(
+        "#unrelated",
+        y=80,
+        styles={"color": "rgb(255, 0, 0)"},
+        measurements={
+            "paletteRole": "action",
+            **_paint(
+                (1.0, 0.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0, 1.0),
+            ),
+        },
+    )
+
+    findings = _design_findings(_design_page(*peers, unrelated))
+
+    assert "runtime-component-drift" in findings["#action-outlier"]
+    assert "runtime-palette-role-drift" not in findings["#unrelated"]
+
+
+def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> None:
+    heading_one = _design_element(
+        "#h1",
+        tag="h1",
+        styles={"fontSize": "32px", "fontWeight": "700"},
+        measurements={"layoutParentSelector": "main"},
+    )
+    heading_two = _design_element(
+        "#h2",
+        tag="h2",
+        order=1,
+        y=60,
+        styles={"fontSize": "32px", "fontWeight": "700"},
+        measurements={"layoutParentSelector": "main"},
+    )
+    rhythm = [
+        _design_element(
+            f"#item-{index}",
+            order=index + 2,
+            y=120 + (index * 40) + (20 if index == 3 else 0),
+            height=20,
+            measurements={
+                "layoutParentSelector": "#list",
+                "equivalenceGroup": "list:item",
+                "equivalenceEvidence": "same-parent-role",
+            },
+        )
+        for index in range(4)
+    ]
+
+    findings = _design_findings(_design_page(heading_one, heading_two, *rhythm))
+
+    assert "runtime-type-hierarchy" in findings["#h2"]
+    assert "runtime-spatial-rhythm" in findings["#item-3"]
+
+    healthy_h2 = replace(
+        heading_two,
+        styles={**heading_two.styles, "fontSize": "24px", "fontWeight": "600"},
+    )
+    healthy_rhythm = tuple(
+        replace(item, bounds={**item.bounds, "y": 120 + index * 40})
+        for index, item in enumerate(rhythm)
+    )
+    healthy = _design_findings(
+        _design_page(heading_one, healthy_h2, *healthy_rhythm)
+    )
+    assert "runtime-type-hierarchy" not in healthy["#h2"]
+    assert all("runtime-spatial-rhythm" not in codes for codes in healthy.values())
+
+
+def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound() -> None:
+    sticky = _design_element(
+        "#sticky",
+        kind="region",
+        y=0,
+        width=1440,
+        height=60,
+        styles={"position": "sticky"},
+        measurements={"layoutParentSelector": "body"},
+    )
+    occluded = _design_element(
+        "#occluded",
+        kind="action",
+        tag="button",
+        role="button",
+        y=20,
+        width=80,
+        height=30,
+        measurements={
+            "occludedBy": "#sticky",
+            "occludedFraction": 0.5,
+            "layoutParentSelector": "body",
+        },
+    )
+    offscreen = _design_element(
+        "#offscreen",
+        x=1435,
+        width=30,
+        measurements={"layoutParentSelector": "body"},
+    )
+    small = _design_element(
+        "#small",
+        kind="action",
+        tag="button",
+        role="button",
+        x=200,
+        y=100,
+        width=23.99,
+        height=24,
+        measurements={"layoutParentSelector": "body"},
+    )
+    focused = _design_element(
+        "#focused",
+        kind="action",
+        tag="button",
+        role="button",
+        x=300,
+        y=100,
+        width=80,
+        height=30,
+        states={"focused": True},
+        measurements={
+            "focusIndicator": {
+                "visible": False,
+                "area": 0,
+                "minimum_area": 220,
+            },
+            "layoutParentSelector": "body",
+        },
+    )
+
+    findings = _design_findings(
+        _design_page(sticky, occluded, offscreen, small, focused, state="focus")
+    )
+
+    assert findings["#occluded"] == {"runtime-sticky-occlusion"}
+    assert "runtime-offscreen" in findings["#offscreen"]
+    assert "runtime-target-size" in findings["#small"]
+    assert "runtime-focus-visible" in findings["#focused"]
+    assert "runtime-focus-appearance-guidance" not in findings["#focused"]
+
+    boundary = replace(small, bounds={**small.bounds, "width": 24.0})
+    inline = replace(
+        small,
+        selector="#inline",
+        bounds={**small.bounds, "width": 12.0},
+        measurements={**small.measurements, "targetException": "inline"},
+    )
+    boundary_findings = _design_findings(_design_page(boundary, inline))
+    assert "runtime-target-size" not in boundary_findings["#small"]
+    assert "runtime-target-size" not in boundary_findings["#inline"]
+
+
 class _Page:
     def __init__(self, events: list[tuple], fail_screenshot: bool = False) -> None:
         self.events = events
