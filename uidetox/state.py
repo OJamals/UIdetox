@@ -209,8 +209,10 @@ def _normalize_tooling_config(tooling: object) -> dict:
     return normalized
 
 
-def load_config() -> dict:
-    config_path = get_uidetox_dir() / CONFIG_FILE
+def load_config(root: str | Path | None = None) -> dict:
+    config_path = (
+        Path(root).resolve() / UIDETOX_DIR if root is not None else get_uidetox_dir()
+    ) / CONFIG_FILE
     default_config = {"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4}
     if not config_path.exists():
         return default_config.copy()

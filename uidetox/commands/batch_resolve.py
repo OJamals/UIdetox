@@ -166,9 +166,13 @@ def run(args: argparse.Namespace):
             sys.exit(1)
         print()
     current_state = load_state()
+    verification_cache: dict[tuple[str, str, str], object] = {}
     verifications: dict[str, VerificationResult] = {
         issue["id"]: verify_finding(
-            issue, state=current_state, root=get_project_root()
+            issue,
+            state=current_state,
+            root=get_project_root(),
+            verification_cache=verification_cache,
         )
         for issue in issue_records
     }

@@ -2,28 +2,17 @@
 
 import argparse
 
-from uidetox.mechanical import diagnostic_finding, run_diagnostics
+from uidetox.mechanical import diagnostic_finding, resolve_tool, run_diagnostics
 from uidetox.state import add_issue, get_project_root, load_config
-from uidetox.tooling import detect_all
 
 
 def run(args: argparse.Namespace):
     project_root = get_project_root()
     config = load_config()
-    tooling = config.get("tooling")
-
-    if tooling and tooling.get("linter"):
-        linter = tooling["linter"]
-    else:
-        profile = detect_all(project_root)
-        if not profile.linter:
-            print("No linter detected. Install biome or eslint.")
-            return
-        linter = {
-            "name": profile.linter.name,
-            "run_cmd": profile.linter.run_cmd,
-            "fix_cmd": profile.linter.fix_cmd,
-        }
+    linter = resolve_tool("linter", project_root, config)
+    if not linter:
+        print("No linter detected. Install biome or eslint.")
+        return
 
     fix = getattr(args, "fix", False)
     cmd = linter["fix_cmd"] if fix and linter.get("fix_cmd") else linter["run_cmd"]

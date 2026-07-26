@@ -46,6 +46,32 @@ class MechanicalRun:
         return hashlib.sha256(value).hexdigest()
 
 
+def resolve_tool(
+    tool: str, root: Path, config: dict | None = None
+) -> dict[str, str | None]:
+    from uidetox.state import load_config
+    from uidetox.tooling import detect_linter, detect_typescript
+
+    active_config = load_config(root) if config is None else config
+    tooling = active_config.get("tooling", {})
+    configured = tooling.get(tool) if isinstance(tooling, dict) else None
+    if isinstance(configured, dict) and configured.get("run_cmd"):
+        return dict(configured)
+
+    detector = {
+        "typescript": detect_typescript,
+        "linter": detect_linter,
+    }.get(tool)
+    detected = detector(root) if detector else None
+    if detected is None:
+        return {}
+    return {
+        "name": detected.name,
+        "run_cmd": detected.run_cmd,
+        "fix_cmd": detected.fix_cmd,
+    }
+
+
 def run_diagnostics(
     tool: str, command: str, root: Path
 ) -> tuple[MechanicalRun, tuple[MechanicalDiagnostic, ...]]:

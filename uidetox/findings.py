@@ -72,6 +72,21 @@ def _mapping(value: object) -> dict[str, Any]:
     return _freeze(value) if isinstance(value, Mapping) else _FrozenMapping()  # type: ignore[return-value]
 
 
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _source_anchor(value: object) -> dict[str, Any]:
+    anchor = dict(value) if isinstance(value, Mapping) else {}
+    for key in ("line", "column", "start", "end"):
+        if key in anchor:
+            anchor[key] = _safe_int(anchor[key])
+    return anchor
+
+
 def _safe(value: Mapping[str, Any], matched: object = None) -> dict[str, Any]:
     evidence = matched if isinstance(matched, (str, bytes)) else None
     clean = sanitize_untrusted_data(dict(value), matched_evidence=evidence)
@@ -232,7 +247,7 @@ class Finding(Mapping[str, Any]):
             provenance=str(raw.get("provenance", "static")),
             evidence=_mapping(raw.get("evidence")),
             evidence_freshness=str(raw.get("evidence_freshness", "fresh")),
-            source_anchor=_mapping(raw.get("source_anchor")),
+            source_anchor=_mapping(_source_anchor(raw.get("source_anchor"))),
             runtime_anchor=_mapping(raw.get("runtime_anchor")),
             contract_anchor=_mapping(raw.get("contract_anchor")),
             suppression_key=str(raw.get("suppression_key", "")),
@@ -273,7 +288,7 @@ class Finding(Mapping[str, Any]):
                 detector_id=code,
                 category=str(raw.get("category", "layout")),
                 severity=str(raw.get("severity", "warning")),
-                confidence=float(raw.get("confidence", 0.9) or 0.9),
+                confidence=raw.get("confidence", 0.9),
                 message=str(raw.get("message", "Rendered layout needs review.")),
                 provenance="runtime",
                 evidence={"metrics": _mapping(raw.get("metrics"))},
@@ -296,10 +311,10 @@ class Finding(Mapping[str, Any]):
             )
         anchor = {
             "path": str(raw.get("file", "")),
-            "line": int(raw.get("line", 0) or 0),
-            "column": int(raw.get("column", 0) or 0),
+            "line": raw.get("line", 0),
+            "column": raw.get("column", 0),
             **{
-                key: int(raw[key])
+                key: raw[key]
                 for key in ("start", "end")
                 if raw.get(key) is not None
             },
@@ -311,7 +326,7 @@ class Finding(Mapping[str, Any]):
             detector_id=detector,
             category=str(raw.get("category", "quality")),
             severity=severity,
-            confidence=float(raw.get("confidence", 0.8) or 0.8),
+            confidence=raw.get("confidence", 0.8),
             message=str(raw.get("message", raw.get("issue", "Finding"))),
             provenance=str(raw.get("provenance", "static")),
             evidence=_mapping(raw.get("evidence")),
@@ -653,6 +668,7 @@ def verify_finding(
     *,
     state: Mapping[str, Any] | None = None,
     root: str | Path | None = None,
+    verification_cache: dict[tuple[str, str, str], Any] | None = None,
 ) -> VerificationResult:
     finding = coerce_finding(value)
     kind = str(finding.verifier.get("kind", finding.provenance or "manual"))
@@ -661,11 +677,18 @@ def verify_finding(
         "runtime": _verify_runtime,
         "contract": _verify_contract,
         "manual": _verify_manual,
-        "mechanical": _verify_mechanical,
     }
     try:
+        resolved_root = Path(root or Path.cwd()).resolve()
+        if kind == "mechanical":
+            return _verify_mechanical(
+                finding,
+                state or {},
+                resolved_root,
+                verification_cache=verification_cache,
+            )
         handler = handlers[kind]
-        return handler(finding, state or {}, Path(root or Path.cwd()).resolve())
+        return handler(finding, state or {}, resolved_root)
     except KeyError:
         return verification_result("stale_evidence", kind, f"Unsupported verifier kind: {kind}")
     except (OSError, ValueError, TypeError) as error:
@@ -776,18 +799,30 @@ def _verify_manual(
 
 
 def _verify_mechanical(
-    finding: Finding, _state: Mapping[str, Any], root: Path
+    finding: Finding,
+    _state: Mapping[str, Any],
+    root: Path,
+    *,
+    verification_cache: dict[tuple[str, str, str], Any] | None = None,
 ) -> VerificationResult:
-    from uidetox.mechanical import run_diagnostics
-    from uidetox.state import load_config
+    from uidetox.mechanical import resolve_tool, run_diagnostics
 
     tool = str(finding.verifier.get("tool", ""))
-    entry = _mapping(_mapping(load_config().get("tooling")).get(tool))
+    entry = _mapping(resolve_tool(tool, root))
     command = str(entry.get("run_cmd", ""))
     if tool not in {"typescript", "linter"} or not command:
         evidence_hash = _hash({"tool": tool, "status": "unavailable"})
         return verification_result("stale_evidence", "mechanical", "Originating tool is unavailable.", evidence_hash=evidence_hash)
-    run, diagnostics = run_diagnostics(tool, command, root)
+    cache_key = (tool, command, str(root))
+    cached = (
+        verification_cache.get(cache_key) if verification_cache is not None else None
+    )
+    if cached is None:
+        run, diagnostics = run_diagnostics(tool, command, root)
+        if verification_cache is not None:
+            verification_cache[cache_key] = (run, diagnostics)
+    else:
+        run, diagnostics = cached
     if run.error or (run.returncode != 0 and not diagnostics):
         return verification_result("stale_evidence", "mechanical", "Originating tool did not produce verifiable diagnostics.", evidence_hash=run.evidence_hash)
     signature = str(finding.verifier.get("signature", ""))

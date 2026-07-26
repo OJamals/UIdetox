@@ -161,6 +161,40 @@ def test_confidence_preserves_zero_and_safely_defaults_malformed_values() -> Non
         ).confidence == 0.5
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "id": "SCAN-LEGACY",
+            "file": "src/Card.tsx",
+            "tier": "T2",
+            "issue": "Legacy finding",
+            "confidence": "not-a-number",
+            "line": "not-a-line",
+            "column": [],
+            "start": {},
+            "end": "not-an-offset",
+        },
+        {
+            "code": "runtime-text-clipped",
+            "metrics": {"overflow": 12},
+            "confidence": "not-a-number",
+            "runtime_anchor": {"selector": "#total"},
+        },
+    ],
+)
+def test_malformed_legacy_numbers_use_safe_canonical_defaults(payload: dict) -> None:
+    finding = Finding.from_dict(payload)
+    serialized = finding.to_dict()
+
+    assert finding.confidence == 0.5
+    assert serialized["line"] == 0
+    assert serialized["column"] == 0
+    if "file" in payload:
+        assert finding.source_anchor["start"] == 0
+        assert finding.source_anchor["end"] == 0
+
+
 def test_legacy_queue_uuid_does_not_change_detector_fingerprint() -> None:
     common = {
         "rule_id": "LOREM_IPSUM_SLOP",

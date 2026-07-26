@@ -2,24 +2,18 @@
 
 import argparse
 
-from uidetox.mechanical import diagnostic_finding, run_diagnostics
+from uidetox.mechanical import diagnostic_finding, resolve_tool, run_diagnostics
 from uidetox.state import add_issue, get_project_root, load_config
-from uidetox.tooling import detect_all
 
 
 def run(args: argparse.Namespace):
     project_root = get_project_root()
     config = load_config()
-    tooling = config.get("tooling")
-
-    if tooling and tooling.get("typescript"):
-        tsc_cmd = tooling["typescript"]["run_cmd"]
-    else:
-        profile = detect_all(project_root)
-        if not profile.typescript:
-            print("No TypeScript configuration found in this project.")
-            return
-        tsc_cmd = profile.typescript.run_cmd
+    typescript = resolve_tool("typescript", project_root, config)
+    if not typescript:
+        print("No TypeScript configuration found in this project.")
+        return
+    tsc_cmd = str(typescript["run_cmd"])
 
     print("==============================")
     print(" UIdetox TypeScript Check")

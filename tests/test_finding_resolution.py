@@ -269,6 +269,41 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
         )
 
 
+def test_add_issue_reuses_stable_detector_identity_for_same_evidence(
+    tmp_path, monkeypatch, capsys
+):
+    from uidetox.commands import add_issue as add_issue_command
+
+    monkeypatch.chdir(tmp_path)
+    add_issue_command.run(
+        argparse.Namespace(
+            file=" src/Card.tsx ",
+            tier="T2",
+            issue="Hierarchy   needs review",
+            fix_command="uidetox   polish src/Card.tsx",
+        )
+    )
+    first_output = capsys.readouterr().out
+    add_issue_command.run(
+        argparse.Namespace(
+            file="src/Card.tsx",
+            tier="T2",
+            issue="Hierarchy needs review",
+            fix_command="uidetox polish src/Card.tsx",
+        )
+    )
+    duplicate_output = capsys.readouterr().out
+
+    state = load_state()
+    assert len(state["issues"]) == 1
+    assert state["issues"][0]["detector_id"].startswith("manual-")
+    assert first_output.startswith("Added issue SCAN-")
+    assert duplicate_output == (
+        "Issue already queued: [T2] Hierarchy needs review in src/Card.tsx\n"
+    )
+    assert "Added issue" not in duplicate_output
+
+
 def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypatch):
     import uidetox.frontend_map as frontend_map_module
     import uidetox.project_map as project_map_module
@@ -456,3 +491,152 @@ def test_skip_verify_never_bypasses_originating_mechanical_tool(
         )
 
     assert load_state()["issues"]
+
+
+@pytest.mark.parametrize(
+    ("module_name", "fixture_name", "output"),
+    [
+        (
+            "tsc",
+            "tsconfig.json",
+            "src/App.ts(1,2): error TS2322: Type mismatch\n",
+        ),
+        (
+            "lint",
+            "eslint.config.js",
+            "src/App.ts:1:2: no-unused-vars\n",
+        ),
+    ],
+)
+def test_detected_mechanical_tool_remains_available_to_verifier(
+    tmp_path, monkeypatch, module_name, fixture_name, output
+):
+    from uidetox import mechanical
+    from uidetox.commands import lint, tsc
+
+    command_module = tsc if module_name == "tsc" else lint
+    (tmp_path / fixture_name).write_text("{}", encoding="utf-8")
+    captured = []
+    runs = iter(
+        [
+            subprocess.CompletedProcess([], 1, stdout=output, stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        ]
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(command_module, "add_issue", captured.append)
+    monkeypatch.setattr(
+        mechanical.subprocess, "run", lambda *_args, **_kwargs: next(runs)
+    )
+
+    command_module.run(argparse.Namespace(fix=False))
+    result = verify_finding(captured[0], root=tmp_path)
+
+    assert result.outcome == "absent"
+    assert result.evidence_hash
+
+
+def test_mechanical_verifier_reads_config_from_explicit_root(tmp_path, monkeypatch):
+    from uidetox import mechanical
+
+    project_root = tmp_path / "project"
+    caller_root = tmp_path / "caller"
+    project_root.mkdir()
+    caller_root.mkdir()
+    monkeypatch.chdir(project_root)
+    save_config(
+        {
+            "tooling": {
+                "typescript": {
+                    "name": "typescript",
+                    "run_cmd": "project-tsc --noEmit",
+                }
+            }
+        }
+    )
+    finding = Finding.create(
+        detector_id="mechanical-typescript-signature",
+        category="code quality",
+        severity="info",
+        confidence=1.0,
+        message="Diagnostic",
+        provenance="mechanical",
+        source_anchor={"path": "src/App.ts", "line": 1, "column": 1},
+        verifier={
+            "kind": "mechanical",
+            "tool": "typescript",
+            "signature": "signature",
+        },
+        legacy={"id": "TSC-1", "command": "tsc-fix"},
+    )
+    calls = []
+    monkeypatch.chdir(caller_root)
+    monkeypatch.setattr(
+        mechanical.subprocess,
+        "run",
+        lambda *args, **kwargs: (
+            calls.append((args, kwargs))
+            or subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        ),
+    )
+
+    result = verify_finding(finding, root=project_root)
+
+    assert result.outcome == "absent"
+    assert calls[0][0][0] == ["project-tsc", "--noEmit"]
+
+
+def test_batch_resolve_runs_matching_mechanical_recipe_once_per_command(
+    tmp_path, monkeypatch
+):
+    from uidetox import mechanical
+    from uidetox.commands import batch_resolve
+
+    findings = [
+        Finding.create(
+            detector_id=f"mechanical-typescript-signature-{index}",
+            category="code quality",
+            severity="info",
+            confidence=1.0,
+            message=f"Diagnostic {index}",
+            provenance="mechanical",
+            source_anchor={"path": "src/App.ts", "line": index, "column": 1},
+            verifier={
+                "kind": "mechanical",
+                "tool": "typescript",
+                "signature": f"signature-{index}",
+            },
+            legacy={"id": f"TSC-{index}", "command": "tsc-fix"},
+        )
+        for index in (1, 2)
+    ]
+    calls = []
+    monkeypatch.chdir(tmp_path)
+    save_config(
+        {"tooling": {"typescript": {"name": "typescript", "run_cmd": "tsc --noEmit"}}}
+    )
+    monkeypatch.setattr(
+        mechanical.subprocess,
+        "run",
+        lambda *args, **kwargs: (
+            calls.append((args, kwargs))
+            or subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        ),
+    )
+    monkeypatch.setattr(batch_resolve, "log_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(batch_resolve, "save_session", lambda *_args, **_kwargs: None)
+    args = argparse.Namespace(
+        issue_ids=[finding.to_dict()["id"] for finding in findings],
+        note="fixed",
+        single=False,
+        skip_verify=True,
+        override_verifier="",
+        actor="",
+    )
+
+    for _ in range(2):
+        save_state({"issues": findings, "resolved": [], "stats": {}})
+        batch_resolve.run(args)
+
+    assert len(calls) == 2
+    assert load_state()["issues"] == []
