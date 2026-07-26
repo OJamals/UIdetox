@@ -16,7 +16,12 @@ from uidetox.runtime_observer import (
     RuntimePage,
     observe_frontend,
 )
-from uidetox.runtime_scenarios import VIEWPORT_REGISTRY, RuntimeViewport
+from uidetox.runtime_scenarios import (
+    VIEWPORT_REGISTRY,
+    RuntimeViewport,
+    RuntimeViewportDiscovery,
+    discover_runtime_viewports,
+)
 from uidetox.state import (
     ensure_uidetox_dir,
     get_project_root,
@@ -113,6 +118,7 @@ def _observe_capture(
     destinations: tuple[tuple[RuntimeViewport, Path], ...],
     *,
     full_page: bool = True,
+    viewport_discovery: RuntimeViewportDiscovery | None = None,
 ) -> RuntimeObservation | None:
     if not destinations:
         return RuntimeObservation(now_iso(), (url,), ())
@@ -129,6 +135,7 @@ def _observe_capture(
             timeout_ms=15_000,
             full_page=full_page,
             settle_ms=1_000,
+            viewport_discovery=viewport_discovery,
         )
     except RuntimeError as error:
         print(f"❌ Failed to capture screenshot: {error}", file=sys.stderr)
@@ -148,21 +155,30 @@ def _capture_named_stage(
 ) -> tuple[list[Path], RuntimeObservation | None]:
     snapshots = _snapshots_dir()
     if responsive:
+        viewport_discovery = discover_runtime_viewports(
+            get_project_root(),
+            base_viewports=VIEWPORT_REGISTRY.values(),
+        )
         destinations = tuple(
             (
                 viewport,
                 snapshots / f"{prefix}_{viewport.name}.png",
             )
-            for viewport in VIEWPORT_REGISTRY.values()
+            for viewport in viewport_discovery.viewports
         )
     else:
+        viewport_discovery = None
         destinations = (
             (
                 VIEWPORT_REGISTRY["desktop"],
                 snapshots / f"{prefix}.png",
             ),
         )
-    observation = _observe_capture(url, destinations)
+    observation = _observe_capture(
+        url,
+        destinations,
+        viewport_discovery=viewport_discovery,
+    )
     if observation is None:
         return [], None
     captured_set = {
@@ -539,6 +555,11 @@ def run(args: argparse.Namespace):
             if observation is not None
             else {}
         )
+        if observation is not None and observation.viewport_discovery is not None:
+            visual_options["expected_viewports"] = tuple(
+                viewport.name
+                for viewport in observation.viewport_discovery.viewports
+            )
         if responsive:
             if captured:
                 print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")

@@ -346,22 +346,16 @@ def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]
         or frontend_map.evidence.get("runtime_status") != "current"
     ):
         return (), False
-    findings = list(ProjectMap.from_dict(frontend_map.project_map).findings)
-    for node in frontend_map.nodes:
-        metadata = node.metadata
-        for raw in metadata.get("findings", ()):
-            if not isinstance(raw, dict):
-                continue
-            finding = coerce_finding(raw)
-            if finding.provenance == "runtime":
-                finding = finding.with_runtime_anchor(
-                    url=str(metadata.get("runtime_url", "")),
-                    viewport=str(metadata.get("viewport", "")),
-                    selector=str(metadata.get("selector", "")),
-                    scenario=str(metadata.get("scenario", "default")),
-                )
-            findings.append(finding)
-    return tuple(findings), True
+    findings = [
+        *ProjectMap.from_dict(frontend_map.project_map).findings,
+        *(
+            coerce_finding(raw)
+            for raw in frontend_map.evidence.get("runtime_findings", ())
+            if isinstance(raw, dict)
+        ),
+    ]
+    unique = {finding.fingerprint: finding for finding in findings}
+    return tuple(unique.values()), True
 
 
 def run(args: argparse.Namespace):

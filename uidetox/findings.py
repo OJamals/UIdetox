@@ -401,13 +401,22 @@ class Finding(Mapping[str, Any]):
         return len(self.to_dict())
 
     def with_runtime_anchor(
-        self, *, url: str, viewport: str, selector: str, scenario: str = "default"
+        self,
+        *,
+        url: str,
+        viewport: str,
+        selector: str,
+        scenario: str,
+        state: str,
+        capture_id: str,
     ) -> Finding:
         anchor = {
             "url": url,
             "viewport": viewport,
             "selector": selector,
             "scenario": scenario,
+            "state": state,
+            "capture_id": capture_id,
         }
         return replace(
             self, runtime_anchor=anchor, verifier={**dict(self.verifier), **anchor}
@@ -722,6 +731,8 @@ def _verify_runtime(
     finding: Finding, _state: Mapping[str, Any], root: Path
 ) -> VerificationResult:
     from uidetox.frontend_map import frontend_map_is_fresh, load_frontend_map
+    from uidetox.runtime_scenarios import sanitize_runtime_url
+
     frontend_map = load_frontend_map(root / ".uidetox" / "frontend-map.json")
     map_hash = current_evidence_hashes(root)["map"]
     if frontend_map.evidence.get("runtime_status") != "current" or not frontend_map_is_fresh(
@@ -729,21 +740,97 @@ def _verify_runtime(
     ):
         return verification_result("stale_evidence", "runtime", "Runtime map is not current.", evidence_hash=map_hash)
     anchor = finding.runtime_anchor
-    if any(not str(anchor.get(key, "")).strip() for key in ("url", "viewport", "selector", "scenario")):
+    diagnostic = bool(str(anchor.get("source", "")).strip())
+    required = ("url", "viewport", "scenario", "state", "capture_id")
+    if not diagnostic:
+        required = (*required, "selector")
+    if any(not str(anchor.get(key, "")).strip() for key in required):
         evidence_hash = _hash({"map": map_hash, "anchor": _identity(anchor)})
-        return verification_result("stale_evidence", "runtime", "Route/scenario/viewport/selector evidence is incomplete.", evidence_hash=evidence_hash)
+        return verification_result(
+            "stale_evidence",
+            "runtime",
+            "Runtime capture identity is incomplete.",
+            evidence_hash=evidence_hash,
+        )
+    captures = frontend_map.evidence.get("runtime_capture_matrix", ())
+    exact_capture = next(
+        (
+            capture
+            for capture in captures
+            if isinstance(capture, Mapping)
+            and str(capture.get("capture_id", "")) == anchor["capture_id"]
+            and str(capture.get("scenario", "")) == anchor["scenario"]
+            and str(capture.get("state", "")) == anchor["state"]
+            and str(
+                (
+                    capture.get("viewport", {}).get("name", "")
+                    if isinstance(capture.get("viewport"), Mapping)
+                    else capture.get("viewport", "")
+                )
+            )
+            == anchor["viewport"]
+            and (
+                sanitize_runtime_url(str(capture.get("url", "")))
+                if diagnostic
+                else str(capture.get("url", ""))
+            )
+            == anchor["url"]
+        ),
+        None,
+    )
+    capture_hash = _hash(
+        {
+            "map": map_hash,
+            "anchor": _identity(anchor),
+            "capture": _identity(exact_capture) if exact_capture else None,
+        }
+    )
+    if exact_capture is None or exact_capture.get("status") != "completed":
+        return verification_result(
+            "stale_evidence",
+            "runtime",
+            "Requested runtime capture is not current.",
+            evidence_hash=capture_hash,
+        )
+    if diagnostic:
+        reproduced = any(
+            isinstance(item, Mapping)
+            and str(item.get("code", "")) == finding.detector_id
+            and str(item.get("source", "")) == anchor["source"]
+            and str(item.get("scenario", "")) == anchor["scenario"]
+            and str(item.get("state", "")) == anchor["state"]
+            and str(item.get("url", "")) == anchor["url"]
+            and str(item.get("viewport", "")) == anchor["viewport"]
+            for item in exact_capture.get("diagnostics", ())
+        )
+        return verification_result(
+            "reproduced" if reproduced else "absent",
+            "runtime",
+            (
+                "Runtime diagnostic reproduced."
+                if reproduced
+                else "Runtime diagnostic no longer reproduces."
+            ),
+            evidence_hash=capture_hash,
+        )
     observed = [
         node
         for node in frontend_map.nodes
         if node.metadata.get("runtime_url") == anchor["url"]
         and node.metadata.get("viewport") == anchor["viewport"]
-        and node.metadata.get("scenario", "default") == anchor["scenario"]
+        and node.metadata.get("scenario") == anchor["scenario"]
+        and node.metadata.get("state") == anchor["state"]
+        and node.metadata.get("capture_id") == anchor["capture_id"]
     ]
-    scenario_hash = _hash({"map": map_hash, "anchor": _identity(anchor), "nodes": [
-        {"id": node.id, "metadata": _identity(node.metadata)} for node in observed
-    ]})
-    if not observed:
-        return verification_result("stale_evidence", "runtime", "Requested route/viewport/scenario was not observed.", evidence_hash=scenario_hash)
+    scenario_hash = _hash(
+        {
+            "capture": capture_hash,
+            "nodes": [
+                {"id": node.id, "metadata": _identity(node.metadata)}
+                for node in observed
+            ],
+        }
+    )
     exact = next((node for node in observed if node.metadata.get("selector") == anchor["selector"]), None)
     reproduced_at = [
         node for node in observed if any(

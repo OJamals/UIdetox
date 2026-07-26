@@ -9,6 +9,7 @@ from uidetox.commands import compare as compare_command
 from uidetox.commands import map as map_command
 from uidetox.commands import prototype as prototype_command
 from uidetox.commands import redesign as redesign_command
+from uidetox.commands import scan as scan_command
 from uidetox.frontend_map import (
     frontend_map_is_fresh,
     load_frontend_map,
@@ -312,6 +313,116 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
     assert any(
         "Only initial runtime state was observed" in unknown
         for unknown in frontend_map.contracts.unknown
+    )
+
+
+def test_runtime_graph_identity_is_exact_per_capture_and_state(tmp_path):
+    _write_frontend(tmp_path)
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    element = RuntimeElement(
+        kind="action",
+        tag="button",
+        role="button",
+        name="Save",
+        selector="#save",
+        order=0,
+        bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+        styles={},
+        findings=(
+            RuntimeFinding(
+                code="runtime-text-clipped",
+                category="overflow",
+                severity="error",
+                message="clipped",
+            ),
+        ),
+    )
+    pages = tuple(
+        RuntimePage(
+            url="http://localhost:3000/dashboard",
+            title="Dashboard",
+            viewport=viewport,
+            elements=(element,),
+            capture_id=f"capture-{state}",
+            scenario="checkout",
+            state=state,
+        )
+        for state in ("loading", "ready")
+    )
+
+    frontend_map = map_frontend(
+        tmp_path,
+        runtime=RuntimeObservation(
+            generated_at="2026-07-26T00:00:00Z",
+            requested_urls=(pages[0].url,),
+            pages=pages,
+        ),
+    )
+    runtime_nodes = [
+        node for node in frontend_map.nodes if node.kind.startswith("runtime_")
+    ]
+    runtime_page_ids = {
+        node.id for node in runtime_nodes if node.kind == "runtime_page"
+    }
+    contains = [
+        edge
+        for edge in frontend_map.edges
+        if edge.kind == "contains" and edge.source in runtime_page_ids
+    ]
+
+    assert len(runtime_nodes) == 4
+    assert len({node.id for node in runtime_nodes}) == 4
+    assert len(contains) == 2
+    assert {edge.metadata["capture_id"] for edge in contains} == {
+        "capture-loading",
+        "capture-ready",
+    }
+    anchors = [
+        node.metadata["findings"][0]["runtime_anchor"]
+        for node in runtime_nodes
+        if node.kind == "runtime_action"
+    ]
+    assert {
+        (anchor["state"], anchor["capture_id"])
+        for anchor in anchors
+    } == {
+        ("loading", "capture-loading"),
+        ("ready", "capture-ready"),
+    }
+
+
+def test_current_map_finding_projection_includes_diagnostics_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    artifact = tmp_path / ".uidetox" / "frontend-map.json"
+    save_frontend_map(
+        map_frontend(tmp_path, runtime=_diagnostic_observation()),
+        artifact,
+    )
+    monkeypatch.setattr(
+        scan_command,
+        "frontend_map_is_fresh",
+        lambda *_args: True,
+    )
+
+    findings, qualified = scan_command.current_map_findings(tmp_path)
+    diagnostic_codes = [
+        finding.code
+        for finding in findings
+        if finding.code.startswith("browser-")
+    ]
+
+    assert qualified is True
+    assert sorted(diagnostic_codes) == sorted(
+        {
+            "browser-console-error",
+            "browser-page-error",
+            "browser-request-failed",
+            "browser-http-error",
+            "browser-action-failed",
+        }
     )
 
 

@@ -39,6 +39,8 @@ from uidetox.runtime_scenarios import (
     discover_runtime_viewports,
     normalize_runtime_urls,
     runtime_capture_id,
+    sanitize_runtime_text,
+    validate_runtime_observation_plan,
 )
 from uidetox.utils import now_iso
 
@@ -194,6 +196,9 @@ class RuntimeObservation:
     status: str = ""
 
     def __post_init__(self) -> None:
+        sanitized_errors = tuple(sanitize_runtime_text(error) for error in self.errors)
+        if sanitized_errors != self.errors:
+            object.__setattr__(self, "errors", sanitized_errors)
         pages = tuple(
             page
             if page.capture_id
@@ -276,6 +281,7 @@ def observe_frontend(
     readiness: RuntimeReadinessPolicy | None = None,
     dom_budget: RuntimeDomBudget = RuntimeDomBudget(),
     source_root: str | Path | None = None,
+    viewport_discovery: RuntimeViewportDiscovery | None = None,
 ) -> RuntimeObservation:
     """Observe explicit browser scenarios through one bounded capture engine.
 
@@ -288,7 +294,11 @@ def observe_frontend(
     normalized_viewports = tuple(viewports)
     if not normalized_viewports:
         raise ValueError("At least one runtime viewport is required.")
-    viewport_discovery = (
+    if viewport_discovery is not None and source_root is not None:
+        raise ValueError(
+            "Provide runtime viewport discovery or a source root, not both."
+        )
+    effective_discovery = viewport_discovery or (
         discover_runtime_viewports(
             source_root,
             base_viewports=normalized_viewports,
@@ -296,12 +306,8 @@ def observe_frontend(
         if source_root is not None
         else None
     )
-    if viewport_discovery is not None:
-        normalized_viewports = viewport_discovery.viewports
-    if timeout_ms <= 0:
-        raise ValueError("timeout_ms must be greater than zero.")
-    if settle_ms < 0:
-        raise ValueError("settle_ms must be zero or greater.")
+    if effective_discovery is not None:
+        normalized_viewports = effective_discovery.viewports
     active_scenarios = (
         tuple(scenarios)
         if scenarios is not None
@@ -323,6 +329,12 @@ def observe_frontend(
     } - set(normalized_urls)
     if unrequested_urls:
         raise ValueError("Runtime scenario URLs must be included in requested URLs.")
+    validate_runtime_observation_plan(
+        active_scenarios,
+        normalized_viewports,
+        timeout_ms=timeout_ms,
+        settle_ms=settle_ms,
+    )
 
     screenshot_root = None
     if screenshots_dir is not None:
@@ -382,7 +394,7 @@ def observe_frontend(
         pages=tuple(pages),
         errors=tuple(errors),
         captures=tuple(captures),
-        viewport_discovery=viewport_discovery,
+        viewport_discovery=effective_discovery,
     )
 
 
@@ -393,13 +405,7 @@ def _scenario_viewports(
     if not scenario.viewports:
         return available
     requested = set(scenario.viewports)
-    selected = tuple(viewport for viewport in available if viewport.name in requested)
-    if len(selected) != len(requested):
-        missing = requested - {viewport.name for viewport in selected}
-        raise ValueError(
-            f"Scenario viewports were not provided: {', '.join(sorted(missing))}"
-        )
-    return selected
+    return tuple(viewport for viewport in available if viewport.name in requested)
 
 
 def _scenario_states(scenario: RuntimeScenario) -> tuple[str, ...]:
@@ -407,6 +413,33 @@ def _scenario_states(scenario: RuntimeScenario) -> tuple[str, ...]:
         action.state for action in scenario.actions if action.kind == "capture"
     )
     return states or (scenario.expected_state,)
+
+
+def _finalize_capture_diagnostics(
+    captures: Iterable[RuntimeCaptureRecord],
+    diagnostics: Iterable[RuntimeDiagnostic],
+) -> tuple[RuntimeCaptureRecord, ...]:
+    by_state: dict[str, list[RuntimeDiagnostic]] = {}
+    seen: set[tuple[str, ...]] = set()
+    for diagnostic in diagnostics:
+        key = (
+            diagnostic.kind,
+            diagnostic.code,
+            diagnostic.message,
+            diagnostic.scenario,
+            diagnostic.state,
+            diagnostic.url,
+            diagnostic.viewport,
+            diagnostic.source,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        by_state.setdefault(diagnostic.state, []).append(diagnostic)
+    return tuple(
+        replace(capture, diagnostics=tuple(by_state.get(capture.state, ())))
+        for capture in captures
+    )
 
 
 def _observe_scenario(
@@ -481,7 +514,6 @@ def _observe_scenario(
                     captures.append(capture)
                     captured_states.add(action.state)
                 else:
-                    state_context["state"] = action.state or state_context["state"]
                     _perform_action(page, action)
             if not captured_states:
                 state_context["state"] = scenario.expected_state
@@ -500,10 +532,11 @@ def _observe_scenario(
                 )
                 pages.append(runtime_page)
                 captures.append(capture)
-            return tuple(pages), tuple(captures), ()
         except Exception as exc:
             state = state_context["state"]
-            message = f"{scenario.url} [{viewport.name}/{scenario.name}/{state}]: {exc}"
+            message = sanitize_runtime_text(
+                f"{scenario.url} [{viewport.name}/{scenario.name}/{state}]: {exc}"
+            )
             errors.append(message)
             diagnostics.append(
                 _diagnostic(
@@ -541,9 +574,13 @@ def _observe_scenario(
                         diagnostics=tuple(diagnostics),
                     )
                 )
-            return tuple(pages), tuple(captures), tuple(errors)
     finally:
         context.close()
+    return (
+        tuple(pages),
+        _finalize_capture_diagnostics(captures, diagnostics),
+        tuple(errors),
+    )
 
 
 def _wait_for_readiness(

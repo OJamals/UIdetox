@@ -716,6 +716,8 @@ def map_frontend(
                 viewport=page.viewport.name,
                 selector=element.selector,
                 scenario=page.scenario,
+                state=page.state,
+                capture_id=page.capture_id,
             ).to_dict(),
         }
         for page in runtime_pages
@@ -1101,8 +1103,8 @@ def _merge_runtime_evidence(
         return
 
     for page in runtime.pages:
-        page_key = f"{page.url}@{page.viewport.name}"
-        page_id = _node_id("runtime_page", "", page_key)
+        capture_identity = page.capture_id
+        page_id = _node_id("runtime_page", "", capture_identity)
         page_finding_count = sum(len(element.findings) for element in page.elements)
         route_sources = application.route_sources(page.url)
         nodes.append(
@@ -1114,6 +1116,7 @@ def _merge_runtime_evidence(
                 line=0,
                 metadata={
                     "title": page.title,
+                    "runtime_url": page.url,
                     "viewport": {
                         "name": page.viewport.name,
                         "width": page.viewport.width,
@@ -1145,7 +1148,7 @@ def _merge_runtime_evidence(
             element_key = element.selector or f"{element.tag}:{element.order}"
             element_id = _node_id(
                 node_kind,
-                page_key,
+                capture_identity,
                 element_key,
                 element.order,
             )
@@ -1177,6 +1180,9 @@ def _merge_runtime_evidence(
                                 url=page.url,
                                 viewport=page.viewport.name,
                                 selector=element.selector,
+                                scenario=page.scenario,
+                                state=page.state,
+                                capture_id=page.capture_id,
                             ).to_dict()
                             for finding in element.findings
                         ],
@@ -1192,7 +1198,13 @@ def _merge_runtime_evidence(
                     page_id,
                     element_id,
                     "contains",
-                    {"order": element.order, "viewport": page.viewport.name},
+                    {
+                        "order": element.order,
+                        "viewport": page.viewport.name,
+                        "capture_id": page.capture_id,
+                        "scenario": page.scenario,
+                        "state": page.state,
+                    },
                 ),
             )
             tag = element.tag.lower()

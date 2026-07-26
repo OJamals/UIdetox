@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+import json
 import sys
 import types
 from dataclasses import asdict, replace
@@ -21,6 +23,7 @@ from uidetox.runtime_observer import (
     observe_frontend,
 )
 from uidetox.runtime_scenarios import (
+    RUNTIME_OBSERVATION_LIMITS,
     VIEWPORT_REGISTRY,
     RuntimeCaptureRecord,
     RuntimeCoverage,
@@ -140,6 +143,178 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
         load_runtime_scenarios(outside, root=tmp_path)
 
 
+def test_runtime_work_limits_reject_before_playwright_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limits = RUNTIME_OBSERVATION_LIMITS
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b" " * (limits.scenario_file_bytes + 1))
+    with pytest.raises(ValueError, match="file exceeds"):
+        load_runtime_scenarios(oversized, root=tmp_path)
+
+    def write_scenarios(name: str, value: object) -> Path:
+        path = tmp_path / name
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    scenario = {"name": "bounded", "url": "https://example.invalid"}
+    with pytest.raises(ValueError, match="scenario count"):
+        load_runtime_scenarios(
+            write_scenarios(
+                "too-many.json",
+                [
+                    {**scenario, "name": f"scenario-{index}"}
+                    for index in range(limits.scenarios + 1)
+                ],
+            ),
+            root=tmp_path,
+        )
+    action = {"kind": "click", "selector": "#save", "timeout_ms": 1}
+    with pytest.raises(ValueError, match="scenario action count"):
+        load_runtime_scenarios(
+            write_scenarios(
+                "too-many-actions.json",
+                [
+                    {
+                        **scenario,
+                        "actions": [action] * (limits.actions_per_scenario + 1),
+                    }
+                ],
+            ),
+            root=tmp_path,
+        )
+    with pytest.raises(ValueError, match="total action count"):
+        load_runtime_scenarios(
+            write_scenarios(
+                "too-many-total-actions.json",
+                [
+                    {
+                        **scenario,
+                        "name": f"scenario-{index}",
+                        "actions": [action] * limits.actions_per_scenario,
+                    }
+                    for index in range(
+                        limits.actions_total // limits.actions_per_scenario + 1
+                    )
+                ],
+            ),
+            root=tmp_path,
+        )
+
+    original_import = builtins.__import__
+
+    def reject_playwright(name, *args, **kwargs):
+        if name.startswith("playwright"):
+            pytest.fail("over-budget observation reached Playwright import")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_playwright)
+    with pytest.raises(ValueError, match="URL count"):
+        observe_frontend(
+            tuple(
+                f"https://example.invalid/{index}"
+                for index in range(limits.scenarios + 1)
+            )
+        )
+    viewports = tuple(
+        RuntimeViewport(f"viewport-{index}", 320 + index, 800)
+        for index in range(limits.viewports + 1)
+    )
+    with pytest.raises(ValueError, match="viewport count"):
+        observe_frontend("https://example.invalid", viewports=viewports)
+    with pytest.raises(ValueError, match="timeout_ms"):
+        observe_frontend("https://example.invalid", timeout_ms=limits.timeout_ms + 1)
+    with pytest.raises(ValueError, match="settle_ms"):
+        observe_frontend("https://example.invalid", settle_ms=limits.settle_ms + 1)
+
+    bounded_viewports = viewports[: limits.viewports]
+    matrix_scenario = RuntimeScenario(
+        name="matrix",
+        url="https://example.invalid",
+        actions=tuple(
+            RuntimeScenarioAction(kind="capture", state=f"state-{index}")
+            for index in range(limits.capture_matrix // limits.viewports + 1)
+        ),
+    )
+    with pytest.raises(ValueError, match="capture matrix"):
+        observe_frontend(
+            matrix_scenario.url,
+            viewports=bounded_viewports,
+            scenarios=(matrix_scenario,),
+        )
+    boundary_root = tmp_path / "boundary-project"
+    boundary_root.mkdir()
+    (boundary_root / "responsive.css").write_text(
+        "\n".join(
+            f"@media (min-width: {400 + index * 100}px) {{ main {{ order: {index}; }} }}"
+            for index in range(8)
+        ),
+        encoding="utf-8",
+    )
+    boundary_matrix = RuntimeScenario(
+        name="boundary-matrix",
+        url="https://example.invalid",
+        actions=tuple(
+            RuntimeScenarioAction(kind="capture", state=f"state-{index}")
+            for index in range(14)
+        ),
+    )
+    with pytest.raises(ValueError, match="capture matrix"):
+        observe_frontend(
+            boundary_matrix.url,
+            scenarios=(boundary_matrix,),
+            source_root=boundary_root,
+        )
+
+    work_scenarios = tuple(
+        RuntimeScenario(
+            name=f"work-{index}",
+            url="https://example.invalid",
+            actions=tuple(
+                RuntimeScenarioAction(
+                    kind="click",
+                    selector="#save",
+                    timeout_ms=1,
+                )
+                for _ in range(limits.actions_per_scenario)
+            ),
+            readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+        )
+        for index in range(2)
+    )
+    with pytest.raises(ValueError, match="observation work"):
+        observe_frontend(
+            "https://example.invalid",
+            viewports=bounded_viewports,
+            scenarios=work_scenarios,
+            timeout_ms=1,
+            settle_ms=0,
+        )
+
+    time_scenario = RuntimeScenario(
+        name="time",
+        url="https://example.invalid",
+        actions=tuple(
+            RuntimeScenarioAction(
+                kind="click",
+                selector="#save",
+                timeout_ms=limits.timeout_ms,
+            )
+            for _ in range(15)
+        ),
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+    with pytest.raises(ValueError, match="time budget"):
+        observe_frontend(
+            time_scenario.url,
+            viewports=bounded_viewports[:2],
+            scenarios=(time_scenario,),
+            timeout_ms=limits.timeout_ms,
+            settle_ms=0,
+        )
+
+
 def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> None:
     (tmp_path / "responsive.css").write_text(
         """
@@ -236,6 +411,154 @@ def test_runtime_diagnostics_round_trip_with_scenario_provenance() -> None:
     )
 
     assert RuntimeDiagnostic.from_dict(asdict(diagnostic)) == diagnostic
+
+
+def test_context_close_diagnostics_are_finalized_on_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    callbacks: dict[str, object] = {}
+
+    class Page:
+        def on(self, event, callback) -> None:
+            callbacks[event] = callback
+
+        def goto(self, *_args, **_kwargs) -> None:
+            return None
+
+    page = Page()
+
+    class Context:
+        def new_page(self):
+            return page
+
+        def close(self) -> None:
+            callbacks["console"](
+                SimpleNamespace(type="error", text="late console failure")
+            )
+
+    class Browser:
+        def new_context(self, **_kwargs):
+            return Context()
+
+    scenario = RuntimeScenario(
+        name="default",
+        url="https://example.invalid",
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+    runtime_page = RuntimePage(
+        url=scenario.url,
+        title="Late",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        elements=(),
+        capture_id="late",
+    )
+    monkeypatch.setattr(
+        runtime_observer,
+        "_wait_for_readiness",
+        lambda *_args, **_kwargs: RuntimeReadiness("current", "test", 0),
+    )
+    monkeypatch.setattr(
+        runtime_observer,
+        "_capture_scenario_state",
+        lambda *_args, **_kwargs: (
+            runtime_page,
+            _capture_record("late", status="completed"),
+        ),
+    )
+
+    _pages, captures, errors = runtime_observer._observe_scenario(
+        Browser(),
+        scenario,
+        VIEWPORT_REGISTRY["desktop"],
+        timeout_ms=1_000,
+        dom_budget=RuntimeDomBudget(scan=10, candidates=10),
+        screenshot_root=None,
+        screenshot_namer=None,
+        full_page=True,
+        playwright_timeout_error=RuntimeError,
+    )
+
+    assert errors == ()
+    assert [diagnostic.code for diagnostic in captures[0].diagnostics] == [
+        "browser-console-error"
+    ]
+
+
+def test_runtime_diagnostics_are_sanitized_before_serialization(
+    tmp_path: Path,
+) -> None:
+    from uidetox.frontend_map import map_frontend
+
+    callbacks: dict[str, object] = {}
+    page = SimpleNamespace(on=lambda event, callback: callbacks.__setitem__(event, callback))
+    scenario = RuntimeScenario(
+        name="safe",
+        url="https://example.invalid/dashboard",
+    )
+    diagnostics: list[RuntimeDiagnostic] = []
+    runtime_observer._install_diagnostic_listeners(
+        page,
+        diagnostics,
+        scenario=scenario,
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        state_context={"state": "initial"},
+    )
+    console_secret = "sk-1234567890abcdefghijkl"
+    password_secret = "correct-horse-battery-staple"
+    query_secret = "query-secret-value"
+    callbacks["console"](
+        SimpleNamespace(type="error", text=f"token={console_secret}")
+    )
+    callbacks["pageerror"](RuntimeError(f"password={password_secret}"))
+    callbacks["requestfailed"](
+        SimpleNamespace(
+            url=f"https://user:pass@example.invalid/api?token={query_secret}#fragment",
+            failure=f"authorization=Bearer {console_secret}",
+        )
+    )
+    callbacks["response"](
+        SimpleNamespace(
+            status=500,
+            url=f"https://example.invalid/api?token={query_secret}#fragment",
+        )
+    )
+
+    viewport = VIEWPORT_REGISTRY["desktop"]
+    page_evidence = RuntimePage(
+        url=scenario.url,
+        title="Safe",
+        viewport=viewport,
+        elements=(),
+        capture_id="safe-capture",
+        scenario=scenario.name,
+        state="initial",
+    )
+    capture = RuntimeCaptureRecord(
+        capture_id=page_evidence.capture_id,
+        scenario=scenario.name,
+        state="initial",
+        url=scenario.url,
+        viewport=viewport,
+        status="completed",
+        readiness=RuntimeReadiness("current", "selector", 1),
+        coverage=RuntimeCoverage.empty(1),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+        diagnostics=tuple(diagnostics),
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(scenario.url,),
+        pages=(page_evidence,),
+        captures=(capture,),
+    )
+    (tmp_path / "index.html").write_text("<main>Safe</main>", encoding="utf-8")
+    serialized = json.dumps(map_frontend(tmp_path, runtime=observation).to_dict())
+    assert console_secret not in serialized
+    assert password_secret not in serialized
+    assert query_secret not in serialized
+    assert "user:pass@" not in serialized
+    assert "https://example.invalid/api" in serialized
 
 
 def _skip_missing_browser(exc: RuntimeError) -> None:
@@ -1200,3 +1523,67 @@ def test_readiness_distinguishes_slow_hydration_from_polling_degradation(
     }
     assert readiness == {"hydrated": "current", "polling": "degraded"}
     assert observation.status == "degraded"
+
+
+@pytest.mark.browser
+def test_capture_then_failure_finalizes_exact_semantic_state_diagnostic(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    from uidetox.frontend_map import map_frontend
+
+    fixture = tmp_path / "late-failure.html"
+    fixture.write_text(
+        '<main><button id="ready">Ready</button></main>',
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+    scenario = RuntimeScenario(
+        name="late-failure",
+        url=url,
+        actions=(
+            RuntimeScenarioAction(kind="capture", state="ready"),
+            RuntimeScenarioAction(
+                kind="wait-for-state",
+                selector="#ready",
+                state="visible",
+                timeout_ms=500,
+            ),
+            RuntimeScenarioAction(
+                kind="click",
+                selector="#missing",
+                timeout_ms=100,
+            ),
+        ),
+        readiness=RuntimeReadinessPolicy(request_idle_ms=0, settle_ms=0),
+    )
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        timeout_ms=1_000,
+        settle_ms=0,
+    )
+
+    assert observation.status == "partial"
+    assert len(observation.captures) == 1
+    capture = observation.captures[0]
+    assert capture.state == "ready"
+    action_failures = [
+        diagnostic
+        for diagnostic in capture.diagnostics
+        if diagnostic.code == "browser-action-failed"
+    ]
+    assert len(action_failures) == 1
+    assert action_failures[0].scenario == scenario.name
+    assert action_failures[0].state == capture.state
+    frontend_map = map_frontend(tmp_path, runtime=observation)
+    finding = next(
+        item
+        for item in frontend_map.evidence["runtime_findings"]
+        if item["code"] == "browser-action-failed"
+    )
+    assert finding["runtime_anchor"]["capture_id"] == capture.capture_id
+    assert finding["runtime_anchor"]["scenario"] == scenario.name
+    assert finding["runtime_anchor"]["state"] == capture.state

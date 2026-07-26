@@ -110,6 +110,8 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
             "viewport": "mobile",
             "selector": "#total",
             "scenario": "default",
+            "state": "ready",
+            "capture_id": "cart-ready-mobile",
         },
         verifier={"kind": "runtime", "detector_id": "runtime-text-clipped"},
     )
@@ -131,6 +133,8 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
                     "selector": "#total",
                     "states": {},
                     "scenario": "default",
+                    "state": "ready",
+                    "capture_id": "cart-ready-mobile",
                     "findings": [runtime.to_dict()],
                 },
             }
@@ -141,6 +145,17 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
         "evidence": {
             "runtime_observed": True,
             "runtime_status": "current",
+            "runtime_capture_matrix": [
+                {
+                    "capture_id": "cart-ready-mobile",
+                    "scenario": "default",
+                    "state": "ready",
+                    "url": "http://localhost:3000/cart",
+                    "viewport": {"name": "mobile", "width": 390, "height": 844},
+                    "status": "completed",
+                    "diagnostics": [],
+                }
+            ],
             "source_manifest": {"files": {}, "project_files": {}},
         },
         "project_map": {},
@@ -152,18 +167,18 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
     reproduced = verify_finding(runtime, root=tmp_path)
     assert reproduced.outcome == "reproduced"
     assert reproduced.evidence_hash
-    artifact["nodes"][0]["metadata"]["scenario"] = "hover"
+    artifact["evidence"]["runtime_capture_matrix"][0]["scenario"] = "hover"
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
     )
     assert verify_finding(runtime, root=tmp_path).outcome == "stale_evidence"
-    artifact["nodes"][0]["metadata"]["scenario"] = "default"
-    artifact["nodes"][0]["metadata"]["viewport"] = "desktop"
+    artifact["evidence"]["runtime_capture_matrix"][0]["scenario"] = "default"
+    artifact["evidence"]["runtime_capture_matrix"][0]["viewport"]["name"] = "desktop"
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
     )
     assert verify_finding(runtime, root=tmp_path).outcome == "stale_evidence"
-    artifact["nodes"][0]["metadata"]["viewport"] = "mobile"
+    artifact["evidence"]["runtime_capture_matrix"][0]["viewport"]["name"] = "mobile"
     artifact["nodes"][0]["metadata"]["selector"] = "#other"
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
@@ -179,6 +194,12 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
     )
     assert verify_finding(runtime, root=tmp_path).outcome == "stale_anchor"
     artifact["nodes"][0]["metadata"]["findings"] = []
+    other_state = json.loads(json.dumps(artifact["nodes"][0]))
+    other_state["id"] = "other-state"
+    other_state["metadata"]["state"] = "loading"
+    other_state["metadata"]["capture_id"] = "cart-loading-mobile"
+    other_state["metadata"]["findings"] = [runtime.to_dict()]
+    artifact["nodes"].append(other_state)
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
     )
@@ -190,6 +211,88 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
         json.dumps(artifact), encoding="utf-8"
     )
     assert verify_finding(runtime, root=tmp_path).outcome == "stale_evidence"
+
+
+def test_runtime_diagnostic_verifier_uses_exact_capture_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uidetox.frontend_map as frontend_map_module
+
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: True)
+    anchor = {
+        "url": "http://localhost:3000/cart",
+        "viewport": "mobile",
+        "scenario": "checkout",
+        "state": "ready",
+        "source": "console",
+        "capture_id": "checkout-ready-mobile",
+    }
+    finding = Finding.create(
+        detector_id="browser-console-error",
+        category="runtime",
+        severity="error",
+        confidence=1,
+        message="console failed",
+        provenance="runtime",
+        evidence={"kind": "console", "source": "console"},
+        runtime_anchor=anchor,
+        verifier={
+            "kind": "runtime",
+            "detector_id": "browser-console-error",
+            **anchor,
+        },
+    )
+    diagnostic = {
+        "kind": "console",
+        "code": finding.detector_id,
+        "message": finding.message,
+        "severity": "error",
+        "scenario": anchor["scenario"],
+        "state": anchor["state"],
+        "url": anchor["url"],
+        "viewport": anchor["viewport"],
+        "source": anchor["source"],
+    }
+    artifact = {
+        "schema_version": 1,
+        "generated_at": "now",
+        "root": str(tmp_path),
+        "target": ".",
+        "nodes": [],
+        "edges": [],
+        "contracts": {"must_preserve": [], "may_change": [], "unknown": []},
+        "fingerprint": {},
+        "evidence": {
+            "runtime_observed": True,
+            "runtime_status": "current",
+            "runtime_capture_matrix": [
+                {
+                    "capture_id": anchor["capture_id"],
+                    "scenario": anchor["scenario"],
+                    "state": anchor["state"],
+                    "url": anchor["url"],
+                    "viewport": {"name": anchor["viewport"], "width": 390, "height": 844},
+                    "status": "completed",
+                    "diagnostics": [diagnostic],
+                }
+            ],
+            "source_manifest": {"files": {}, "project_files": {}},
+        },
+        "project_map": {},
+    }
+    path = tmp_path / ".uidetox" / "frontend-map.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    assert verify_finding(finding, root=tmp_path).outcome == "reproduced"
+    artifact["evidence"]["runtime_capture_matrix"][0]["diagnostics"] = []
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    assert verify_finding(finding, root=tmp_path).outcome == "absent"
+    artifact["evidence"]["runtime_capture_matrix"][0]["capture_id"] = "stale-capture"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    assert verify_finding(finding, root=tmp_path).outcome == "stale_evidence"
 
 
 def test_manual_verifier_requires_linked_structured_review(tmp_path):

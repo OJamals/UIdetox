@@ -10,15 +10,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from uidetox.fileset import ProjectFileSet
+from uidetox.prompt_safety import (
+    SENSITIVE_EVIDENCE_REDACTION,
+    sanitize_untrusted_data,
+)
 
 _MAX_ACTION_TIMEOUT_MS = 30_000
 _MAX_DOM_SCAN = 50_000
 _MAX_DOM_CANDIDATES = 10_000
 _MAX_RESPONSIVE_BOUNDARIES = 8
 _MAX_RESPONSIVE_SOURCE_BYTES = 1_000_000
+_URL_IN_TEXT_PATTERN = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(?P<key>authorization|api[_-]?key|access[_-]?token|password|passwd|"
+    r"secret|token)\b(?P<separator>\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
+)
+_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _SUPPORTED_ACTIONS = frozenset(
     {
         "click",
@@ -48,6 +58,61 @@ _RESPONSIVE_BOUNDARY_PATTERN = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class RuntimeObservationLimits:
+    scenario_file_bytes: int = 1_000_000
+    scenarios: int = 32
+    actions_per_scenario: int = 64
+    actions_total: int = 512
+    viewports: int = 20
+    capture_matrix: int = 256
+    timeout_ms: int = _MAX_ACTION_TIMEOUT_MS
+    settle_ms: int = _MAX_ACTION_TIMEOUT_MS
+    work_units: int = 2_048
+    time_budget_ms: int = 900_000
+
+
+RUNTIME_OBSERVATION_LIMITS = RuntimeObservationLimits()
+
+
+def sanitize_runtime_url(value: str) -> str:
+    """Remove URL credentials and request-specific query data from diagnostics."""
+
+    parsed = urlsplit(str(value))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return str(sanitize_untrusted_data(str(value)))
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{host}:{port}" if port is not None else host
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
+def sanitize_runtime_text(value: object) -> str:
+    """Redact secrets and scrub embedded URLs before runtime evidence exists."""
+
+    text = _URL_IN_TEXT_PATTERN.sub(
+        lambda match: sanitize_runtime_url(match.group(0)),
+        str(value),
+    )
+    text = _SECRET_ASSIGNMENT_PATTERN.sub(
+        lambda match: (
+            f"{match.group('key')}{match.group('separator')}"
+            f"{SENSITIVE_EVIDENCE_REDACTION}"
+        ),
+        text,
+    )
+    text = _BEARER_PATTERN.sub(
+        f"Bearer {SENSITIVE_EVIDENCE_REDACTION}",
+        text,
+    )
+    return str(sanitize_untrusted_data(text))
+
+
 def _reject_unknown(
     value: dict[str, Any],
     allowed: set[str],
@@ -63,7 +128,7 @@ def _safe_identifier(value: str, label: str) -> None:
 
 
 def normalize_runtime_urls(urls: str | Iterable[str]) -> tuple[str, ...]:
-    values = [urls] if isinstance(urls, str) else list(urls)
+    values = (urls,) if isinstance(urls, str) else urls
     normalized: list[str] = []
     for value in values:
         url = str(value).strip()
@@ -72,6 +137,11 @@ def normalize_runtime_urls(urls: str | Iterable[str]) -> tuple[str, ...]:
             raise ValueError(f"Runtime URL must be absolute HTTP(S): {url}")
         if url not in normalized:
             normalized.append(url)
+            if len(normalized) > RUNTIME_OBSERVATION_LIMITS.scenarios:
+                raise ValueError(
+                    "Runtime URL count exceeds "
+                    f"{RUNTIME_OBSERVATION_LIMITS.scenarios}."
+                )
     if not normalized:
         raise ValueError("At least one runtime URL is required.")
     return tuple(normalized)
@@ -172,6 +242,11 @@ def discover_runtime_viewports(
         raise ValueError(
             f"Runtime responsive boundary budget must be 1-{_MAX_RESPONSIVE_BOUNDARIES}."
         )
+    base = tuple(base_viewports)
+    if not 1 <= len(base) <= RUNTIME_OBSERVATION_LIMITS.viewports:
+        raise ValueError(
+            f"Runtime viewport count must be 1-{RUNTIME_OBSERVATION_LIMITS.viewports}."
+        )
     root_path = Path(root).expanduser().resolve()
     discovered: dict[int, dict[str, set[str]]] = {}
     for path in ProjectFileSet(root_path).discover():
@@ -214,7 +289,7 @@ def discover_runtime_viewports(
         )
         for width in selected_widths
     )
-    viewports = list(base_viewports)
+    viewports = list(base)
     occupied_widths = {viewport.width for viewport in viewports}
     for boundary in boundaries:
         probe_kind = "-".join(boundary.kinds)
@@ -296,6 +371,10 @@ class RuntimeDiagnostic:
     url: str
     viewport: str
     source: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "message", sanitize_runtime_text(self.message))
+        object.__setattr__(self, "url", sanitize_runtime_url(self.url))
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeDiagnostic":
@@ -459,6 +538,11 @@ class RuntimeScenario:
         ]
         if len(states) != len(set(states)):
             raise ValueError("Runtime scenario capture states must be unique.")
+        if len(self.actions) > RUNTIME_OBSERVATION_LIMITS.actions_per_scenario:
+            raise ValueError(
+                "Runtime scenario action count exceeds "
+                f"{RUNTIME_OBSERVATION_LIMITS.actions_per_scenario}."
+            )
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeScenario":
@@ -541,6 +625,81 @@ def runtime_capture_id(
     return f"{scenario}:{state}:{viewport.name}:{digest}"
 
 
+def validate_runtime_observation_plan(
+    scenarios: Iterable[RuntimeScenario],
+    viewports: Iterable[RuntimeViewport],
+    *,
+    timeout_ms: int,
+    settle_ms: int,
+) -> None:
+    """Reject an observation plan whose complete execution exceeds one policy."""
+
+    limits = RUNTIME_OBSERVATION_LIMITS
+    scenario_list = tuple(scenarios)
+    viewport_list = tuple(viewports)
+    if not 1 <= timeout_ms <= limits.timeout_ms:
+        raise ValueError(f"timeout_ms must be 1-{limits.timeout_ms}.")
+    if not 0 <= settle_ms <= limits.settle_ms:
+        raise ValueError(f"settle_ms must be 0-{limits.settle_ms}.")
+    if not 1 <= len(scenario_list) <= limits.scenarios:
+        raise ValueError(f"Runtime scenario count must be 1-{limits.scenarios}.")
+    total_actions = sum(len(scenario.actions) for scenario in scenario_list)
+    if total_actions > limits.actions_total:
+        raise ValueError(
+            f"Runtime total action count exceeds {limits.actions_total}."
+        )
+    if not 1 <= len(viewport_list) <= limits.viewports:
+        raise ValueError(f"Runtime viewport count must be 1-{limits.viewports}.")
+
+    matrix_size = 0
+    work_units = 0
+    time_budget_ms = 0
+    available_names = {viewport.name for viewport in viewport_list}
+    for scenario in scenario_list:
+        requested_viewports = set(scenario.viewports)
+        if requested_viewports - available_names:
+            raise ValueError(
+                "Scenario viewports were not provided: "
+                f"{', '.join(sorted(requested_viewports - available_names))}"
+            )
+        selected_viewports = (
+            len(requested_viewports)
+            if requested_viewports
+            else len(viewport_list)
+        )
+        capture_count = (
+            sum(action.kind == "capture" for action in scenario.actions) or 1
+        )
+        matrix_size += selected_viewports * capture_count
+        work_units += selected_viewports * (
+            1 + len(scenario.actions) + capture_count
+        )
+        action_time = sum(
+            action.timeout_ms
+            for action in scenario.actions
+            if action.kind != "capture"
+        )
+        time_budget_ms += selected_viewports * (
+            timeout_ms
+            + action_time
+            + scenario.readiness.request_idle_ms
+            + scenario.readiness.settle_ms
+        )
+    if matrix_size > limits.capture_matrix:
+        raise ValueError(
+            f"Runtime capture matrix exceeds {limits.capture_matrix}."
+        )
+    if work_units > limits.work_units:
+        raise ValueError(
+            f"Runtime observation work exceeds {limits.work_units} units."
+        )
+    if time_budget_ms > limits.time_budget_ms:
+        raise ValueError(
+            "Runtime observation time budget exceeds "
+            f"{limits.time_budget_ms}ms."
+        )
+
+
 def load_runtime_scenarios(
     path: str | Path,
     *,
@@ -551,16 +710,54 @@ def load_runtime_scenarios(
     if not scenario_path.is_relative_to(scenario_root):
         raise ValueError("Runtime scenario file must be inside the allowed project root.")
     try:
-        value = json.loads(scenario_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        file_size = scenario_path.stat().st_size
+    except OSError as exc:
+        raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
+    if file_size > RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes:
+        raise ValueError(
+            "Runtime scenario file exceeds "
+            f"{RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes} bytes."
+        )
+    try:
+        payload = scenario_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
+    if len(payload) > RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes:
+        raise ValueError(
+            "Runtime scenario file exceeds "
+            f"{RUNTIME_OBSERVATION_LIMITS.scenario_file_bytes} bytes."
+        )
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Runtime scenario file is unreadable: {scenario_path}") from exc
     if not isinstance(value, list):
         raise ValueError("Runtime scenario file must contain a JSON array.")
-    scenarios = tuple(
-        RuntimeScenario.from_dict(dict(item)) for item in value if isinstance(item, dict)
-    )
-    if len(scenarios) != len(value) or not scenarios:
+    if len(value) > RUNTIME_OBSERVATION_LIMITS.scenarios:
+        raise ValueError(
+            f"Runtime scenario count exceeds {RUNTIME_OBSERVATION_LIMITS.scenarios}."
+        )
+    if any(not isinstance(item, dict) for item in value) or not value:
         raise ValueError("Runtime scenario file must contain scenario objects.")
+    raw_action_counts = []
+    for item in value:
+        actions = item.get("actions", [])
+        if not isinstance(actions, list):
+            raise ValueError("Runtime scenario actions/readiness have invalid types.")
+        if len(actions) > RUNTIME_OBSERVATION_LIMITS.actions_per_scenario:
+            raise ValueError(
+                "Runtime scenario action count exceeds "
+                f"{RUNTIME_OBSERVATION_LIMITS.actions_per_scenario}."
+            )
+        raw_action_counts.append(len(actions))
+    if sum(raw_action_counts) > RUNTIME_OBSERVATION_LIMITS.actions_total:
+        raise ValueError(
+            "Runtime total action count exceeds "
+            f"{RUNTIME_OBSERVATION_LIMITS.actions_total}."
+        )
+    scenarios = tuple(
+        RuntimeScenario.from_dict(dict(item)) for item in value
+    )
     if len({scenario.name for scenario in scenarios}) != len(scenarios):
         raise ValueError("Runtime scenario names must be unique.")
     return scenarios

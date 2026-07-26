@@ -35,13 +35,22 @@ accept `load`, `domcontentloaded`, or `networkidle`. Scenario files never
 contain credentials. UIdetox does not infer credentials, crawl controls, or
 click destructive actions.
 
+One centralized observation policy rejects work before Chromium starts:
+scenario JSON is limited to 1 MB, 32 scenarios, 64 actions per scenario, 512
+actions total, 20 resolved viewports, 256 captures, 2,048 work units, and a
+15-minute configured worst-case time budget. Source-derived boundary probes
+count toward the viewport, capture-matrix, work, and time limits.
+
 Readiness prefers an explicit selector or app hook. Mutation idle and bounded
 request idle are available when the app has no explicit signal. Request-idle
 timeout followed by settle is recorded as `degraded`; a missing explicit signal
 fails the capture. Browser console, page, HTTP, request, and action failures
 become canonical typed findings and retain scenario, state, URL, viewport,
 capture, and source provenance. Repeated capture snapshots project one queue
-candidate per distinct diagnostic.
+candidate per distinct diagnostic. Diagnostic messages are redacted and
+request URLs lose credentials, query strings, and fragments before capture
+records exist. Late failures replace the matching capture's diagnostic
+snapshot; Playwright wait conditions never become semantic scenario states.
 
 Observation status is derived from the requested capture matrix:
 
@@ -69,3 +78,10 @@ mapping also discovers pixel-valued media and container-query boundaries from
 the shared frontend file set, then adds bounded probes one pixel below and
 above each selected boundary. The artifact records boundary kinds, source
 files, the total discovered count, and whether selection was truncated.
+Responsive before/after capture consumes the same discovery result.
+
+Runtime graph nodes and findings use exact capture identity: capture ID,
+scenario, semantic state, URL, and viewport. Element findings additionally
+require a selector; browser diagnostics instead require their source and
+detector code. Verification never accepts evidence from another state or
+capture.
