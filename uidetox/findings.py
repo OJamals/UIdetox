@@ -456,7 +456,23 @@ def score_current_snapshot(
         if structured_review_current(review, evidence_hashes)
         else None
     )
-    blended = round(objective * 0.6 + subjective * 0.4) if subjective is not None else objective
+    critical_deterministic_pending = any(
+        item.status not in _NON_DEFECT
+        and item.severity == "critical"
+        and (
+            item.provenance in {"contract", "runtime", "static"}
+            or str(item.verifier.get("kind", ""))
+            in {"contract", "runtime", "static"}
+        )
+        for item in findings
+    )
+    blended = (
+        round(objective * 0.6 + subjective * 0.4)
+        if subjective is not None
+        else objective
+    )
+    if critical_deterministic_pending:
+        blended = min(blended, objective)
     return {
         "objective_score": objective,
         "subjective_score": subjective,
@@ -465,6 +481,7 @@ def score_current_snapshot(
         "resolved_slop": 0,
         "total_slop": slop,
         "qualified_coverage": coverage,
+        "critical_deterministic_pending": critical_deterministic_pending,
     }
 
 
@@ -529,7 +546,13 @@ def _structured_review_score(review: Mapping[str, Any]) -> int | None:
 
 
 def _structured_review_complete(review: Mapping[str, Any]) -> bool:
-    lists = ("finding_links", "routes", "states", "viewports")
+    lists = (
+        "finding_links",
+        "region_links",
+        "routes",
+        "states",
+        "viewports",
+    )
     hashes = review.get("evidence_hashes")
     return bool(
         _structured_review_score(review) is not None
@@ -537,7 +560,11 @@ def _structured_review_complete(review: Mapping[str, Any]) -> bool:
         and str(review.get("reviewer", "")).strip()
         and all(
             isinstance(review.get(key), (list, tuple))
-            and all(isinstance(item, str) for item in review[key])
+            and bool(review[key])
+            and all(
+                isinstance(item, str) and bool(item.strip())
+                for item in review[key]
+            )
             for key in lists
         )
         and isinstance(hashes, Mapping)

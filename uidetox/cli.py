@@ -444,6 +444,7 @@ def parse_args(args_list=None):
     review_parser.add_argument("--rationale", help="Evidence-based review rationale")
     review_parser.add_argument("--reviewer", help="Reviewer identity")
     review_parser.add_argument("--finding-link", action="append", default=[])
+    review_parser.add_argument("--region-link", action="append", default=[])
     review_parser.add_argument("--route", action="append", default=[])
     review_parser.add_argument("--state", action="append", default=[])
     review_parser.add_argument("--viewport", action="append", default=[])

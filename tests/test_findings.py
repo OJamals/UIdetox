@@ -458,13 +458,76 @@ def test_investigative_findings_remain_visible_without_becoming_defects(
     assert "pending_findings" not in {blocker.code for blocker in result.blockers}
 
 
+def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> None:
+    critical = Finding.create(
+        detector_id="runtime-sticky-occlusion",
+        category="occlusion",
+        severity="critical",
+        confidence=1.0,
+        message="Primary action is fully occluded.",
+        provenance="runtime",
+        verifier={"kind": "runtime"},
+    )
+    state = {
+        "issues": [critical.to_dict()],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "score": 100,
+            "rationale": "Reviewed the affected route and region.",
+            "reviewer": "qa-agent",
+            "finding_links": [critical.fingerprint],
+            "region_links": ["runtime-primary-action"],
+            "routes": ["/checkout"],
+            "states": ["ready"],
+            "viewports": ["mobile"],
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+        },
+    }
+
+    scores = score_current_snapshot(state)
+
+    assert scores["subjective_score"] == 100
+    assert scores["blended_score"] == scores["objective_score"]
+    assert scores["critical_deterministic_pending"] is True
+
+
+def test_incomplete_structured_review_cannot_inflate_score_or_eligibility() -> None:
+    state = {
+        "issues": [],
+        "current_snapshot": {"qualified_coverage": 0.8},
+        "subjective": {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "score": 100,
+            "rationale": "Reviewed one screenshot.",
+            "reviewer": "qa-agent",
+            "finding_links": ["finding-1"],
+            "region_links": [],
+            "routes": ["/"],
+            "states": ["initial"],
+            "viewports": ["desktop"],
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+        },
+    }
+
+    scores = score_current_snapshot(state)
+    result = evaluate_eligibility(state, EligibilityContext())
+
+    assert scores["subjective_score"] is None
+    assert scores["blended_score"] == scores["objective_score"] == 80
+    assert "missing_structured_review" in {
+        blocker.code for blocker in result.blockers
+    }
+
+
 def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() -> None:
     review = {
         "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
         "score": 100,
         "rationale": "Reviewed every route and state.",
         "reviewer": "qa-agent",
-        "finding_links": [],
+        "finding_links": ["finding-1"],
+        "region_links": ["runtime-region-1"],
         "routes": ["/"],
         "states": ["default"],
         "viewports": ["desktop"],

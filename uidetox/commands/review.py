@@ -5,6 +5,7 @@ import sys
 from typing import Any
 
 from uidetox.findings import current_evidence_hashes
+from uidetox.frontend_map import FrontendMap, load_frontend_map
 from uidetox.state import ensure_uidetox_dir, load_config, load_state, save_state
 from uidetox.utils import now_iso
 from uidetox.visual_semantics import project_visual_evidence_status
@@ -34,7 +35,7 @@ def run(args: argparse.Namespace) -> None:
     if (score := getattr(args, "score", None)) is not None:
         _store_subjective_score(score)
         return
-    _print_review_brief(visual)
+    _print_review_brief(visual, _load_review_map())
 
 
 def _store_structured_review(
@@ -47,10 +48,22 @@ def _store_structured_review(
     ]
     rationale = str(getattr(args, "rationale", "") or "").strip()
     reviewer = str(getattr(args, "reviewer", "") or "").strip()
+    required_lists = {
+        "finding_link": list(getattr(args, "finding_link", None) or []),
+        "region_link": list(getattr(args, "region_link", None) or []),
+        "route": list(getattr(args, "route", None) or []),
+        "state": list(getattr(args, "state", None) or []),
+        "viewport": list(getattr(args, "viewport", None) or []),
+    }
     if not rationale:
         errors.append("--rationale is required")
     if not reviewer:
         errors.append("--reviewer is required")
+    errors.extend(
+        f"--{name.replace('_', '-')} is required"
+        for name, values in required_lists.items()
+        if not values
+    )
     if errors:
         print("Error: " + "; ".join(errors), file=sys.stderr)
         raise SystemExit(1)
@@ -61,10 +74,11 @@ def _store_structured_review(
         "score": sum(scores.values()),
         "rationale": rationale,
         "reviewer": reviewer,
-        "finding_links": list(getattr(args, "finding_link", None) or []),
-        "routes": list(getattr(args, "route", None) or []),
-        "states": list(getattr(args, "state", None) or []),
-        "viewports": list(getattr(args, "viewport", None) or []),
+        "finding_links": required_lists["finding_link"],
+        "region_links": required_lists["region_link"],
+        "routes": required_lists["route"],
+        "states": required_lists["state"],
+        "viewports": required_lists["viewport"],
         "evidence_hashes": current_evidence_hashes(),
         "stale": False,
         "timestamp": now_iso(),
@@ -99,7 +113,17 @@ def _save_review(record: dict[str, Any]) -> None:
     save_state(state)
 
 
-def _print_review_brief(visual: Any) -> None:
+def _load_review_map() -> FrontendMap | None:
+    try:
+        return load_frontend_map()
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return None
+
+
+def _print_review_brief(
+    visual: Any,
+    frontend_map: FrontendMap | None = None,
+) -> None:
     print("UIdetox structured subjective review")
     print("  A Visual design 0-40 | B System 0-30 | C Craft 0-20 | D Architecture 0-10")
     print("  Record scores with --dimension-a/b/c/d, --rationale, and --reviewer.")
@@ -117,3 +141,54 @@ def _print_review_brief(visual: Any) -> None:
             )
         for warning in visual.warnings:
             print(f"  Warning: {warning}")
+    if frontend_map is None:
+        print("  Runtime map: missing")
+        return
+    evidence = frontend_map.evidence
+    captures = evidence.get("runtime_capture_matrix", [])
+    if isinstance(captures, list):
+        for capture in captures:
+            if not isinstance(capture, dict):
+                continue
+            viewport = capture.get("viewport", {})
+            viewport_name = (
+                viewport.get("name", "")
+                if isinstance(viewport, dict)
+                else viewport
+            )
+            print(
+                "  Capture: "
+                f"{capture.get('scenario', 'default')}/"
+                f"{capture.get('state', 'initial')} "
+                f"{viewport_name} {capture.get('status', 'unknown')}"
+            )
+    screenshots = evidence.get("runtime_screenshots", [])
+    if isinstance(screenshots, list):
+        for screenshot in screenshots:
+            print(f"  Screenshot: {screenshot}")
+    semantic = evidence.get("runtime_semantic_coverage", {})
+    if isinstance(semantic, dict):
+        print(
+            "  Paint coverage: "
+            f"{semantic.get('paint_resolved', 0)} resolved; "
+            f"Paint unresolved: {semantic.get('paint_unresolved', 0)}; "
+            f"{semantic.get('paint_unobserved', 0)} unobserved"
+        )
+    findings = evidence.get("runtime_findings", [])
+    if isinstance(findings, list):
+        for finding in findings[:10]:
+            if isinstance(finding, dict):
+                print(
+                    f"  Finding: {finding.get('code', 'unknown')} "
+                    f"{finding.get('selector', '')}".rstrip()
+                )
+    for node in frontend_map.nodes:
+        if not node.kind.startswith("runtime_") or node.kind == "runtime_page":
+            continue
+        targets = node.metadata.get("source_targets", [])
+        if not isinstance(targets, list) or not targets:
+            continue
+        print(
+            f"  Region: {node.id} {node.metadata.get('selector', '')} "
+            f"-> {', '.join(str(target) for target in targets)}"
+        )
