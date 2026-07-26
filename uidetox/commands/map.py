@@ -9,6 +9,7 @@ from uidetox.findings import coerce_finding
 from uidetox.frontend_map import map_frontend, save_frontend_map
 from uidetox.project_map import ProjectMap
 from uidetox.runtime_observer import observe_frontend
+from uidetox.runtime_scenarios import load_runtime_scenarios
 from uidetox.state import add_issues, get_project_root, get_uidetox_dir, load_config
 
 
@@ -26,14 +27,24 @@ def run(args: argparse.Namespace) -> None:
         urls = getattr(args, "urls", None) or [
             config.get("dev_server", "http://localhost:3000")
         ]
+        scenario_file = config.get("runtime_scenarios")
+        scenarios = (
+            load_runtime_scenarios(scenario_file, root=root)
+            if scenario_file
+            else None
+        )
+        if scenarios is not None and not getattr(args, "urls", None):
+            urls = list(dict.fromkeys(scenario.url for scenario in scenarios))
         screenshot_dir = (
             get_uidetox_dir() / "runtime-screenshots" if screenshots_requested else None
         )
-        runtime_observation = observe_frontend(
-            urls,
-            screenshots_dir=screenshot_dir,
-            timeout_ms=getattr(args, "timeout", 15_000),
-        )
+        observation_options = {
+            "screenshots_dir": screenshot_dir,
+            "timeout_ms": getattr(args, "timeout", 15_000),
+        }
+        if scenarios is not None:
+            observation_options["scenarios"] = scenarios
+        runtime_observation = observe_frontend(urls, **observation_options)
         if not runtime_observation.pages:
             detail = (
                 runtime_observation.errors[0]
@@ -81,8 +92,10 @@ def run(args: argparse.Namespace) -> None:
     if frontend_map.evidence.get("runtime_observed"):
         viewports = ", ".join(frontend_map.evidence.get("runtime_viewports", []))
         print(
-            f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} page/view(s) ({viewports})"
+            f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} "
+            f"page/view(s) ({viewports})"
         )
+        print(f"  Completeness: {frontend_map.evidence.get('runtime_status')}")
         runtime_finding_count = frontend_map.evidence.get("runtime_finding_count", 0)
         if runtime_finding_count:
             print(f"  Findings    : {runtime_finding_count} rendered layout issue(s)")

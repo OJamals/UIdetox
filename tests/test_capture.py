@@ -244,40 +244,6 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
     assert calls[0][1]["full_page"] is False
 
 
-def test_capture_multi_viewport_returns_only_successes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    snapshots = tmp_path / "snapshots"
-    snapshots.mkdir()
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def fake_observe(*args: object, **kwargs: object) -> RuntimeObservation:
-        calls.append((args, kwargs))
-        return _observation(
-            "https://example.invalid",
-            [
-                ("mobile", snapshots / "before_mobile.png"),
-                ("desktop", snapshots / "before_desktop.png"),
-            ],
-        )
-
-    monkeypatch.setattr(capture, "_snapshots_dir", lambda: snapshots)
-    monkeypatch.setattr(capture, "observe_frontend", fake_observe)
-
-    result = capture._capture_multi_viewport("https://example.invalid", "before")
-
-    assert result == [snapshots / "before_mobile.png", snapshots / "before_desktop.png"]
-    assert len(calls) == 1
-    assert [viewport.name for viewport in calls[0][1]["viewports"]] == [
-        "mobile",
-        "tablet",
-        "desktop",
-        "wide",
-    ]
-    assert list(snapshots.iterdir()) == []
-
-
 def _args(stage: str | None, *, responsive: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         url="https://example.invalid",

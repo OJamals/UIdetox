@@ -685,7 +685,9 @@ def map_frontend(
     )
     runtime_pages = tuple(runtime.pages) if runtime is not None else ()
     runtime_viewports = sorted({page.viewport.name for page in runtime_pages})
-    runtime_urls = list(dict.fromkeys(page.url for page in runtime_pages))
+    runtime_urls = (
+        list(runtime.requested_urls) if runtime is not None else []
+    )
     runtime_screenshots = [
         page.screenshot for page in runtime_pages if page.screenshot is not None
     ]
@@ -693,6 +695,9 @@ def map_frontend(
         {
             "url": page.url,
             "viewport": page.viewport.name,
+            "scenario": page.scenario,
+            "state": page.state,
+            "capture_id": page.capture_id,
             "selector": element.selector,
             "element": element.name or element.role or element.tag,
             **finding.with_runtime_anchor(
@@ -706,6 +711,28 @@ def map_frontend(
         for finding in element.findings
     ]
     runtime_finding_counts = Counter(finding["code"] for finding in runtime_findings)
+    runtime_captures = tuple(runtime.captures) if runtime is not None else ()
+    runtime_diagnostics = [
+        asdict(diagnostic)
+        for capture in runtime_captures
+        for diagnostic in capture.diagnostics
+    ]
+    runtime_coverage = {
+        "requested": len(runtime_captures),
+        "completed": sum(
+            capture.status == "completed" for capture in runtime_captures
+        ),
+        "failed": sum(capture.status == "failed" for capture in runtime_captures),
+        "truncated": sum(
+            capture.coverage.truncated for capture in runtime_captures
+        ),
+        "total": sum(capture.coverage.total for capture in runtime_captures),
+        "candidates": sum(
+            capture.coverage.candidates for capture in runtime_captures
+        ),
+        "eligible": sum(capture.coverage.eligible for capture in runtime_captures),
+        "emitted": sum(capture.coverage.emitted for capture in runtime_captures),
+    }
     project_map = build_project_map(root_path, nodes)
 
     return FrontendMap(
@@ -718,7 +745,7 @@ def map_frontend(
         contracts=contracts,
         fingerprint=fingerprint,
         evidence={
-            "mode": "static+runtime" if runtime_pages else "static",
+            "mode": "static+runtime" if runtime is not None else "static",
             "frameworks": sorted({module.framework for module in application.modules}),
             "files_mapped": len(records),
             "files_skipped": unreadable_files,
@@ -755,7 +782,7 @@ def map_frontend(
             },
             "source_status": "current",
             "runtime_observed": bool(runtime_pages),
-            "runtime_status": "current" if runtime_pages else "absent",
+            "runtime_status": runtime.status if runtime is not None else "absent",
             "runtime_generated_at": runtime.generated_at
             if runtime is not None
             else None,
@@ -767,6 +794,11 @@ def map_frontend(
             "runtime_finding_counts": dict(sorted(runtime_finding_counts.items())),
             "runtime_findings": runtime_findings,
             "runtime_errors": list(runtime.errors) if runtime is not None else [],
+            "runtime_capture_matrix": [
+                asdict(capture) for capture in runtime_captures
+            ],
+            "runtime_diagnostics": runtime_diagnostics,
+            "runtime_coverage": runtime_coverage,
         },
         project_map=project_map.to_dict(),
     )
@@ -821,9 +853,7 @@ def retain_runtime_evidence(
     refreshed_manifest = refreshed.evidence.get("source_manifest", {})
     previous_status = str(previous.evidence.get("runtime_status", "current"))
     same_source = previous_manifest == refreshed_manifest
-    runtime_status = (
-        "current" if same_source and previous_status == "current" else "stale"
-    )
+    runtime_status = previous_status if same_source else "stale"
     evidence = dict(refreshed.evidence)
     for key, value in previous.evidence.items():
         if key.startswith("runtime_"):
@@ -831,9 +861,7 @@ def retain_runtime_evidence(
     evidence["runtime_status"] = runtime_status
     evidence["runtime_observed"] = True
     evidence["runtime_stale_reason"] = (
-        None
-        if runtime_status == "current"
-        else "Source manifest changed after the recorded runtime observation."
+        None if same_source else "Source manifest changed after runtime observation."
     )
     runtime_nodes = tuple(
         node for node in previous.nodes if node.kind.startswith("runtime_")
@@ -1001,6 +1029,9 @@ def _merge_runtime_evidence(
                         "width": page.viewport.width,
                         "height": page.viewport.height,
                     },
+                    "capture_id": page.capture_id,
+                    "scenario": page.scenario,
+                    "state": page.state,
                     "screenshot": page.screenshot,
                     "finding_count": page_finding_count,
                 },
@@ -1047,7 +1078,9 @@ def _merge_runtime_evidence(
                         "bounds": element.bounds,
                         "styles": element.styles,
                         "states": element.states,
-                        "scenario": "default",
+                        "capture_id": page.capture_id,
+                        "scenario": page.scenario,
+                        "state": page.state,
                         "measurements": element.measurements,
                         "findings": [
                             finding.with_runtime_anchor(
@@ -1089,6 +1122,13 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
     data_sources = sorted({node.name for node in nodes if node.kind == "data"})
     actions = sorted({node.name for node in nodes if node.kind == "action"})
     runtime_pages = [node for node in nodes if node.kind == "runtime_page"]
+    runtime_capture_states = {
+        (
+            str(node.metadata.get("scenario", "default")),
+            str(node.metadata.get("state", "initial")),
+        )
+        for node in runtime_pages
+    }
     runtime_routes = sorted({_runtime_route(node.name) for node in runtime_pages})
     runtime_actions = sorted(
         {
@@ -1143,10 +1183,21 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
 
     if runtime_pages:
         unknown = [
-            "Only initial runtime state was observed; triggered, authenticated, and failure states remain unknown.",
             "Source-to-runtime ownership remains inferred without source maps.",
             "Focus order and computed contrast still require dedicated runtime assertions.",
         ]
+        if runtime_capture_states == {("default", "initial")}:
+            unknown.insert(
+                0,
+                "Only initial runtime state was observed; triggered, authenticated, "
+                "and failure states remain unknown.",
+            )
+        else:
+            unknown.insert(
+                0,
+                "Only declared scenario states were observed; undeclared runtime "
+                "states remain unknown.",
+            )
     else:
         unknown = [
             "Runtime-only states, overlays, and responsive transitions were not observed.",

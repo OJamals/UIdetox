@@ -12,6 +12,7 @@ from uidetox.findings import (
     EligibilityContext,
     Finding,
     VerificationResult,
+    current_verification_fresh,
     evaluate_eligibility,
     score_current_snapshot,
     verify_finding,
@@ -25,6 +26,24 @@ from uidetox.state import (
     save_config,
     save_state,
 )
+
+
+@pytest.mark.parametrize("status", ("degraded", "partial", "failed", "stale"))
+def test_current_verification_requires_exact_current_runtime_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+) -> None:
+    from uidetox import frontend_map
+
+    monkeypatch.setattr(
+        frontend_map,
+        "load_frontend_map",
+        lambda _path: SimpleNamespace(target=".", evidence={"runtime_status": status}),
+    )
+    monkeypatch.setattr(frontend_map, "frontend_map_is_fresh", lambda *_args: True)
+
+    assert current_verification_fresh(tmp_path) is False
 
 
 def _static(path: Path, *, start: int = 0) -> Finding:

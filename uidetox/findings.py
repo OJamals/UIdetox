@@ -655,7 +655,7 @@ def current_verification_fresh(root: str | Path | None = None) -> bool:
         frontend_map = load_frontend_map(root_path / ".uidetox" / "frontend-map.json")
         return frontend_map_is_fresh(
             frontend_map, root_path, frontend_map.target
-        ) and frontend_map.evidence.get("runtime_status") != "stale"
+        ) and frontend_map.evidence.get("runtime_status") == "current"
     except (FileNotFoundError, ValueError, OSError):
         return False
 

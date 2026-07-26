@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import types
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,9 +14,23 @@ from uidetox import runtime_observer
 from uidetox.runtime_observer import (
     DEFAULT_VIEWPORTS,
     RuntimeElement,
+    RuntimeObservation,
+    RuntimePage,
     RuntimeViewport,
     detect_runtime_findings,
     observe_frontend,
+)
+from uidetox.runtime_scenarios import (
+    VIEWPORT_REGISTRY,
+    RuntimeCaptureRecord,
+    RuntimeCoverage,
+    RuntimeDiagnostic,
+    RuntimeDomBudget,
+    RuntimeReadiness,
+    RuntimeReadinessPolicy,
+    RuntimeScenario,
+    RuntimeScenarioAction,
+    load_runtime_scenarios,
 )
 
 
@@ -36,6 +50,129 @@ def _measured_element(**measurements: object) -> RuntimeElement:
 
 def _finding_codes(element: RuntimeElement) -> set[str]:
     return {finding.code for finding in detect_runtime_findings(element)}
+
+
+def _capture_record(
+    capture_id: str,
+    *,
+    status: str,
+    readiness: str = "current",
+) -> RuntimeCaptureRecord:
+    return RuntimeCaptureRecord(
+        capture_id=capture_id,
+        scenario="default",
+        state="initial",
+        url="https://example.invalid",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        status=status,
+        readiness=RuntimeReadiness(
+            status=readiness,
+            strategy="request-idle",
+            duration_ms=1,
+        ),
+        coverage=RuntimeCoverage(
+            total=1,
+            candidates=1,
+            eligible=1,
+            emitted=1,
+            budget=10,
+        ),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+    )
+
+
+def test_scenario_schema_rejects_unsafe_or_unbounded_actions(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unsupported runtime action"):
+        RuntimeScenarioAction.from_dict({"kind": "destroy", "selector": "#account"})
+    with pytest.raises(ValueError, match="environment variable"):
+        RuntimeScenarioAction.from_dict(
+            {"kind": "fill", "selector": "input[type=password]", "value": "secret"}
+        )
+    with pytest.raises(ValueError, match="timeout_ms"):
+        RuntimeScenarioAction.from_dict(
+            {"kind": "wait-for-selector", "selector": "#ready", "timeout_ms": 0}
+        )
+
+    outside = tmp_path.parent / "outside-runtime-scenarios.json"
+    outside.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside"):
+        load_runtime_scenarios(outside, root=tmp_path)
+
+
+def test_observation_status_never_promotes_partial_or_degraded_to_current() -> None:
+    page = RuntimePage(
+        url="https://example.invalid",
+        title="Example",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        elements=(),
+        capture_id="ok",
+    )
+    partial = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=("https://example.invalid",),
+        pages=(page,),
+        captures=(
+            _capture_record("ok", status="completed"),
+            _capture_record("failed", status="failed"),
+        ),
+    )
+    degraded = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=("https://example.invalid",),
+        pages=(page,),
+        captures=(
+            _capture_record("ok", status="completed", readiness="degraded"),
+        ),
+    )
+
+    assert partial.status == "partial"
+    assert degraded.status == "degraded"
+    assert RuntimeObservation.from_dict(partial.to_dict()) == partial
+
+
+def test_runtime_payload_exposes_truncation_instead_of_silent_slicing() -> None:
+    elements, coverage = runtime_observer._elements_and_coverage_from_payload(
+        {
+            "elements": [{}, {}, {}, {}],
+            "coverage": {
+                "total": 20,
+                "candidates": 12,
+                "eligible": 10,
+                "emitted": 4,
+                "budget": 4,
+                "truncated": True,
+            },
+        },
+        RuntimeDomBudget(scan=20, candidates=4),
+    )
+
+    assert len(elements) == 4
+    assert coverage.truncated is True
+    assert coverage.emitted == 4
+    assert coverage.candidates == 12
+
+
+def test_default_viewports_are_canonical_registry_members() -> None:
+    assert DEFAULT_VIEWPORTS == tuple(
+        VIEWPORT_REGISTRY[name] for name in ("mobile", "tablet", "desktop")
+    )
+
+
+def test_runtime_diagnostics_round_trip_with_scenario_provenance() -> None:
+    diagnostic = RuntimeDiagnostic(
+        kind="console",
+        code="browser-console-error",
+        message="boom",
+        severity="error",
+        scenario="modal",
+        state="open",
+        url="https://example.invalid",
+        viewport="desktop",
+        source="console",
+    )
+
+    assert RuntimeDiagnostic.from_dict(asdict(diagnostic)) == diagnostic
 
 
 def _skip_missing_browser(exc: RuntimeError) -> None:
@@ -680,3 +817,199 @@ def test_fullstack_lab_runtime_observation_is_repeatable(
         )
 
     assert capture("first") == capture("second")
+
+
+@pytest.mark.browser
+def test_scenario_observation_records_interaction_state_and_diagnostics(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "scenario.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<button id="open">Open modal</button>
+<dialog id="modal"><p>Ready</p></dialog>
+<script>
+  document.querySelector("#open").addEventListener("click", () => {
+    document.querySelector("#modal").showModal();
+    console.error("fixture console failure");
+    setTimeout(() => { throw new Error("fixture page failure"); }, 0);
+    fetch("/missing-runtime-resource");
+  });
+</script>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+    scenario = RuntimeScenario(
+        name="modal",
+        url=f"{origin}/{fixture.name}",
+        actions=(
+            RuntimeScenarioAction(kind="click", selector="#open"),
+            RuntimeScenarioAction(kind="wait-for-selector", selector="#modal[open]"),
+            RuntimeScenarioAction(kind="capture", state="open"),
+        ),
+        expected_state="open",
+        readiness=RuntimeReadinessPolicy(
+            selector="#open",
+            request_idle_ms=0,
+            settle_ms=0,
+        ),
+    )
+
+    observation = observe_frontend(
+        scenario.url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=(scenario,),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current"
+    assert [page.state for page in observation.pages] == ["open"]
+    assert any(element.selector == "#modal" for element in observation.pages[0].elements)
+    assert {
+        diagnostic.code
+        for diagnostic in observation.captures[0].diagnostics
+    } >= {
+        "browser-console-error",
+        "browser-http-error",
+        "browser-page-error",
+    }
+
+
+@pytest.mark.browser
+def test_dom_budget_finds_prioritized_tail_or_reports_coverage(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "large-dom.html"
+    fixture.write_text(
+        "<!doctype html><main>"
+        + "".join(f"<div>Node {index}</div>" for index in range(3_200))
+        + '<button id="tail-defect" style="width:20px;overflow:hidden">'
+        "Tail action deliberately clipped"
+        "</button></main>",
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    observation = observe_frontend(
+        f"{origin}/{fixture.name}",
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        dom_budget=RuntimeDomBudget(scan=4_000, candidates=100),
+        settle_ms=0,
+    )
+
+    page = observation.pages[0]
+    coverage = observation.captures[0].coverage
+    assert (
+        any(element.selector == "#tail-defect" for element in page.elements)
+        or coverage.truncated
+    )
+    assert coverage.total >= 3_201
+    assert coverage.emitted <= 100
+
+
+@pytest.mark.browser
+def test_top_aligned_variable_height_peer_is_not_misaligned(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "top-aligned.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  .row { display: flex; align-items: flex-start; }
+  .card { width: 100px; }
+  #short { height: 40px; }
+  .tall { height: 80px; }
+</style>
+<main class="row">
+  <article class="card" id="short">Short</article>
+  <article class="card tall">Tall A</article>
+  <article class="card tall">Tall B</article>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    observation = observe_frontend(
+        f"{origin}/{fixture.name}",
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+    short = next(
+        element
+        for element in observation.pages[0].elements
+        if element.selector == "#short"
+    )
+
+    assert "runtime-layout-misalignment" not in _finding_codes(short)
+
+
+@pytest.mark.browser
+def test_readiness_distinguishes_slow_hydration_from_polling_degradation(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    hydrated = tmp_path / "hydrated.html"
+    hydrated.write_text(
+        """
+<!doctype html>
+<main id="root">Hydrating</main>
+<script>
+  setTimeout(() => {
+    document.querySelector("#root").textContent = "Ready";
+    document.querySelector("#root").dataset.ready = "true";
+  }, 75);
+</script>
+""".strip(),
+        encoding="utf-8",
+    )
+    polling = tmp_path / "polling.html"
+    polling.write_text(
+        """
+<!doctype html>
+<main>Streaming</main>
+<script>setInterval(() => fetch("/poll"), 25);</script>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+    scenarios = (
+        RuntimeScenario(
+            name="hydrated",
+            url=f"{origin}/{hydrated.name}",
+            readiness=RuntimeReadinessPolicy(
+                selector='[data-ready="true"]',
+                request_idle_ms=0,
+                settle_ms=0,
+            ),
+        ),
+        RuntimeScenario(
+            name="polling",
+            url=f"{origin}/{polling.name}",
+            readiness=RuntimeReadinessPolicy(
+                request_idle_ms=200,
+                settle_ms=0,
+            ),
+        ),
+    )
+
+    observation = observe_frontend(
+        tuple(scenario.url for scenario in scenarios),
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        scenarios=scenarios,
+        timeout_ms=1_000,
+        settle_ms=0,
+    )
+
+    readiness = {
+        capture.scenario: capture.readiness.status
+        for capture in observation.captures
+    }
+    assert readiness == {"hydrated": "current", "polling": "degraded"}
+    assert observation.status == "degraded"

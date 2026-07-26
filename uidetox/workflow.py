@@ -591,7 +591,7 @@ def build_workflow_inputs(
         frontend_map = load_frontend_map(map_path)
         runtime_status = str(frontend_map.evidence.get("runtime_status", "absent"))
         map_fresh = frontend_map_is_fresh(frontend_map, root_path, frontend_map.target)
-        verification_fresh = map_fresh and runtime_status != "stale"
+        verification_fresh = map_fresh and runtime_status == "current"
         verification_payload = {
             "map_fresh": map_fresh,
             "runtime_status": runtime_status,
@@ -660,7 +660,7 @@ def in_process_adapters() -> WorkflowAdapters:
         save_frontend_map(frontend_map, output)
         verification_fresh = (
             frontend_map_is_fresh(frontend_map, context.root, frontend_map.target)
-            and frontend_map.evidence.get("runtime_status") != "stale"
+            and frontend_map.evidence.get("runtime_status") == "current"
         )
         return AdapterResult(
             artifacts={

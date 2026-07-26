@@ -8474,6 +8474,37 @@ def test_stale_map_findings_cannot_qualify_rescan(tmp_path, monkeypatch):
     assert qualified is False
 
 
+@pytest.mark.parametrize("status", ("degraded", "partial", "failed", "stale"))
+def test_noncurrent_map_findings_cannot_qualify_scan(
+    tmp_path,
+    monkeypatch,
+    status,
+):
+    from types import SimpleNamespace
+
+    from uidetox.commands import scan as scan_cmd
+
+    map_path = tmp_path / ".uidetox" / "frontend-map.json"
+    map_path.parent.mkdir()
+    map_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_frontend_map",
+        lambda _path: SimpleNamespace(
+            target=".",
+            evidence={"runtime_status": status},
+            nodes=(),
+            project_map={},
+        ),
+    )
+    monkeypatch.setattr(scan_cmd, "frontend_map_is_fresh", lambda *_args: True)
+
+    findings, qualified = scan_cmd.current_map_findings(tmp_path)
+
+    assert findings == ()
+    assert qualified is False
+
+
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch, tmp_path
 ):

@@ -11,6 +11,7 @@ from uidetox.frontend_map import (
     frontend_map_is_fresh,
     load_frontend_map,
     map_frontend,
+    retain_runtime_evidence,
     save_frontend_map,
 )
 from uidetox.project_map import ProjectMap
@@ -27,6 +28,11 @@ from uidetox.runtime_observer import (
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,
+)
+from uidetox.runtime_scenarios import (
+    RuntimeCaptureRecord,
+    RuntimeCoverage,
+    RuntimeReadiness,
 )
 
 
@@ -221,6 +227,78 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
         "Only initial runtime state was observed" in unknown
         for unknown in frontend_map.contracts.unknown
     )
+
+
+def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
+    _write_frontend(tmp_path)
+    observation = _runtime_observation()
+    page = observation.pages[0]
+    capture = RuntimeCaptureRecord(
+        capture_id="mobile-initial",
+        scenario="default",
+        state="initial",
+        url=page.url,
+        viewport=page.viewport,
+        status="completed",
+        readiness=RuntimeReadiness(
+            status="current",
+            strategy="request-idle",
+            duration_ms=1,
+        ),
+        coverage=RuntimeCoverage(
+            total=1,
+            candidates=1,
+            eligible=1,
+            emitted=1,
+            budget=10,
+        ),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+    )
+    failed = RuntimeCaptureRecord(
+        capture_id="desktop-initial",
+        scenario="default",
+        state="initial",
+        url=page.url,
+        viewport=RuntimeViewport("desktop", 1440, 900),
+        status="failed",
+        readiness=RuntimeReadiness(
+            status="failed",
+            strategy="request-idle",
+            duration_ms=3_000,
+            detail="timeout",
+        ),
+        coverage=RuntimeCoverage.empty(10),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:03Z",
+    )
+    partial = RuntimeObservation(
+        generated_at=observation.generated_at,
+        requested_urls=observation.requested_urls,
+        pages=(page,),
+        captures=(capture, failed),
+        errors=("desktop failed",),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=partial)
+
+    assert frontend_map.evidence["runtime_status"] == "partial"
+    assert len(frontend_map.evidence["runtime_capture_matrix"]) == 2
+    assert frontend_map.evidence["runtime_coverage"]["requested"] == 2
+    assert frontend_map.evidence["runtime_coverage"]["completed"] == 1
+
+    retained = retain_runtime_evidence(
+        frontend_map,
+        map_frontend(tmp_path),
+    )
+    assert retained.evidence["runtime_status"] == "partial"
+
+    (tmp_path / "src" / "theme.css").write_text(
+        ":root { --color-accent: #9a3412; }",
+        encoding="utf-8",
+    )
+    stale = retain_runtime_evidence(frontend_map, map_frontend(tmp_path))
+    assert stale.evidence["runtime_status"] == "stale"
 
 
 def test_runtime_observation_round_trips_serializable_evidence():

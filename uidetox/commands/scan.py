@@ -343,7 +343,7 @@ def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]
         return (), False
     if (
         not frontend_map_is_fresh(frontend_map, project_root, frontend_map.target)
-        or frontend_map.evidence.get("runtime_status") == "stale"
+        or frontend_map.evidence.get("runtime_status") != "current"
     ):
         return (), False
     findings = list(ProjectMap.from_dict(frontend_map.project_map).findings)
