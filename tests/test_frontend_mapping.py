@@ -1175,3 +1175,46 @@ export function App() {
         and edge["kind"] == "triggers"
         for edge in project_map["edges"]
     )
+
+
+def test_contract_lineage_does_not_cross_link_ambiguous_module_actions(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        """
+import axios from "axios";
+
+export function App() {
+  async function createUser() {
+    await axios.post("/users");
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  }
+  async function createTeam() {
+    await axios.post("/teams");
+  }
+  return (
+    <main>
+      <button onClick={createUser}>Create user</button>
+      <button onClick={createTeam}>Create team</button>
+    </main>
+  );
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = map_frontend(tmp_path, "src").project_map
+    client_ids = {
+        node["id"] for node in graph["nodes"] if node["kind"] == "client_operation"
+    }
+    action_ids = {
+        node["id"] for node in graph["nodes"] if node["kind"] == "ui_action"
+    }
+
+    assert len(client_ids) == 2
+    assert not any(
+        edge["source"] in action_ids
+        and edge["target"] in client_ids
+        and edge["kind"] == "triggers"
+        for edge in graph["edges"]
+    )

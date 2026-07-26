@@ -341,6 +341,20 @@ def map_frontend(
             )
             edges.append(FrontendEdge(owner_id, state_id, "owns"))
 
+        call_count = len(facts.network_calls)
+        mutation_count = sum(
+            call.method not in {None, "GET", "HEAD", "OPTIONS"}
+            for call in facts.network_calls
+        )
+        cache_evidence = bool(
+            re.search(
+                r"\b(?:invalidateQueries|invalidateTags|mutate|refetch)\s*\(",
+                content,
+            )
+        )
+        auth_evidence = bool(
+            re.search(r"\b(?:Authorization|credentials)\b\s*[:=]", content)
+        )
         for index, call in enumerate(facts.network_calls):
             name = call.url or call.url_expression or call.target
             identity = f"{call.target}:{call.method or '?'}:{name}:{call.line}:{index}"
@@ -382,27 +396,26 @@ def map_frontend(
                 "response_type_refs": list(call.response_type_refs),
                 "request_contracts": request_contracts,
                 "response_contracts": response_contracts,
-                "ui_actions": sorted({item.name for item in facts.actions}),
-                "ui_states": sorted(state_names),
+                "ui_actions": (
+                    sorted({item.name for item in facts.actions})
+                    if call_count == 1
+                    else []
+                ),
+                "ui_states": sorted(state_names) if call_count == 1 else [],
                 "mutation": call.method not in {None, "GET", "HEAD", "OPTIONS"},
                 "cache_invalidation": (
                     "present"
-                    if re.search(
-                        r"\b(?:invalidateQueries|invalidateTags|mutate|refetch)\s*\(",
-                        content,
-                    )
+                    if cache_evidence and mutation_count == 1
                     else (
                         "absent"
                         if call.method not in {None, "GET", "HEAD", "OPTIONS"}
+                        and not cache_evidence
                         else "unknown"
                     )
                 ),
                 "auth": (
                     "present"
-                    if re.search(
-                        r"\b(?:Authorization|credentials)\b\s*[:=]",
-                        content,
-                    )
+                    if auth_evidence and call_count == 1
                     else "unknown"
                 ),
                 "extractor": facts.extractor,
