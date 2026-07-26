@@ -53,6 +53,13 @@ conventions. Callable type parameters substitute concrete call arguments
 through imported and re-exported wrappers; this records source type references
 without claiming the backend DTO lineage owned by the next phase.
 
+Backend capabilities obey the same provenance rule. A generic FastAPI
+`Depends(...)` is dependency evidence, not authentication. Authentication is
+present only for qualified OpenAPI security or imported FastAPI `Security`
+bound to an imported security provider. Persistence lineage requires an
+explicit table declaration or qualified SQLAlchemy declarative-base
+provenance; an arbitrary local class named `Base` is not an entity.
+
 ## Source ownership
 
 Render topology resolves lexical import bindings and module exports. Duplicate

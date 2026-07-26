@@ -416,7 +416,25 @@ def map_frontend(
                 "auth": (
                     "present"
                     if auth_evidence and call_count == 1
+                    else "absent"
+                    if call_count == 1
                     else "unknown"
+                ),
+                "authorization": (
+                    "absent"
+                    if not auth_evidence and call_count == 1
+                    else "unknown"
+                ),
+                "tenant": (
+                    "absent"
+                    if not auth_evidence and call_count == 1
+                    else "unknown"
+                ),
+                "ui_required": bool(
+                    facts.declared_ui_modules
+                    or facts.regions
+                    or facts.actions
+                    or facts.states
                 ),
                 "extractor": facts.extractor,
                 "confidence": facts.confidence,

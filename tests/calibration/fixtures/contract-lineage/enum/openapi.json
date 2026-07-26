@@ -1,0 +1,35 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/users": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role"],
+                "properties": {
+                  "role": {"type": "string", "enum": ["admin", "guest"]}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {"id": {"type": "string"}}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

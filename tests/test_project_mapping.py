@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.project_map import (
     ContractEdge,
@@ -69,7 +71,7 @@ def test_route_normalization_preserves_identity_but_compares_shapes() -> None:
     )
 
 
-def test_openapi_json_yaml_extract_schema_refs_and_dedupe_provenance(tmp_path) -> None:
+def test_openapi_json_yaml_preserve_schema_source_identity(tmp_path) -> None:
     document = {
         "openapi": "3.1.0",
         "paths": {
@@ -112,13 +114,15 @@ paths:
     )
 
     backend = _operation_nodes(project, "backend")
-    assert len(backend) == 1
-    assert backend[0].attributes["normalized_path"] == "/users/{}"
-    assert backend[0].attributes["parameters"] == ["id", "userId"]
-    assert [source["framework"] for source in backend[0].attributes["sources"]] == [
-        "openapi",
-        "openapi",
-    ]
+    assert len(backend) == 2
+    assert {
+        (node.source.file, tuple(node.attributes["parameters"]))
+        for node in backend
+    } == {
+        ("openapi.json", ("id",)),
+        ("swagger.yaml", ("userId",)),
+    }
+    assert all(node.attributes["normalized_path"] == "/users/{}" for node in backend)
     assert any(
         node.kind == "response_schema" and node.name == "User"
         for node in project.nodes
@@ -522,7 +526,7 @@ app.get("/api/users/:id", handler);
     }
 
 
-def test_fullstack_fixture_reconciles_without_duplicate_probe_manifest() -> None:
+def test_fullstack_fixture_preserves_sources_and_causal_findings() -> None:
     fixture = (
         Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
     )
@@ -530,9 +534,14 @@ def test_fullstack_fixture_reconciles_without_duplicate_probe_manifest() -> None
     frontend_map = map_frontend(fixture, ".")
     project = ProjectMap.from_dict(frontend_map.project_map)
 
-    assert project.counts == {"contract_mismatch": 2, "coverage_gap": 26}
+    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 52}
     assert project.evidence["unknown_backend_evidence"] == 0
-    assert len(_operation_nodes(project, "frontend")) == 28
+    assert len(_operation_nodes(project, "frontend")) == 57
+    assert len(_operation_nodes(project, "backend")) == 58
+    assert sum(
+        finding.detector_id == "contract-evidence-contradictory"
+        for finding in project.findings
+    ) == 4
 
 
 def test_frontend_map_preserves_same_path_requests_by_method(tmp_path) -> None:
@@ -840,12 +849,13 @@ def post_user(payload: Input, user=Depends(require_user)):
 
     project = build_project_map(tmp_path)
     route = next(node for node in project.nodes if node.kind == "route")
+    node_by_id = {node.id: node for node in project.nodes}
     reachable = {
         edge.target
         for edge in project.edges
-        if edge.source == route.id or edge.source.startswith(("handler:", "service:", "entity:"))
+        if node_by_id[edge.source].kind
+        in {"route", "handler", "service_operation", "entity"}
     }
-    node_by_id = {node.id: node for node in project.nodes}
 
     assert any(node_by_id[node_id].kind == "handler" for node_id in reachable)
     assert any(node_by_id[node_id].kind == "service_operation" for node_id in reachable)
@@ -856,6 +866,560 @@ def post_user(payload: Input, user=Depends(require_user)):
     assert any(
         edge.source == route.id
         and edge.kind == "requires"
-        and node_by_id[edge.target].capability_status == "present"
+        and node_by_id[edge.target].capability_status == "unknown"
         for edge in project.edges
     )
+
+
+def test_repair_preserves_same_route_source_identity_and_action_schema_links(
+    tmp_path,
+) -> None:
+    frontend = [
+        {
+            "id": "data:create-a",
+            "kind": "data",
+            "name": "/users",
+            "file": "src/a.ts",
+            "line": 10,
+            "metadata": {
+                "transport": "http",
+                "method": "POST",
+                "request_contracts": {
+                    "CreateA": {
+                        "type": "object",
+                        "properties": {"a": {"type": "string"}},
+                        "required": ["a"],
+                    }
+                },
+                "ui_actions": ["Create A"],
+                "extractor": "test",
+                "confidence": 1.0,
+            },
+        },
+        {
+            "id": "data:create-b",
+            "kind": "data",
+            "name": "/users",
+            "file": "src/b.ts",
+            "line": 20,
+            "metadata": {
+                "transport": "http",
+                "method": "POST",
+                "request_contracts": {
+                    "CreateB": {
+                        "type": "object",
+                        "properties": {"b": {"type": "integer"}},
+                        "required": ["b"],
+                    }
+                },
+                "ui_actions": ["Create B"],
+                "extractor": "test",
+                "confidence": 1.0,
+            },
+        },
+    ]
+
+    graph = build_project_map(tmp_path, frontend)
+    clients = _operation_nodes(graph, "frontend")
+    node_by_id = {node.id: node for node in graph.nodes}
+    outgoing = {
+        (edge.source, edge.kind): node_by_id[edge.target] for edge in graph.edges
+    }
+
+    assert len(clients) == 2
+    by_file = {client.source.file: client for client in clients}
+    a_schema = outgoing[(by_file["src/a.ts"].id, "accepts")]
+    b_schema = outgoing[(by_file["src/b.ts"].id, "accepts")]
+    assert {
+        node_by_id[edge.target].name
+        for edge in graph.edges
+        if edge.source == a_schema.id and edge.kind == "has_field"
+    } == {"a"}
+    assert {
+        node_by_id[edge.target].name
+        for edge in graph.edges
+        if edge.source == b_schema.id and edge.kind == "has_field"
+    } == {"b"}
+    triggers = {
+        (node_by_id[edge.source].name, node_by_id[edge.target].source.file)
+        for edge in graph.edges
+        if edge.kind == "triggers"
+    }
+    assert triggers == {("Create A", "src/a.ts"), ("Create B", "src/b.ts")}
+
+
+def _repair_contract_graph(
+    *,
+    front_schema: dict | None = None,
+    back_schema: dict | None = None,
+    front_evidence: dict[str, str] | None = None,
+    back_evidence: dict[str, str] | None = None,
+    front_auth: tuple[str, str, str] = ("absent", "absent", "absent"),
+    back_auth: tuple[str, str, str] = ("absent", "absent", "absent"),
+    front_statuses: tuple[str, ...] = (),
+    back_statuses: tuple[str, ...] = (),
+    front_states: tuple[str, ...] = ("loading", "error", "empty", "success"),
+    front_cache: str = "absent",
+    mutation: bool = False,
+    front_capability: str = "present",
+    back_capability: str = "present",
+    front_errors: tuple[tuple[str, dict], ...] = (),
+    back_errors: tuple[tuple[str, dict], ...] = (),
+) -> tuple[tuple[ContractNode, ...], tuple[ContractEdge, ...]]:
+    anchor = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+    default_evidence = {
+        "request": "absent",
+        "response": "absent",
+        "error": "absent",
+        "status": "absent",
+        "ui_lifecycle": "present",
+        "cache": front_cache,
+    }
+    front_status = {**default_evidence, **(front_evidence or {})}
+    back_status = {
+        **default_evidence,
+        "ui_lifecycle": "absent",
+        "cache": "absent",
+        **(back_evidence or {}),
+    }
+    front = ContractNode(
+        "front",
+        "client_operation",
+        "POST /items",
+        "frontend",
+        front_capability,
+        anchor,
+        {
+            "method": "POST",
+            "normalized_path": "/items",
+            "status_codes": list(front_statuses),
+            "mutation": mutation,
+            "cache_invalidation": front_cache,
+            "evidence": front_status,
+        },
+    )
+    back = ContractNode(
+        "back",
+        "route",
+        "POST /items",
+        "backend",
+        back_capability,
+        anchor,
+        {
+            "method": "POST",
+            "normalized_path": "/items",
+            "status_codes": list(back_statuses),
+            "mutation": False,
+            "cache_invalidation": "absent",
+            "evidence": back_status,
+        },
+    )
+    nodes: list[ContractNode] = [front, back]
+    edges: list[ContractEdge] = []
+
+    def link(
+        operation: ContractNode,
+        node: ContractNode,
+        kind: str,
+    ) -> None:
+        nodes.append(node)
+        edges.append(
+            ContractEdge(operation.id, node.id, kind, "test", 1.0, anchor)
+        )
+
+    for operation, schema, side in (
+        (front, front_schema, "frontend"),
+        (back, back_schema, "backend"),
+    ):
+        if schema is not None:
+            link(
+                operation,
+                ContractNode(
+                    f"{side}-response",
+                    "response_schema",
+                    "Response",
+                    side,
+                    "present",
+                    anchor,
+                    schema,
+                ),
+                "returns",
+            )
+    for operation, auth, side in (
+        (front, front_auth, "frontend"),
+        (back, back_auth, "backend"),
+    ):
+        link(
+            operation,
+            ContractNode(
+                f"{side}-auth",
+                "auth_requirement",
+                "authentication",
+                side,
+                auth[0],
+                anchor,
+                {"authorization": auth[1], "tenant": auth[2]},
+            ),
+            "requires",
+        )
+    for state in front_states:
+        link(
+            front,
+            ContractNode(
+                f"state:{state}",
+                "ui_state",
+                state,
+                "frontend",
+                "present",
+                anchor,
+                {},
+            ),
+            "renders_state",
+        )
+    for operation, errors, side in (
+        (front, front_errors, "frontend"),
+        (back, back_errors, "backend"),
+    ):
+        for status, schema in errors:
+            link(
+                operation,
+                ContractNode(
+                    f"{side}-error:{status}",
+                    "error_schema",
+                    f"Error{status}",
+                    side,
+                    "present",
+                    anchor,
+                    {**schema, "status": status},
+                ),
+                "returns_error",
+            )
+    return tuple(nodes), tuple(edges)
+
+
+@pytest.mark.parametrize(
+    ("front_schema", "back_schema", "expected_id", "expected_status"),
+    [
+        (
+            {"type": "object", "properties": {"id": {}}},
+            {"type": "object", "properties": {"id": {"type": "string"}}},
+            "contract-response-field-type-evidence-unknown",
+            "investigate",
+        ),
+        (
+            {"type": "string"},
+            {"type": "string", "enum": ["a", "b"]},
+            "contract-response-field-enum-mismatch",
+            "pending",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": [],
+            },
+            {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+            "contract-response-field-required-mismatch",
+            "pending",
+        ),
+        (
+            {"type": "string", "nullable": True},
+            {"type": "string"},
+            "contract-response-field-nullability-mismatch",
+            "pending",
+        ),
+        (
+            {"type": "string"},
+            {"type": "string", "minLength": 3},
+            "contract-response-field-validation-mismatch",
+            "pending",
+        ),
+        (
+            {"type": "array"},
+            {"type": "array", "items": {"type": "string"}},
+            "contract-response-array-items-evidence-unknown",
+            "investigate",
+        ),
+    ],
+)
+def test_repair_schema_lattice_never_treats_one_sided_evidence_as_clean(
+    front_schema,
+    back_schema,
+    expected_id,
+    expected_status,
+) -> None:
+    nodes, edges = _repair_contract_graph(
+        front_schema=front_schema,
+        back_schema=back_schema,
+        front_evidence={"response": "present"},
+        back_evidence={"response": "present"},
+    )
+
+    findings = reconcile_contract_graph(nodes, edges)
+
+    assert [finding.detector_id for finding in findings] == [expected_id]
+    assert findings[0].status == expected_status
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_id", "expected_status"),
+    [
+        (
+            {
+                "front_evidence": {"status": "absent"},
+                "back_evidence": {"status": "present"},
+                "back_statuses": ("200",),
+            },
+            "contract-status-mismatch",
+            "pending",
+        ),
+        (
+            {
+                "front_auth": ("absent", "absent", "absent"),
+                "back_auth": ("present", "present", "absent"),
+            },
+            "contract-auth-mismatch",
+            "pending",
+        ),
+        (
+            {
+                "front_auth": ("present", "present", "unknown"),
+                "back_auth": ("present", "present", "present"),
+            },
+            "contract-tenant-evidence-unknown",
+            "investigate",
+        ),
+        (
+            {
+                "front_schema": {"type": "object"},
+                "back_schema": {"type": "object"},
+                "front_evidence": {
+                    "response": "present",
+                    "ui_lifecycle": "absent",
+                },
+                "back_evidence": {"response": "present"},
+                "front_states": (),
+            },
+            "contract-ui-state-missing",
+            "pending",
+        ),
+        (
+            {
+                "mutation": True,
+                "front_cache": "unknown",
+                "front_evidence": {"cache": "unknown"},
+            },
+            "contract-cache-invalidation-evidence-unknown",
+            "investigate",
+        ),
+        (
+            {
+                "front_capability": "contradictory",
+                "back_capability": "present",
+            },
+            "contract-evidence-contradictory",
+            "investigate",
+        ),
+    ],
+)
+def test_repair_operation_lattice_never_treats_missing_evidence_as_clean(
+    kwargs,
+    expected_id,
+    expected_status,
+) -> None:
+    nodes, edges = _repair_contract_graph(**kwargs)
+
+    findings = reconcile_contract_graph(nodes, edges)
+
+    assert [finding.detector_id for finding in findings] == [expected_id]
+    assert findings[0].status == expected_status
+
+
+def test_repair_conflicting_backend_sources_are_investigative_not_first_wins() -> None:
+    nodes, edges = _repair_contract_graph()
+    backend = next(node for node in nodes if node.id == "back")
+    conflicting_backend = ContractNode(
+        "back-conflict",
+        backend.kind,
+        backend.name,
+        backend.side,
+        backend.capability_status,
+        backend.source,
+        dict(backend.attributes),
+    )
+    conflicting_auth = ContractNode(
+        "back-conflict-auth",
+        "auth_requirement",
+        "bearer",
+        "backend",
+        "present",
+        backend.source,
+        {"authorization": "absent", "tenant": "absent"},
+    )
+    conflicting_edge = ContractEdge(
+        conflicting_backend.id,
+        conflicting_auth.id,
+        "requires",
+        "test",
+        1.0,
+        backend.source,
+    )
+
+    findings = reconcile_contract_graph(
+        (*nodes, conflicting_backend, conflicting_auth),
+        (*edges, conflicting_edge),
+    )
+
+    assert [finding.detector_id for finding in findings] == [
+        "contract-evidence-contradictory"
+    ]
+    assert findings[0].contract_anchor["field"] == "auth"
+    assert findings[0].status == "investigate"
+
+
+def test_repair_error_envelope_shapes_are_compared() -> None:
+    nodes, edges = _repair_contract_graph(
+        front_evidence={"error": "present"},
+        back_evidence={"error": "present"},
+        front_errors=(
+            ("422", {"type": "object", "properties": {"detail": {"type": "string"}}}),
+        ),
+        back_errors=(
+            ("422", {"type": "object", "properties": {"detail": {"type": "array"}}}),
+        ),
+    )
+
+    findings = reconcile_contract_graph(nodes, edges)
+
+    assert [finding.detector_id for finding in findings] == [
+        "contract-error-field-type-mismatch"
+    ]
+
+
+def test_repair_generic_fastapi_dependency_is_not_authentication(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import Depends, FastAPI
+
+app = FastAPI()
+
+def get_db():
+    return object()
+
+@app.get("/items")
+def items(db=Depends(get_db)):
+    return []
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = build_project_map(tmp_path)
+    auth = next(node for node in graph.nodes if node.kind == "auth_requirement")
+
+    assert auth.capability_status == "unknown"
+    assert auth.name == "authentication"
+
+
+def test_repair_fastapi_security_proof_marks_authentication_present(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import FastAPI, Security
+from fastapi.security import HTTPBearer
+
+app = FastAPI()
+bearer = HTTPBearer()
+
+@app.get("/items")
+def items(credentials=Security(bearer)):
+    return []
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = build_project_map(tmp_path)
+    auth = next(node for node in graph.nodes if node.kind == "auth_requirement")
+
+    assert auth.capability_status == "present"
+    assert auth.name == "bearer"
+
+
+def test_repair_arbitrary_base_class_is_not_persistence(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import FastAPI
+
+app = FastAPI()
+
+class Base:
+    pass
+
+class User(Base):
+    id: int
+
+def load_user():
+    return User()
+
+@app.get("/users")
+def users():
+    return load_user()
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = build_project_map(tmp_path)
+
+    assert not any(node.kind == "entity" for node in graph.nodes)
+    assert not any(node.kind == "database_field" for node in graph.nodes)
+
+
+def test_repair_lineage_keeps_service_and_entity_siblings(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import FastAPI
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+app = FastAPI()
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+class Team(Base):
+    __tablename__ = "teams"
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+def load_user():
+    return User()
+
+def load_team():
+    return Team()
+
+@app.get("/dashboard")
+def dashboard():
+    return load_user(), load_team()
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = build_project_map(tmp_path)
+    nodes = {node.id: node for node in graph.nodes}
+    pairs = {
+        (nodes[edge.source].name, nodes[edge.target].name)
+        for edge in graph.edges
+        if nodes[edge.source].kind in {"handler", "service_operation", "entity"}
+        and nodes[edge.target].kind in {"service_operation", "entity"}
+    }
+
+    assert pairs == {
+        ("dashboard", "load_user"),
+        ("dashboard", "load_team"),
+        ("load_user", "User"),
+        ("load_team", "Team"),
+    }

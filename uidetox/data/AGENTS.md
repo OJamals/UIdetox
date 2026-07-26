@@ -198,7 +198,9 @@ UIdetox/
 │   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
 │   ├── source_facts.py           # Shared AST parse lifecycle + immutable source facts
 │   ├── frontend_map.py           # Semantic frontend graph + artifact persistence
-│   ├── project_map.py            # Backend/API discovery + typed contract lineage
+│   ├── project_map.py            # Stable full-stack contract facade
+│   ├── contract_graph.py         # Canonical graph, evidence lattice, reconciliation
+│   ├── contract_adapters.py      # Qualified backend/OpenAPI source adapters
 │   ├── redesign.py              # Source-aware divergent redesign planning
 │   ├── runtime_observer.py      # Playwright DOM/a11y/layout evidence adapter
 │   ├── runtime_layout.py        # Typed rendered-layout finding policy
