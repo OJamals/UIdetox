@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-
 _FORM_TAG = re.compile(r"<form\b[^>]*>", re.IGNORECASE)
 _HANDLER_ATTRIBUTE = re.compile(r"\b(?:action|onsubmit)\s*=", re.IGNORECASE)
 _ID_ATTRIBUTE = re.compile(r"\bid\s*=\s*([\"'])([^\"']+)\1", re.IGNORECASE)

@@ -16,18 +16,18 @@ import argparse
 import subprocess
 import uuid
 
+from ..fileset import ProjectFileSet
+from ..findings import current_evidence_hashes, score_current_snapshot
+from ..memory import get_last_scan, get_notes, get_patterns, get_session, log_progress
+from ..prompt_safety import render_untrusted_data
 from ..state import (
+    ensure_uidetox_dir,
     get_project_root,
     load_config,
-    save_config,
     load_state,
-    ensure_uidetox_dir,
+    save_config,
 )
-from ..fileset import ProjectFileSet
 from ..tooling import detect_all
-from ..memory import get_patterns, get_notes, get_session, get_last_scan, log_progress
-from ..prompt_safety import render_untrusted_data
-from ..findings import current_evidence_hashes, score_current_snapshot
 from ..workflow import run_executable_workflow
 
 

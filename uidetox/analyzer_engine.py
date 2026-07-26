@@ -227,10 +227,11 @@ def analyze_directory(
     analysis_targets = file_set.discover()
 
     from concurrent.futures import ThreadPoolExecutor
+
     from uidetox.color_utils import (
-        load_dynamic_colors,
         audit_project_colors,
         find_color_config_sources,
+        load_dynamic_colors,
     )
 
     color_sources = find_color_config_sources(root)

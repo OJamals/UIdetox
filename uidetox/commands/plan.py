@@ -5,10 +5,11 @@ optimized attack order (highest impact first = most issues × lowest tier).
 """
 
 import argparse
-from pathlib import Path
 from collections import defaultdict
-from uidetox.state import load_state, load_config
+from pathlib import Path
+
 from uidetox.findings import current_evidence_hashes, score_current_snapshot
+from uidetox.state import load_config, load_state
 
 # Effort estimate per tier (minutes)
 _TIER_EFFORT = {"T1": 2, "T2": 8, "T3": 20, "T4": 45}

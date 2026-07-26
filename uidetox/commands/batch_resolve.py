@@ -5,22 +5,24 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from uidetox.findings import VerificationResult, verify_finding
+from uidetox.memory import log_progress, save_session
+from uidetox.prompt_safety import render_untrusted_data, sanitize_untrusted_data
 from uidetox.state import (
     batch_remove_issues,
     get_issue,
     get_project_root,
-    load_state,
     load_config,
+    load_state,
     record_verification_override,
 )
-from uidetox.findings import VerificationResult, verify_finding
-from uidetox.memory import save_session, log_progress
-from uidetox.prompt_safety import render_untrusted_data, sanitize_untrusted_data
 from uidetox.utils import (
     prepare_subprocess_cmd,
     tracked_changed_entries,
     untracked_changed_files,
 )
+
 
 def _run_verification(config: dict) -> bool:
     """Run tsc → lint --fix → format --fix as a pre-commit quality gate.
@@ -107,6 +109,7 @@ def _run_verification(config: dict) -> bool:
             pass  # Non-critical
     return not diagnostics
 
+
 def _derive_component_name(files: list[str]) -> str:
     """Derive a human-readable component name from a list of file paths."""
     if not files:
@@ -129,6 +132,7 @@ def _derive_component_name(files: list[str]) -> str:
     except ValueError:
         name = "project"
     return name
+
 
 def run(args: argparse.Namespace):
     issue_ids = args.issue_ids

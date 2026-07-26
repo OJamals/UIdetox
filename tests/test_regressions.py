@@ -1376,6 +1376,7 @@ def test_tracked_changed_files_handles_quoted_rename_sources_with_arrows(monkeyp
 
 
 def test_tsc_run_supports_env_prefixed_command(monkeypatch):
+    from uidetox import mechanical
     from uidetox.commands import tsc as tsc_mod
 
     captured: dict[str, object] = {}
@@ -1391,7 +1392,7 @@ def test_tsc_run_supports_env_prefixed_command(monkeypatch):
         captured["env"] = kwargs.get("env")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(tsc_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mechanical.subprocess, "run", fake_run)
 
     tsc_mod.run(argparse.Namespace(fix=False))
 
@@ -1892,6 +1893,7 @@ def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     add_issue(
         {
             "id": "SCAN-BATCH1",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -1944,6 +1946,7 @@ def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(
     add_issue(
         {
             "id": "SCAN-BATCH2",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2006,6 +2009,7 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(
     add_issue(
         {
             "id": "SCAN-BATCH-RENAME",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2068,6 +2072,7 @@ def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exist
     add_issue(
         {
             "id": "SCAN-BATCH-UNTRACKED",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2127,6 +2132,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     add_issue(
         {
             "id": "SCAN-RESOLVE1",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2179,6 +2185,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
     add_issue(
         {
             "id": "SCAN-RESOLVE2",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2239,6 +2246,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
     add_issue(
         {
             "id": "SCAN-RESOLVE-RENAME",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2301,6 +2309,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
     add_issue(
         {
             "id": "SCAN-RESOLVE-UNTRACKED",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2361,6 +2370,7 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
     add_issue(
         {
             "id": "SCAN-RESOLVE-SUBDIR",
+            "rule_id": "TEST-STATIC",
             "file": "src/Button.tsx",
             "tier": "T1",
             "issue": "Example issue",
@@ -8241,6 +8251,38 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     rescan_cmd.run(argparse.Namespace(path="."))
 
     assert analyzed_path == root.resolve()
+
+
+def test_rescan_invalid_path_preserves_queue_and_scan_stats(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import rescan as rescan_cmd
+    from uidetox.findings import Finding
+    from uidetox.state import save_state
+
+    monkeypatch.chdir(tmp_path)
+    finding = Finding.create(
+        detector_id="KEEP-ME",
+        category="quality",
+        severity="warning",
+        confidence=1,
+        message="Existing queue entry",
+        provenance="manual",
+    )
+    save_state(
+        {
+            "issues": [finding],
+            "resolved": [],
+            "stats": {"total_found": 1, "total_resolved": 0, "scans_run": 4},
+        }
+    )
+    state_path = tmp_path / ".uidetox" / "state.json"
+    before = state_path.read_bytes()
+
+    with pytest.raises(SystemExit):
+        rescan_cmd.run(argparse.Namespace(path=str(tmp_path / "missing")))
+
+    assert state_path.read_bytes() == before
 
 
 def test_rescan_batches_all_current_findings_without_history_credit(

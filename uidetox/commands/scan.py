@@ -302,6 +302,7 @@ _MANUAL_CATEGORIES = {
 
 _OUTPUT_FORMATS = frozenset({"table", "json", "github"})
 
+
 def _get_output_format(args: argparse.Namespace) -> str:
     """Return a validated output format before scan work emits anything."""
     output_format = getattr(args, "output", "table")
@@ -313,18 +314,23 @@ def _get_output_format(args: argparse.Namespace) -> str:
         raise SystemExit(2)
     return output_format
 
+
 def _is_table_output(output_format: str) -> bool:
     return output_format == "table"
+
 
 def _is_json_output(output_format: str) -> bool:
     return output_format == "json"
 
+
 def _is_github_output(output_format: str) -> bool:
     return output_format == "github"
+
 
 def _print_fallback_warning(message: str, *, table_output: bool) -> None:
     """Keep machine stdout parseable while preserving table diagnostics."""
     print(message, file=sys.stdout if table_output else sys.stderr)
+
 
 def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]:
     """Return findings from a current persisted runtime/contract map."""
@@ -356,6 +362,7 @@ def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]
                 )
             findings.append(finding)
     return tuple(findings), True
+
 
 def run(args: argparse.Namespace):
     output_format = _get_output_format(args)
@@ -625,6 +632,7 @@ def run(args: argparse.Namespace):
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
 
+
 def _save_scan_to_memory(
     slop_issues: list, queued_count: int, triggered_rules: set, scan_path: str
 ):
@@ -648,6 +656,7 @@ def _save_scan_to_memory(
         files_scanned=len(file_counts),
         top_files=top_files,
     )
+
 
 def _infer_category(desc: str) -> str:
     """Infer issue category from description text."""

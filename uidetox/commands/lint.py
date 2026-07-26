@@ -1,12 +1,10 @@
 """Lint command: run detected linter and queue errors as issues."""
 
 import argparse
-import subprocess
-import re
-import uuid
-from uidetox.tooling import detect_all
+
+from uidetox.mechanical import diagnostic_finding, run_diagnostics
 from uidetox.state import add_issue, get_project_root, load_config
-from uidetox.utils import prepare_subprocess_cmd
+from uidetox.tooling import detect_all
 
 
 def run(args: argparse.Namespace):
@@ -36,58 +34,31 @@ def run(args: argparse.Namespace):
     print(f"  Running: {cmd}")
     print()
 
-    try:
-        argv, env = prepare_subprocess_cmd(cmd)
-        result = subprocess.run(
-            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
-        )
-    except FileNotFoundError:
+    result, errors = run_diagnostics("linter", cmd, project_root)
+    if result.error == "command_not_found":
         print(f"Command not found. Install {linter['name']}.")
         return
-    except subprocess.TimeoutExpired:
+    if result.error == "timeout":
         print("Lint check timed out after 120s.")
         return
-
-    output = result.stdout + result.stderr
-
     if result.returncode == 0:
         print("✅ No lint errors found.")
         return
-
     if fix:
         print("🔧 Auto-fix applied. Re-run without --fix to verify.")
-        if output.strip():
-            print(output[:1000])
+        if result.output.strip():
+            print(result.output[:1000])
         return
-
-    # Generic parser that catches file.ts:line:col (with optional trailing colon)
-    # Works for ESLint (unix/stylish), Biome, TSC, and standard GNU outputs
-    pattern = re.compile(
-        r"^([^:\n]+?):(\d+):(\d+)(?::\s*|\s+-\s*|\s+)(.+)$", re.MULTILINE
-    )
-    errors = pattern.findall(output)
-
     queued = 0
-    for file_path, line, col, msg in errors:
-        if (
-            file_path.startswith("/")
-            or file_path.startswith(".")
-            or ":" not in file_path
-        ):
-            issue_id = f"LINT-{str(uuid.uuid4())[:6].upper()}"
-            add_issue(
-                {
-                    "id": issue_id,
-                    "file": file_path,
-                    "tier": "T1",
-                    "issue": f"Lint: {msg.strip()} (line {line})",
-                    "command": "lint-fix",
-                }
+    for error in errors:
+        finding = diagnostic_finding("linter", error)
+        add_issue(finding)
+        queued += 1
+        if queued <= 10:
+            print(
+                f"  {finding.to_dict()['id']}: "
+                f"{error.path}:{error.line} — {error.message}"
             )
-            queued += 1
-            if queued <= 10:
-                print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")
-
     if queued > 10:
         print(f"  ... and {queued - 10} more")
 
@@ -97,5 +68,4 @@ def run(args: argparse.Namespace):
             "Run 'uidetox next' to start fixing, or 'uidetox lint --fix' to auto-fix."
         )
     else:
-        # Couldn't parse, just show raw output
-        print(output[:2000])
+        print(result.output[:2000])

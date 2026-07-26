@@ -140,6 +140,27 @@ def test_finding_fingerprint_ignores_display_copy_but_tracks_anchor_and_evidence
     assert changed_anchor.fingerprint != original.fingerprint
 
 
+def test_confidence_preserves_zero_and_safely_defaults_malformed_values() -> None:
+    zero = Finding.create(
+        detector_id="ZERO-CONFIDENCE",
+        category="quality",
+        severity="info",
+        confidence=0.0,
+        message="Uncertain signal",
+        provenance="static",
+    )
+
+    assert zero.confidence == 0.0
+    assert Finding.from_dict(zero.to_dict()).confidence == 0.0
+    assert Finding.from_dict(
+        {**zero.to_dict(), "confidence": "not-a-number"}
+    ).confidence == 0.5
+    for nonfinite in (float("nan"), float("inf"), float("-inf")):
+        assert Finding.from_dict(
+            {**zero.to_dict(), "confidence": nonfinite}
+        ).confidence == 0.5
+
+
 def test_legacy_queue_uuid_does_not_change_detector_fingerprint() -> None:
     common = {
         "rule_id": "LOREM_IPSUM_SLOP",
@@ -157,6 +178,7 @@ def test_legacy_queue_uuid_does_not_change_detector_fingerprint() -> None:
     )
 
     assert first.detector_id == "LOREM_IPSUM_SLOP"
+    assert first.verifier["kind"] == "static"
     assert first.fingerprint == second.fingerprint
     assert another_occurrence.fingerprint != first.fingerprint
 

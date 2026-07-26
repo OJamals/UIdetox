@@ -6,7 +6,6 @@ import shlex
 import subprocess
 from datetime import datetime, timezone
 
-
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 

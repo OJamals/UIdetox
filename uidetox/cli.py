@@ -2,10 +2,10 @@
 
 import argparse
 import sys
-
-from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 from importlib import import_module
 from pathlib import Path
+
+from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 
 
 def _get_version() -> str:

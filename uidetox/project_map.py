@@ -17,7 +17,6 @@ import yaml
 
 from uidetox.findings import Finding
 
-
 HTTP_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 _CODE_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"}
 _IGNORED_DIRS = {

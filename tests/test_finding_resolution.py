@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,7 @@ from uidetox.state import (
     load_state,
     record_verification_override,
     remove_issue,
+    save_config,
     save_state,
 )
 
@@ -147,6 +149,20 @@ def test_runtime_verifier_requires_current_exact_scenario(tmp_path, monkeypatch)
     (tmp_path / ".uidetox" / "frontend-map.json").write_text(
         json.dumps(artifact), encoding="utf-8"
     )
+    assert verify_finding(runtime, root=tmp_path).outcome == "stale_anchor"
+    requested = json.loads(json.dumps(artifact["nodes"][0]))
+    requested["id"] = "requested-selector"
+    requested["metadata"]["selector"] = "#total"
+    requested["metadata"]["findings"] = []
+    artifact["nodes"].append(requested)
+    (tmp_path / ".uidetox" / "frontend-map.json").write_text(
+        json.dumps(artifact), encoding="utf-8"
+    )
+    assert verify_finding(runtime, root=tmp_path).outcome == "stale_anchor"
+    artifact["nodes"][0]["metadata"]["findings"] = []
+    (tmp_path / ".uidetox" / "frontend-map.json").write_text(
+        json.dumps(artifact), encoding="utf-8"
+    )
     absent = verify_finding(runtime, root=tmp_path)
     assert absent.outcome == "absent"
     assert absent.evidence_hash
@@ -207,6 +223,52 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
         )
 
 
+def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import add_issue as add_issue_command
+
+    captured = []
+    hashes = {"source": "s", "map": "m", "runtime": "r"}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(add_issue_command, "load_config", lambda: {})
+    monkeypatch.setattr(add_issue_command, "add_issue", captured.append)
+    add_issue_command.run(
+        argparse.Namespace(
+            file="src/Card.tsx",
+            tier="T2",
+            issue="Hierarchy needs review",
+            fix_command="uidetox polish src/Card.tsx",
+        )
+    )
+    finding = captured[0]
+    queue_id = finding.to_dict()["id"]
+
+    assert isinstance(finding, Finding)
+    assert finding.provenance == "manual"
+    assert finding.verifier["kind"] == "manual"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            "uidetox.findings.current_evidence_hashes", lambda _root: hashes
+        )
+        assert verify_finding(finding, state={}, root=tmp_path).outcome == "stale_evidence"
+        review = {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "score": 100,
+            "rationale": "Reviewed the repaired hierarchy.",
+            "reviewer": "qa-agent",
+            "finding_links": [queue_id],
+            "routes": ["/"],
+            "states": ["default"],
+            "viewports": ["desktop"],
+            "evidence_hashes": hashes,
+        }
+        assert (
+            verify_finding(finding, state={"subjective": review}, root=tmp_path).outcome
+            == "absent"
+        )
+
+
 def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypatch):
     import uidetox.frontend_map as frontend_map_module
     import uidetox.project_map as project_map_module
@@ -243,6 +305,23 @@ def test_contract_verifier_rebuilds_relevant_operation_slice(tmp_path, monkeypat
     absent = verify_finding(finding, root=tmp_path)
     assert absent.outcome == "absent"
     assert absent.evidence_hash
+    independent = Finding.create(
+        detector_id="contract-frontend-only",
+        category="contract",
+        severity="warning",
+        confidence=0.9,
+        message="Independent route mismatch",
+        provenance="contract",
+        contract_anchor={"kind": "frontend_only", "normalized_path": "/users"},
+        verifier={"kind": "contract", "normalized_path": "/users"},
+    )
+    monkeypatch.setattr(
+        project_map_module,
+        "build_project_map",
+        lambda *args: SimpleNamespace(findings=(independent,)),
+    )
+    # Contract detector IDs represent families: another route is independently resolvable.
+    assert verify_finding(finding, root=tmp_path).outcome == "absent"
     monkeypatch.setattr(frontend_map_module, "frontend_map_is_fresh", lambda *args: False)
     assert verify_finding(finding, root=tmp_path).outcome == "stale_evidence"
 
@@ -325,3 +404,55 @@ def test_skip_verify_does_not_bypass_finding_verifier(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         resolve.run(argparse.Namespace(issue_id=finding.id, note="fixed", skip_verify=True))
     assert len(load_state()["issues"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("module_name", "tool", "tooling", "output"),
+    [
+        (
+            "tsc",
+            "typescript",
+            {"name": "typescript", "run_cmd": "tsc --noEmit"},
+            "src/App.ts(1,2): error TS2322: Type mismatch\n",
+        ),
+        (
+            "lint",
+            "linter",
+            {"name": "eslint", "run_cmd": "eslint .", "fix_cmd": "eslint . --fix"},
+            "src/App.ts:1:2: no-unused-vars\n",
+        ),
+    ],
+)
+def test_skip_verify_never_bypasses_originating_mechanical_tool(
+    tmp_path, monkeypatch, module_name, tool, tooling, output
+):
+    from uidetox import mechanical
+    from uidetox.commands import lint, resolve, tsc
+
+    command_module = tsc if module_name == "tsc" else lint
+    config = {"tooling": {tool: tooling}}
+    captured = []
+    monkeypatch.chdir(tmp_path)
+    save_config(config)
+    monkeypatch.setattr(command_module, "add_issue", captured.append)
+    monkeypatch.setattr(
+        mechanical.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout=output, stderr=""
+        ),
+    )
+    command_module.run(argparse.Namespace(fix=False))
+    finding = captured[0]
+    save_state({"issues": [finding], "resolved": [], "stats": {}})
+
+    with pytest.raises(SystemExit):
+        resolve.run(
+            argparse.Namespace(
+                issue_id=finding.to_dict()["id"],
+                note="fixed",
+                skip_verify=True,
+            )
+        )
+
+    assert load_state()["issues"]

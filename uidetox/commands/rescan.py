@@ -35,9 +35,6 @@ def run(args: argparse.Namespace):
     old_count = len(old_issues)
     resolved = state.get("resolved", [])
     target = config.get("target_score", 95)
-    # Clear existing issues and track the rescan
-    clear_issues()
-    increment_scans()
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
@@ -50,6 +47,8 @@ def run(args: argparse.Namespace):
             file=sys.stderr,
         )
         sys.exit(1)
+    clear_issues()
+    increment_scans()
     print("=" * 58)
     print(" UIdetox Rescan (fresh analysis + smart dedup)")
     print("=" * 58)

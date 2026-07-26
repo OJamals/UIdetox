@@ -5,6 +5,7 @@ import os
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
+
 from uidetox.findings import (
     FINDING_SCHEMA_VERSION,
     Finding,
@@ -13,11 +14,13 @@ from uidetox.findings import (
 )
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
+
 try:
     import fcntl as _fcntl
     _HAS_FLOCK = True
 except ImportError:
     _HAS_FLOCK = False  # Windows — locking is best-effort only
+
 
 @contextlib.contextmanager
 def _state_lock():
@@ -37,6 +40,7 @@ def _state_lock():
         finally:
             _fcntl.flock(lf.fileno(), _fcntl.LOCK_UN)
 
+
 UIDETOX_DIR = ".uidetox"
 CONFIG_FILE = "config.json"
 STATE_FILE = "state.json"
@@ -53,6 +57,7 @@ _PROJECT_ROOT_MARKERS = (
     "setup.cfg",
 )
 
+
 def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path | None:
     """Return the nearest ancestor containing any marker file or directory."""
     current = start
@@ -62,6 +67,7 @@ def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path |
         if current == current.parent:
             return None
         current = current.parent
+
 
 def get_project_root() -> Path:
     """Find the project root from the current working directory.
@@ -82,29 +88,36 @@ def get_project_root() -> Path:
         return project_root
     return cwd
 
+
 def get_uidetox_dir() -> Path:
     return get_project_root() / UIDETOX_DIR
+
 
 def ensure_uidetox_dir():
     d = get_uidetox_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
+
 def _now_iso() -> str:
     return now_iso()
 
+
 def _is_numeric_config_value(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
 
 def _normalize_counter(value: object) -> int:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return int(value)
     return 0
 
+
 def _normalize_bounded_score(value: object) -> int | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return max(0, min(100, int(value)))
     return None
+
 
 def _normalize_issue_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
@@ -114,6 +127,7 @@ def _normalize_issue_collection(value: object) -> list[dict]:
         for issue in value
         if isinstance(issue, (Finding, dict))
     ]
+
 
 def _normalize_subjective_history_entry(entry: object) -> dict | None:
     if not isinstance(entry, dict):
@@ -126,6 +140,7 @@ def _normalize_subjective_history_entry(entry: object) -> dict | None:
     normalized["score"] = score
     normalized["timestamp"] = timestamp if isinstance(timestamp, str) else ""
     return normalized
+
 
 def _normalize_subjective_state(value: object) -> dict:
     if not isinstance(value, dict):
@@ -148,6 +163,7 @@ def _normalize_subjective_state(value: object) -> dict:
         normalized["history"] = normalized_history
     return normalized
 
+
 def _normalize_tool_entry(tool: object) -> dict | None:
     if not isinstance(tool, dict):
         return None
@@ -164,6 +180,7 @@ def _normalize_tool_entry(tool: object) -> dict | None:
         normalized["fix_cmd"] = fix_cmd
     return normalized
 
+
 def _normalize_tool_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
@@ -173,6 +190,7 @@ def _normalize_tool_collection(value: object) -> list[dict]:
         if clean_entry is not None:
             normalized.append(clean_entry)
     return normalized
+
 
 def _normalize_tooling_config(tooling: object) -> dict:
     if not isinstance(tooling, dict):
@@ -189,6 +207,7 @@ def _normalize_tooling_config(tooling: object) -> dict:
     ):
         normalized["package_manager"] = None
     return normalized
+
 
 def load_config() -> dict:
     config_path = get_uidetox_dir() / CONFIG_FILE
@@ -228,6 +247,7 @@ def load_config() -> dict:
         data.pop("dev_server", None)
     return data
 
+
 def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
     d = ensure_uidetox_dir()
     target = d / filename
@@ -238,8 +258,10 @@ def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
         os.fsync(f.fileno())
     os.replace(tmp_path, target)
 
+
 def save_config(config: dict):
     _save_json(config, CONFIG_FILE, "config_")
+
 
 def load_state() -> dict:
     """
@@ -288,6 +310,7 @@ def load_state() -> dict:
     data.setdefault("overrides", [])
     return sanitize_untrusted_data(data)
 
+
 def _default_state() -> dict:
     return {
         "schema_version": FINDING_SCHEMA_VERSION,
@@ -301,6 +324,7 @@ def _default_state() -> dict:
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }
 
+
 def save_state(state: dict):
     canonical = dict(state)
     canonical["schema_version"] = FINDING_SCHEMA_VERSION
@@ -308,12 +332,14 @@ def save_state(state: dict):
         canonical[key] = _normalize_issue_collection(canonical.get(key))
     _save_json(sanitize_untrusted_data(canonical), STATE_FILE, "state_")
 
+
 def get_issue(issue_id: str) -> dict | None:
     state = load_state()
     for item in state.get("issues", []):
         if item.get("id") == issue_id:
             return item
     return None
+
 
 def remove_issue(
     issue_id: str,
@@ -328,9 +354,11 @@ def remove_issue(
         )
     )
 
+
 def issue_dedup_key(issue: dict) -> str:
     """Return a stable key for detecting duplicate pending issues."""
     return coerce_finding(issue).fingerprint
+
 
 def add_issues(
     issues: Iterable[Finding | dict], *, qualified_complete: bool | None = None
@@ -368,8 +396,10 @@ def add_issues(
         save_state(state)
         return accepted_count
 
+
 def add_issue(issue: Finding | dict) -> bool:
     return add_issues((issue,)) == 1
+
 
 def increment_scans():
     """Track number of scans run."""
@@ -380,12 +410,14 @@ def increment_scans():
         state["last_scan"] = _now_iso()
         save_state(state)
 
+
 def clear_issues():
     """Clear all pending issues (used by rescan)."""
     with _state_lock():
         state = load_state()
         state["issues"] = []
         save_state(state)
+
 
 def batch_remove_issues(
     issue_ids: list[str],
@@ -431,6 +463,7 @@ def batch_remove_issues(
         ) + len(removed)
         save_state(state)
         return removed
+
 
 def record_verification_override(
     issue_ids: list[str],

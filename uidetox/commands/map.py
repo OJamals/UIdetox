@@ -5,8 +5,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from uidetox.frontend_map import map_frontend, save_frontend_map
 from uidetox.findings import coerce_finding
+from uidetox.frontend_map import map_frontend, save_frontend_map
 from uidetox.project_map import ProjectMap
 from uidetox.runtime_observer import observe_frontend
 from uidetox.state import add_issues, get_project_root, get_uidetox_dir, load_config

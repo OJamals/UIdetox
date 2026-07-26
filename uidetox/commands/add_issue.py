@@ -4,6 +4,8 @@ import argparse
 import fnmatch
 import sys
 import uuid
+
+from uidetox.findings import Finding
 from uidetox.state import add_issue, load_config
 
 _MAX_FILE_LEN = 300
@@ -62,12 +64,19 @@ def run(args: argparse.Namespace):
         return
 
     issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
-    new_issue = {
-        "id": issue_id,
-        "file": args.file,
-        "tier": args.tier,
-        "issue": args.issue,
-        "command": args.fix_command,
-    }
+    new_issue = Finding.create(
+        detector_id=f"manual-{issue_id.lower()}",
+        category="quality",
+        severity={"T1": "info", "T2": "warning", "T3": "error", "T4": "critical"}.get(
+            args.tier, "warning"
+        ),
+        confidence=0.8,
+        message=args.issue,
+        provenance="manual",
+        source_anchor={"path": args.file},
+        suppression_key=issue_id,
+        verifier={"kind": "manual"},
+        legacy={"id": issue_id, "command": args.fix_command},
+    )
     add_issue(new_issue)
     print(f"Added issue {issue_id}: [{args.tier}] {args.issue} in {args.file}")

@@ -27,7 +27,6 @@ from uidetox.source_facts import extract_source_facts
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
-
 SCHEMA_VERSION = 1
 EXTRACTOR_VERSION = 2
 FRONTEND_MAP_FILE = "frontend-map.json"

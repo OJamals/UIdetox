@@ -42,6 +42,7 @@ WAITING_REVIEW = "waiting_for_review"
 WAITING_SELECTION = "waiting_for_proposal_selection"
 WAITING_VERIFICATION = "waiting_for_verification"
 
+
 @dataclass(frozen=True)
 class PhaseDefinition:
     """Static transition knowledge for one workflow phase."""
@@ -50,6 +51,7 @@ class PhaseDefinition:
     dependencies: tuple[str, ...]
     input_keys: tuple[str, ...]
     artifact_kinds: tuple[str, ...] = ()
+
 
 PHASES = (
     PhaseDefinition(
@@ -117,6 +119,7 @@ PHASES = (
     ),
 )
 
+
 @dataclass(frozen=True)
 class WorkflowInputs:
     source_fingerprint: str
@@ -129,6 +132,7 @@ class WorkflowInputs:
     verification_fresh: bool = True
     visual_evidence_state: str = "missing"
     visual_evidence_required: bool = False
+
     def value(self, key: str) -> Any:
         values = {
             "source": self.source_fingerprint,
@@ -141,6 +145,7 @@ class WorkflowInputs:
         }
         return values[key]
 
+
 @dataclass(frozen=True)
 class AdapterResult:
     """Concise, serializable result returned by an in-process phase adapter."""
@@ -149,6 +154,7 @@ class AdapterResult:
     evidence: str = ""
     signals: dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class WorkflowContext:
     root: Path
@@ -156,12 +162,15 @@ class WorkflowContext:
     state: dict[str, Any]
     phase: PhaseDefinition
 
+
 PhaseRunner = Callable[[WorkflowContext], AdapterResult]
+
 
 @dataclass(frozen=True)
 class WorkflowAdapters:
     """Injected in-process functions keyed by phase adapter name."""
     runners: Mapping[str, PhaseRunner]
+
     def run(self, phase: PhaseDefinition, context: WorkflowContext) -> AdapterResult:
         try:
             runner = self.runners[phase.adapter]
@@ -177,6 +186,7 @@ class WorkflowAdapters:
             )
         return result
 
+
 @dataclass(frozen=True)
 class WorkflowRunResult:
     status: str
@@ -186,11 +196,13 @@ class WorkflowRunResult:
     state_path: Path
     completed: tuple[str, ...]
 
+
 class WorkflowPause(RuntimeError):
     def __init__(self, waiting: str, message: str) -> None:
         self.waiting = waiting
         self.message = message
         super().__init__(message)
+
 
 class WorkflowEngine:
     """Execute each phase at most once per call and persist every transition."""
@@ -209,6 +221,7 @@ class WorkflowEngine:
             else self.root / ".uidetox" / WORKFLOW_STATE_FILE
         )
         self._executed_this_run: set[str] = set()
+
     def run(self, inputs: WorkflowInputs) -> WorkflowRunResult:
         self._executed_this_run = set()
         state = self._load_state(inputs.target_score)
@@ -348,6 +361,7 @@ class WorkflowEngine:
                 "Run `uidetox finish` explicitly to finalize."
             ),
         )
+
     def _load_state(self, target_score: int) -> dict[str, Any]:
         if self.state_path.exists():
             try:
@@ -377,6 +391,7 @@ class WorkflowEngine:
             "updated_at": now_iso(),
             "phases": {phase.id: _new_phase_state() for phase in PHASES},
         }
+
     def _save_state(self, state: dict[str, Any]) -> None:
         state["updated_at"] = now_iso()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,6 +411,7 @@ class WorkflowEngine:
                 os.unlink(temp_name)
             except FileNotFoundError:
                 pass
+
     def _phase_fingerprint(
         self,
         phase: PhaseDefinition,
@@ -412,6 +428,7 @@ class WorkflowEngine:
                 },
             }
         )
+
     def _invalidate_from(self, state: dict[str, Any], index: int) -> None:
         invalidated = {PHASES[index].id}
         changed = True
@@ -434,6 +451,7 @@ class WorkflowEngine:
         state["status"] = "pending"
         state["waiting"] = None
         self._save_state(state)
+
     def _artifacts_fresh(
         self,
         phase: PhaseDefinition,
@@ -452,6 +470,7 @@ class WorkflowEngine:
             if current is None or current != fingerprints.get(kind):
                 return False
         return True
+
     def _artifact_signature(self, reference: str, mode: str) -> str | None:
         if mode == "inline":
             return _stable_hash({"inline": reference})
@@ -466,6 +485,7 @@ class WorkflowEngine:
             return hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             return None
+
     def _waiting_before(
         self,
         phase: PhaseDefinition,
@@ -478,6 +498,7 @@ class WorkflowEngine:
                 "Select a redesign proposal and rerun with `--proposal-id`.",
             )
         return None
+
     def _waiting_after(
         self,
         phase: PhaseDefinition,
@@ -501,6 +522,7 @@ class WorkflowEngine:
                 )
                 return waiting, "Finalization blocked: " + ", ".join(sorted(codes))
         return None
+
     def _wait(
         self,
         state: dict[str, Any],
@@ -522,6 +544,7 @@ class WorkflowEngine:
             waiting=waiting,
             message=message,
         )
+
     def _result(
         self,
         state: dict[str, Any],
@@ -543,6 +566,7 @@ class WorkflowEngine:
                 if state["phases"][phase.id]["status"] == "completed"
             ),
         )
+
 
 def build_workflow_inputs(
     root: str | Path,
@@ -600,6 +624,7 @@ def build_workflow_inputs(
         visual_evidence_state=visual_status.state,
         visual_evidence_required=visual_status.required,
     )
+
 
 def in_process_adapters() -> WorkflowAdapters:
     """Build production adapters without invoking an external agent or shell CLI."""
@@ -765,6 +790,7 @@ def in_process_adapters() -> WorkflowAdapters:
         }
     )
 
+
 def run_executable_workflow(
     root: str | Path,
     *,
@@ -788,6 +814,7 @@ def run_executable_workflow(
         adapters or in_process_adapters(),
         state_path=state_path,
     ).run(active_inputs)
+
 
 def _source_fingerprint(root: Path, config: dict[str, Any]) -> str:
     ignored = {
@@ -860,6 +887,7 @@ def _source_fingerprint(root: Path, config: dict[str, Any]) -> str:
             manifest[str(path)] = "unreadable"
     return _stable_hash(manifest)
 
+
 def _new_phase_state() -> dict[str, Any]:
     return {
         "status": "pending",
@@ -876,9 +904,11 @@ def _new_phase_state() -> dict[str, Any]:
         "completed_at": None,
     }
 
+
 def _stable_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 
 def _concise_error(error: Exception) -> str:
     message = " ".join(str(error).split())
