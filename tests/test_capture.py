@@ -244,40 +244,6 @@ def test_capture_screenshot_forwards_arguments_and_closes_browser(
     assert calls[0][1]["full_page"] is False
 
 
-def test_capture_multi_viewport_returns_only_successes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    snapshots = tmp_path / "snapshots"
-    snapshots.mkdir()
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def fake_observe(*args: object, **kwargs: object) -> RuntimeObservation:
-        calls.append((args, kwargs))
-        return _observation(
-            "https://example.invalid",
-            [
-                ("mobile", snapshots / "before_mobile.png"),
-                ("desktop", snapshots / "before_desktop.png"),
-            ],
-        )
-
-    monkeypatch.setattr(capture, "_snapshots_dir", lambda: snapshots)
-    monkeypatch.setattr(capture, "observe_frontend", fake_observe)
-
-    result = capture._capture_multi_viewport("https://example.invalid", "before")
-
-    assert result == [snapshots / "before_mobile.png", snapshots / "before_desktop.png"]
-    assert len(calls) == 1
-    assert [viewport.name for viewport in calls[0][1]["viewports"]] == [
-        "mobile",
-        "tablet",
-        "desktop",
-        "wide",
-    ]
-    assert list(snapshots.iterdir()) == []
-
-
 def _args(stage: str | None, *, responsive: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         url="https://example.invalid",
@@ -296,6 +262,69 @@ def _isolate_run(
     monkeypatch.setattr(capture, "_snapshots_dir", lambda: snapshots)
     monkeypatch.setattr(capture, "_server_is_reachable", lambda _url: True)
     return snapshots
+
+
+def test_responsive_capture_uses_source_boundary_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshots = _isolate_run(tmp_path, monkeypatch)
+    (tmp_path / "responsive.css").write_text(
+        "@media (max-width: 640px) { main { display: block; } }",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(capture, "get_project_root", lambda: tmp_path)
+    observed: dict[str, object] = {}
+
+    def fake_observe(
+        url: str,
+        destinations,
+        *,
+        full_page: bool = True,
+        viewport_discovery=None,
+    ) -> RuntimeObservation:
+        observed["destinations"] = destinations
+        observed["discovery"] = viewport_discovery
+        pages = tuple(
+            RuntimePage(
+                url=url,
+                title=viewport.name,
+                viewport=viewport,
+                elements=(),
+                screenshot=str(path.resolve()),
+            )
+            for viewport, path in destinations
+        )
+        return RuntimeObservation(
+            generated_at="2026-07-26T00:00:00Z",
+            requested_urls=(url,),
+            pages=pages,
+            viewport_discovery=viewport_discovery,
+        )
+
+    monkeypatch.setattr(capture, "_observe_capture", fake_observe)
+
+    captured, observation = capture._capture_named_stage(
+        "https://example.invalid",
+        "before",
+        responsive=True,
+    )
+
+    assert observation is not None
+    assert observation.viewport_discovery is observed["discovery"]
+    widths = {
+        viewport.width
+        for viewport, _path in observed["destinations"]
+    }
+    assert {639, 641}.issubset(widths)
+    probes = [
+        viewport
+        for viewport, _path in observed["destinations"]
+        if viewport.kind == "boundary"
+    ]
+    assert {viewport.boundary_px for viewport in probes} == {640}
+    assert len(captured) == len(observed["destinations"])
+    assert (snapshots / "runtime_before.json").is_file()
 
 
 @pytest.mark.parametrize(

@@ -24,18 +24,27 @@ def main() -> None:
     project_map = frontend_map.get("project_map", {})
     findings = project_map.get("findings", [])
     counts = {
-        kind: sum(finding.get("kind") == kind for finding in findings)
-        for kind in ("frontend_only", "backend_only", "method_mismatch", "unresolved")
+        "contract_mismatch": sum(
+            finding.get("status") != "investigate" for finding in findings
+        ),
+        "coverage_gap": sum(
+            finding.get("status") == "investigate" for finding in findings
+        ),
     }
+    contract_nodes = project_map.get("nodes", [])
     summary: dict[str, Any] = {
         "target": frontend_map.get("target"),
         "nodes": len(frontend_map.get("nodes", [])),
         "edges": len(frontend_map.get("edges", [])),
         "runtime_observed": evidence.get("runtime_observed"),
         "runtime_status": evidence.get("runtime_status"),
-        "frontend_operations": len(project_map.get("frontend_operations", [])),
-        "backend_operations": len(project_map.get("backend_operations", [])),
-        "parity": counts,
+        "client_operations": sum(
+            node.get("kind") == "client_operation" for node in contract_nodes
+        ),
+        "backend_routes": sum(node.get("kind") == "route" for node in contract_nodes),
+        "contract_lineage": counts,
+        "contract_nodes": len(contract_nodes),
+        "contract_edges": len(project_map.get("edges", [])),
         "source_status": evidence.get("source_status"),
     }
     if redesign_path.exists():
@@ -58,7 +67,9 @@ def main() -> None:
                 for target in proposal.get("source_targets", [])
             }
         )
-        summary["redesign_parity"] = redesigns.get("parity", {}).get("counts", {})
+        summary["redesign_contract_lineage"] = redesigns.get(
+            "contract_lineage", {}
+        ).get("counts", {})
         summary["runtime_unknowns"] = redesigns.get("unknowns", [])
     print(json.dumps(summary, indent=2, sort_keys=True))
 

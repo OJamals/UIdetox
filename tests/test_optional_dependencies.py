@@ -17,7 +17,6 @@ from uidetox.visual_evidence import (
     build_visual_evidence,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_EXTRA_COMMAND = "pip install 'uidetox[capture]'"
 CHROMIUM_COMMAND = "python -m playwright install chromium"
@@ -63,7 +62,7 @@ def test_optional_dependency_metadata_keeps_core_minimal() -> None:
     assert not base & extras["all"]
     assert {
         "PyYAML>=6.0",
-        "tree-sitter>=0.21.0",
+        "tree-sitter>=0.25.0,<0.26.0",
         "tree-sitter-javascript>=0.21.0",
         "tree-sitter-typescript>=0.21.0",
         "tree-sitter-css>=0.21.0",

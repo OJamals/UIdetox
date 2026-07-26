@@ -96,7 +96,7 @@ export function B() { return <A />; }
     assert any("Dependency cycle" in item for item in proposal.feasibility_blockers)
 
 
-def test_cross_stack_parity_becomes_blocker_and_observable_check(tmp_path) -> None:
+def test_contract_lineage_becomes_blocker_and_observable_check(tmp_path) -> None:
     source = tmp_path / "src"
     source.mkdir()
     (source / "App.tsx").write_text(
@@ -108,7 +108,7 @@ export function App() {
 """.strip(),
         encoding="utf-8",
     )
-    (source / "api.ts").write_text(
+    (tmp_path / "api.ts").write_text(
         """
 import express from "express";
 const app = express();
@@ -124,7 +124,7 @@ app.get("/items", handler);
         for item in proposal.feasibility_blockers
     )
     assert any(
-        item.startswith("Operation parity check:")
+        item.startswith("Contract lineage check:")
         for item in proposal.observable_checks
     )
 

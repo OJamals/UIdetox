@@ -26,8 +26,8 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
         if sibling_distances
         else None
     )
-    parity_counts = dict(redesign_set.parity.get("counts", {}))
-    parity_findings = list(redesign_set.parity.get("findings", []))
+    contract_counts = dict(redesign_set.contract_lineage.get("counts", {}))
+    contract_findings = list(redesign_set.contract_lineage.get("findings", []))
     source_evidence = [
         (
             f"- {item.get('file', 'unknown')}: "
@@ -149,12 +149,15 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             *_bullets(proposal.feasibility_blockers),
             "Runtime unknowns:",
             *_bullets(redesign_set.unknowns),
-            "Cross-stack parity counts:",
+            "Full-stack contract lineage counts:",
             *(
-                [f"- {kind}: {count}" for kind, count in sorted(parity_counts.items())]
+                [
+                    f"- {kind}: {count}"
+                    for kind, count in sorted(contract_counts.items())
+                ]
                 or ["- None recorded."]
             ),
-            "Cross-stack parity findings:",
+            "Full-stack contract lineage findings:",
             *(
                 [
                     "- "
@@ -163,7 +166,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
                     + str(item.get("normalized_path") or "unknown path")
                     + " — "
                     + str(item.get("detail", ""))
-                    for item in parity_findings
+                    for item in contract_findings
                 ]
                 or ["- None recorded."]
             ),

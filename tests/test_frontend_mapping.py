@@ -2,17 +2,22 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from uidetox.cli import parse_args
 from uidetox.commands import compare as compare_command
 from uidetox.commands import map as map_command
 from uidetox.commands import prototype as prototype_command
 from uidetox.commands import redesign as redesign_command
+from uidetox.commands import scan as scan_command
 from uidetox.frontend_map import (
     frontend_map_is_fresh,
     load_frontend_map,
     map_frontend,
+    retain_runtime_evidence,
     save_frontend_map,
 )
+from uidetox.project_map import ProjectMap
 from uidetox.prototype import build_prototype_brief, save_prototype_brief
 from uidetox.redesign import (
     RedesignBrief,
@@ -20,12 +25,19 @@ from uidetox.redesign import (
     propose_redesigns,
     save_redesign_set,
 )
+from uidetox.runtime_layout import RuntimeFinding
 from uidetox.runtime_observer import (
     RuntimeElement,
-    RuntimeFinding,
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,
+)
+from uidetox.runtime_scenarios import (
+    RuntimeCaptureRecord,
+    RuntimeCoverage,
+    RuntimeDiagnostic,
+    RuntimeReadiness,
+    discover_runtime_viewports,
 )
 
 
@@ -76,6 +88,41 @@ export function Dashboard() {
     (src / "theme.css").write_text(
         ":root { --color-accent: #c2410c; --space-unit: 0.5rem; }",
         encoding="utf-8",
+    )
+
+
+def _runtime_capture(
+    *,
+    capture_id: str,
+    scenario: str,
+    state: str,
+    url: str,
+    viewport: RuntimeViewport,
+    diagnostics: tuple[RuntimeDiagnostic, ...],
+    status: str = "completed",
+) -> RuntimeCaptureRecord:
+    failed = status == "failed"
+    return RuntimeCaptureRecord(
+        capture_id=capture_id,
+        scenario=scenario,
+        state=state,
+        url=url,
+        viewport=viewport,
+        status=status,
+        readiness=RuntimeReadiness(
+            "failed" if failed else "current",
+            "navigation" if failed else "selector",
+            1,
+            "navigation failed" if failed else "",
+        ),
+        coverage=(
+            RuntimeCoverage.empty(100)
+            if failed
+            else RuntimeCoverage(0, 0, 0, 0, 10)
+        ),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+        diagnostics=diagnostics,
     )
 
 
@@ -132,6 +179,53 @@ def _runtime_observation() -> RuntimeObservation:
         generated_at="2026-07-16T12:00:00Z",
         requested_urls=("http://localhost:3000/dashboard?view=all",),
         pages=tuple(pages),
+    )
+
+
+def _diagnostic_observation() -> RuntimeObservation:
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    page = RuntimePage(
+        url="http://localhost:3000/dashboard",
+        title="Dashboard",
+        viewport=viewport,
+        elements=(),
+        capture_id="diagnostic-capture",
+        scenario="diagnostics",
+        state="error",
+    )
+    diagnostics = tuple(
+        RuntimeDiagnostic(
+            kind=kind,
+            code=code,
+            message=message,
+            severity="error",
+            scenario="diagnostics",
+            state="error",
+            url=page.url,
+            viewport=viewport.name,
+            source=source,
+        )
+        for kind, code, message, source in (
+            ("console", "browser-console-error", "console failed", "console"),
+            ("page", "browser-page-error", "page failed", "pageerror"),
+            ("network", "browser-request-failed", "request failed", "requestfailed"),
+            ("network", "browser-http-error", "HTTP 500", "response"),
+            ("action", "browser-action-failed", "click failed", "scenario"),
+        )
+    )
+    capture = _runtime_capture(
+        capture_id=page.capture_id,
+        scenario=page.scenario,
+        state=page.state,
+        url=page.url,
+        viewport=viewport,
+        diagnostics=(*diagnostics, diagnostics[0]),
+    )
+    return RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+        captures=(capture,),
     )
 
 
@@ -222,10 +316,224 @@ def test_map_frontend_merges_runtime_layout_accessibility_and_viewports(tmp_path
     )
 
 
+def test_runtime_graph_identity_is_exact_per_capture_and_state(tmp_path):
+    _write_frontend(tmp_path)
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    element = RuntimeElement(
+        kind="action",
+        tag="button",
+        role="button",
+        name="Save",
+        selector="#save",
+        order=0,
+        bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+        styles={},
+        findings=(
+            RuntimeFinding(
+                code="runtime-text-clipped",
+                category="overflow",
+                severity="error",
+                message="clipped",
+            ),
+        ),
+    )
+    pages = tuple(
+        RuntimePage(
+            url="http://localhost:3000/dashboard",
+            title="Dashboard",
+            viewport=viewport,
+            elements=(element,),
+            capture_id=f"capture-{state}",
+            scenario="checkout",
+            state=state,
+        )
+        for state in ("loading", "ready")
+    )
+
+    frontend_map = map_frontend(
+        tmp_path,
+        runtime=RuntimeObservation(
+            generated_at="2026-07-26T00:00:00Z",
+            requested_urls=(pages[0].url,),
+            pages=pages,
+        ),
+    )
+    runtime_nodes = [
+        node for node in frontend_map.nodes if node.kind.startswith("runtime_")
+    ]
+    runtime_page_ids = {
+        node.id for node in runtime_nodes if node.kind == "runtime_page"
+    }
+    contains = [
+        edge
+        for edge in frontend_map.edges
+        if edge.kind == "contains" and edge.source in runtime_page_ids
+    ]
+
+    assert len(runtime_nodes) == 4
+    assert len({node.id for node in runtime_nodes}) == 4
+    assert len(contains) == 2
+    assert {edge.metadata["capture_id"] for edge in contains} == {
+        "capture-loading",
+        "capture-ready",
+    }
+    anchors = [
+        node.metadata["findings"][0]["runtime_anchor"]
+        for node in runtime_nodes
+        if node.kind == "runtime_action"
+    ]
+    assert {
+        (anchor["state"], anchor["capture_id"])
+        for anchor in anchors
+    } == {
+        ("loading", "capture-loading"),
+        ("ready", "capture-ready"),
+    }
+
+
+def test_current_map_finding_projection_includes_diagnostics_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    artifact = tmp_path / ".uidetox" / "frontend-map.json"
+    save_frontend_map(
+        map_frontend(tmp_path, runtime=_diagnostic_observation()),
+        artifact,
+    )
+    monkeypatch.setattr(
+        scan_command,
+        "frontend_map_is_fresh",
+        lambda *_args: True,
+    )
+
+    findings, qualified = scan_command.current_map_findings(tmp_path)
+    diagnostic_codes = [
+        finding.code
+        for finding in findings
+        if finding.code.startswith("browser-")
+    ]
+
+    assert qualified is True
+    assert sorted(diagnostic_codes) == sorted(
+        {
+            "browser-console-error",
+            "browser-page-error",
+            "browser-request-failed",
+            "browser-http-error",
+            "browser-action-failed",
+        }
+    )
+
+
+def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
+    _write_frontend(tmp_path)
+    observation = _runtime_observation()
+    page = observation.pages[0]
+    capture = RuntimeCaptureRecord(
+        capture_id="mobile-initial",
+        scenario="default",
+        state="initial",
+        url=page.url,
+        viewport=page.viewport,
+        status="completed",
+        readiness=RuntimeReadiness(
+            status="current",
+            strategy="request-idle",
+            duration_ms=1,
+        ),
+        coverage=RuntimeCoverage(
+            total=1,
+            candidates=1,
+            eligible=1,
+            emitted=1,
+            budget=10,
+        ),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+    )
+    failed = RuntimeCaptureRecord(
+        capture_id="desktop-initial",
+        scenario="default",
+        state="initial",
+        url=page.url,
+        viewport=RuntimeViewport("desktop", 1440, 900),
+        status="failed",
+        readiness=RuntimeReadiness(
+            status="failed",
+            strategy="request-idle",
+            duration_ms=3_000,
+            detail="timeout",
+        ),
+        coverage=RuntimeCoverage.empty(10),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:03Z",
+    )
+    partial = RuntimeObservation(
+        generated_at=observation.generated_at,
+        requested_urls=observation.requested_urls,
+        pages=(page,),
+        captures=(capture, failed),
+        errors=("desktop failed",),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=partial)
+
+    assert frontend_map.evidence["runtime_status"] == "partial"
+    assert len(frontend_map.evidence["runtime_capture_matrix"]) == 2
+    assert frontend_map.evidence["runtime_coverage"]["requested"] == 2
+    assert frontend_map.evidence["runtime_coverage"]["completed"] == 1
+
+    retained = retain_runtime_evidence(
+        frontend_map,
+        map_frontend(tmp_path),
+    )
+    assert retained.evidence["runtime_status"] == "partial"
+
+    (tmp_path / "src" / "theme.css").write_text(
+        ":root { --color-accent: #9a3412; }",
+        encoding="utf-8",
+    )
+    stale = retain_runtime_evidence(frontend_map, map_frontend(tmp_path))
+    assert stale.evidence["runtime_status"] == "stale"
+
+
 def test_runtime_observation_round_trips_serializable_evidence():
     observation = _runtime_observation()
 
     assert RuntimeObservation.from_dict(observation.to_dict()) == observation
+
+
+def test_frontend_map_persists_responsive_boundary_discovery(tmp_path):
+    _write_frontend(tmp_path)
+    stylesheet = tmp_path / "src" / "theme.css"
+    stylesheet.write_text(
+        stylesheet.read_text(encoding="utf-8")
+        + "\n@media (min-width: 720px) { main { display: grid; } }",
+        encoding="utf-8",
+    )
+    discovery = discover_runtime_viewports(
+        tmp_path,
+        base_viewports=(RuntimeViewport("desktop", 1440, 900),),
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=("http://localhost:3000",),
+        pages=(),
+        viewport_discovery=discovery,
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=observation)
+    responsive = frontend_map.evidence["runtime_viewport_discovery"]
+
+    assert responsive["total_boundaries"] == 1
+    assert responsive["truncated"] is False
+    assert {viewport["width"] for viewport in responsive["viewports"]} == {
+        719,
+        721,
+        1440,
+    }
+    assert responsive["boundaries"][0]["sources"] == ("src/theme.css",)
 
 
 def test_frontend_map_round_trips_through_persisted_artifact(tmp_path):
@@ -291,6 +599,432 @@ export const Shell = () => {
     )
 
 
+def test_render_topology_uses_import_identity_not_global_component_name(tmp_path):
+    src = tmp_path / "src"
+    (src / "primary").mkdir(parents=True)
+    (src / "secondary").mkdir()
+    (src / "primary" / "Button.tsx").write_text(
+        "export default function Button() { return <button>Primary</button>; }",
+        encoding="utf-8",
+    )
+    (src / "secondary" / "Button.tsx").write_text(
+        "export default function Button() { return <button>Secondary</button>; }",
+        encoding="utf-8",
+    )
+    (src / "App.tsx").write_text(
+        """
+import Button from "./secondary/Button";
+export function App() { return <main><Button /></main>; }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    nodes = {node.id: node for node in frontend_map.nodes}
+    render_edges = [
+        edge
+        for edge in frontend_map.edges
+        if edge.kind == "renders"
+        and nodes.get(edge.source) is not None
+        and nodes[edge.source].name == "App"
+    ]
+
+    assert len(render_edges) == 1
+    target = nodes[render_edges[0].target]
+    assert target.name == "Button"
+    assert target.file == "src/secondary/Button.tsx"
+    assert not any(
+        node.kind == "external_component" and node.name == "Button"
+        for node in frontend_map.nodes
+    )
+
+
+def test_render_topology_resolves_aliased_anonymous_default_component(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "Anon.tsx").write_text(
+        "export default function () { return <button>Hi</button>; }",
+        encoding="utf-8",
+    )
+    (src / "App.tsx").write_text(
+        """
+import Renamed from "./Anon";
+export function App() { return <Renamed />; }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    nodes = {node.id: node for node in frontend_map.nodes}
+    target = next(
+        nodes[edge.target]
+        for edge in frontend_map.edges
+        if edge.kind == "renders"
+        and nodes.get(edge.source) is not None
+        and nodes[edge.source].name == "App"
+    )
+
+    assert (target.kind, target.name, target.file) == (
+        "component",
+        "Anon",
+        "src/Anon.tsx",
+    )
+
+
+def test_runtime_source_ownership_uses_exact_selector_or_stays_unresolved(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        """
+export function App() {
+  return <main>
+    <nav data-testid="sidebar">Projects</nav>
+    <div className="profile-panel">Profile</div>
+  </main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=(
+                    RuntimeElement(
+                        kind="region",
+                        tag="nav",
+                        role="navigation",
+                        name="Projects",
+                        selector='[data-testid="sidebar"]',
+                        order=0,
+                        bounds={"x": 0, "y": 0, "width": 240, "height": 800},
+                        styles={},
+                    ),
+                    RuntimeElement(
+                        kind="region",
+                        tag="div",
+                        role="region",
+                        name="Profile",
+                        selector="main > div",
+                        order=1,
+                        bounds={"x": 250, "y": 0, "width": 100, "height": 20},
+                        styles={},
+                        source_selectors=(".profile-panel", "div"),
+                    ),
+                    RuntimeElement(
+                        kind="text",
+                        tag="p",
+                        role="",
+                        name="Unknown",
+                        selector="#missing",
+                        order=2,
+                        bounds={"x": 250, "y": 0, "width": 100, "height": 20},
+                        styles={},
+                    ),
+                    RuntimeElement(
+                        kind="region",
+                        tag="section",
+                        role="region",
+                        name="Explicit",
+                        selector="#not-static",
+                        order=3,
+                        bounds={"x": 0, "y": 100, "width": 100, "height": 100},
+                        styles={},
+                        source_hint="src/App.tsx",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_nodes = {
+        node.metadata["selector"]: node
+        for node in frontend_map.nodes
+        if node.kind in {"runtime_region", "runtime_text"}
+    }
+
+    owned = runtime_nodes['[data-testid="sidebar"]']
+    assert owned.metadata["source_targets"] == ["src/App.tsx"]
+    assert owned.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 1.0,
+        "provenance": "selector:exact",
+        "candidates": ["src/App.tsx"],
+    }
+    heuristic = runtime_nodes["main > div"]
+    assert heuristic.metadata["source_targets"] == ["src/App.tsx"]
+    assert heuristic.metadata["source_selectors"] == [".profile-panel", "div"]
+    assert heuristic.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.65,
+        "provenance": "selector:unique-heuristic",
+        "candidates": ["src/App.tsx"],
+    }
+    unresolved = runtime_nodes["#missing"]
+    assert unresolved.metadata["source_targets"] == []
+    assert unresolved.metadata["source_ownership"]["status"] == "unresolved"
+    explicit = runtime_nodes["#not-static"]
+    assert explicit.metadata["source_ownership"]["provenance"] == (
+        "runtime:source-hook"
+    )
+    assert explicit.metadata["source_targets"] == ["src/App.tsx"]
+    assert frontend_map.evidence["adapter_capabilities"]["react"]["status"] == "native"
+
+
+def test_runtime_source_ownership_rejects_ambiguous_selector_matches(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("Primary", "Secondary"):
+        (src / f"{name}.tsx").write_text(
+            f"""
+export function {name}() {{
+  return <button data-testid="save">{name}</button>;
+}}
+""".strip(),
+            encoding="utf-8",
+        )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=(
+                    RuntimeElement(
+                        kind="action",
+                        tag="button",
+                        role="button",
+                        name="Save",
+                        selector='[data-testid="save"]',
+                        order=0,
+                        bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+                        styles={},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_node = next(
+        node for node in frontend_map.nodes if node.kind == "runtime_action"
+    )
+
+    assert runtime_node.metadata["source_targets"] == []
+    assert runtime_node.metadata["source_ownership"] == {
+        "status": "ambiguous",
+        "confidence": 0.0,
+        "provenance": "selector:ambiguous",
+        "candidates": ["src/Primary.tsx", "src/Secondary.tsx"],
+    }
+
+
+def test_runtime_source_ownership_uses_route_context_conservatively(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    sources = {
+        "Alpha.tsx": """
+export function Alpha() {
+  return <main><Route path="/alpha" /><button data-testid="shared">Alpha</button></main>;
+}
+""",
+        "Beta.tsx": """
+export function Beta() {
+  return <main><Route path="/beta" /><button data-testid="shared">Beta</button></main>;
+}
+""",
+        "Unique.tsx": """
+export function Unique() {
+  return <main><Route path="/unique" /></main>;
+}
+""",
+        "SharedPrimary.tsx": """
+export function SharedPrimary() {
+  return <main><Route path="/shared" /></main>;
+}
+""",
+        "SharedSecondary.tsx": """
+export function SharedSecondary() {
+  return <main><Route path="/shared" /></main>;
+}
+""",
+    }
+    for name, content in sources.items():
+        (src / name).write_text(content.strip(), encoding="utf-8")
+
+    def page(path: str, selector: str) -> RuntimePage:
+        return RuntimePage(
+            url=f"http://localhost:3000{path}",
+            title=path,
+            viewport=RuntimeViewport("desktop", 1280, 800),
+            elements=(
+                RuntimeElement(
+                    kind="region",
+                    tag="canvas",
+                    role="",
+                    name=path,
+                    selector=selector,
+                    order=0,
+                    bounds={"x": 0, "y": 0, "width": 100, "height": 40},
+                    styles={},
+                ),
+            ),
+        )
+
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=(
+            "http://localhost:3000/alpha?tab=current",
+            "http://localhost:3000/unique",
+            "http://localhost:3000/shared",
+        ),
+        pages=(
+            page("/alpha?tab=current", '[data-testid="shared"]'),
+            page("/unique", "#missing-unique"),
+            page("/shared", "#missing-shared"),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+    runtime_nodes = {
+        (node.metadata["runtime_url"], node.metadata["selector"]): node
+        for node in frontend_map.nodes
+        if node.kind == "runtime_region"
+    }
+
+    narrowed = runtime_nodes[
+        (
+            "http://localhost:3000/alpha?tab=current",
+            '[data-testid="shared"]',
+        )
+    ]
+    assert narrowed.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.9,
+        "provenance": "selector:exact+route",
+        "candidates": ["src/Alpha.tsx"],
+    }
+    route_only = runtime_nodes[
+        ("http://localhost:3000/unique", "#missing-unique")
+    ]
+    assert route_only.metadata["source_ownership"] == {
+        "status": "resolved",
+        "confidence": 0.4,
+        "provenance": "route:unique-context",
+        "candidates": ["src/Unique.tsx"],
+    }
+    ambiguous = runtime_nodes[
+        ("http://localhost:3000/shared", "#missing-shared")
+    ]
+    assert ambiguous.metadata["source_targets"] == []
+    assert ambiguous.metadata["source_ownership"] == {
+        "status": "ambiguous",
+        "confidence": 0.0,
+        "provenance": "route:ambiguous-context",
+        "candidates": ["src/SharedPrimary.tsx", "src/SharedSecondary.tsx"],
+    }
+    assert type(frontend_map).from_dict(frontend_map.to_dict()) == frontend_map
+
+
+def test_dynamic_route_candidates_are_computed_once_per_runtime_page(
+    tmp_path, monkeypatch
+):
+    from uidetox import semantic_adapters
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "ItemPage.tsx").write_text(
+        """
+export function ItemPage() {
+  return <main><Route path="/items/:itemId" /></main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    match_calls = 0
+    route_matches = semantic_adapters._route_matches
+
+    def counted_route_match(pattern: str, runtime_route: str) -> bool:
+        nonlocal match_calls
+        match_calls += 1
+        return route_matches(pattern, runtime_route)
+
+    monkeypatch.setattr(semantic_adapters, "_route_matches", counted_route_match)
+    elements = tuple(
+        RuntimeElement(
+            kind="region",
+            tag="canvas",
+            role="",
+            name=f"Element {index}",
+            selector=f"#missing-{index}",
+            order=index,
+            bounds={"x": 0, "y": index * 10, "width": 100, "height": 10},
+            styles={},
+        )
+        for index in range(12)
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-25T00:00:00Z",
+        requested_urls=("http://localhost:3000/items/42",),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/items/42",
+                title="Item",
+                viewport=RuntimeViewport("desktop", 1280, 800),
+                elements=elements,
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=runtime)
+
+    assert match_calls == 1
+    assert all(
+        node.metadata["source_targets"] == ["src/ItemPage.tsx"]
+        for node in frontend_map.nodes
+        if node.kind == "runtime_region"
+    )
+
+
+def test_frontend_map_serializes_network_type_references(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+import axios, { type AxiosResponse } from "axios";
+declare const body: SaveRequest;
+export function save() {
+  return axios.post<SaveResponse, AxiosResponse<SaveResponse>, SaveRequest>(
+    "/api/items",
+    body,
+  );
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+    data = next(
+        node
+        for node in frontend_map.nodes
+        if node.kind == "data" and node.name == "/api/items"
+    )
+
+    assert data.metadata["request_type_refs"] == ["SaveRequest"]
+    assert data.metadata["response_type_refs"] == ["SaveResponse"]
+    loaded = type(frontend_map).from_dict(frontend_map.to_dict())
+    loaded_data = next(node for node in loaded.nodes if node.id == data.id)
+    assert loaded_data.metadata["request_type_refs"] == ["SaveRequest"]
+    assert loaded_data.metadata["response_type_refs"] == ["SaveResponse"]
+
+
 def test_frontend_map_freshness_tracks_add_change_and_delete(tmp_path):
     _write_frontend(tmp_path)
     frontend_map = map_frontend(tmp_path, "src")
@@ -325,9 +1059,11 @@ def items():
     frontend_map = map_frontend(tmp_path, "src")
 
     assert frontend_map_is_fresh(frontend_map, tmp_path, "src") is True
+    project_map = ProjectMap.from_dict(frontend_map.project_map)
     assert {
-        operation["method"]
-        for operation in frontend_map.project_map["backend_operations"]
+        node.attributes["method"]
+        for node in project_map.nodes
+        if node.side == "backend" and node.kind == "route"
     } == {"GET"}
 
     api.write_text(
@@ -338,8 +1074,11 @@ def items():
 
     refreshed = map_frontend(tmp_path, "src")
     assert frontend_map_is_fresh(refreshed, tmp_path, "src") is True
+    refreshed_project_map = ProjectMap.from_dict(refreshed.project_map)
     assert {
-        operation["method"] for operation in refreshed.project_map["backend_operations"]
+        node.attributes["method"]
+        for node in refreshed_project_map.nodes
+        if node.side == "backend" and node.kind == "route"
     } == {"POST"}
 
 
@@ -529,10 +1268,11 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(tmp_path)
     captured = {}
 
-    def fake_observe(urls, *, screenshots_dir, timeout_ms):
+    def fake_observe(urls, *, screenshots_dir, timeout_ms, source_root):
         captured["urls"] = urls
         captured["screenshots_dir"] = screenshots_dir
         captured["timeout_ms"] = timeout_ms
+        captured["source_root"] = source_root
         return _runtime_observation()
 
     monkeypatch.setattr(map_command, "observe_frontend", fake_observe)
@@ -556,9 +1296,133 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     assert captured["urls"] == ["http://localhost:3000/dashboard?view=all"]
     assert captured["screenshots_dir"] == tmp_path / ".uidetox" / "runtime-screenshots"
     assert captured["timeout_ms"] == 2500
+    assert captured["source_root"] == tmp_path
     output = capsys.readouterr().out
     assert "Runtime     : 2 page/view(s) (desktop, mobile)" in output
     assert "Findings    : 2 rendered layout issue(s)" in output
+
+
+def test_runtime_diagnostics_project_to_typed_findings_and_queue_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    observation = _diagnostic_observation()
+    queued_findings = []
+    monkeypatch.setattr(
+        map_command,
+        "observe_frontend",
+        lambda _urls, **_options: observation,
+    )
+    monkeypatch.setattr(
+        map_command,
+        "add_issues",
+        lambda findings: queued_findings.extend(findings) or len(findings),
+    )
+    artifact = tmp_path / ".uidetox" / "frontend-map.json"
+
+    map_command.run(
+        Namespace(
+            target="src",
+            runtime=True,
+            urls=["http://localhost:3000/dashboard"],
+            screenshots=False,
+            timeout=2500,
+            output=str(artifact),
+            json=False,
+        )
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    expected = {
+        "browser-console-error",
+        "browser-page-error",
+        "browser-request-failed",
+        "browser-http-error",
+        "browser-action-failed",
+    }
+    runtime_findings = payload["evidence"]["runtime_findings"]
+    assert {finding["code"] for finding in runtime_findings} == expected
+    assert len(runtime_findings) == len(expected)
+    assert all(finding["provenance"] == "runtime" for finding in runtime_findings)
+    assert all(
+        finding["runtime_anchor"]["scenario"] == "diagnostics"
+        and finding["runtime_anchor"]["state"] == "error"
+        and finding["runtime_anchor"]["source"]
+        and finding["runtime_anchor"]["capture_id"] == "diagnostic-capture"
+        for finding in runtime_findings
+    )
+    queued_codes = [
+        finding.code for finding in queued_findings if finding.code in expected
+    ]
+    assert sorted(queued_codes) == sorted(expected)
+
+
+def test_map_command_persists_failed_runtime_artifact_before_signaling(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    diagnostic = RuntimeDiagnostic(
+        kind="action",
+        code="browser-action-failed",
+        message="selector unavailable",
+        severity="error",
+        scenario="failed",
+        state="initial",
+        url="http://localhost:3000/fail",
+        viewport=viewport.name,
+        source="scenario",
+    )
+    capture = _runtime_capture(
+        capture_id="failed-capture",
+        scenario="failed",
+        state="initial",
+        url=diagnostic.url,
+        viewport=viewport,
+        status="failed",
+        diagnostics=(diagnostic,),
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(diagnostic.url,),
+        pages=(),
+        errors=("navigation failed",),
+        captures=(capture,),
+    )
+    monkeypatch.setattr(
+        map_command,
+        "observe_frontend",
+        lambda _urls, **_options: observation,
+    )
+    artifact = tmp_path / ".uidetox" / "failed-map.json"
+
+    with pytest.raises(RuntimeError, match="Runtime observation failed"):
+        map_command.run(
+            Namespace(
+                target="src",
+                runtime=True,
+                urls=[diagnostic.url],
+                screenshots=False,
+                timeout=2500,
+                output=str(artifact),
+                json=False,
+            )
+        )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["evidence"]["runtime_status"] == "failed"
+    assert payload["evidence"]["runtime_errors"] == ["navigation failed"]
+    assert payload["evidence"]["runtime_capture_matrix"][0]["status"] == "failed"
+    assert payload["evidence"]["runtime_diagnostics"][0]["code"] == (
+        "browser-action-failed"
+    )
+    assert payload["evidence"]["runtime_findings"][0]["code"] == (
+        "browser-action-failed"
+    )
 
 
 def test_compare_and_prototype_commands_consume_redesign_artifact(
@@ -590,3 +1454,385 @@ def test_compare_and_prototype_commands_consume_redesign_artifact(
     assert prototype_artifact.exists()
     assert redesigns.proposals[0].name in prototype_artifact.read_text(encoding="utf-8")
     assert "Prototype brief created:" in capsys.readouterr().out
+
+
+def test_frontend_contract_lineage_uses_semantic_types_states_and_mutation(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        """
+import axios, { AxiosResponse } from "axios";
+import { useState } from "react";
+
+interface CreateUser {
+  email: string;
+  role?: "admin" | "member";
+}
+
+interface User {
+  id: string;
+  nickname: string | null;
+}
+
+export function App() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [empty, setEmpty] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  async function submit() {
+    await axios.post<User, AxiosResponse<User>, CreateUser>("/users");
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  }
+
+  return <button onClick={submit}>Create</button>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/users": {
+                        "post": {
+                            "requestBody": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "required": ["email"],
+                                            "properties": {
+                                                "email": {"type": "string"},
+                                                "role": {
+                                                    "type": "string",
+                                                    "enum": ["admin", "member"],
+                                                },
+                                            },
+                                        }
+                                    }
+                                }
+                            },
+                            "responses": {
+                                "200": {
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {
+                                                "type": "object",
+                                                "required": ["id", "nickname"],
+                                                "properties": {
+                                                    "id": {"type": "string"},
+                                                    "nickname": {
+                                                        "type": "string",
+                                                        "nullable": True,
+                                                    },
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path, "src")
+    project_map = frontend_map.project_map
+    client = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "client_operation"
+    )
+    request = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "request_schema" and node["side"] == "frontend"
+    )
+    response = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "response_schema" and node["side"] == "frontend"
+    )
+    email = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "schema_field"
+        and node["name"] == "email"
+        and any(
+            edge["source"] == request["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    nickname = next(
+        node
+        for node in project_map["nodes"]
+        if node["kind"] == "schema_field"
+        and node["name"] == "nickname"
+        and any(
+            edge["source"] == response["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    assert email["attributes"]["type"] == "string"
+    assert nickname["attributes"] == {
+        "nullable": True,
+        "required": True,
+        "type": "string",
+    }
+    ui_states = sorted(
+        node["name"]
+        for node in project_map["nodes"]
+        if node["kind"] == "ui_state"
+        and any(
+            edge["source"] == client["id"] and edge["target"] == node["id"]
+            for edge in project_map["edges"]
+        )
+    )
+    assert ui_states == [
+        "empty",
+        "error",
+        "loading",
+        "success",
+    ]
+    assert client["attributes"]["cache_invalidation"] == "present"
+    action = next(node for node in project_map["nodes"] if node["kind"] == "ui_action")
+    assert any(
+        edge["source"] == action["id"]
+        and edge["target"] == client["id"]
+        and edge["kind"] == "triggers"
+        for edge in project_map["edges"]
+    )
+
+
+def test_contract_lineage_does_not_cross_link_ambiguous_module_actions(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        """
+import axios from "axios";
+
+export function App() {
+  async function createUser() {
+    await axios.post("/users");
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  }
+  async function createTeam() {
+    await axios.post("/teams");
+  }
+  return (
+    <main>
+      <button onClick={createUser}>Create user</button>
+      <button onClick={createTeam}>Create team</button>
+    </main>
+  );
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    graph = map_frontend(tmp_path, "src").project_map
+    client_ids = {
+        node["id"] for node in graph["nodes"] if node["kind"] == "client_operation"
+    }
+    action_ids = {
+        node["id"] for node in graph["nodes"] if node["kind"] == "ui_action"
+    }
+
+    assert len(client_ids) == 2
+    assert not any(
+        edge["source"] in action_ids
+        and edge["target"] in client_ids
+        and edge["kind"] == "triggers"
+        for edge in graph["edges"]
+    )
+
+
+def _write_ui_contract_fixture(root: Path, source: str) -> ProjectMap:
+    src = root / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(source.strip(), encoding="utf-8")
+    (root / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/users": {
+                        "get": {
+                            "responses": {
+                                "200": {
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": {"type": "string"}
+                                                },
+                                                "required": ["id"],
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return ProjectMap.from_dict(map_frontend(root, "src").project_map)
+
+
+def test_production_ui_call_links_each_owned_lifecycle_state(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+import { useState } from "react";
+
+interface User { id: string }
+
+export function App() {
+  const [loading] = useState(false);
+  const [error] = useState(false);
+  const [empty] = useState(false);
+  const [success] = useState(false);
+  axios.get<User>("/users");
+  return <button onClick={() => undefined}>Load</button>;
+}
+""",
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+    nodes = {node.id: node for node in graph.nodes}
+    states = {
+        nodes[edge.target].name
+        for edge in graph.edges
+        if edge.source == operation.id and edge.kind == "renders_state"
+    }
+
+    assert operation.attributes["ui_required"] is True
+    assert states == {"loading", "error", "empty", "success"}
+    assert not any(
+        finding.detector_id.startswith("contract-ui-state")
+        for finding in graph.findings
+    )
+
+
+def test_production_ui_call_without_lifecycle_states_is_not_clean(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+
+interface User { id: string }
+
+export function App() {
+  axios.get<User>("/users");
+  return <main>Users</main>;
+}
+""",
+    )
+
+    assert any(
+        finding.detector_id == "contract-ui-state-missing"
+        for finding in graph.findings
+    )
+
+
+def test_production_multi_call_ui_owner_preserves_lifecycle_ambiguity(
+    tmp_path,
+) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+import { useState } from "react";
+
+interface User { id: string }
+
+export function App() {
+  const [loading] = useState(false);
+  axios.get<User>("/users");
+  axios.get<User>("/teams");
+  return <main>{loading ? "Loading" : "Ready"}</main>;
+}
+""",
+    )
+    operations = [node for node in graph.nodes if node.kind == "client_operation"]
+
+    assert len(operations) == 2
+    assert not any(
+        edge.source in {operation.id for operation in operations}
+        and edge.kind == "renders_state"
+        for edge in graph.edges
+    )
+    assert any(
+        finding.detector_id == "contract-ui-state-evidence-unknown"
+        for finding in graph.findings
+    )
+
+
+def test_lifecycle_states_remain_scoped_to_each_ui_owner(tmp_path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        """
+import axios from "axios";
+import { useState } from "react";
+
+export function Users() {
+  const [loading] = useState(false);
+  axios.get("/users");
+  return <main>{loading ? "Loading" : "Users"}</main>;
+}
+
+export function Teams() {
+  const [loading] = useState(false);
+  axios.get("/teams");
+  return <main>{loading ? "Loading" : "Teams"}</main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+    nodes = {node.id: node for node in graph.nodes}
+    operations = {
+        node.attributes["path"]: node
+        for node in graph.nodes
+        if node.kind == "client_operation"
+    }
+
+    assert set(operations) == {"/users", "/teams"}
+    for operation in operations.values():
+        assert {
+            nodes[edge.target].name
+            for edge in graph.edges
+            if edge.source == operation.id and edge.kind == "renders_state"
+        } == {"loading"}
+
+
+def test_production_low_level_client_does_not_require_ui_lifecycle(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+
+interface User { id: string }
+
+export function loadUsers() {
+  return axios.get<User>("/users");
+}
+""",
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+
+    assert operation.attributes["ui_required"] is False
+    assert not any(
+        finding.detector_id.startswith("contract-ui-state")
+        for finding in graph.findings
+    )

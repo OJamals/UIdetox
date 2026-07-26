@@ -165,7 +165,9 @@ RULES:
 ```bash
 uidetox loop --execute
 uidetox loop --execute --proposal-id REDESIGN-01-task-flow
-uidetox loop --execute --proposal-id REDESIGN-01-task-flow --review-score 97
+uidetox review --dimension-a 38 --dimension-b 28 --dimension-c 18 --dimension-d 9 \
+  --rationale "Reviewed mapped routes and states" --reviewer "design-reviewer"
+uidetox loop --execute --proposal-id REDESIGN-01-task-flow
 ```
 
 Execution never invokes an external agent CLI and never chooses a redesign proposal automatically. It stops explicitly when source fixes need an agent, proposal selection is missing, subjective scoring needs human/LLM input, or verification evidence is stale/blocked. Completed fresh phases are skipped on resume; source or input changes invalidate only dependent downstream phases. Failures are recorded once and retried only on a later invocation. Passing the score, queue, and freshness gates marks `uidetox finish` as eligible—it does not run finalization automatically.

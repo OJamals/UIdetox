@@ -24,7 +24,7 @@ from uidetox.workflow import (
 
 
 def _issue_ids(issues: list[dict]) -> set[str]:
-    return {str(issue["id"]) for issue in issues}
+    return {str(issue.get("detector_id", issue["id"])) for issue in issues}
 
 
 def _write_full_stack_demo(tmp_path) -> None:
@@ -196,14 +196,21 @@ def test_scoped_frontend_map_reconciles_against_project_wide_backend(
     frontend_map = map_frontend(tmp_path, "frontend")
     project_map = ProjectMap.from_dict(frontend_map.project_map)
 
-    assert len(project_map.frontend_operations) == 2
-    assert len(project_map.backend_operations) == 2
-    assert project_map.counts == {
-        "frontend_only": 0,
-        "backend_only": 0,
-        "method_mismatch": 0,
-        "unresolved": 0,
-    }
+    assert (
+        sum(
+            node.side == "frontend" and node.kind == "client_operation"
+            for node in project_map.nodes
+        )
+        == 2
+    )
+    assert (
+        sum(
+            node.side == "backend" and node.kind == "route"
+            for node in project_map.nodes
+        )
+        == 2
+    )
+    assert project_map.counts == {"contract_mismatch": 0, "coverage_gap": 2}
 
 
 def test_scoped_scan_reconciles_against_project_wide_backend(
@@ -232,14 +239,13 @@ def test_scoped_scan_reconciles_against_project_wide_backend(
     scan_command.run(Namespace(path="frontend", since=None, output="table"))
 
     output = capsys.readouterr().out
-    parity_line = next(
+    contract_line = next(
         line.strip()
         for line in output.splitlines()
-        if "Full-stack operation parity:" in line
+        if "Full-stack contract lineage:" in line
     )
-    assert parity_line == (
-        "Full-stack operation parity: frontend-only=0, backend-only=0, "
-        "method-mismatch=0, unresolved=0."
+    assert contract_line.startswith(
+        "Full-stack contract lineage: mismatches=0, coverage-gaps=2, "
     )
 
 
@@ -280,7 +286,9 @@ def test_fresh_scoped_scan_detects_tooling_from_project_root(
 
     output = capsys.readouterr().out
     assert detected_paths == [tmp_path.resolve()]
-    assert "Full-stack operation parity: frontend-only=0, backend-only=0" in output
+    assert (
+        "Full-stack contract lineage: mismatches=0, coverage-gaps=2" in output
+    )
 
 
 def test_html_asset_dependencies_reach_redesign_source_targets(tmp_path) -> None:
@@ -335,7 +343,7 @@ def test_workflow_semantic_map_preserves_scoped_runtime_map(tmp_path) -> None:
         adapter="semantic_map",
         dependencies=(),
         input_keys=(),
-        artifact_kinds=("frontend_map", "project_map"),
+        artifact_kinds=("frontend_map", "contract_graph"),
     )
     context = WorkflowContext(
         root=tmp_path,

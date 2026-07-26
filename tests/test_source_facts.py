@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -10,9 +10,18 @@ import pytest
 from uidetox.analyzer import analyze_file
 from uidetox.analyzer_ast import _analyze_ast
 from uidetox.frontend_semantics import extract_script_semantics
+from uidetox.semantic_adapters import (
+    AdapterCapability,
+    ApplicationSemantics,
+    ModuleSemantics,
+    SourceDocument,
+    build_application_semantics,
+)
 from uidetox.source_facts import (
     EndpointFact,
     ImportAlias,
+    SelectorFact,
+    SourceFacts,
     SourceOccurrence,
     extract_source_facts,
     get_parser,
@@ -67,6 +76,36 @@ createBrowserRouter(routes);
     assert facts.extractor == "tree-sitter"
     assert facts.confidence == 1.0
     assert facts.parse_errors is False
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "export default function () { return <button>Hi</button>; }",
+        "export default class extends React.Component { render() { return <main />; } }",
+        "export default () => <section />;",
+    ],
+)
+def test_source_facts_name_anonymous_default_components_from_module(source):
+    facts = extract_source_facts(Path("my-widget.tsx"), source)
+
+    assert facts is not None
+    assert any(
+        item.exported == "default" and item.local == "MyWidget"
+        for item in facts.exports
+    )
+    assert SourceOccurrence("MyWidget", 1) in facts.declared_ui_modules
+
+
+def test_source_facts_do_not_name_anonymous_non_ui_defaults():
+    facts = extract_source_facts(
+        Path("plain.ts"),
+        "export default function () { return 42; }",
+    )
+
+    assert facts is not None
+    assert facts.declared_ui_modules == ()
+    assert all(item.local != "Plain" for item in facts.exports)
 
 
 def test_source_facts_extract_local_fetch_wrapper_calls_without_probe_duplicates():
@@ -131,15 +170,52 @@ def test_fullstack_fixture_client_is_canonical_operation_evidence():
     assert facts is not None
     assert len(facts.endpoints) == 28
     assert all(endpoint.method is not None for endpoint in facts.endpoints)
-    assert EndpointFact(
-        "/api/projects/${projectId}", 70, "GET", True
-    ) in facts.endpoints
-    assert EndpointFact(
-        "/api/governance/approvals/${approvalId}/decision",
-        132,
-        "POST",
-        True,
-    ) in facts.endpoints
+    assert (
+        EndpointFact("/api/projects/${projectId}", 70, "GET", True) in facts.endpoints
+    )
+    assert (
+        EndpointFact(
+            "/api/governance/approvals/${approvalId}/decision",
+            132,
+            "POST",
+            True,
+        )
+        in facts.endpoints
+    )
+    assert "api.getProjects" in {item.name for item in facts.callables}
+    assert any(
+        call.target == "request"
+        and call.owner == "api.getProjects"
+        and call.arguments[0] == '"/api/projects"'
+        for call in facts.calls
+    )
+
+
+def test_fullstack_fixture_source_anchors_stay_within_file_bounds():
+    contracts = (
+        Path(__file__).parents[1]
+        / "examples"
+        / "fullstack-slop-lab"
+        / "frontend"
+        / "src"
+        / "api"
+        / "contracts.ts"
+    )
+    content = contracts.read_text(encoding="utf-8")
+    facts = extract_source_facts(contracts, content)
+
+    assert facts is not None
+    source_line_count = len(content.splitlines())
+    anchors = (
+        *(item.line for item in facts.calls),
+        *(item.line for item in facts.callables),
+        *(item.line for item in facts.declared_ui_modules),
+        *(item.line for item in facts.endpoints),
+        *(item.line for item in facts.regions),
+        *(item.line for item in facts.selectors),
+    )
+    assert anchors
+    assert all(1 <= line <= source_line_count for line in anchors)
 
 
 def test_source_facts_report_semantic_parse_errors_without_leaking_tree_nodes():
@@ -202,9 +278,13 @@ def test_analyzer_and_semantic_consumers_reuse_one_source_fact_parse(tmp_path):
     assert semantics is not None
     assert semantics.components[0].name == "Shell"
     assert [issue["id"] for issue in ast_issues] == ["ANIMATE_STATE_SLOP"]
-    assert ast_issues == [
-        issue for issue in file_issues if issue["id"] == "ANIMATE_STATE_SLOP"
-    ]
+    canonical = next(
+        issue
+        for issue in file_issues
+        if issue["detector_id"] == "ANIMATE_STATE_SLOP"
+    )
+    assert ast_issues[0]["issue"] == canonical["issue"]
+    assert ast_issues[0]["file"] == canonical["file"]
     assert parse_calls == 1
 
 
@@ -228,3 +308,279 @@ def test_semantic_consumer_does_not_retry_a_failed_shared_parse():
     assert facts is None
     assert extract_script_semantics(path, content, facts=facts) is None
     assert parse_calls == 1
+
+
+def test_application_semantics_resolve_reexported_http_wrappers(tmp_path):
+    sources = {
+        "api.ts": """
+import axios from "axios";
+const client = axios.create();
+export const request = (path: string) => client.get(path);
+""".strip(),
+        "barrel.ts": 'export { request as fetchItems } from "./api";',
+        "wildcard.ts": 'export * from "./api";',
+        "App.tsx": """
+import { fetchItems } from "./barrel";
+import { request as wildcardRequest } from "./wildcard";
+import { useQuery } from "@tanstack/react-query";
+export function App() {
+  useQuery({ queryKey: ["items"], queryFn: () => fetchItems("/api/items") });
+  wildcardRequest("/api/wildcard");
+  return <main />;
+}
+""".strip(),
+    }
+    documents = []
+    for relative_path, content in sources.items():
+        path = tmp_path / relative_path
+        path.write_text(content, encoding="utf-8")
+        documents.append(SourceDocument(path, relative_path, content))
+
+    application = build_application_semantics(tmp_path, tmp_path, documents)
+    app = application.module("App.tsx")
+
+    assert app is not None
+    assert any(
+        call.target == "fetchItems"
+        and call.client_family == "axios"
+        and call.method == "GET"
+        and call.url == "/api/items"
+        and call.resolution == "resolved"
+        for call in app.facts.network_calls
+    )
+    assert any(
+        call.target == "useQuery"
+        and call.client_family == "tanstack-query"
+        and call.url is None
+        and call.unresolved_evidence
+        for call in app.facts.network_calls
+    )
+    assert any(
+        call.target == "wildcardRequest"
+        and call.client_family == "axios"
+        and call.url == "/api/wildcard"
+        and call.resolution == "resolved"
+        for call in app.facts.network_calls
+    )
+
+
+def test_network_type_references_survive_reexported_wrapper_resolution(tmp_path):
+    sources = {
+        "api.ts": """
+import axios, { type AxiosResponse } from "axios";
+const client = axios.create();
+export function save<TRequest, TResponse>(path: string, body: TRequest) {
+  return client.post<TResponse, AxiosResponse<TResponse>, TRequest>(path, body);
+}
+""".strip(),
+        "barrel.ts": 'export { save as saveItem } from "./api";',
+        "App.tsx": """
+import { useMutation } from "@tanstack/react-query";
+import { useQuery as useApolloQuery } from "@apollo/client";
+import { saveItem } from "./barrel";
+declare const payload: SaveItemRequest;
+export function App() {
+  saveItem<SaveItemRequest, SaveItemResponse>("/api/items", payload);
+  useMutation<SaveItemResponse, Error, SaveItemRequest>({ mutationFn: saveItem });
+  useApolloQuery<ItemsResponse, ItemsVariables>(GET_ITEMS);
+  return <main />;
+}
+""".strip(),
+    }
+    documents = []
+    for relative_path, content in sources.items():
+        path = tmp_path / relative_path
+        path.write_text(content, encoding="utf-8")
+        documents.append(SourceDocument(path, relative_path, content))
+
+    application = build_application_semantics(tmp_path, tmp_path, documents)
+    app = application.module("App.tsx")
+
+    assert app is not None
+    calls = {call.target: call for call in app.facts.network_calls}
+    assert calls["saveItem"].request_type_refs == ("SaveItemRequest",)
+    assert calls["saveItem"].response_type_refs == ("SaveItemResponse",)
+    assert calls["useMutation"].request_type_refs == ("SaveItemRequest",)
+    assert calls["useMutation"].response_type_refs == ("SaveItemResponse",)
+    assert calls["useApolloQuery"].request_type_refs == ("ItemsVariables",)
+    assert calls["useApolloQuery"].response_type_refs == ("ItemsResponse",)
+
+
+def test_application_semantics_resolve_exported_client_object_methods(tmp_path):
+    sources = {
+        "api.ts": """
+import axios from "axios";
+const client = axios.create();
+export const api = {
+  list: () => client.get("/api/items"),
+  update: (id: string) => client.patch(`/api/items/${id}`),
+};
+""".strip(),
+        "App.tsx": """
+import { api } from "./api";
+export function App({ id }: { id: string }) {
+  api.list();
+  api.update(id);
+  return <main />;
+}
+""".strip(),
+    }
+    documents = []
+    for relative_path, content in sources.items():
+        path = tmp_path / relative_path
+        path.write_text(content, encoding="utf-8")
+        documents.append(SourceDocument(path, relative_path, content))
+
+    application = build_application_semantics(tmp_path, tmp_path, documents)
+    app = application.module("App.tsx")
+
+    assert app is not None
+    calls = {call.target: call for call in app.facts.network_calls}
+    assert calls["api.list"].client_family == "axios"
+    assert calls["api.list"].method == "GET"
+    assert calls["api.list"].url == "/api/items"
+    assert calls["api.list"].dynamic is False
+    assert calls["api.list"].resolution == "resolved"
+    assert calls["api.update"].client_family == "axios"
+    assert calls["api.update"].method == "PATCH"
+    assert calls["api.update"].url == "/api/items/${id}"
+    assert calls["api.update"].dynamic is True
+    assert calls["api.update"].resolution == "resolved"
+
+
+def test_application_semantics_bound_cyclic_reexports(tmp_path):
+    sources = {
+        "a.ts": 'export { request } from "./b";',
+        "b.ts": 'export { request } from "./a";',
+        "App.tsx": """
+import { request } from "./a";
+export function App() {
+  request("/api/items");
+  return <main />;
+}
+""".strip(),
+    }
+    documents = []
+    for relative_path, content in sources.items():
+        path = tmp_path / relative_path
+        path.write_text(content, encoding="utf-8")
+        documents.append(SourceDocument(path, relative_path, content))
+
+    first = build_application_semantics(tmp_path, tmp_path, documents)
+    second = build_application_semantics(tmp_path, tmp_path, reversed(documents))
+    call = next(
+        item
+        for item in first.module("App.tsx").facts.network_calls
+        if item.target == "request"
+    )
+
+    assert call.resolution == "unresolved"
+    assert "unresolved import chain" in call.unresolved_evidence
+    assert first.resolution_issues == second.resolution_issues
+
+
+def test_application_semantics_preindexes_scale_sensitive_lookups(tmp_path):
+    capability = AdapterCapability("native", "test fixture", 1.0, "test")
+    modules = tuple(
+        ModuleSemantics(
+            relative_path=f"Component{index}.tsx",
+            framework="react",
+            capability=capability,
+            facts=SourceFacts(
+                path=tmp_path / f"Component{index}.tsx",
+                extension=".tsx",
+                selectors=(
+                    SelectorFact(
+                        f'[data-testid="component-{index}"]',
+                        1,
+                        "exact",
+                    ),
+                ),
+            ),
+        )
+        for index in range(96)
+    )
+    application = ApplicationSemantics(tmp_path, tmp_path, modules)
+    last = application.module("Component95.tsx")
+    assert last is not None
+    rebuilt = replace(application, modules=(last,))
+    assert rebuilt.module("Component95.tsx") is last
+    assert rebuilt.module("Component0.tsx") is None
+    assert rebuilt.source_ownership(
+        selector='[data-testid="component-95"]',
+        tag="section",
+    ).source_targets == ("Component95.tsx",)
+
+    class IterationGuard(tuple):
+        def __iter__(self):
+            raise AssertionError("lookup scanned application.modules")
+
+    object.__setattr__(application, "modules", IterationGuard(application.modules))
+    assert application.module("Component95.tsx") is not None
+    assert application.source_ownership(
+        selector='[data-testid="component-95"]',
+        tag="section",
+    ).source_targets == ("Component95.tsx",)
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "framework"),
+    [
+        (
+            "Panel.vue",
+            """
+<script setup lang="ts">
+import { ref } from "vue";
+const open = ref(false);
+</script>
+<template><section data-testid="panel"><button @click="open = true">Open</button></section></template>
+""".strip(),
+            "vue",
+        ),
+        (
+            "Panel.svelte",
+            """
+<script lang="ts">let open = false;</script>
+<section data-testid="panel"><button on:click={() => open = true}>Open</button></section>
+""".strip(),
+            "svelte",
+        ),
+        (
+            "Panel.astro",
+            """
+---
+const open = false;
+---
+<section data-testid="panel"><button>Open</button></section>
+""".strip(),
+            "astro",
+        ),
+    ],
+)
+def test_framework_adapters_report_degraded_capability_truth(
+    tmp_path, filename, content, framework
+):
+    path = tmp_path / filename
+    path.write_text(content, encoding="utf-8")
+
+    application = build_application_semantics(
+        tmp_path,
+        tmp_path,
+        [SourceDocument(path, filename, content)],
+    )
+    module = application.module(filename)
+
+    assert module is not None
+    assert module.framework == framework
+    assert module.capability.status == "degraded"
+    assert module.capability.reason
+    assert module.capability.confidence < 1.0
+    assert {region.name for region in module.facts.regions} == {"section"}
+    assert {action.name for action in module.facts.actions} >= (
+        {"Click"} if framework != "astro" else set()
+    )
+    if framework in {"vue", "svelte"}:
+        assert {state.name for state in module.facts.states} == {"open"}
+    assert '[data-testid="panel"]' in {
+        selector.selector for selector in module.facts.selectors
+    }

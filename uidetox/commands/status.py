@@ -1,415 +1,99 @@
-"""Status command: project health dashboard with smart scoring and velocity tracking."""
+"""Project health and canonical finalization eligibility."""
 
 import argparse
 import json
-import sys
-from uidetox.state import load_state, load_config
-from uidetox.utils import compute_design_score
-from uidetox.memory import get_session
+import subprocess
+
+from uidetox.findings import (
+    EligibilityContext,
+    current_evidence_hashes,
+    current_verification_fresh,
+    evaluate_eligibility,
+)
+from uidetox.state import load_config, load_state
 from uidetox.visual_semantics import project_visual_evidence_status
 
 
-# Recommended fix order hints per category
-_CATEGORY_HINTS = {
-    "typography": "Start here — font swap is the biggest instant improvement, lowest risk.",
-    "color": "Clean up palette — remove AI purple-blue gradients and pure black.",
-    "motion": "Add hover/active states — makes the interface feel alive.",
-    "layout": "Fix grids and spacing — proper max-width, asymmetric layouts.",
-    "materiality": "Replace glassmorphism and oversized shadows with solid surfaces.",
-    "states": "Add loading/error/empty states — makes it feel finished.",
-    "a11y": "Add focus indicators and ARIA labels — accessibility requirement.",
-    "duplication": "Extract repeated code into shared components or utility functions.",
-    "dead code": "Remove commented-out code, unused imports, and no-op handlers.",
-    "content": "Replace generic AI copy and placeholder names with real content.",
-    "code quality": "Fix lint suppressions, type safety issues, and semantic HTML.",
-    "components": "Replace generic icon/badge/dashboard patterns with intentional design.",
-}
+def _git_context() -> tuple[str, bool]:
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
+        return branch, dirty
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return "", True
 
 
-def run(args: argparse.Namespace):
-    state = load_state()
-    config = load_config()
-    visual_status = project_visual_evidence_status(
+def eligibility_status(
+    state: dict,
+    config: dict,
+    *,
+    visual_ready: bool = True,
+) -> dict:
+    branch, dirty = _git_context()
+    evidence_hashes = current_evidence_hashes()
+    context = EligibilityContext(
+        target_score=int(config.get("target_score", 95)),
+        current_branch=branch,
+        session_branch=(branch if branch.startswith("uidetox-session-") else "uidetox-session-*"),
+        dirty=dirty,
+        verification_fresh=current_verification_fresh() and visual_ready,
+        require_session_branch=True,
+        evidence_hashes=evidence_hashes,
+    )
+    return evaluate_eligibility(state, context).to_dict()
+
+
+def run(args: argparse.Namespace) -> None:
+    state, config = load_state(), load_config()
+    visual = project_visual_evidence_status(
         config,
         required=(True if getattr(args, "require_visual_evidence", False) else None),
         manifest_path=getattr(args, "visual_evidence_file", None),
     )
-    issues = state.get("issues", [])
-    resolved = state.get("resolved", [])
-    stats = state.get("stats", {})
-    scans_run = stats.get("scans_run", 0)
-
-    # Tier breakdown
-    tiers = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
-    for issue in issues:
-        tier = issue.get("tier", "T4")
-        if tier in tiers:
-            tiers[tier] += 1
-
-    # Category breakdown (infer from issue descriptions)
-    categories: dict[str, dict] = {
-        "typography": {
-            "keywords": [
-                "font",
-                "typography",
-                "inter",
-                "roboto",
-                "type scale",
-                "line-height",
-                "px font",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "color": {
-            "keywords": [
-                "color",
-                "gradient",
-                "palette",
-                "contrast",
-                "dark mode",
-                "purple",
-                "blue",
-                "black",
-                "hex color",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "layout": {
-            "keywords": [
-                "layout",
-                "grid",
-                "spacing",
-                "padding",
-                "margin",
-                "dashboard",
-                "card",
-                "center",
-                "viewport",
-                "h-screen",
-                "flex center",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "motion": {
-            "keywords": [
-                "animation",
-                "bounce",
-                "pulse",
-                "spin",
-                "transition",
-                "motion",
-                "hover",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "states": {
-            "keywords": [
-                "loading",
-                "error",
-                "empty",
-                "skeleton",
-                "disabled",
-                "hover state",
-                "focus",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "a11y": {
-            "keywords": [
-                "accessibility",
-                "a11y",
-                "aria",
-                "alt text",
-                "focus",
-                "contrast ratio",
-                "skip-to-content",
-                "htmlFor",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "materiality": {
-            "keywords": [
-                "shadow",
-                "glassmorphism",
-                "radius",
-                "border",
-                "backdrop",
-                "blur",
-                "glow",
-                "opacity",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "content": {
-            "keywords": [
-                "copy",
-                "lorem",
-                "generic",
-                "placeholder",
-                "cliche",
-                "john doe",
-                "acme",
-                "emoji",
-                "oops",
-                "exclamation",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "code quality": {
-            "keywords": [
-                "div soup",
-                "semantic",
-                "z-index",
-                "inline style",
-                "import",
-                "console",
-                "todo",
-                "fixme",
-                "!important",
-                "ternary",
-                "any type",
-                "ts-ignore",
-                "eslint-disable",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "duplication": {
-            "keywords": [
-                "duplicate",
-                "repeated",
-                "copy-paste",
-                "identical",
-                "same hex",
-                "same className",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-        "dead code": {
-            "keywords": [
-                "commented-out",
-                "unused import",
-                "unreachable",
-                "empty handler",
-                "empty css",
-                "unused state",
-                "deprecated",
-                "dead code",
-                "no-op",
-            ],
-            "pending": 0,
-            "resolved": 0,
-        },
-    }
-    for issue in issues:
-        desc = issue.get("issue", "").lower()
-        for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["pending"] += 1
-                break
-    for issue in resolved:
-        desc = issue.get("issue", "").lower()
-        for cat_name, cat in categories.items():
-            if any(kw in desc for kw in cat["keywords"]):
-                cat["resolved"] += 1
-                break
-
-    # Centralized scoring
-    scores = compute_design_score(state)
-    score = scores["blended_score"]
-    objective_score = scores["objective_score"]
-    subjective_score = scores["subjective_score"]
-
-    use_json = getattr(args, "json", False)
-    total_resolved = len(resolved)
-    total_found = stats.get("total_found", len(issues) + total_resolved)
-
-    if use_json:
-        payload = {
-            "design_score": score,
-            "objective_score": objective_score,
-            "subjective_score": subjective_score,
-            "total_issues": len(issues),
-            "total_resolved": total_resolved,
-            "total_found": total_found,
-            "resolution_rate": f"{(total_resolved / total_found * 100) if total_found else 0:.0f}%",
-            "tiers": tiers,
-            "scans_run": scans_run,
-            "last_scan": state.get("last_scan"),
-            "visual_evidence": visual_status.to_dict(),
-        }
-        print(json.dumps(payload, indent=2))
-        if visual_status.required and not visual_status.ready:
-            sys.exit(1)
-        return
-
-    print("╔══════════════════════════════╗")
-    print("║   UIdetox Health Dashboard   ║")
-    print("╚══════════════════════════════╝")
-
-    # Score bar
-    filled = score // 5
-    bar = "█" * filled + "░" * (20 - filled)
-    print(f"\n  Design Score : [{bar}] {score}/100")
-    if subjective_score is not None:
-        print(f"    Objective  : {objective_score}/100  (static analysis — 60% weight)")
-        print(f"    Subjective : {subjective_score}/100  (LLM review — 40% weight)")
-    elif scans_run == 0 and scores["total_slop"] == 0:
-        print("  (Baseline — run 'uidetox scan' for an accurate score)")
-    else:
-        print("    Objective only — run 'uidetox review' for LLM subjective score")
-    print()
-
-    # Issue summary
-    print(f"  Pending Issues  : {len(issues)}")
-    print(f"  Resolved Issues : {total_resolved}")
-    if total_found:
-        rate = total_resolved / total_found * 100
-        print(f"  Resolution Rate : {rate:.0f}%")
-    print(f"  Scans Run       : {scans_run}")
-    print()
-
-    # Tier breakdown
-    print(f"  T1 Quick Fix         : {tiers['T1']}")
-    print(f"  T2 Targeted Refactor : {tiers['T2']}")
-    print(f"  T3 Design Judgment   : {tiers['T3']}")
-    print(f"  T4 Major Redesign    : {tiers['T4']}")
-    print()
-
-    # Design dials
-    print(f"  DESIGN_VARIANCE  : {config.get('DESIGN_VARIANCE', 8)}")
-    print(f"  MOTION_INTENSITY : {config.get('MOTION_INTENSITY', 6)}")
-    print(f"  VISUAL_DENSITY   : {config.get('VISUAL_DENSITY', 4)}")
-    auto_commit = config.get("auto_commit", False)
-    print(f"  AUTO_COMMIT      : {'enabled' if auto_commit else 'disabled'}")
-    print(
-        "  VISUAL_EVIDENCE  : "
-        f"{visual_status.state}"
-        f"{' (required)' if visual_status.required else ' (optional)'}"
+    eligibility = eligibility_status(
+        state,
+        config,
+        visual_ready=not visual.required or visual.ready,
     )
-    for reason in visual_status.reasons:
-        print(f"    - {reason}")
-    if visual_status.incomplete_viewports:
-        print("    incomplete: " + ", ".join(visual_status.incomplete_viewports))
-    generated_artifacts = [
-        artifact
-        for artifact in visual_status.reviewer_artifacts
-        if artifact.get("status") == "generated"
-        and artifact.get("kind") != "amplified_diff"
-    ]
-    omitted_artifacts = [
-        artifact
-        for artifact in visual_status.reviewer_artifacts
-        if artifact.get("status") == "omitted"
-    ]
-    if generated_artifacts or omitted_artifacts:
-        print(
-            "    reviewer artifacts: "
-            f"{len(generated_artifacts)} generated, "
-            f"{len(omitted_artifacts)} omitted"
-        )
-    for region in visual_status.top_changed_regions[:3]:
-        print(
-            "    changed region: "
-            f"{region.get('case_id')}/{region.get('region_id')} "
-            f"({region.get('pixels_changed', 0)} px)"
-        )
-    for warning in visual_status.warnings:
-        print(f"    warning: {warning}")
-
-    # ---- Velocity & Progression ----
-    subjective_history = state.get("subjective", {}).get("history", [])
-    if scans_run > 1 or total_resolved > 0:
-        print()
-        print("  ─── Velocity & Progression ───")
-        if total_found > 0:
-            print(
-                f"  Fix rate        : {total_resolved}/{total_found} ({(total_resolved / total_found * 100):.0f}%)"
-            )
-        if scans_run > 0:
-            avg_per_scan = total_found / scans_run if total_found > 0 else 0
-            print(f"  Avg issues/scan : {avg_per_scan:.1f}")
-        if total_resolved > 0 and scans_run > 0:
-            velocity = total_resolved / scans_run
-            print(f"  Fix velocity    : {velocity:.1f} resolved/scan")
-
-        # Subjective score progression
-        if len(subjective_history) > 1:
-            scores_list = [h["score"] for h in subjective_history]
-            trend = scores_list[-1] - scores_list[0]
-            trend_arrow = "↑" if trend > 0 else ("↓" if trend < 0 else "→")
-            print(
-                f"  Subjective trend: {scores_list[0]} → {scores_list[-1]} ({trend_arrow}{abs(trend)}pts over {len(scores_list)} reviews)"
-            )
-
-    # Session context
-    session = get_session()
-    if session:
-        phase = session.get("phase", "unknown")
-        fixed = session.get("issues_fixed_this_session", 0)
-        last_component = session.get("last_component", "")
-        session_parts = []
-        session_parts.append(f"phase={phase}")
-        if fixed > 0:
-            session_parts.append(f"fixed={fixed}")
-        if last_component:
-            session_parts.append(f"last={last_component}")
-        print(f"  Session         : {', '.join(session_parts)}")
-
-    # Category breakdown with actionable hints
-    active_cats = {
-        k: v for k, v in categories.items() if v["pending"] > 0 or v["resolved"] > 0
+    scores = eligibility["score"]
+    issues, resolved = state.get("issues", []), state.get("resolved", [])
+    stats = state.get("stats", {})
+    payload = {
+        "design_score": scores["blended_score"],
+        "objective_score": scores["objective_score"],
+        "subjective_score": scores["subjective_score"],
+        "qualified_coverage": scores["qualified_coverage"],
+        "total_issues": len(issues),
+        "total_resolved": len(resolved),
+        "total_found": stats.get("total_found", len(issues) + len(resolved)),
+        "scans_run": stats.get("scans_run", 0),
+        "last_scan": state.get("last_scan"),
+        "eligibility": eligibility,
+        "visual_evidence": visual.to_dict(),
     }
-    if active_cats:
-        print()
-        print("  ─── Category Breakdown ───")
-        for cat_name, cat in active_cats.items():
-            pending_val = cat["pending"]
-            resolved_val = cat["resolved"]
-            total_cat = pending_val + resolved_val
-            if total_cat > 0:
-                cat_score = int((resolved_val / total_cat) * 100)
-                cat_bar = "█" * (cat_score // 10) + "░" * (10 - cat_score // 10)
-                print(
-                    f"  {cat_name:<14} [{cat_bar}] {cat_score}%  ({pending_val} pending, {resolved_val} resolved)"
-                )
-                # Show hint for worst-performing categories
-                if cat_score == 0 and cat_name in _CATEGORY_HINTS:
-                    print(f"                 ^ {_CATEGORY_HINTS[cat_name]}")
-
-    # Verdict
-    if score >= 95 and len(issues) == 0:
-        print("\n  EXCELLENT — Interface is clean of AI slop. Queue is empty.")
-    elif score >= 95:
-        print("\n  Score is high, but some issues remain in the queue.")
-    elif score >= 80:
-        print("\n  Good progress. A few issues remain — keep pushing.")
-    elif score >= 50:
-        print("\n  Moderate slop detected. Focus on T1 and T2 first.")
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2))
     else:
-        print("\n  Heavy slop detected. Run 'uidetox loop' and go.")
-
-    # Agent loop control signal
-    print("\n[AGENT LOOP SIGNAL]")
-    if score >= 95 and len(issues) == 0:
-        print("TARGET REACHED. You may exit the loop.")
-    elif len(issues) == 0:
-        print(
-            f"Queue is empty but score is {score}. Run 'uidetox review' to update subjective score, or use design skills (e.g., 'uidetox polish <target>') to improve the design."
-        )
-    else:
-        print(
-            f"Score is {score}, {len(issues)} issue(s) remain. Run 'uidetox next' to continue."
-        )
-
-    if visual_status.required and not visual_status.ready:
-        sys.exit(1)
+        print("UIdetox health")
+        print(f"  Design score : {scores['blended_score']}/100")
+        print(f"  Coverage     : {scores['qualified_coverage']:.0%}")
+        print(f"  Pending      : {len(issues)}")
+        print(f"  Resolved     : {len(resolved)}")
+        print(f"  Visual       : {visual.state}")
+        print(f"  Finalizable  : {'yes' if eligibility['eligible'] else 'no'}")
+        for blocker in eligibility["blockers"]:
+            print(f"    - {blocker['code']}: {blocker['message']}")
+    if visual.required and not visual.ready:
+        raise SystemExit(1)

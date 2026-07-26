@@ -27,10 +27,10 @@ baseline counts. The baseline included:
 - approval and journey contracts split across incompatible route vocabularies and DTOs
 - fixed-width governance queues and journey canvases that clip on narrow screens
 
-The remediated target is zero operation-parity findings and zero deterministic analyzer
+The remediated target is explicit typed contract findings and zero deterministic analyzer
 findings while every route and backed action remains functional. The generic runtime API
 wrapper is the canonical transport boundary. UIdetox resolves its literal call sites
-through the local wrapper into concrete method/path operations, so parity evidence comes
+through the local wrapper into typed client operations, so contract-lineage evidence comes
 from executable application code rather than a duplicate probe manifest.
 
 ## Intent and provenance

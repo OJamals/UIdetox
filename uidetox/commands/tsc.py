@@ -1,27 +1,19 @@
 """TSC command: run TypeScript compiler and queue errors as issues."""
 
 import argparse
-import subprocess
-import re
-from uidetox.tooling import detect_all
+
+from uidetox.mechanical import diagnostic_finding, resolve_tool, run_diagnostics
 from uidetox.state import add_issue, get_project_root, load_config
-from uidetox.utils import prepare_subprocess_cmd
-import uuid
 
 
 def run(args: argparse.Namespace):
     project_root = get_project_root()
     config = load_config()
-    tooling = config.get("tooling")
-
-    if tooling and tooling.get("typescript"):
-        tsc_cmd = tooling["typescript"]["run_cmd"]
-    else:
-        profile = detect_all(project_root)
-        if not profile.typescript:
-            print("No TypeScript configuration found in this project.")
-            return
-        tsc_cmd = profile.typescript.run_cmd
+    typescript = resolve_tool("typescript", project_root, config)
+    if not typescript:
+        print("No TypeScript configuration found in this project.")
+        return
+    tsc_cmd = str(typescript["run_cmd"])
 
     print("==============================")
     print(" UIdetox TypeScript Check")
@@ -29,51 +21,29 @@ def run(args: argparse.Namespace):
     print(f"  Running: {tsc_cmd}")
     print()
 
-    try:
-        argv, env = prepare_subprocess_cmd(tsc_cmd)
-        result = subprocess.run(
-            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
-        )
-    except FileNotFoundError:
+    result, errors = run_diagnostics("typescript", tsc_cmd, project_root)
+    if result.error == "command_not_found":
         print("Command not found. Install TypeScript: npm install -D typescript")
         return
-    except subprocess.TimeoutExpired:
+    if result.error == "timeout":
         print("TypeScript check timed out after 120s.")
         return
-
-    output = result.stdout + result.stderr
-
     if result.returncode == 0:
         print("✅ No TypeScript errors found.")
         return
-
-    # Parse tsc errors: file(line,col): error TSxxxx: message
-    error_pattern = re.compile(
-        r"^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$", re.MULTILINE
-    )
-    errors = error_pattern.findall(output)
-
     if not errors:
-        # Fallback: just print raw output
-        print(output[:2000])
+        print(result.output[:2000])
         return
-
     queued = 0
-    for file_path, line, col, code, msg in errors:
-        issue_id = f"TSC-{str(uuid.uuid4())[:6].upper()}"
-        add_issue(
-            {
-                "id": issue_id,
-                "file": file_path.strip(),
-                "tier": "T1",
-                "issue": f"[{code}] {msg.strip()} (line {line})",
-                "command": "tsc-fix",
-            }
-        )
+    for error in errors:
+        finding = diagnostic_finding("typescript", error)
+        add_issue(finding)
         queued += 1
         if queued <= 10:
-            print(f"  {issue_id}: {file_path}:{line} — {msg.strip()}")
-
+            print(
+                f"  {finding.to_dict()['id']}: "
+                f"{error.path}:{error.line} — {error.message}"
+            )
     if queued > 10:
         print(f"  ... and {queued - 10} more")
 

@@ -14,8 +14,13 @@ from uidetox.frontend_map import FRONTEND_MAP_FILE
 from uidetox.runtime_observer import (
     RuntimeObservation,
     RuntimePage,
-    RuntimeViewport,
     observe_frontend,
+)
+from uidetox.runtime_scenarios import (
+    VIEWPORT_REGISTRY,
+    RuntimeViewport,
+    RuntimeViewportDiscovery,
+    discover_runtime_viewports,
 )
 from uidetox.state import (
     ensure_uidetox_dir,
@@ -30,22 +35,15 @@ from uidetox.visual_evidence import (
     VisualEvidenceRequest,
     build_visual_evidence,
 )
-from uidetox.visual_worker_client import build_visual_evidence_isolated
-from uidetox.visual_worker_protocol import VisualWorkerPolicy
 from uidetox.visual_semantics import (
     explicit_ignore_regions,
     load_project_visual_context,
     semantic_regions_from_runtime,
 )
-
+from uidetox.visual_worker_client import build_visual_evidence_isolated
+from uidetox.visual_worker_protocol import VisualWorkerPolicy
 
 _CAPTURE_INSTALL_GUIDANCE = capture_install_guidance()
-_RESPONSIVE_VIEWPORTS = (
-    ("mobile", 375, 812),
-    ("tablet", 768, 1024),
-    ("desktop", 1280, 800),
-    ("wide", 1920, 1080),
-)
 
 
 def _missing_browser_executable(error: Exception) -> bool:
@@ -93,19 +91,18 @@ def _capture_screenshot(
 
     Returns True on success, False on failure.
     """
-    vp = viewport or {"width": 1280, "height": 800}
+    selected_viewport = (
+        RuntimeViewport(
+            "desktop",
+            int(viewport["width"]),
+            int(viewport["height"]),
+        )
+        if viewport is not None
+        else VIEWPORT_REGISTRY["desktop"]
+    )
     observation = _observe_capture(
         url,
-        (
-            (
-                RuntimeViewport(
-                    "desktop",
-                    int(vp["width"]),
-                    int(vp["height"]),
-                ),
-                out_path,
-            ),
-        ),
+        ((selected_viewport, out_path),),
         full_page=full_page,
     )
     return bool(
@@ -116,37 +113,12 @@ def _capture_screenshot(
     )
 
 
-def _capture_multi_viewport(url: str, prefix: str) -> list[Path]:
-    """Capture screenshots at multiple viewport widths for responsive validation."""
-    snapshots = _snapshots_dir()
-    destinations = tuple(
-        (
-            RuntimeViewport(name, width, height),
-            snapshots / f"{prefix}_{name}.png",
-        )
-        for name, width, height in _RESPONSIVE_VIEWPORTS
-    )
-    observation = _observe_capture(url, destinations)
-    if observation is None:
-        return []
-    captured = {
-        Path(page.screenshot)
-        for page in observation.pages
-        if page.screenshot is not None
-    }
-    ordered: list[Path] = []
-    for viewport, out_file in destinations:
-        if out_file.resolve() in captured:
-            ordered.append(out_file)
-            print(f"  ✓ {viewport.name} ({viewport.width}x{viewport.height})")
-    return ordered
-
-
 def _observe_capture(
     url: str,
     destinations: tuple[tuple[RuntimeViewport, Path], ...],
     *,
     full_page: bool = True,
+    viewport_discovery: RuntimeViewportDiscovery | None = None,
 ) -> RuntimeObservation | None:
     if not destinations:
         return RuntimeObservation(now_iso(), (url,), ())
@@ -163,6 +135,7 @@ def _observe_capture(
             timeout_ms=15_000,
             full_page=full_page,
             settle_ms=1_000,
+            viewport_discovery=viewport_discovery,
         )
     except RuntimeError as error:
         print(f"❌ Failed to capture screenshot: {error}", file=sys.stderr)
@@ -182,21 +155,30 @@ def _capture_named_stage(
 ) -> tuple[list[Path], RuntimeObservation | None]:
     snapshots = _snapshots_dir()
     if responsive:
+        viewport_discovery = discover_runtime_viewports(
+            get_project_root(),
+            base_viewports=VIEWPORT_REGISTRY.values(),
+        )
         destinations = tuple(
             (
-                RuntimeViewport(name, width, height),
-                snapshots / f"{prefix}_{name}.png",
+                viewport,
+                snapshots / f"{prefix}_{viewport.name}.png",
             )
-            for name, width, height in _RESPONSIVE_VIEWPORTS
+            for viewport in viewport_discovery.viewports
         )
     else:
+        viewport_discovery = None
         destinations = (
             (
-                RuntimeViewport("desktop", 1280, 800),
+                VIEWPORT_REGISTRY["desktop"],
                 snapshots / f"{prefix}.png",
             ),
         )
-    observation = _observe_capture(url, destinations)
+    observation = _observe_capture(
+        url,
+        destinations,
+        viewport_discovery=viewport_discovery,
+    )
     if observation is None:
         return [], None
     captured_set = {
@@ -288,12 +270,8 @@ def _atomic_copy(source: Path, destination: Path) -> None:
 
 
 def _viewport_for_case(case_id: str) -> tuple[int, int] | None:
-    for name, width, height in _RESPONSIVE_VIEWPORTS:
-        if name == case_id:
-            return (width, height)
-    if case_id == "desktop":
-        return (1280, 800)
-    return None
+    viewport = VIEWPORT_REGISTRY.get(case_id)
+    return (viewport.width, viewport.height) if viewport is not None else None
 
 
 def _build_capture_evidence(
@@ -529,7 +507,7 @@ def run(args: argparse.Namespace):
     snapshots = _snapshots_dir()
     visual_options = _visual_options(args, config, snapshots)
     visual_options["expected_viewports"] = (
-        tuple(name for name, _, _ in _RESPONSIVE_VIEWPORTS)
+        tuple(VIEWPORT_REGISTRY)
         if responsive
         else ("desktop",)
     )
@@ -577,6 +555,11 @@ def run(args: argparse.Namespace):
             if observation is not None
             else {}
         )
+        if observation is not None and observation.viewport_discovery is not None:
+            visual_options["expected_viewports"] = tuple(
+                viewport.name
+                for viewport in observation.viewport_discovery.viewports
+            )
         if responsive:
             if captured:
                 print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")

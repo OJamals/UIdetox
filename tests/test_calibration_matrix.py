@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -11,14 +11,23 @@ from typing import Any
 import pytest
 
 from uidetox.analyzer import analyze_file
+from uidetox.fileset import ProjectFileSet
+from uidetox.frontend_map import map_frontend
+from uidetox.project_map import ProjectMap
 from uidetox.rule_registry import RULE_REGISTRY
-
+from uidetox.semantic_adapters import SourceDocument, build_application_semantics
 
 CALIBRATION_ROOT = Path(__file__).parent / "calibration"
 MANIFEST_PATH = CALIBRATION_ROOT / "manifest.json"
 _STATUSES = {"positive", "negative", "degraded", "unsupported"}
 _SEVERITIES = {"info", "warning", "error"}
-_DETECTORS = {"static-analyzer", "frontend-map", "project-map", "runtime-layout"}
+_DETECTORS = {
+    "static-analyzer",
+    "frontend-map",
+    "project-map",
+    "runtime-layout",
+    "semantic-adapter",
+}
 _REQUIRED_CASE_KEYS = {
     "id",
     "fixture",
@@ -80,7 +89,9 @@ def validate_manifest(
             errors.append(f"{label} must be an object")
             continue
         case = raw_case
-        if set(case) - (_REQUIRED_CASE_KEYS | {"route", "state", "viewport", "rule_id"}):
+        if set(case) - (
+            _REQUIRED_CASE_KEYS | {"route", "state", "viewport", "rule_id", "expect"}
+        ):
             errors.append(f"{label} has unknown keys")
         missing = _REQUIRED_CASE_KEYS - set(case)
         if missing:
@@ -104,6 +115,19 @@ def validate_manifest(
                 errors.append(f"{label} unknown rule_id: {rule_id}")
         elif rule_id is not None:
             errors.append(f"{label}.rule_id is only valid for static-analyzer")
+        executable_case = case.get("status") in {"positive", "negative"}
+        if (
+            detector in {"semantic-adapter", "project-map"}
+            and executable_case
+            and not isinstance(case.get("expect"), dict)
+        ):
+            errors.append(
+                f"{label}.expect must be an object for {detector}"
+            )
+        elif detector not in {"semantic-adapter", "project-map"} and "expect" in case:
+            errors.append(
+                f"{label}.expect is only valid for semantic-adapter or project-map"
+            )
 
         status = case["status"]
         if status not in _STATUSES:
@@ -157,15 +181,13 @@ def _qualification_partition(
     assert isinstance(cases, list)
     statuses: dict[str, set[str]] = defaultdict(set)
     for case in cases:
-        if (
-            case["detector"] == "static-analyzer"
-            and case["status"] in {"positive", "negative"}
-        ):
+        if case["detector"] == "static-analyzer" and case["status"] in {
+            "positive",
+            "negative",
+        }:
             statuses[str(case["rule_id"])].add(str(case["status"]))
     objective = {
-        rule_id
-        for rule_id in registry
-        if statuses[rule_id] == {"positive", "negative"}
+        rule_id for rule_id in registry if statuses[rule_id] == {"positive", "negative"}
     }
     manual = [rule_id for rule_id in registry if rule_id not in objective]
     return objective, manual
@@ -254,14 +276,34 @@ def evaluate_cases(
     for case in cases:
         status = str(case["status"])
         key = f"{case['capability']}::{case['framework']}"
-        if status in {"degraded", "unsupported"}:
+        detector = str(case["detector"])
+        if detector == "semantic-adapter" or (
+            detector == "project-map" and status in {"positive", "negative"}
+        ):
+            failure = (
+                _evaluate_semantic_case(fixture_root, case)
+                if detector == "semantic-adapter"
+                else _evaluate_project_map_case(fixture_root, case)
+            )
+            if failure is None:
+                counter = status if status in {"degraded", "unsupported"} else "tp"
+                totals[counter] += 1
+                grouped[key][counter] += 1
+            else:
+                totals["fn"] += 1
+                grouped[key]["fn"] += 1
+                failures.append(f"FN {case['fixture']}: {failure}")
+        elif status in {"degraded", "unsupported"}:
             totals[status] += 1
             grouped[key][status] += 1
         elif case["detector"] == "static-analyzer":
             static_by_fixture[str(case["fixture"])].append(case)
 
     for fixture, fixture_cases in static_by_fixture.items():
-        actual = {str(issue["id"]) for issue in analyzer(fixture_root / fixture)}
+        actual = {
+            str(issue.get("detector_id", issue.get("id")))
+            for issue in analyzer(fixture_root / fixture)
+        }
         positive = {
             str(case["rule_id"])
             for case in fixture_cases
@@ -297,6 +339,89 @@ def evaluate_cases(
     )
 
 
+def _evaluate_semantic_case(
+    fixture_root: Path,
+    case: Mapping[str, object],
+) -> str | None:
+    fixture = fixture_root / str(case["fixture"])
+    case_root = fixture.parent
+    documents = [
+        SourceDocument(
+            path,
+            path.relative_to(case_root).as_posix(),
+            path.read_text(encoding="utf-8"),
+        )
+        for path in ProjectFileSet(case_root).discover()
+    ]
+    application = build_application_semantics(case_root, case_root, documents)
+    module = application.module(fixture.name)
+    if module is None:
+        return "fixture module absent"
+    expected = case["expect"]
+    assert isinstance(expected, dict)
+
+    capability_status = expected.get("capability_status")
+    if capability_status is not None and module.capability.status != capability_status:
+        return (
+            f"expected capability {capability_status}, found {module.capability.status}"
+        )
+    framework = expected.get("framework")
+    if framework is not None and module.framework != framework:
+        return f"expected framework {framework}, found {module.framework}"
+
+    actual_calls = [
+        {
+            "target": call.target,
+            "client_family": call.client_family,
+            "method": call.method,
+            "url": call.url,
+            "resolution": call.resolution,
+            "request_type_refs": list(call.request_type_refs),
+            "response_type_refs": list(call.response_type_refs),
+        }
+        for call in module.facts.network_calls
+    ]
+    for expected_call in expected.get("network_calls", []):
+        if not isinstance(expected_call, dict):
+            return "network call expectation must be an object"
+        if not any(
+            all(actual.get(key) == value for key, value in expected_call.items())
+            for actual in actual_calls
+        ):
+            return f"missing network call {expected_call}"
+
+    actual_selectors = {item.selector for item in module.facts.selectors}
+    missing_selectors = set(expected.get("selectors", [])) - actual_selectors
+    if missing_selectors:
+        return f"missing selectors {sorted(missing_selectors)}"
+    return None
+
+
+def _evaluate_project_map_case(
+    fixture_root: Path,
+    case: Mapping[str, object],
+) -> str | None:
+    fixture = fixture_root / str(case["fixture"])
+    graph = ProjectMap.from_dict(map_frontend(fixture.parent, ".").project_map)
+    expected = case["expect"]
+    assert isinstance(expected, dict)
+
+    finding_ids = {finding.detector_id for finding in graph.findings}
+    required = set(expected.get("finding_ids", []))
+    forbidden = set(expected.get("forbid_finding_ids", []))
+    if missing := required - finding_ids:
+        return f"missing findings {sorted(missing)}"
+    if unexpected := forbidden & finding_ids:
+        return f"forbidden findings {sorted(unexpected)}"
+    if expected.get("exact_findings") is True and finding_ids != required:
+        return f"expected findings {sorted(required)}, found {sorted(finding_ids)}"
+
+    node_kinds = {node.kind for node in graph.nodes}
+    if missing_kinds := set(expected.get("node_kinds", [])) - node_kinds:
+        return f"missing node kinds {sorted(missing_kinds)}"
+    return None
+
+
 def _load_manifest(path: Path = MANIFEST_PATH) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -323,6 +448,8 @@ def test_calibration_manifest_seeds_required_framework_and_boundary_shapes() -> 
         "typescript-backend",
         "openapi",
         "orm-schema",
+        "application-semantics",
+        "framework-semantics",
     } <= capabilities
 
 
@@ -354,7 +481,11 @@ def test_calibration_reports_one_removed_expected_result_as_one_fn() -> None:
     def remove(path: Path) -> list[dict[str, Any]]:
         issues = analyze_file(path)
         if path.as_posix().endswith("react-next/positive.tsx"):
-            return [issue for issue in issues if issue["id"] != "LOREM_IPSUM_SLOP"]
+            return [
+                issue
+                for issue in issues
+                if issue["detector_id"] != "LOREM_IPSUM_SLOP"
+            ]
         return issues
 
     report = evaluate_cases(_load_manifest(), analyzer=remove)

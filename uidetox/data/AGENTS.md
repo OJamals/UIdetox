@@ -76,8 +76,8 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 |---------|---------|
 | `uidetox setup` | Interactively capture website/app intent and initialize typed design dials (`--product-goal`, `--audience`, `--primary-job`, `--tone`, `--genre`, `--page-kind`, `--brand`, repeatable `--preserve`/`--constraint`, `--no-intent-prompt`) plus preview/commit settings |
 | `uidetox intent` | Inspect effective field-level intent provenance, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`) |
-| `uidetox scan` | Full audit: auto-detect tooling → static analyzer → frontend/backend operation parity → design review |
-| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, backend/API operation parity, provenance/confidence, source hashes, plus optional rendered DOM/a11y evidence and deterministic misalignment, clipping, padding, edge-contact, and line-spacing findings (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
+| `uidetox scan` | Full audit: auto-detect tooling → static analyzer → full-stack contract lineage → design review |
+| `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, typed full-stack contract lineage, provenance/confidence, source hashes, plus optional rendered DOM/a11y evidence and deterministic misalignment, clipping, padding, edge-contact, and line-spacing findings (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
 | `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
 | `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
 | `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
@@ -91,7 +91,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox next` | Batch issues for top-priority component/directory with SKILL.md context injection |
 | `uidetox resolve <id> --note "..."` | Mark a single issue as fixed (note is mandatory) |
 | `uidetox batch-resolve ID1 ID2 ... --note "..."` | Resolve multiple issues with a single coherent commit |
-| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution (`--proposal-id`, `--review-score`) |
+| `uidetox loop` | Preview the autonomous protocol; add `--execute` for durable in-process phase execution (`--proposal-id`; structured review resumes from persisted evidence) |
 | `uidetox loop --orchestrator` | Sub-agent mode with auto-parallel (1-5) and memory injection |
 | `uidetox subagent` | Manage sub-agent sessions and generate stage prompts |
 | `uidetox memory` | Read/write persistent agent memory (patterns, notes, reviewed files) |
@@ -198,7 +198,9 @@ UIdetox/
 │   ├── analyzer.py               # 218-rule static slop detector (deterministic anti-pattern scan)
 │   ├── source_facts.py           # Shared AST parse lifecycle + immutable source facts
 │   ├── frontend_map.py           # Semantic frontend graph + artifact persistence
-│   ├── project_map.py            # Backend/API discovery + operation parity
+│   ├── project_map.py            # Stable full-stack contract facade
+│   ├── contract_graph.py         # Canonical graph, evidence lattice, reconciliation
+│   ├── contract_adapters.py      # Qualified backend/OpenAPI source adapters
 │   ├── redesign.py              # Source-aware divergent redesign planning
 │   ├── runtime_observer.py      # Playwright DOM/a11y/layout evidence adapter
 │   ├── runtime_layout.py        # Typed rendered-layout finding policy

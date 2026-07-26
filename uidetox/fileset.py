@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Mapping
-
 
 FRONTEND_EXTENSIONS = frozenset(
     {
+        ".astro",
+        ".cjs",
         ".css",
+        ".htm",
         ".html",
         ".js",
         ".jsx",
         ".less",
         ".md",
+        ".mjs",
         ".sass",
         ".scss",
         ".svelte",

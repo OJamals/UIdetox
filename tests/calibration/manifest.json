@@ -267,6 +267,248 @@
       "expected_anchors": [{"path": "orm/schema.prisma", "contains": "model Order"}],
       "severity": "info",
       "rationale": "ORM field lineage belongs to plans/017-fullstack-contract-lineage.md."
+    },
+    {
+      "id": "application-semantics-imported-clients-positive",
+      "fixture": "semantic-adapters/App.tsx",
+      "framework": "react",
+      "language": "tsx",
+      "capability": "application-semantics",
+      "detector": "semantic-adapter",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "semantic-adapters/App.tsx", "contains": "fetchItems"},
+        {"path": "semantic-adapters/api.ts", "contains": "axios.create"}
+      ],
+      "severity": "error",
+      "rationale": "Imported wrappers, query clients, generated hooks, and ky calls must remain visible through module resolution.",
+      "expect": {
+        "capability_status": "native",
+        "framework": "react",
+        "selectors": ["[data-testid=\"application\"]"],
+        "network_calls": [
+          {
+            "target": "fetchItems",
+            "client_family": "axios",
+            "method": "POST",
+            "url": "/api/items",
+            "resolution": "resolved",
+            "request_type_refs": ["ItemRequest"],
+            "response_type_refs": ["ItemResponse"]
+          },
+          {
+            "target": "useQuery",
+            "client_family": "tanstack-query",
+            "url": null,
+            "resolution": "resolved",
+            "response_type_refs": ["ItemResponse"]
+          },
+          {
+            "target": "useApolloQuery",
+            "client_family": "apollo",
+            "url": null,
+            "resolution": "resolved",
+            "request_type_refs": ["ItemVariables"],
+            "response_type_refs": ["ItemResponse"]
+          },
+          {
+            "target": "useGetUsersQuery",
+            "client_family": "imported-client",
+            "url": null,
+            "resolution": "unresolved"
+          },
+          {
+            "target": "generatedClient.users.list",
+            "client_family": "imported-client",
+            "url": null,
+            "resolution": "unresolved"
+          },
+          {
+            "target": "ky.post",
+            "client_family": "ky",
+            "method": "POST",
+            "url": "/api/events",
+            "resolution": "resolved"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vue-semantic-adapter-degraded",
+      "fixture": "vue/semantics.vue",
+      "framework": "vue",
+      "language": "vue",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "vue/semantics.vue", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Vue must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "vue",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
+    },
+    {
+      "id": "svelte-semantic-adapter-degraded",
+      "fixture": "svelte/semantics.svelte",
+      "framework": "svelte",
+      "language": "svelte",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "svelte/semantics.svelte", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Svelte must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "svelte",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
+    },
+    {
+      "id": "astro-semantic-adapter-degraded",
+      "fixture": "astro/Semantics.astro",
+      "framework": "astro",
+      "language": "astro",
+      "capability": "framework-semantics",
+      "detector": "semantic-adapter",
+      "status": "degraded",
+      "expected_anchors": [
+        {"path": "astro/Semantics.astro", "contains": "data-testid=\"panel\""}
+      ],
+      "severity": "info",
+      "rationale": "Astro must expose conservative template semantics while reporting missing native grammar.",
+      "expect": {
+        "capability_status": "degraded",
+        "framework": "astro",
+        "selectors": ["[data-testid=\"panel\"]"]
+      }
+    },
+    {
+      "id": "contract-lineage-shape-match-evidence-gap",
+      "fixture": "contract-lineage/matched/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/matched/client.ts", "contains": "CreateUser"},
+        {"path": "contract-lineage/matched/openapi.json", "contains": "\"/users\""}
+      ],
+      "severity": "info",
+      "rationale": "Equivalent typed shapes still report missing error evidence; unknown is never treated as clean parity.",
+      "expect": {
+        "finding_ids": ["contract-error-evidence-unknown"],
+        "exact_findings": true,
+        "node_kinds": ["client_operation", "route", "request_schema", "response_schema"]
+      }
+    },
+    {
+      "id": "contract-lineage-field-mismatch-positive",
+      "fixture": "contract-lineage/mismatch/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/mismatch/client.ts", "contains": "email: number"},
+        {"path": "contract-lineage/mismatch/openapi.json", "contains": "\"email\": {\"type\": \"string\"}"}
+      ],
+      "severity": "warning",
+      "rationale": "Contradictory field types must emit the smallest typed mismatch.",
+      "expect": {
+        "finding_ids": ["contract-request-field-type-mismatch"],
+        "exact_findings": true,
+        "node_kinds": ["schema_field"]
+      }
+    },
+    {
+      "id": "contract-lineage-unknown-positive",
+      "fixture": "contract-lineage/unknown/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/unknown/client.ts", "contains": "fetch(\"/users\")"},
+        {"path": "contract-lineage/unknown/openapi.json", "contains": "\"/users\""}
+      ],
+      "severity": "info",
+      "rationale": "Missing frontend type evidence must remain unknown instead of implying compatibility.",
+      "expect": {
+        "finding_ids": ["contract-response-evidence-unknown"],
+        "exact_findings": true,
+        "forbid_finding_ids": ["contract-response-field-type-mismatch"]
+      }
+    },
+    {
+      "id": "contract-lineage-enum-mismatch-positive",
+      "fixture": "contract-lineage/enum/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/enum/client.ts", "contains": "\"admin\" | \"member\""},
+        {"path": "contract-lineage/enum/openapi.json", "contains": "[\"admin\", \"guest\"]"}
+      ],
+      "severity": "warning",
+      "rationale": "One differing request enum must emit the smallest enum mismatch.",
+      "expect": {
+        "finding_ids": ["contract-request-field-enum-mismatch"],
+        "exact_findings": true,
+        "node_kinds": ["schema_field"]
+      }
+    },
+    {
+      "id": "contract-lineage-required-mismatch-positive",
+      "fixture": "contract-lineage/required/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/required/client.ts", "contains": "email?: string"},
+        {"path": "contract-lineage/required/openapi.json", "contains": "\"required\": [\"email\"]"}
+      ],
+      "severity": "warning",
+      "rationale": "One differing required field must emit the smallest requiredness mismatch.",
+      "expect": {
+        "finding_ids": ["contract-request-field-required-mismatch"],
+        "exact_findings": true,
+        "node_kinds": ["schema_field"]
+      }
+    },
+    {
+      "id": "contract-lineage-auth-mismatch-positive",
+      "fixture": "contract-lineage/auth/client.ts",
+      "framework": "typescript-openapi",
+      "language": "typescript",
+      "capability": "contract-lineage",
+      "detector": "project-map",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "contract-lineage/auth/client.ts", "contains": "axios.post"},
+        {"path": "contract-lineage/auth/openapi.json", "contains": "\"BearerAuth\""}
+      ],
+      "severity": "warning",
+      "rationale": "A qualified backend security requirement must contradict a statically absent frontend credential.",
+      "expect": {
+        "finding_ids": ["contract-auth-mismatch"],
+        "exact_findings": true,
+        "node_kinds": ["auth_requirement"]
+      }
     }
   ]
 }

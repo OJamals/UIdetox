@@ -1,20 +1,22 @@
 """Rescan command: clears the queue and runs a unified re-scan (static + subjective).
-
 This is the 'outer loop' in the desloppify flow -- after the fix loop drains the
 queue, rescan re-evaluates from scratch to discover deeper issues and check if
 the target score has been reached.
-
-Smart deduplication: issues already resolved in this session won't be re-queued
-unless the underlying pattern reappears in modifed code. Issues that survived
-multiple rescans get auto-escalated in priority.
 """
-
 import argparse
 import os
 import sys
-import uuid
+
 from uidetox.analyzer import analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
+from uidetox.commands.scan import current_map_findings
+from uidetox.findings import (
+    coerce_finding,
+    current_evidence_hashes,
+    score_current_snapshot,
+)
+from uidetox.history import save_run_snapshot
+from uidetox.memory import log_progress
 from uidetox.state import (
     add_issues,
     clear_issues,
@@ -23,20 +25,6 @@ from uidetox.state import (
     load_config,
     load_state,
 )
-from uidetox.history import save_run_snapshot
-from uidetox.utils import compute_design_score
-from uidetox.memory import log_progress
-
-
-def _dedup_key(issue: dict) -> str:
-    """Create a deduplication key from file + issue description."""
-    return f"{issue.get('file', '')}::{issue.get('issue', '')}"
-
-
-def _auto_escalate_tier(tier: str) -> str:
-    """Escalate tier by one level for recurring issues."""
-    escalation = {"T1": "T2", "T2": "T3", "T3": "T4", "T4": "T4"}
-    return escalation.get(tier, tier)
 
 
 def run(args: argparse.Namespace):
@@ -47,28 +35,11 @@ def run(args: argparse.Namespace):
     old_count = len(old_issues)
     resolved = state.get("resolved", [])
     target = config.get("target_score", 95)
-
-    # Build dedup sets from resolved AND old issues
-    resolved_keys = {_dedup_key(r) for r in resolved}
-    old_issue_keys = {_dedup_key(i) for i in old_issues}
-
-    # Track scan count per issue pattern for auto-escalation
-    recurrence: dict[str, int] = {}
-    for r in resolved:
-        key = _dedup_key(r)
-        recurrence[key] = recurrence.get(key, 0) + 1
-
-    # Clear existing issues and track the rescan
-    clear_issues()
-    increment_scans()
-
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
-
     path_arg = getattr(args, "path", ".")
     path = str(project_root) if path_arg in (None, "", ".") else path_arg
-
     # Validate path before doing anything
     if not os.path.isdir(path):
         print(
@@ -76,7 +47,8 @@ def run(args: argparse.Namespace):
             file=sys.stderr,
         )
         sys.exit(1)
-
+    clear_issues()
+    increment_scans()
     print("=" * 58)
     print(" UIdetox Rescan (fresh analysis + smart dedup)")
     print("=" * 58)
@@ -84,7 +56,6 @@ def run(args: argparse.Namespace):
     print(f"  Resolved history: {len(resolved)} issue(s)")
     print(f"  Path: {path}  |  Dials: V={variance} M={intensity} D={density}")
     print()
-
     # ---- STATIC ANALYSIS ----
     print("  Running static slop analyzer...")
     ignore_patterns = config.get("ignore_patterns", [])
@@ -96,58 +67,25 @@ def run(args: argparse.Namespace):
         zone_overrides=zone_overrides,
         design_variance=variance,
     )
-
-    pending_issues = []
-    dedup_skipped = 0
-    escalated_count = 0
-
-    for issue in slop_issues:
-        if _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
-            continue
-
-        key = _dedup_key(issue)
-
-        # Smart dedup: skip if already resolved AND file hasn't changed
-        # (we re-queue if the pattern recurs — meaning the fix didn't stick)
-        if key in resolved_keys and key not in old_issue_keys:
-            dedup_skipped += 1
-            continue
-
-        # Auto-escalate recurring issues
-        tier = issue["tier"]
-        if key in recurrence and recurrence[key] >= 2:
-            new_tier = _auto_escalate_tier(tier)
-            if new_tier != tier:
-                tier = new_tier
-                escalated_count += 1
-
-        new_issue = {
-            "id": f"SCAN-{str(uuid.uuid4())[:6].upper()}",
-            "file": issue["file"],
-            "tier": tier,
-            "issue": issue["issue"],
-            "command": issue["command"],
-            "rule_id": issue.get("id"),
-        }
-        for meta_key in ("line", "column", "snippet", "credential_class", "evidence_fingerprint"):
-            if meta_key in issue:
-                new_issue[meta_key] = issue[meta_key]
-        pending_issues.append(new_issue)
-
-    queued_count = add_issues(pending_issues)
-
+    pending_issues = [
+        coerce_finding(issue)
+        for issue in slop_issues
+        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns)
+    ]
+    mapped_findings, map_qualified = current_map_findings(project_root)
+    pending_issues = list(
+        {
+            finding.fingerprint: finding
+            for finding in [*pending_issues, *mapped_findings]
+        }.values()
+    )
+    queued_count = add_issues(
+        pending_issues, qualified_complete=map_qualified
+    )
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print("  -> No mechanical anti-patterns detected.")
-
-    if dedup_skipped > 0:
-        print(f"  -> Skipped {dedup_skipped} already-resolved issue(s) (smart dedup).")
-    if escalated_count > 0:
-        print(
-            f"  -> Escalated {escalated_count} recurring issue(s) to higher severity."
-        )
-
     # ---- SUBJECTIVE REVIEW PROMPT ----
     print()
     print("  SUBJECTIVE REVIEW (complete during this rescan):")
@@ -160,33 +98,29 @@ def run(args: argparse.Namespace):
     print(
         '    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
     )
-    print("  Record your score:  uidetox review --score <N>   (sum of A+B+C+D)")
+    print("  Run `uidetox review` and record structured A/B/C/D evidence.")
     print()
-
     # ---- SUPPRESSIONS ----
     if ignore_patterns:
         print(
             f"  Active suppressions: {len(ignore_patterns)} (do NOT flag matching issues)"
         )
-
     # ---- TARGET CHECK ----
     save_run_snapshot(trigger="rescan")
     log_progress(
         "rescan",
-        f"Rescanned {path}: {queued_count} issues queued, {dedup_skipped} deduped, {escalated_count} escalated",
+        f"Rescanned {path}: {queued_count} current findings queued",
     )
     state = load_state()
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
     queue_size = len(state.get("issues", []))
-
     print()
     print("-" * 58)
     filled = score // 5
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score: [{bar}] {score}/100  (target: {target})")
     print(f"  Queue: {queue_size} issue(s)")
-
     if score >= target and queue_size == 0:
         print("  TARGET REACHED -> Run `uidetox finish`")
     elif queue_size > 0:

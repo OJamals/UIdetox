@@ -1,7 +1,13 @@
 import subprocess
 import sys
 
-from uidetox.state import load_config
+from uidetox.findings import (
+    EligibilityContext,
+    current_evidence_hashes,
+    current_verification_fresh,
+    evaluate_eligibility,
+)
+from uidetox.state import load_config, load_state
 from uidetox.visual_semantics import project_visual_evidence_status
 
 
@@ -41,27 +47,16 @@ def _detect_main_branch() -> str:
     return "main"  # Last-resort default
 
 
-def _ensure_clean_workspace() -> None:
-    """Refuse to finish if unrelated changes could be swept into the squash commit."""
+def _workspace_dirty() -> bool:
     try:
-        result = subprocess.run(
+        return bool(subprocess.run(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True,
             check=True,
-        )
+        ).stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("❌ Error: Could not inspect git status.")
-        sys.exit(1)
-
-    if result.stdout.strip():
-        print("❌ Refusing to finish: workspace has uncommitted changes.")
-        print(
-            "   Commit, stash, or remove unrelated changes before running `uidetox finish`."
-        )
-        print()
-        print(result.stdout.strip())
-        sys.exit(1)
+        return True
 
 
 def run(args):
@@ -80,28 +75,38 @@ def run(args):
         print("❌ Error: Could not determine current branch or git is not initialized.")
         sys.exit(1)
 
-    if not current_branch.startswith("uidetox-session-"):
-        print(
-            f"⚠️  Not currently on a UIdetox session branch. (Current branch: {current_branch})"
-        )
-        print(
-            "Run 'uidetox finish' only when you are on a branch created by 'uidetox loop'."
-        )
-        sys.exit(1)
-
+    config = load_config()
     visual_status = project_visual_evidence_status(
-        load_config(),
+        config,
         required=(True if getattr(args, "require_visual_evidence", False) else None),
         manifest_path=getattr(args, "visual_evidence_file", None),
     )
-    if visual_status.required and not visual_status.ready:
-        print(f"❌ Visual evidence is {visual_status.state}.")
-        for reason in visual_status.reasons:
-            print(f"   - {reason}")
-        sys.exit(1)
+    eligibility = evaluate_eligibility(
+        load_state(),
+        EligibilityContext(
+            target_score=int(config.get("target_score", 95)),
+            current_branch=current_branch,
+            session_branch=(
+                current_branch
+                if current_branch.startswith("uidetox-session-")
+                else "uidetox-session-*"
+            ),
+            dirty=_workspace_dirty(),
+            verification_fresh=(
+                current_verification_fresh()
+                and (not visual_status.required or visual_status.ready)
+            ),
+            require_session_branch=True,
+            evidence_hashes=current_evidence_hashes(),
+        ),
+    )
+    if not eligibility.eligible:
+        print("❌ Finalization blocked:")
+        for blocker in eligibility.blockers:
+            print(f"   - {blocker.code}: {blocker.message}")
+        raise SystemExit(1)
 
     target_branch = _detect_main_branch()
-    _ensure_clean_workspace()
 
     print(f"📦 Finishing UIdetox session on branch: {current_branch}")
     print(f"▶️  Target merge branch: {target_branch}")

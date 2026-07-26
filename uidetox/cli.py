@@ -2,10 +2,10 @@
 
 import argparse
 import sys
-
-from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 from importlib import import_module
 from pathlib import Path
+
+from uidetox.agent_integration import SUPPORTED_AGENT_NAMES
 
 
 def _get_version() -> str:
@@ -395,6 +395,13 @@ def parse_args(args_list=None):
     resolve_parser.add_argument(
         "--note", required=True, help="Mandatory explanation of the fix applied"
     )
+    resolve_parser.add_argument(
+        "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
+    )
+    resolve_parser.add_argument(
+        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+    )
+    resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
 
     # Command: batch-resolve
     batch_resolve_parser = subparsers.add_parser(
@@ -409,8 +416,12 @@ def parse_args(args_list=None):
         "--note", required=True, help="Mandatory explanation of fixes applied"
     )
     batch_resolve_parser.add_argument(
-        "--skip-verify", action="store_true", help="Skip pre-commit verification gate"
+        "--skip-verify", action="store_true", help="Skip mechanical pre-commit checks"
     )
+    batch_resolve_parser.add_argument(
+        "--override-verifier", metavar="REASON", help="Audit an explicit verifier override without resolving"
+    )
+    batch_resolve_parser.add_argument("--actor", help="Actor recording a verifier override")
 
     # Command: plan
     subparsers.add_parser(
@@ -424,8 +435,18 @@ def parse_args(args_list=None):
     review_parser.add_argument(
         "--score",
         type=int,
-        help="Store an LLM-assigned subjective design score (0-100)",
+        help="Store legacy scalar input (incomplete; cannot satisfy finalization)",
     )
+    for key, cap in (("a", 40), ("b", 30), ("c", 20), ("d", 10)):
+        review_parser.add_argument(
+            f"--dimension-{key}", type=int, help=f"Structured dimension {key.upper()} (0-{cap})"
+        )
+    review_parser.add_argument("--rationale", help="Evidence-based review rationale")
+    review_parser.add_argument("--reviewer", help="Reviewer identity")
+    review_parser.add_argument("--finding-link", action="append", default=[])
+    review_parser.add_argument("--route", action="append", default=[])
+    review_parser.add_argument("--state", action="append", default=[])
+    review_parser.add_argument("--viewport", action="append", default=[])
     review_parser.add_argument(
         "--require-visual-evidence",
         action="store_true",
@@ -647,12 +668,6 @@ def parse_args(args_list=None):
     loop_parser.add_argument(
         "--proposal-id",
         help="Explicit redesign proposal selected for prototype generation",
-    )
-    loop_parser.add_argument(
-        "--review-score",
-        type=int,
-        choices=range(0, 101),
-        help="Human/LLM subjective review score used to resume the review gate",
     )
     loop_parser.add_argument(
         "--require-visual-evidence",

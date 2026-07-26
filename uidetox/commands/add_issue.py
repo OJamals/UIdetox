@@ -2,8 +2,11 @@
 
 import argparse
 import fnmatch
+import hashlib
 import sys
 import uuid
+
+from uidetox.findings import Finding
 from uidetox.state import add_issue, load_config
 
 _MAX_FILE_LEN = 300
@@ -27,6 +30,17 @@ def _is_suppressed(file_path: str, description: str, patterns: list[str]) -> boo
         ):
             return True
     return False
+
+
+def _manual_detector_id(file_path: str, issue: str, fix_command: str) -> str:
+    identity = "\0".join(
+        (
+            file_path.strip().replace("\\", "/"),
+            " ".join(issue.split()),
+            " ".join(fix_command.split()),
+        )
+    )
+    return f"manual-{hashlib.sha256(identity.encode()).hexdigest()[:16]}"
 
 
 def run(args: argparse.Namespace):
@@ -62,12 +76,24 @@ def run(args: argparse.Namespace):
         return
 
     issue_id = f"SCAN-{str(uuid.uuid4())[:6].upper()}"
-    new_issue = {
-        "id": issue_id,
-        "file": args.file,
-        "tier": args.tier,
-        "issue": args.issue,
-        "command": args.fix_command,
-    }
-    add_issue(new_issue)
-    print(f"Added issue {issue_id}: [{args.tier}] {args.issue} in {args.file}")
+    file_path = args.file.strip().replace("\\", "/")
+    issue = " ".join(args.issue.split())
+    fix_command = " ".join(str(args.fix_command or "").split())
+    new_issue = Finding.create(
+        detector_id=_manual_detector_id(file_path, issue, fix_command),
+        category="quality",
+        severity={"T1": "info", "T2": "warning", "T3": "error", "T4": "critical"}.get(
+            args.tier, "warning"
+        ),
+        confidence=0.8,
+        message=issue,
+        provenance="manual",
+        source_anchor={"path": file_path},
+        suppression_key=issue_id,
+        verifier={"kind": "manual"},
+        legacy={"id": issue_id, "command": fix_command},
+    )
+    if not add_issue(new_issue):
+        print(f"Issue already queued: [{args.tier}] {issue} in {file_path}")
+        return
+    print(f"Added issue {issue_id}: [{args.tier}] {issue} in {file_path}")

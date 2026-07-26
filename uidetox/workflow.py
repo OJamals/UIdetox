@@ -1,5 +1,4 @@
 """Durable, opt-in execution engine for the UIdetox workflow."""
-
 from __future__ import annotations
 
 import hashlib
@@ -12,6 +11,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from uidetox.design_context import DesignSettings
+from uidetox.findings import (
+    EligibilityContext,
+    current_evidence_hashes,
+    evaluate_eligibility,
+    structured_review_current,
+)
 from uidetox.frontend_map import (
     FRONTEND_MAP_FILE,
     frontend_map_is_fresh,
@@ -28,9 +33,8 @@ from uidetox.redesign import (
     save_redesign_set,
 )
 from uidetox.state import load_config, load_state
-from uidetox.utils import compute_design_score, now_iso
+from uidetox.utils import now_iso
 from uidetox.visual_semantics import project_visual_evidence_status
-
 
 WORKFLOW_STATE_FILE = "workflow-state.json"
 WAITING_AGENT = "waiting_for_agent"
@@ -42,7 +46,6 @@ WAITING_VERIFICATION = "waiting_for_verification"
 @dataclass(frozen=True)
 class PhaseDefinition:
     """Static transition knowledge for one workflow phase."""
-
     id: str
     adapter: str
     dependencies: tuple[str, ...]
@@ -70,7 +73,7 @@ PHASES = (
         "semantic_map",
         ("static_analysis",),
         ("source",),
-        ("frontend_map", "project_map"),
+        ("frontend_map", "contract_graph"),
     ),
     PhaseDefinition(
         "issue_planning",
@@ -97,14 +100,14 @@ PHASES = (
         "subjective_review",
         "subjective_review",
         ("prototype_generation",),
-        ("source", "review_score"),
-        ("review_score",),
+        ("source", "review"),
+        ("structured_review",),
     ),
     PhaseDefinition(
         "status_evaluation",
         "status_evaluation",
         ("subjective_review", "issue_planning", "semantic_map"),
-        ("source", "queue", "review_score", "verification", "target"),
+        ("source", "queue", "review", "verification", "target"),
         ("status",),
     ),
     PhaseDefinition(
@@ -125,7 +128,7 @@ class WorkflowInputs:
     verification_fingerprint: str
     target_score: int = 95
     proposal_id: str | None = None
-    subjective_score: int | None = None
+    review_fingerprint: str = ""
     verification_fresh: bool = True
     visual_evidence_state: str = "missing"
     visual_evidence_required: bool = False
@@ -138,7 +141,7 @@ class WorkflowInputs:
             "verification": self.verification_fingerprint,
             "target": self.target_score,
             "proposal": self.proposal_id,
-            "review_score": self.subjective_score,
+            "review": self.review_fingerprint,
         }
         return values[key]
 
@@ -146,7 +149,6 @@ class WorkflowInputs:
 @dataclass(frozen=True)
 class AdapterResult:
     """Concise, serializable result returned by an in-process phase adapter."""
-
     artifacts: dict[str, str] = field(default_factory=dict)
     artifact_validation: dict[str, str] = field(default_factory=dict)
     evidence: str = ""
@@ -167,7 +169,6 @@ PhaseRunner = Callable[[WorkflowContext], AdapterResult]
 @dataclass(frozen=True)
 class WorkflowAdapters:
     """Injected in-process functions keyed by phase adapter name."""
-
     runners: Mapping[str, PhaseRunner]
 
     def run(self, phase: PhaseDefinition, context: WorkflowContext) -> AdapterResult:
@@ -196,9 +197,15 @@ class WorkflowRunResult:
     completed: tuple[str, ...]
 
 
+class WorkflowPause(RuntimeError):
+    def __init__(self, waiting: str, message: str) -> None:
+        self.waiting = waiting
+        self.message = message
+        super().__init__(message)
+
+
 class WorkflowEngine:
     """Execute each phase at most once per call and persist every transition."""
-
     def __init__(
         self,
         root: str | Path,
@@ -222,12 +229,10 @@ class WorkflowEngine:
         state["waiting"] = None
         state["error"] = None
         self._save_state(state)
-
         for index, phase in enumerate(PHASES):
             precondition = self._waiting_before(phase, state, inputs)
             if precondition is not None:
                 return self._wait(state, phase, *precondition)
-
             expected = self._phase_fingerprint(phase, state, inputs)
             phase_state = state["phases"][phase.id]
             if (
@@ -246,7 +251,6 @@ class WorkflowEngine:
                 self._invalidate_from(state, index)
                 phase_state = state["phases"][phase.id]
                 expected = self._phase_fingerprint(phase, state, inputs)
-
             phase_state["status"] = "running"
             phase_state["attempts"] = int(phase_state.get("attempts", 0)) + 1
             phase_state["error"] = None
@@ -256,6 +260,14 @@ class WorkflowEngine:
                 result = self.adapters.run(
                     phase,
                     WorkflowContext(self.root, inputs, state, phase),
+                )
+            except WorkflowPause as pause:
+                phase_state["status"] = "pending"
+                phase_state["error"] = None
+                phase_state["completed_at"] = None
+                self._save_state(state)
+                return self._wait(
+                    state, phase, pause.waiting, pause.message
                 )
             except Exception as exc:  # adapters define their own error taxonomy
                 phase_state["status"] = "failed"
@@ -273,7 +285,6 @@ class WorkflowEngine:
                     phase=phase.id,
                     message=f"{phase.id} failed: {phase_state['error']}",
                 )
-
             validation = {
                 key: result.artifact_validation.get(
                     key,
@@ -335,11 +346,9 @@ class WorkflowEngine:
             self._executed_this_run.add(phase.id)
             state["status"] = "running"
             self._save_state(state)
-
             after = self._waiting_after(phase, state, inputs)
             if after is not None:
                 return self._wait(state, phase, *after)
-
         state["status"] = "eligible"
         state["waiting"] = None
         self._save_state(state)
@@ -488,22 +497,6 @@ class WorkflowEngine:
                 WAITING_SELECTION,
                 "Select a redesign proposal and rerun with `--proposal-id`.",
             )
-        if phase.id == "subjective_review" and inputs.subjective_score is None:
-            return (
-                WAITING_REVIEW,
-                "Record human/LLM subjective input and rerun with `--review-score`.",
-            )
-        if phase.id in {"status_evaluation", "finish_eligibility"}:
-            fresh = (
-                bool(state["signals"].get("verification_fresh", False))
-                if "semantic_map" in self._executed_this_run
-                else inputs.verification_fresh
-            )
-            if not fresh:
-                return (
-                    WAITING_VERIFICATION,
-                    "Verification evidence is stale or blocked; refresh it before resuming.",
-                )
         return None
 
     def _waiting_after(
@@ -512,25 +505,22 @@ class WorkflowEngine:
         state: dict[str, Any],
         inputs: WorkflowInputs,
     ) -> tuple[str, str] | None:
-        if (
-            phase.id == "issue_planning"
-            and int(state["signals"].get("issues_pending", 0)) > 0
-        ):
-            return (
-                WAITING_AGENT,
-                "Source fixes require an agent; resolve the queued plan, then rerun.",
-            )
         if phase.id == "status_evaluation":
-            score = int(state["signals"].get("blended_score", 0))
-            queue = int(state["signals"].get("issues_pending", 0))
-            if queue > 0 or score < inputs.target_score:
-                return (
-                    WAITING_AGENT,
-                    (
-                        f"Finish gate not met: score={score}/{inputs.target_score}, "
-                        f"issues={queue}. Apply one bounded fix/review cycle, then rerun."
-                    ),
+            eligibility = state["signals"].get("eligibility", {})
+            if isinstance(eligibility, Mapping) and not eligibility.get("eligible"):
+                codes = {
+                    blocker.get("code")
+                    for blocker in eligibility.get("blockers", [])
+                    if isinstance(blocker, Mapping)
+                }
+                waiting = (
+                    WAITING_REVIEW
+                    if codes & {"missing_structured_review", "stale_review"}
+                    else WAITING_VERIFICATION
+                    if codes & {"stale_evidence", "incomplete_qualification"}
+                    else WAITING_AGENT
                 )
+                return waiting, "Finalization blocked: " + ", ".join(sorted(codes))
         return None
 
     def _wait(
@@ -583,7 +573,6 @@ def build_workflow_inputs(
     *,
     target_score: int,
     proposal_id: str | None,
-    subjective_score: int | None,
     require_visual_evidence: bool | None = None,
     visual_evidence_file: str | Path | None = None,
 ) -> WorkflowInputs:
@@ -602,7 +591,7 @@ def build_workflow_inputs(
         frontend_map = load_frontend_map(map_path)
         runtime_status = str(frontend_map.evidence.get("runtime_status", "absent"))
         map_fresh = frontend_map_is_fresh(frontend_map, root_path, frontend_map.target)
-        verification_fresh = map_fresh and runtime_status != "stale"
+        verification_fresh = map_fresh and runtime_status == "current"
         verification_payload = {
             "map_fresh": map_fresh,
             "runtime_status": runtime_status,
@@ -630,7 +619,7 @@ def build_workflow_inputs(
         verification_fingerprint=_stable_hash(verification_payload),
         target_score=target_score,
         proposal_id=proposal_id,
-        subjective_score=subjective_score,
+        review_fingerprint=_stable_hash(state.get("subjective", {})),
         verification_fresh=verification_fresh,
         visual_evidence_state=visual_status.state,
         visual_evidence_required=visual_status.required,
@@ -639,19 +628,15 @@ def build_workflow_inputs(
 
 def in_process_adapters() -> WorkflowAdapters:
     """Build production adapters without invoking an external agent or shell CLI."""
-
     from uidetox.commands import check as check_command
     from uidetox.commands import plan as plan_command
-    from uidetox.commands import review as review_command
     from uidetox.commands import scan as scan_command
-
     def mechanical(context: WorkflowContext) -> AdapterResult:
         check_command.run(Namespace(fix=True))
         return AdapterResult(
             artifacts={"check_report": "inline:mechanical-checks-complete"},
             evidence="Mechanical checks completed in process.",
         )
-
     def static_analysis(context: WorkflowContext) -> AdapterResult:
         scan_command.run(Namespace(path=".", since=None, output="table"))
         current = load_state()
@@ -659,7 +644,6 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"scan_state": "inline:" + _stable_hash(current)},
             evidence="Static analysis completed and issue state was refreshed.",
         )
-
     def semantic_map(context: WorkflowContext) -> AdapterResult:
         output = context.root / ".uidetox" / FRONTEND_MAP_FILE
         previous = load_frontend_map(output) if output.exists() else None
@@ -676,21 +660,20 @@ def in_process_adapters() -> WorkflowAdapters:
         save_frontend_map(frontend_map, output)
         verification_fresh = (
             frontend_map_is_fresh(frontend_map, context.root, frontend_map.target)
-            and frontend_map.evidence.get("runtime_status") != "stale"
+            and frontend_map.evidence.get("runtime_status") == "current"
         )
         return AdapterResult(
             artifacts={
                 "frontend_map": str(output),
-                "project_map": f"{output}#project_map",
+                "contract_graph": f"{output}#project_map",
             },
             artifact_validation={
                 "frontend_map": "content",
-                "project_map": "content",
+                "contract_graph": "content",
             },
-            evidence="Semantic frontend/project map persisted.",
+            evidence="Semantic frontend map and contract graph persisted.",
             signals={"verification_fresh": verification_fresh},
         )
-
     def issue_plan(context: WorkflowContext) -> AdapterResult:
         plan_command.run(Namespace())
         current = load_state()
@@ -708,7 +691,6 @@ def in_process_adapters() -> WorkflowAdapters:
             evidence=f"Issue plan contains {pending} pending issue(s).",
             signals={"issues_pending": pending},
         )
-
     def redesign(context: WorkflowContext) -> AdapterResult:
         frontend_map = load_frontend_map(context.root / ".uidetox" / FRONTEND_MAP_FILE)
         settings = DesignSettings.from_config(
@@ -729,7 +711,6 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"redesign_set": str(output)},
             evidence="Source-aware redesign proposals persisted.",
         )
-
     def prototype(context: WorkflowContext) -> AdapterResult:
         redesigns = load_redesign_set()
         proposal_id = context.inputs.proposal_id
@@ -740,34 +721,53 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"prototype_brief": str(output)},
             evidence=f"Prototype brief generated for {proposal_id}.",
         )
-
     def subjective_review(context: WorkflowContext) -> AdapterResult:
-        review_command.run(Namespace(score=context.inputs.subjective_score))
+        current = load_state()
+        review = current.get("subjective", {})
+        hashes = current_evidence_hashes(context.root)
+        if not isinstance(review, Mapping) or not structured_review_current(
+            review, hashes
+        ):
+            raise WorkflowPause(
+                WAITING_REVIEW,
+                "Record a current structured review with `uidetox review`, then resume.",
+            )
         return AdapterResult(
-            artifacts={
-                "review_score": f"inline:{context.inputs.subjective_score}",
-            },
-            evidence="Subjective score recorded.",
+            artifacts={"structured_review": "inline:" + _stable_hash(review)},
+            evidence="Current structured subjective review confirmed.",
         )
-
     def status(context: WorkflowContext) -> AdapterResult:
         current = load_state()
-        scores = compute_design_score(current)
-        pending = len(current.get("issues", []))
-        return AdapterResult(
-            artifacts={"status": "inline:" + json.dumps(scores, sort_keys=True)},
-            evidence=(
-                f"Blended score {scores['blended_score']}; {pending} pending issue(s)."
+        fresh = (
+            bool(context.state["signals"].get("verification_fresh", False))
+            if "semantic_map" in context.state.get("phases", {})
+            else context.inputs.verification_fresh
+        )
+        eligibility = evaluate_eligibility(
+            current,
+            EligibilityContext(
+                target_score=context.inputs.target_score,
+                verification_fresh=fresh,
+                evidence_hashes=current_evidence_hashes(context.root),
             ),
+        )
+        payload = eligibility.to_dict()
+        scores = payload["score"]
+        return AdapterResult(
+            artifacts={"status": "inline:" + json.dumps(payload, sort_keys=True)},
+            evidence=f"Canonical eligibility: {payload['eligible']}.",
             signals={
                 "blended_score": scores["blended_score"],
-                "issues_pending": pending,
+                "issues_pending": len(current.get("issues", [])),
+                "eligibility": payload,
                 "visual_evidence_state": context.inputs.visual_evidence_state,
                 "visual_evidence_required": (context.inputs.visual_evidence_required),
             },
         )
-
     def finish_eligibility(context: WorkflowContext) -> AdapterResult:
+        eligibility = context.state["signals"].get("eligibility", {})
+        if not isinstance(eligibility, Mapping) or not eligibility.get("eligible"):
+            raise RuntimeError("Canonical finalization eligibility is not satisfied.")
         return AdapterResult(
             artifacts={"finish_eligibility": "inline:verified"},
             evidence=(
@@ -776,7 +776,6 @@ def in_process_adapters() -> WorkflowAdapters:
             ),
             signals={"finish_eligible": True},
         )
-
     return WorkflowAdapters(
         {
             "mechanical_checks": mechanical,
@@ -797,7 +796,6 @@ def run_executable_workflow(
     *,
     target_score: int = 95,
     proposal_id: str | None = None,
-    subjective_score: int | None = None,
     require_visual_evidence: bool | None = None,
     visual_evidence_file: str | Path | None = None,
     adapters: WorkflowAdapters | None = None,
@@ -808,7 +806,6 @@ def run_executable_workflow(
         root,
         target_score=target_score,
         proposal_id=proposal_id,
-        subjective_score=subjective_score,
         require_visual_evidence=require_visual_evidence,
         visual_evidence_file=visual_evidence_file,
     )

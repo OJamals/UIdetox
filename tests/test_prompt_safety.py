@@ -42,7 +42,7 @@ def _sensitive_finding(tmp_path) -> tuple[str, dict]:
     finding = next(
         issue
         for issue in analyze_file(source)
-        if issue["id"] == "HARDCODED_SECRET_SLOP"
+        if issue["detector_id"] == "HARDCODED_SECRET_SLOP"
     )
     return sentinel, finding
 
@@ -180,7 +180,7 @@ def _stub_scan_dependencies(monkeypatch, tmp_path, findings, queued):
     monkeypatch.setattr(
         scan,
         "add_issues",
-        lambda issues: queued.extend(issues) or len(issues),
+        lambda issues, **kwargs: queued.extend(issues) or len(issues),
     )
     monkeypatch.setattr(scan, "increment_scans", lambda: None)
     monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
@@ -193,7 +193,7 @@ def _stub_scan_dependencies(monkeypatch, tmp_path, findings, queued):
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan, "compute_design_score", lambda state: {"blended_score": 100}
+        scan, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
 
 
@@ -217,14 +217,15 @@ def test_sensitive_evidence_never_emitted_from_scan_or_queue(
     _assert_sensitive_absent(sentinel, table_output, queued)
 
     expected_fingerprint = hashlib.sha256(f'"{sentinel}"'.encode()).hexdigest()
-    assert sensitive["id"] == "HARDCODED_SECRET_SLOP"
+    assert sensitive["detector_id"] == "HARDCODED_SECRET_SLOP"
+    assert sensitive["fingerprint"] == sensitive["id"]
     assert sensitive["file"] == str((tmp_path / "client.ts").resolve())
     assert sensitive["line"] == 1
     assert sensitive.get("credential_class") == "openai_api_key"
     assert sensitive.get("evidence_fingerprint") == f"sha256:{expected_fingerprint}"
     if sensitive.get("snippet") != "[REDACTED SENSITIVE EVIDENCE]":
         pytest.fail("sensitive snippet was not replaced")
-    assert queued[0].get("rule_id") == "HARDCODED_SECRET_SLOP"
+    assert queued[0].get("detector_id") == "HARDCODED_SECRET_SLOP"
     assert queued[0].get("evidence_fingerprint") == f"sha256:{expected_fingerprint}"
 
 
@@ -254,12 +255,12 @@ def test_sensitive_evidence_never_emitted_from_rescan_queue(
     monkeypatch.setattr(
         rescan,
         "add_issues",
-        lambda issues: queued.extend(issues) or len(issues),
+        lambda issues, **kwargs: queued.extend(issues) or len(issues),
     )
     monkeypatch.setattr(rescan, "save_run_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(rescan, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan, "compute_design_score", lambda state: {"blended_score": 0}
+        rescan, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 0}
     )
 
     rescan.run(argparse.Namespace(path="."))
@@ -267,7 +268,7 @@ def test_sensitive_evidence_never_emitted_from_rescan_queue(
 
     _assert_sensitive_absent(sentinel, output, queued)
     issue = queued[0]
-    assert issue["rule_id"] == "HARDCODED_SECRET_SLOP"
+    assert issue["detector_id"] == "HARDCODED_SECRET_SLOP"
     assert issue["credential_class"] == "openai_api_key"
     assert issue["evidence_fingerprint"] == finding["evidence_fingerprint"]
     assert issue["file"] == str((tmp_path / "client.ts").resolve())
@@ -365,7 +366,7 @@ def test_sensitive_evidence_never_emitted_from_loop_memory(
         },
     )
     monkeypatch.setattr(
-        loop, "compute_design_score", lambda state: {"blended_score": 0}
+        loop, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 0}
     )
     monkeypatch.setattr(loop, "log_progress", lambda *args, **kwargs: None)
 

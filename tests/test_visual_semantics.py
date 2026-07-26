@@ -20,17 +20,17 @@ from uidetox.runtime_observer import (
     RuntimePage,
     RuntimeViewport,
 )
+from uidetox.visual_evidence import (
+    VisualEvidenceCase,
+    VisualEvidenceRequest,
+    build_visual_evidence,
+)
 from uidetox.visual_semantics import (
     build_visual_context,
     explicit_ignore_regions,
     load_project_visual_context,
     project_visual_evidence_status,
     semantic_regions_from_runtime,
-)
-from uidetox.visual_evidence import (
-    VisualEvidenceCase,
-    VisualEvidenceRequest,
-    build_visual_evidence,
 )
 
 
@@ -131,6 +131,52 @@ def test_runtime_regions_link_only_evidenced_sources_intent_and_contracts() -> N
     assert "Route remains reachable: /projects" in region.preserve_contracts
     assert "Keep project routes and API contracts" in region.preserve_contracts
     assert "runtime-sidebar" in region.provenance
+
+
+def test_runtime_text_uses_production_map_source_ownership(tmp_path: Path) -> None:
+    from uidetox.frontend_map import map_frontend
+    from uidetox.runtime_observer import RuntimeObservation
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        """
+export function App() {
+  return <main><p data-testid="summary">Healthy</p></main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    page = RuntimePage(
+        url="http://localhost:3000/",
+        title="App",
+        viewport=RuntimeViewport("desktop", 1280, 800),
+        elements=(
+            RuntimeElement(
+                kind="text",
+                tag="p",
+                role="",
+                name="Healthy",
+                selector='[data-testid="summary"]',
+                order=0,
+                bounds={"x": 0, "y": 0, "width": 100, "height": 20},
+                styles={},
+            ),
+        ),
+    )
+    frontend_map = map_frontend(
+        tmp_path,
+        runtime=RuntimeObservation(
+            generated_at="2026-07-25T00:00:00Z",
+            requested_urls=(page.url,),
+            pages=(page,),
+        ),
+    )
+
+    regions = semantic_regions_from_runtime(page, frontend_map=frontend_map)
+
+    assert regions[0].source_targets == ("src/App.tsx",)
+    assert "map:unresolved" not in regions[0].provenance
 
 
 def test_visual_context_hashes_map_and_field_level_intent_provenance() -> None:

@@ -5,9 +5,12 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from uidetox.findings import coerce_finding
 from uidetox.frontend_map import map_frontend, save_frontend_map
+from uidetox.project_map import ProjectMap
 from uidetox.runtime_observer import observe_frontend
-from uidetox.state import get_project_root, get_uidetox_dir, load_config
+from uidetox.runtime_scenarios import load_runtime_scenarios
+from uidetox.state import add_issues, get_project_root, get_uidetox_dir, load_config
 
 
 def run(args: argparse.Namespace) -> None:
@@ -24,21 +27,25 @@ def run(args: argparse.Namespace) -> None:
         urls = getattr(args, "urls", None) or [
             config.get("dev_server", "http://localhost:3000")
         ]
+        scenario_file = config.get("runtime_scenarios")
+        scenarios = (
+            load_runtime_scenarios(scenario_file, root=root)
+            if scenario_file
+            else None
+        )
+        if scenarios is not None and not getattr(args, "urls", None):
+            urls = list(dict.fromkeys(scenario.url for scenario in scenarios))
         screenshot_dir = (
             get_uidetox_dir() / "runtime-screenshots" if screenshots_requested else None
         )
-        runtime_observation = observe_frontend(
-            urls,
-            screenshots_dir=screenshot_dir,
-            timeout_ms=getattr(args, "timeout", 15_000),
-        )
-        if not runtime_observation.pages:
-            detail = (
-                runtime_observation.errors[0]
-                if runtime_observation.errors
-                else "no pages observed"
-            )
-            raise RuntimeError(f"Runtime observation failed: {detail}")
+        observation_options = {
+            "screenshots_dir": screenshot_dir,
+            "timeout_ms": getattr(args, "timeout", 15_000),
+            "source_root": root,
+        }
+        if scenarios is not None:
+            observation_options["scenarios"] = scenarios
+        runtime_observation = observe_frontend(urls, **observation_options)
 
     frontend_map = map_frontend(root, target, runtime_observation)
     output_arg = getattr(args, "output", None)
@@ -46,6 +53,20 @@ def run(args: argparse.Namespace) -> None:
         frontend_map,
         Path(output_arg) if output_arg else None,
     )
+    runtime_findings = [
+        coerce_finding(item)
+        for item in frontend_map.evidence.get("runtime_findings", [])
+        if isinstance(item, dict)
+    ]
+    contract_graph = ProjectMap.from_dict(frontend_map.project_map)
+    queued = add_issues([*runtime_findings, *contract_graph.findings])
+    if runtime_observation is not None and not runtime_observation.pages:
+        detail = (
+            runtime_observation.errors[0]
+            if runtime_observation.errors
+            else "no pages observed"
+        )
+        raise RuntimeError(f"Runtime observation failed: {detail}")
 
     if getattr(args, "json", False):
         print(json.dumps(frontend_map.to_dict(), indent=2, sort_keys=True))
@@ -61,12 +82,21 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Routes      : {counts['route']}")
     print(f"  Actions     : {counts['action']}")
     print(f"  Data sources: {counts['data']}")
+    print(
+        "  Contracts   : "
+        f"{len(contract_graph.nodes)} nodes, {len(contract_graph.edges)} edges, "
+        f"{contract_graph.counts['contract_mismatch']} mismatch(es), "
+        f"{contract_graph.counts['coverage_gap']} coverage gap(s)"
+    )
     print(f"  Artifact    : {output_path}")
+    print(f"  Queued      : {queued} current finding(s)")
     if frontend_map.evidence.get("runtime_observed"):
         viewports = ", ".join(frontend_map.evidence.get("runtime_viewports", []))
         print(
-            f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} page/view(s) ({viewports})"
+            f"  Runtime     : {frontend_map.evidence.get('runtime_pages', 0)} "
+            f"page/view(s) ({viewports})"
         )
+        print(f"  Completeness: {frontend_map.evidence.get('runtime_status')}")
         runtime_finding_count = frontend_map.evidence.get("runtime_finding_count", 0)
         if runtime_finding_count:
             print(f"  Findings    : {runtime_finding_count} rendered layout issue(s)")

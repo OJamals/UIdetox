@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Protocol
+
+from uidetox.findings import Finding
 
 
 class RuntimeMeasuredElement(Protocol):
@@ -11,29 +12,31 @@ class RuntimeMeasuredElement(Protocol):
     measurements: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class RuntimeFinding:
-    code: str
-    category: str
-    severity: str
-    message: str
-    metrics: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeFinding":
-        metrics = value.get("metrics", {})
-        return cls(
-            code=str(value.get("code", "runtime-layout-finding")),
-            category=str(value.get("category", "layout")),
-            severity=str(value.get("severity", "warning")),
-            message=str(value.get("message", "Rendered layout needs review.")),
-            metrics=dict(metrics) if isinstance(metrics, dict) else {},
-        )
+def RuntimeFinding(
+    *,
+    code: str,
+    category: str,
+    severity: str,
+    message: str,
+    metrics: dict[str, Any] | None = None,
+) -> Finding:
+    return Finding.create(
+        detector_id=code,
+        category=category,
+        severity=severity,
+        confidence=0.9,
+        message=message,
+        provenance="runtime",
+        evidence={"metrics": metrics or {}},
+        suppression_key=code,
+        verifier={"kind": "runtime", "detector_id": code},
+        status="informational" if severity == "info" else "pending",
+    )
 
 
 def detect_runtime_findings(
     element: RuntimeMeasuredElement,
-) -> tuple[RuntimeFinding, ...]:
+) -> tuple[Finding, ...]:
     """Classify browser measurements into stable layout finding codes."""
 
     return (
@@ -46,8 +49,8 @@ def detect_runtime_findings(
 
 def _alignment_findings(
     measurements: dict[str, Any],
-) -> tuple[RuntimeFinding, ...]:
-    findings: list[RuntimeFinding] = []
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
     layout_deviation = _measurement_float(measurements, "layoutDeviation")
     if layout_deviation > 4:
         axis = str(measurements.get("layoutAxis", "cross-axis"))
@@ -94,8 +97,8 @@ def _alignment_findings(
 
 def _clipping_findings(
     measurements: dict[str, Any],
-) -> tuple[RuntimeFinding, ...]:
-    findings: list[RuntimeFinding] = []
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
     has_text = measurements.get("hasText") is True
     clipped_values = {"clip", "hidden"}
     clipped_x = (
@@ -178,8 +181,8 @@ def _clipping_findings(
 
 def _spacing_findings(
     measurements: dict[str, Any],
-) -> tuple[RuntimeFinding, ...]:
-    findings: list[RuntimeFinding] = []
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
     has_text = measurements.get("hasText") is True
     is_box_control = measurements.get("isBoxControl") is True
     is_visual_container = measurements.get("isVisualContainer") is True
@@ -322,7 +325,7 @@ def _spacing_findings(
 
 def _line_spacing_findings(
     element: RuntimeMeasuredElement,
-) -> tuple[RuntimeFinding, ...]:
+) -> tuple[Finding, ...]:
     measurements = element.measurements
     font_size = _measurement_float(measurements, "fontSize")
     line_height = _measurement_float(measurements, "lineHeight")

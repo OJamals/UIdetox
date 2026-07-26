@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-
 _FORM_TAG = re.compile(r"<form\b[^>]*>", re.IGNORECASE)
 _HANDLER_ATTRIBUTE = re.compile(r"\b(?:action|onsubmit)\s*=", re.IGNORECASE)
 _ID_ATTRIBUTE = re.compile(r"\bid\s*=\s*([\"'])([^\"']+)\1", re.IGNORECASE)
@@ -22,10 +21,13 @@ def reconcile_project_issues(
     """Remove per-file findings disproved by linked project evidence."""
 
     issue_list = list(issues)
+    def detector(issue: dict) -> object:
+        return issue.get("detector_id", issue.get("id"))
+
     form_issue_files = {
         Path(str(issue.get("file", ""))).resolve()
         for issue in issue_list
-        if issue.get("id") == "FORM_NO_SUBMIT_SLOP"
+        if detector(issue) == "FORM_NO_SUBMIT_SLOP"
         and str(issue.get("file", "")).lower().endswith((".htm", ".html"))
     }
     if not form_issue_files:
@@ -43,7 +45,7 @@ def reconcile_project_issues(
         issue
         for issue in issue_list
         if not (
-            issue.get("id") == "FORM_NO_SUBMIT_SLOP"
+            detector(issue) == "FORM_NO_SUBMIT_SLOP"
             and Path(str(issue.get("file", ""))).resolve() in resolved_form_files
         )
     ]

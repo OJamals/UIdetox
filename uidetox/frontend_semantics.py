@@ -5,8 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from uidetox.analyzer_ast import _get_parser
-from uidetox.source_facts import SourceFacts, extract_source_facts
+from uidetox.source_facts import (
+    SourceFacts,
+    extract_source_facts,
+)
+from uidetox.source_facts import (
+    get_parser as _get_parser,
+)
 
 _UNSET_FACTS = object()
 
@@ -39,7 +44,7 @@ def extract_script_semantics(
     content: str,
     facts: SourceFacts | None | object = _UNSET_FACTS,
 ) -> ScriptSemantics | None:
-    """Return the legacy semantic view, reusing precomputed facts when supplied."""
+    """Return compatibility values projected from the canonical adapter."""
     if facts is _UNSET_FACTS:
         facts = extract_source_facts(path, content, parser_factory=_get_parser)
     if facts is None:
@@ -51,25 +56,28 @@ def extract_script_semantics(
             for item in facts.declared_ui_modules
         ),
         imports=facts.imports,
-        rendered_tags=facts.rendered_modules,
+        rendered_tags=tuple(item.binding for item in facts.rendered_bindings),
         regions=tuple(
             SemanticOccurrence(item.name, item.line) for item in facts.regions
         ),
         actions=tuple(
             SemanticOccurrence(item.name, item.line) for item in facts.actions
         ),
-        states=tuple(SemanticOccurrence(item.name, item.line) for item in facts.states),
+        states=tuple(
+            SemanticOccurrence(item.name, item.line) for item in facts.states
+        ),
         endpoints=tuple(
             SemanticOccurrence(
-                item.url,
+                item.url or item.url_expression or item.target,
                 item.line,
                 method=item.method,
                 dynamic=item.dynamic,
             )
-            for item in facts.endpoints
-            if item.url is not None
+            for item in facts.network_calls
         ),
-        routes=tuple(SemanticOccurrence(item.name, item.line) for item in facts.routes),
+        routes=tuple(
+            SemanticOccurrence(item.name, item.line) for item in facts.routes
+        ),
         extractor=facts.extractor,
         confidence=facts.confidence,
         parse_errors=facts.parse_errors,

@@ -1,5 +1,4 @@
 """State and Config Management for UIdetox."""
-
 import contextlib
 import json
 import os
@@ -7,12 +6,17 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
+from uidetox.findings import (
+    FINDING_SCHEMA_VERSION,
+    Finding,
+    VerificationResult,
+    coerce_finding,
+)
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
 
 try:
     import fcntl as _fcntl
-
     _HAS_FLOCK = True
 except ImportError:
     _HAS_FLOCK = False  # Windows — locking is best-effort only
@@ -21,7 +25,6 @@ except ImportError:
 @contextlib.contextmanager
 def _state_lock():
     """Advisory POSIX file lock to serialize concurrent state mutations.
-
     On platforms without fcntl (Windows), this is a no-op — concurrent
     writes are still possible but won't crash.
     """
@@ -68,26 +71,21 @@ def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path |
 
 def get_project_root() -> Path:
     """Find the project root from the current working directory.
-
     Preference order:
     1. Existing `.uidetox` ancestor (persisted project state already established)
     2. Nearest git/project root marker ancestor for cold starts from subdirectories
     3. Current working directory as a last resort
     """
     cwd = Path.cwd().resolve()
-
     uidetox_root = _find_ancestor_with_markers(cwd, (UIDETOX_DIR,))
     if uidetox_root is not None:
         return uidetox_root
-
     git_root = _find_ancestor_with_markers(cwd, (".git",))
     if git_root is not None:
         return git_root
-
     project_root = _find_ancestor_with_markers(cwd, _PROJECT_ROOT_MARKERS)
     if project_root is not None:
         return project_root
-
     return cwd
 
 
@@ -124,17 +122,19 @@ def _normalize_bounded_score(value: object) -> int | None:
 def _normalize_issue_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-    return [issue for issue in value if isinstance(issue, dict)]
+    return [
+        coerce_finding(issue).to_dict()
+        for issue in value
+        if isinstance(issue, (Finding, dict))
+    ]
 
 
 def _normalize_subjective_history_entry(entry: object) -> dict | None:
     if not isinstance(entry, dict):
         return None
-
     score = _normalize_bounded_score(entry.get("score"))
     if score is None:
         return None
-
     normalized = dict(entry)
     timestamp = entry.get("timestamp")
     normalized["score"] = score
@@ -145,15 +145,12 @@ def _normalize_subjective_history_entry(entry: object) -> dict | None:
 def _normalize_subjective_state(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
-
     normalized = dict(value)
-
     score = _normalize_bounded_score(value.get("score"))
     if score is None:
         normalized.pop("score", None)
     else:
         normalized["score"] = score
-
     history = value.get("history")
     if not isinstance(history, list):
         normalized["history"] = []
@@ -164,19 +161,16 @@ def _normalize_subjective_state(value: object) -> dict:
             if clean_entry is not None:
                 normalized_history.append(clean_entry)
         normalized["history"] = normalized_history
-
     return normalized
 
 
 def _normalize_tool_entry(tool: object) -> dict | None:
     if not isinstance(tool, dict):
         return None
-
     name = tool.get("name")
     run_cmd = tool.get("run_cmd")
     if not isinstance(name, str) or not isinstance(run_cmd, str):
         return None
-
     normalized = {"name": name, "run_cmd": run_cmd}
     config_file = tool.get("config_file")
     if isinstance(config_file, str):
@@ -190,7 +184,6 @@ def _normalize_tool_entry(tool: object) -> dict | None:
 def _normalize_tool_collection(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-
     normalized: list[dict] = []
     for entry in value:
         clean_entry = _normalize_tool_entry(entry)
@@ -202,26 +195,24 @@ def _normalize_tool_collection(value: object) -> list[dict]:
 def _normalize_tooling_config(tooling: object) -> dict:
     if not isinstance(tooling, dict):
         return {}
-
     normalized = dict(tooling)
     for key in ("typescript", "linter", "formatter"):
         if key in normalized:
             normalized[key] = _normalize_tool_entry(normalized[key])
-
     for key in ("frontend", "backend", "database", "api"):
         if key in normalized:
             normalized[key] = _normalize_tool_collection(normalized[key])
-
     if "package_manager" in normalized and not isinstance(
         normalized["package_manager"], str
     ):
         normalized["package_manager"] = None
-
     return normalized
 
 
-def load_config() -> dict:
-    config_path = get_uidetox_dir() / CONFIG_FILE
+def load_config(root: str | Path | None = None) -> dict:
+    config_path = (
+        Path(root).resolve() / UIDETOX_DIR if root is not None else get_uidetox_dir()
+    ) / CONFIG_FILE
     default_config = {"DESIGN_VARIANCE": 8, "MOTION_INTENSITY": 6, "VISUAL_DENSITY": 4}
     if not config_path.exists():
         return default_config.copy()
@@ -230,18 +221,14 @@ def load_config() -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return default_config.copy()
-
     if not isinstance(data, dict):
         return default_config.copy()
-
     # Ensure numeric dials have correct types to prevent TypeError in comparisons.
     for key, default in default_config.items():
         if not _is_numeric_config_value(data.get(key)):
             data[key] = default
-
     if not _is_numeric_config_value(data.get("target_score")):
         data["target_score"] = 95
-
     if "tooling" in data:
         data["tooling"] = _normalize_tooling_config(data["tooling"])
     if "ignore_patterns" in data and not isinstance(data["ignore_patterns"], list):
@@ -260,7 +247,6 @@ def load_config() -> dict:
         data["auto_commit"] = False
     if "dev_server" in data and not isinstance(data["dev_server"], str):
         data.pop("dev_server", None)
-
     return data
 
 
@@ -297,17 +283,16 @@ def load_state() -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         data = _default_state()
-
     # Validate expected types — a corrupted or hand-edited state.json can contain
     # wrong types for critical fields, causing cryptic AttributeError crashes downstream.
     if not isinstance(data, dict):
         data = _default_state()
     else:
+        data["schema_version"] = FINDING_SCHEMA_VERSION
         data["issues"] = _normalize_issue_collection(data.get("issues"))
         data["resolved"] = _normalize_issue_collection(data.get("resolved"))
         data["diff_baseline"] = _normalize_issue_collection(data.get("diff_baseline"))
         data["subjective"] = _normalize_subjective_state(data.get("subjective"))
-
         stats = data.get("stats")
         if not isinstance(stats, dict):
             stats = {"total_found": 0, "total_resolved": 0, "scans_run": 0}
@@ -317,28 +302,37 @@ def load_state() -> dict:
             stats["total_resolved"] = _normalize_counter(stats.get("total_resolved"))
             stats["scans_run"] = _normalize_counter(stats.get("scans_run"))
         data["stats"] = stats
-
     # Ensure new fields exist for backwards compat
     data.setdefault("diff_baseline", [])
     data.setdefault("resolved", [])
     data.setdefault("subjective", {})
     data.setdefault("stats", {"total_found": 0, "total_resolved": 0, "scans_run": 0})
+    data.setdefault("schema_version", FINDING_SCHEMA_VERSION)
+    data.setdefault("current_snapshot", {"qualified_coverage": 0.0})
+    data.setdefault("overrides", [])
     return sanitize_untrusted_data(data)
 
 
 def _default_state() -> dict:
     return {
+        "schema_version": FINDING_SCHEMA_VERSION,
         "last_scan": None,
         "diff_baseline": [],
         "issues": [],
         "resolved": [],
         "subjective": {},
+        "current_snapshot": {"qualified_coverage": 0.0},
+        "overrides": [],
         "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
     }
 
 
 def save_state(state: dict):
-    _save_json(sanitize_untrusted_data(state), STATE_FILE, "state_")
+    canonical = dict(state)
+    canonical["schema_version"] = FINDING_SCHEMA_VERSION
+    for key in ("issues", "resolved", "diff_baseline"):
+        canonical[key] = _normalize_issue_collection(canonical.get(key))
+    _save_json(sanitize_untrusted_data(canonical), STATE_FILE, "state_")
 
 
 def get_issue(issue_id: str) -> dict | None:
@@ -349,57 +343,54 @@ def get_issue(issue_id: str) -> dict | None:
     return None
 
 
-def remove_issue(issue_id: str, note: str = "") -> bool:
-    with _state_lock():
-        state = load_state()
-        original_len = len(state.get("issues", []))
-        removed = [i for i in state.get("issues", []) if i.get("id") == issue_id]
-        state["issues"] = [
-            i for i in state.get("issues", []) if i.get("id") != issue_id
-        ]
-        if len(state["issues"]) < original_len:
-            # Track resolved issues
-            for r in removed:
-                r["resolved_at"] = _now_iso()
-                if note:
-                    r["note"] = note
-                state.setdefault("resolved", []).append(r)
-            state.setdefault("stats", {})
-            state["stats"]["total_resolved"] = state["stats"].get(
-                "total_resolved", 0
-            ) + len(removed)
-            save_state(state)
-            return True
-        return False
+def remove_issue(
+    issue_id: str,
+    note: str = "",
+    *,
+    verification: VerificationResult | None = None,
+) -> bool:
+    return bool(
+        verification
+        and batch_remove_issues(
+            [issue_id], note=note, verifications={issue_id: verification}
+        )
+    )
 
 
 def issue_dedup_key(issue: dict) -> str:
     """Return a stable key for detecting duplicate pending issues."""
-    return "::".join(
-        str(issue.get(field, "")).strip() for field in ("file", "issue", "command")
-    )
+    return coerce_finding(issue).fingerprint
 
 
-def add_issues(issues: Iterable[dict]) -> int:
+def add_issues(
+    issues: Iterable[Finding | dict], *, qualified_complete: bool | None = None
+) -> int:
     """Add unique pending issues in one locked persistence transaction."""
     with _state_lock():
         state = load_state()
         pending = state.setdefault("issues", [])
         dedup_keys = {issue_dedup_key(existing) for existing in pending}
         accepted_count = 0
-
         for issue in issues:
-            new_key = issue_dedup_key(issue)
+            finding = coerce_finding(issue)
+            new_key = finding.fingerprint
             if new_key in dedup_keys:
                 continue
-            issue["created_at"] = _now_iso()
-            pending.append(issue)
+            created_at = _now_iso()
+            if isinstance(issue, dict):
+                issue["created_at"] = created_at
+            payload = finding.to_dict()
+            payload["created_at"] = created_at
+            pending.append(payload)
             dedup_keys.add(new_key)
             accepted_count += 1
-
-        if accepted_count == 0:
+        if qualified_complete is not None:
+            state["current_snapshot"] = {
+                "qualified_coverage": 1.0 if qualified_complete else 0.0,
+                "scanned_at": _now_iso(),
+            }
+        if accepted_count == 0 and qualified_complete is None:
             return 0
-
         state.setdefault("stats", {})
         state["stats"]["total_found"] = (
             state["stats"].get("total_found", 0) + accepted_count
@@ -408,7 +399,7 @@ def add_issues(issues: Iterable[dict]) -> int:
         return accepted_count
 
 
-def add_issue(issue: dict) -> bool:
+def add_issue(issue: Finding | dict) -> bool:
     return add_issues((issue,)) == 1
 
 
@@ -430,33 +421,80 @@ def clear_issues():
         save_state(state)
 
 
-def batch_remove_issues(issue_ids: list[str], note: str = "") -> list[dict]:
+def batch_remove_issues(
+    issue_ids: list[str],
+    note: str = "",
+    *,
+    verifications: dict[str, VerificationResult] | None = None,
+) -> list[dict]:
     """Remove multiple issues atomically in a single state update.
-
     Args:
         issue_ids: List of issue IDs to resolve.
         note: Resolution note applied to all issues.
-
     Returns:
         List of removed issue dicts (empty if none found).
     """
+    verifications = verifications or {}
+    if any(
+        issue_id not in verifications
+        or verifications[issue_id].outcome != "absent"
+        or not verifications[issue_id].evidence_hash
+        for issue_id in issue_ids
+    ):
+        return []
     with _state_lock():
         state = load_state()
         id_set = set(issue_ids)
         removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
+        if len(removed) != len(id_set):
+            return []
         state["issues"] = [
             i for i in state.get("issues", []) if i.get("id") not in id_set
         ]
-
         for r in removed:
+            verification = verifications[r["id"]]
+            r["status"] = "verified_resolved"
+            r["last_verification"] = verification.to_dict()
             r["resolved_at"] = _now_iso()
             if note:
                 r["note"] = note
             state.setdefault("resolved", []).append(r)
-
         state.setdefault("stats", {})
         state["stats"]["total_resolved"] = state["stats"].get(
             "total_resolved", 0
         ) + len(removed)
         save_state(state)
         return removed
+
+
+def record_verification_override(
+    issue_ids: list[str],
+    *,
+    actor: str,
+    reason: str,
+    results: dict[str, VerificationResult],
+) -> None:
+    """Audit an explicit verifier override without resolving the findings."""
+    if not actor.strip() or not reason.strip():
+        raise ValueError("Verifier overrides require both actor and reason.")
+    with _state_lock():
+        state = load_state()
+        ids = set(issue_ids)
+        for issue in state.get("issues", []):
+            if issue.get("id") in ids:
+                issue["status"] = "overridden"
+                result = results.get(issue["id"])
+                issue["last_verification"] = result.to_dict() if result else None
+        state.setdefault("overrides", []).append(
+            {
+                "issue_ids": list(issue_ids),
+                "actor": actor.strip(),
+                "reason": reason.strip(),
+                "timestamp": _now_iso(),
+                "results": {
+                    issue_id: result.to_dict()
+                    for issue_id, result in results.items()
+                },
+            }
+        )
+        save_state(state)

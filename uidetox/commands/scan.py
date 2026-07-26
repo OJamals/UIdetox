@@ -1,38 +1,43 @@
 """Scan command -- unified static + subjective analysis in a single pass.
-
 Implements the desloppify flow: Scan Codebase -> generate score -> both
 Mechanical Issues (static analyzer) AND Subjective Analysis (LLM review)
 happen together, with mechanical informing subjective.
 """
-
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-import uuid
-from uidetox.analyzer import analyze_directory, RULES
+from pathlib import Path
+
+from uidetox.analyzer import RULES, analyze_directory
 from uidetox.commands.add_issue import _is_suppressed
-from uidetox.frontend_map import map_frontend
+from uidetox.findings import (
+    Finding,
+    coerce_finding,
+    current_evidence_hashes,
+    score_current_snapshot,
+)
+from uidetox.frontend_map import (
+    FRONTEND_MAP_FILE,
+    frontend_map_is_fresh,
+    load_frontend_map,
+    map_frontend,
+)
+from uidetox.history import save_run_snapshot
+from uidetox.memory import log_progress, save_scan_summary, save_session
 from uidetox.project_map import ProjectMap
 from uidetox.state import (
     add_issues,
     ensure_uidetox_dir,
     get_project_root,
+    increment_scans,
     load_config,
     load_state,
     save_config,
-    increment_scans,
 )
 from uidetox.tooling import detect_all
-from uidetox.history import save_run_snapshot
-from uidetox.memory import save_scan_summary, save_session, log_progress
-from uidetox.prompt_safety import sanitize_untrusted_data
-from uidetox.utils import compute_design_score
 
-
-# Categories auto-covered by static analyzer, mapped to rule IDs
 _AUTO_CATEGORIES = {
     "typography": {
         "TYPOGRAPHY_SLOP",
@@ -285,7 +290,6 @@ _AUTO_CATEGORIES = {
         "PROP_TYPES_IN_TS_SLOP",
     },
 }
-
 # Categories that ALWAYS need manual agent audit (not automatable via regex)
 _MANUAL_CATEGORIES = {
     "responsive": "Mobile collapse, container queries, fluid typography",
@@ -295,7 +299,6 @@ _MANUAL_CATEGORIES = {
     "elegance": "Visual rhythm, spatial harmony, intentional asymmetry, craft details",
     "a11y (deep)": "Skip-to-content, live regions, complex ARIA patterns, focus traps",
 }
-
 
 _OUTPUT_FORMATS = frozenset({"table", "json", "github"})
 
@@ -329,15 +332,39 @@ def _print_fallback_warning(message: str, *, table_output: bool) -> None:
     print(message, file=sys.stdout if table_output else sys.stderr)
 
 
+def current_map_findings(project_root: Path) -> tuple[tuple[Finding, ...], bool]:
+    """Return findings from a current persisted runtime/contract map."""
+    path = project_root / ".uidetox" / FRONTEND_MAP_FILE
+    if not path.exists():
+        return (), True
+    try:
+        frontend_map = load_frontend_map(path)
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return (), False
+    if (
+        not frontend_map_is_fresh(frontend_map, project_root, frontend_map.target)
+        or frontend_map.evidence.get("runtime_status") != "current"
+    ):
+        return (), False
+    findings = [
+        *ProjectMap.from_dict(frontend_map.project_map).findings,
+        *(
+            coerce_finding(raw)
+            for raw in frontend_map.evidence.get("runtime_findings", ())
+            if isinstance(raw, dict)
+        ),
+    ]
+    unique = {finding.fingerprint: finding for finding in findings}
+    return tuple(unique.values()), True
+
+
 def run(args: argparse.Namespace):
     output_format = _get_output_format(args)
     table_output = _is_table_output(output_format)
     json_output = _is_json_output(output_format)
     github_output = _is_github_output(output_format)
-
     ensure_uidetox_dir()
     project_root = get_project_root()
-
     # Validate that the path exists and is a directory before doing anything
     scan_path_arg = getattr(args, "path", ".")
     scan_path = str(project_root) if scan_path_arg in (None, "", ".") else scan_path_arg
@@ -347,21 +374,17 @@ def run(args: argparse.Namespace):
             file=sys.stderr,
         )
         sys.exit(1)
-
     config = load_config()
     variance = config.get("DESIGN_VARIANCE", 8)
     intensity = config.get("MOTION_INTENSITY", 6)
     density = config.get("VISUAL_DENSITY", 4)
     target = config.get("target_score", 95)
-
     # Auto-detect tooling if not already configured
     if not config.get("tooling"):
         profile = detect_all(project_root)
         config["tooling"] = profile.to_dict()
         save_config(config)
-
     tooling = config.get("tooling", {})
-
     if table_output:
         print("+" + "=" * 58 + "+")
         print("| SCAN CODEBASE -- Static Analysis + Subjective Review     |")
@@ -369,7 +392,6 @@ def run(args: argparse.Namespace):
         print(f"  Path  : {scan_path}")
         print(f"  Dials : VARIANCE={variance}  MOTION={intensity}  DENSITY={density}")
         print()
-
     # --- Tooling Summary ---
     pm = tooling.get("package_manager")
     ts = tooling.get("typescript")
@@ -379,7 +401,6 @@ def run(args: argparse.Namespace):
     backends = tooling.get("backend", [])
     databases = tooling.get("database", [])
     apis = tooling.get("api", [])
-
     if table_output:
         print(
             f"  Tooling: pkg={pm or 'none'}, tsc={'yes' if ts else 'no'}, lint={linter['name'] if linter else 'none'}, fmt={fmt['name'] if fmt else 'none'}"
@@ -396,7 +417,6 @@ def run(args: argparse.Namespace):
                 layers.append(f"api={', '.join(a['name'] for a in apis)}")
             print(f"           {', '.join(layers)}")
         print()
-
     # --- Suppressions & Zones ---
     ignore_patterns = config.get("ignore_patterns", [])
     overrides = config.get("zone_overrides", {})
@@ -404,7 +424,6 @@ def run(args: argparse.Namespace):
         print(f"  Active suppressions: {len(ignore_patterns)} pattern(s)")
     if table_output and overrides:
         print(f"  Active zone overrides: {len(overrides)}")
-
     # ===========================================================
     # PART 1: MECHANICAL ISSUES (deterministic static analysis)
     # ===========================================================
@@ -413,17 +432,14 @@ def run(args: argparse.Namespace):
         print("=" * 58)
         print(" PART 1: MECHANICAL ISSUES (static analyzer)")
         print("=" * 58)
-
     # Run tsc/lint/format pre-pass if tooling is available
     if table_output and (ts or linter or fmt):
         print(
             "  Pre-check: run `uidetox check --fix` to clear compiler/lint/format errors first."
         )
         print()
-
     # Run static slop analyzer
     since_sha = getattr(args, "since", None)
-
     # Incremental mode: only scan files changed since a git SHA
     since_targets: list[str] | None = None
     if since_sha:
@@ -448,7 +464,6 @@ def run(args: argparse.Namespace):
                 )
             else:
                 result = None
-
             if result is not None and result.returncode == 0:
                 scan_root = Path(scan_path).resolve()
                 resolved_targets: set[str] = set()
@@ -477,7 +492,6 @@ def run(args: argparse.Namespace):
                 f"  Warning: could not run git diff for --since={since_sha}, scanning all files",
                 table_output=table_output,
             )
-
     if table_output:
         print(f"  Running {len(RULES)}-rule deterministic anti-slop analyzer...")
     exclude_paths = config.get("exclude", [])
@@ -489,16 +503,35 @@ def run(args: argparse.Namespace):
         design_variance=variance,
         target_files=since_targets,
     )
-    slop_issues = sanitize_untrusted_data(slop_issues)
-
+    slop_issues = [coerce_finding(issue) for issue in slop_issues]
+    contract_graph = None
+    has_fullstack = bool(backends or databases or apis)
+    if has_fullstack:
+        try:
+            contract_graph = ProjectMap.from_dict(
+                map_frontend(project_root, Path(scan_path).resolve()).project_map
+            )
+        except (OSError, TypeError, ValueError) as error:
+            if table_output:
+                print(f"  Full-stack contract lineage unavailable: {error}")
+    mapped_findings, map_qualified = current_map_findings(project_root)
+    findings = list(
+        {
+            finding.fingerprint: finding
+            for finding in [
+                *slop_issues,
+                *(contract_graph.findings if contract_graph else ()),
+                *mapped_findings,
+            ]
+        }.values()
+    )
     # JSON output: print all issues as JSON and exit early
     if json_output:
-        print(json.dumps(slop_issues, indent=2))
+        print(json.dumps([finding.to_dict() for finding in findings], indent=2))
         return
-
     # GitHub Actions annotation output
     if github_output:
-        for issue in slop_issues:
+        for issue in findings:
             line = issue.get("line", 1)
             col = issue.get("column", 1)
             filepath = issue.get("file", "")
@@ -507,35 +540,19 @@ def run(args: argparse.Namespace):
             level = "error" if tier in ("T3", "T4") else "warning"
             print(f"::{level} file={filepath},line={line},col={col}::{msg}")
         return
-
-    pending_issues = []
-    triggered_rules: set[str] = set()
-    for issue in slop_issues:
-        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns):
-            issue_id = f"SCAN-{str(uuid.uuid4()).split('-')[0][:6].upper()}"
-            new_issue = {
-                "id": issue_id,
-                "rule_id": issue.get("id"),
-                "file": issue["file"],
-                "tier": issue["tier"],
-                "issue": issue["issue"],
-                "command": issue["command"],
-            }
-            for key in ("line", "column", "snippet", "credential_class", "evidence_fingerprint"):
-                if key in issue:
-                    new_issue[key] = issue[key]
-            pending_issues.append(new_issue)
-            if rule_id := issue.get("id"):
-                triggered_rules.add(rule_id)
-
-    pending_issues = sanitize_untrusted_data(pending_issues)
-    queued_count = add_issues(pending_issues)
-
+    pending_issues = [
+        issue
+        for issue in findings
+        if not _is_suppressed(issue["file"], issue["issue"], ignore_patterns)
+    ]
+    triggered_rules = {issue.detector_id for issue in findings}
+    queued_count = add_issues(
+        pending_issues, qualified_complete=since_targets is None and map_qualified
+    )
     if queued_count > 0:
         print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
     else:
         print("  -> No mechanical anti-patterns detected.")
-
     # Category coverage (compact)
     print()
     auto_hits = []
@@ -552,145 +569,23 @@ def run(args: argparse.Namespace):
         print(f"  Clean     : {', '.join(auto_clean)}")
     manual_list = [f"{cat}" for cat in _MANUAL_CATEGORIES]
     print(f"  Need audit: {', '.join(manual_list)}")
-
     # Full-stack integration checks
-    backends = tooling.get("backend", [])
-    databases = tooling.get("database", [])
-    apis = tooling.get("api", [])
-    has_fullstack = bool(backends or databases or apis)
     if has_fullstack:
         print()
-        try:
-            parity = ProjectMap.from_dict(
-                map_frontend(project_root, Path(scan_path).resolve()).project_map
-            )
-            counts = parity.counts
+        if contract_graph is not None:
+            counts = contract_graph.counts
             print(
-                "  Full-stack operation parity: "
-                f"frontend-only={counts['frontend_only']}, "
-                f"backend-only={counts['backend_only']}, "
-                f"method-mismatch={counts['method_mismatch']}, "
-                f"unresolved={counts['unresolved']}."
+                "  Full-stack contract lineage: "
+                f"mismatches={counts['contract_mismatch']}, "
+                f"coverage-gaps={counts['coverage_gap']}, "
+                f"nodes={len(contract_graph.nodes)}, edges={len(contract_graph.edges)}."
             )
             print(
-                "  Evidence scope: static HTTP routes and schema references only; "
-                "auth, UI error states, and business equivalence remain unverified."
+                "  Evidence scope: static source contracts only; unknown evidence "
+                "never implies parity, and business equivalence remains unverified."
             )
-        except (OSError, TypeError, ValueError) as error:
-            print(f"  Full-stack operation parity unavailable: {error}")
-
-    # ===========================================================
-    # PART 2: SUBJECTIVE ANALYSIS (LLM-driven design review)
-    # ===========================================================
+    print("  Run `uidetox review` for the evidence-bound A/B/C/D review brief.")
     print()
-    print("=" * 58)
-    print(" PART 2: SUBJECTIVE ANALYSIS (LLM design review)")
-    print("=" * 58)
-    print()
-    print("  The mechanical analysis above INFORMS this subjective review.")
-    print("  Read every frontend file. Evaluate the holistic design quality.")
-    print()
-
-    # ---- VISUAL DESIGN & AESTHETICS (40 pts) ----
-    print("  A. VISUAL DESIGN & AESTHETICS (0-40)")
-    print("  " + "-" * 50)
-    print("    STYLING & ELEGANCE (0-15)")
-    print("      Surface textures, color relationships, shadow/border craft.")
-    print("      Does it feel polished or rough? Premium or cheap?")
-    print("      Is there visual rhythm — intentional contrast between dense and airy?")
-    print()
-    print("    TYPOGRAPHY (0-10)")
-    print("      Font choice, weight spectrum, scale, kerning, line-height.")
-    print("      Is there a clear type hierarchy (display, body, caption)?")
-    print("      Are weights intentional (500/600, not just 400/700)?")
-    print()
-    print("    LAYOUT & SPATIAL DESIGN (0-15)")
-    print("      Grid structure, whitespace, alignment, responsive behavior.")
-    print("      Is the layout compositional or just stacked divs?")
-    print("      Does spacing create grouping and hierarchy, not just padding?")
-    print()
-
-    # ---- DESIGN SYSTEM & COHERENCE (30 pts) ----
-    print("  B. DESIGN SYSTEM & COHERENCE (0-30)")
-    print("  " + "-" * 50)
-    print("    CONSISTENCY (0-15)")
-    print("      Unified tokens, spacing scale, color palette, component patterns.")
-    print("      Does the same element look the same everywhere?")
-    print("      Would a new developer know the design system from reading the code?")
-    print()
-    print("    IDENTITY (0-15)")
-    print("      Does this feel designed, not generated?")
-    print("      Is there an intentional aesthetic point-of-view?")
-    print(
-        "      Would someone ask 'what tool made this?' (bad) or 'who designed this?' (good)"
-    )
-    print()
-
-    # ---- INTERACTION & CRAFT (20 pts) ----
-    print("  C. INTERACTION & CRAFT (0-20)")
-    print("  " + "-" * 50)
-    print("    STATES & MICRO-INTERACTIONS (0-10)")
-    print("      Hover, focus, active, disabled, loading, empty, error states.")
-    print("      Transitions, animations, feedback on user actions.")
-    print("      Does the interface feel alive and responsive to input?")
-    print()
-    print("    EDGE CASES & POLISH (0-10)")
-    print("      Error boundaries, empty states, skeleton screens, truncation.")
-    print("      Graceful degradation, mobile edge cases, keyboard navigation.")
-    print("      Does the squint test pass — clear hierarchy at a glance?")
-    print()
-
-    # ---- ARCHITECTURE & COHERENCE (10 pts) ----
-    print("  D. ARCHITECTURE & CODE QUALITY (0-10)")
-    print("  " + "-" * 50)
-    print("    Component structure, file organization, naming conventions.")
-    print("    Separation of concerns (logic/presentation/data).")
-    print("    Reusability, composability, prop/API surface area.")
-    if has_fullstack:
-        print("    DTO alignment: do frontend types match backend schemas?")
-        print("    Error surfacing: do API errors appear as meaningful UI feedback?")
-        print("    Data flow: is fetching/caching/mutation coherent across the stack?")
-    print()
-
-    # Dial-aware review guidance (compact)
-    dial_notes = []
-    if variance > 4:
-        dial_notes.append(
-            f"VARIANCE={variance}: centered heroes BANNED, push asymmetric layouts"
-        )
-    if variance > 7:
-        dial_notes.append(
-            f"VARIANCE={variance}: masonry, overlapping elements, offset margins"
-        )
-    if intensity > 5:
-        dial_notes.append(
-            f"MOTION={intensity}: entrance animations, staggered lists required"
-        )
-    if intensity > 7:
-        dial_notes.append(
-            f"MOTION={intensity}: scroll-triggered reveals, spring physics"
-        )
-    if density < 5:
-        dial_notes.append(f"DENSITY={density}: art gallery mode, generous whitespace")
-    if density > 7:
-        dial_notes.append(
-            f"DENSITY={density}: cockpit mode, dense data, compact spacing"
-        )
-    if dial_notes:
-        print("  Dial constraints for this review:")
-        for note in dial_notes:
-            print(f"    -> {note}")
-        print()
-
-    print("  For each new issue found, queue it:")
-    print(
-        '    uidetox add-issue --file <path> --tier <T1-T4> --issue "<desc>" --fix-command "<cmd>"'
-    )
-    print()
-    print("  When review is complete, record your subjective score:")
-    print("    uidetox review --score <N>   (0-100, sum of A+B+C+D above)")
-    print()
-
     # ===========================================================
     # SCORE CHECK: Target reached?
     # ===========================================================
@@ -703,13 +598,11 @@ def run(args: argparse.Namespace):
         context=f"Found {queued_count} issues in {scan_path}",
     )
     log_progress("scan", f"Scanned {scan_path}: {queued_count} issues queued")
-
     # Compute current score and show target check
     state = load_state()
-    scores = compute_design_score(state)
+    scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
     queue_size = len(state.get("issues", []))
-
     print("=" * 58)
     print(" TARGET SCORE CHECK")
     print("=" * 58)
@@ -717,7 +610,6 @@ def run(args: argparse.Namespace):
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score : [{bar}] {score}/100  (target: {target})")
     print(f"  Queue        : {queue_size} issue(s)")
-
     if score >= target and queue_size == 0:
         print()
         print(f"  TARGET REACHED -- Score >= {target} and queue is empty.")
@@ -729,7 +621,7 @@ def run(args: argparse.Namespace):
             print("  -> Run `uidetox next` to start fixing.")
         else:
             print(f"  Queue empty but score < {target} -> subjective review needed.")
-            print("  -> Complete Part 2 above, then `uidetox review --score <N>`")
+            print("  -> Run `uidetox review`, then record a structured review.")
             print("  -> Then `uidetox rescan` to discover deeper issues.")
     print()
 
@@ -741,7 +633,6 @@ def _save_scan_to_memory(
     by_tier: dict[str, int] = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
     by_category: dict[str, int] = {}
     file_counts: dict[str, int] = {}
-
     for issue in slop_issues:
         tier = issue.get("tier", "T4")
         by_tier[tier] = by_tier.get(tier, 0) + 1
@@ -750,9 +641,7 @@ def _save_scan_to_memory(
         by_category[cat] = by_category.get(cat, 0) + 1
         f = issue.get("file", "")
         file_counts[f] = file_counts.get(f, 0) + 1
-
     top_files = sorted(file_counts.keys(), key=lambda f: file_counts[f], reverse=True)
-
     save_scan_summary(
         total_found=queued_count,
         by_tier=by_tier,

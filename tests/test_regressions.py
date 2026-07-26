@@ -103,7 +103,7 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
         }
         for index in range(3)
     ]
-    duplicate_finding = dict(findings[0], id="RULE-DUPLICATE")
+    duplicate_finding = dict(findings[0])
     findings.append(duplicate_finding)
     load_calls = 0
     save_calls = 0
@@ -148,7 +148,6 @@ def test_scan_batches_multi_finding_queue_persistence(tmp_path, monkeypatch):
         "RULE-0",
         "RULE-1",
         "RULE-2",
-        "RULE-DUPLICATE",
     }
 
 
@@ -167,7 +166,7 @@ def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
     monkeypatch.setattr(scan, "get_project_root", lambda: tmp_path)
     monkeypatch.setattr(scan, "load_config", lambda: {"tooling": tooling})
     monkeypatch.setattr(scan, "analyze_directory", lambda *args, **kwargs: findings)
-    monkeypatch.setattr(scan, "add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(scan, "add_issues", lambda issues, **kwargs: len(issues))
     monkeypatch.setattr(scan, "increment_scans", lambda: None)
     monkeypatch.setattr(scan, "save_run_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(scan, "_save_scan_to_memory", lambda *args, **kwargs: None)
@@ -179,7 +178,7 @@ def _stub_scan_output_dependencies(monkeypatch, tmp_path, findings):
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan, "compute_design_score", lambda state: {"blended_score": 100}
+        scan, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
 
 
@@ -217,7 +216,12 @@ def test_scan_json_output_preserves_issue_schema(monkeypatch, tmp_path, capsys):
     scan.run(argparse.Namespace(path=".", output="json", since=None))
     captured = capsys.readouterr()
 
-    assert json.loads(captured.out) == [issue]
+    payload = json.loads(captured.out)
+    assert payload[0]["detector_id"] == issue["id"]
+    assert payload[0]["fingerprint"]
+    assert {key: payload[0][key] for key in issue if key != "id"} == {
+        key: value for key, value in issue.items() if key != "id"
+    }
     assert captured.err == ""
     assert captured.out.lstrip().startswith("[")
     assert captured.out.rstrip().endswith("]")
@@ -260,7 +264,7 @@ def test_scan_table_output_preserves_human_banner(monkeypatch, tmp_path, capsys)
 
     assert "SCAN CODEBASE -- Static Analysis + Subjective Review" in captured.out
     assert "PART 1: MECHANICAL ISSUES" in captured.out
-    assert "PART 2: SUBJECTIVE ANALYSIS" in captured.out
+    assert "evidence-bound A/B/C/D review brief" in captured.out
     assert "Running" in captured.out
     assert captured.err == ""
 
@@ -907,7 +911,7 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(
         lambda: {"issues": [], "resolved": [], "stats": {"scans_run": 0}},
     )
     monkeypatch.setattr(
-        scan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        scan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
 
     scan_cmd.run(argparse.Namespace(path=".", output="json", since=None))
@@ -1372,6 +1376,7 @@ def test_tracked_changed_files_handles_quoted_rename_sources_with_arrows(monkeyp
 
 
 def test_tsc_run_supports_env_prefixed_command(monkeypatch):
+    from uidetox import mechanical
     from uidetox.commands import tsc as tsc_mod
 
     captured: dict[str, object] = {}
@@ -1387,7 +1392,7 @@ def test_tsc_run_supports_env_prefixed_command(monkeypatch):
         captured["env"] = kwargs.get("env")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(tsc_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mechanical.subprocess, "run", fake_run)
 
     tsc_mod.run(argparse.Namespace(fix=False))
 
@@ -1422,8 +1427,7 @@ def test_finish_preflight_rejects_dirty_workspace(monkeypatch):
 
     monkeypatch.setattr(finish.subprocess, "run", fake_run)
 
-    with pytest.raises(SystemExit):
-        finish._ensure_clean_workspace()
+    assert finish._workspace_dirty() is True
 
 
 def test_package_version_matches_runtime_version():
@@ -1511,7 +1515,7 @@ def test_issue_location_format_is_actionable():
 # ── New rule regression tests ─────────────────────────────────────────────
 
 
-def _issues_for(code: str, ext: str = ".tsx") -> list[dict]:
+def _issues_for(code: str, ext: str = ".tsx") -> list:
     """Write code to a temp file and return analyzer issues."""
     import tempfile
 
@@ -1522,7 +1526,7 @@ def _issues_for(code: str, ext: str = ".tsx") -> list[dict]:
 
 
 def _rule_fired(code: str, rule_id: str, ext: str = ".tsx") -> bool:
-    return any(i.get("id") == rule_id for i in _issues_for(code, ext))
+    return any(i.get("detector_id") == rule_id for i in _issues_for(code, ext))
 
 
 def test_outline_none_slop_fires_without_focus_visible():
@@ -1638,7 +1642,7 @@ def test_css_scroll_behavior_slop_fires_for_smooth_without_media(tmp_path):
     p = tmp_path / "base.css"
     p.write_text("html { scroll-behavior: smooth; color: #333; }", encoding="utf-8")
     issues = analyze_file(p)
-    assert any(i.get("id") == "CSS_SCROLL_BEHAVIOR_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "CSS_SCROLL_BEHAVIOR_SLOP" for i in issues)
 
 
 def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
@@ -1647,7 +1651,7 @@ def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
         "@media (max-width: 768px) { .nav { display: none; } }", encoding="utf-8"
     )
     issues = analyze_file(p)
-    assert any(i.get("id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
 
 
 def test_autofix_categorizes_outline_none_as_accessibility():
@@ -1889,6 +1893,7 @@ def test_batch_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     add_issue(
         {
             "id": "SCAN-BATCH1",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -1941,6 +1946,7 @@ def test_batch_resolve_run_auto_commits_when_only_issue_files_are_dirty(
     add_issue(
         {
             "id": "SCAN-BATCH2",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2003,6 +2009,7 @@ def test_batch_resolve_run_auto_commits_renamed_issue_file(
     add_issue(
         {
             "id": "SCAN-BATCH-RENAME",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2065,6 +2072,7 @@ def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exist
     add_issue(
         {
             "id": "SCAN-BATCH-UNTRACKED",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2108,7 +2116,7 @@ def test_batch_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exist
 def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2124,6 +2132,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
     add_issue(
         {
             "id": "SCAN-RESOLVE1",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2131,8 +2140,8 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd[:3] == ["git", "status", "--porcelain"]:
@@ -2147,7 +2156,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2162,7 +2171,7 @@ def test_resolve_run_skips_auto_commit_when_workspace_already_dirty(
 def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2176,6 +2185,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
     add_issue(
         {
             "id": "SCAN-RESOLVE2",
+            "rule_id": "TEST-STATIC",
             "file": str(issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2183,8 +2193,8 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2197,7 +2207,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2219,7 +2229,7 @@ def test_resolve_run_auto_commits_when_only_issue_file_is_dirty(
 
 
 def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, capsys):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2236,6 +2246,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
     add_issue(
         {
             "id": "SCAN-RESOLVE-RENAME",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2243,8 +2254,8 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2267,7 +2278,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2284,7 +2295,7 @@ def test_resolve_run_auto_commits_renamed_issue_file(tmp_path, monkeypatch, caps
 def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_same_directory(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -2298,6 +2309,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
     add_issue(
         {
             "id": "SCAN-RESOLVE-UNTRACKED",
+            "rule_id": "TEST-STATIC",
             "file": str(old_issue_file),
             "tier": "T1",
             "issue": "Example issue",
@@ -2305,8 +2317,8 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     def fake_run(cmd, **kwargs):
         if cmd == ["git", "status", "--porcelain", "--untracked-files=no"]:
@@ -2326,7 +2338,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
             )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -2341,7 +2353,7 @@ def test_resolve_run_skips_auto_commit_when_unrelated_untracked_file_exists_in_s
 def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_path(
     tmp_path, monkeypatch, capsys
 ):
-    from uidetox.commands import resolve
+    from uidetox.commands import batch_resolve, resolve
 
     root = tmp_path
     src_dir = root / "src"
@@ -2358,6 +2370,7 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
     add_issue(
         {
             "id": "SCAN-RESOLVE-SUBDIR",
+            "rule_id": "TEST-STATIC",
             "file": "src/Button.tsx",
             "tier": "T1",
             "issue": "Example issue",
@@ -2365,8 +2378,8 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
         }
     )
 
-    monkeypatch.setattr(resolve, "load_config", lambda: {"auto_commit": True})
-    monkeypatch.setattr(resolve, "_run_verification", lambda config: True)
+    monkeypatch.setattr(batch_resolve, "load_config", lambda: {"auto_commit": True})
+    monkeypatch.setattr(batch_resolve, "_run_verification", lambda config: True)
 
     calls = []
 
@@ -2379,7 +2392,7 @@ def test_resolve_run_auto_commits_from_subdirectory_with_repo_relative_issue_pat
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(resolve.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch_resolve.subprocess, "run", fake_run)
 
     resolve.run(
         argparse.Namespace(
@@ -3852,7 +3865,7 @@ def test_hardcoded_dev_url_slop_skips_development_tool_config(tmp_path):
         encoding="utf-8",
     )
     assert not any(
-        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        issue.get("detector_id") == "HARDCODED_DEV_URL_SLOP"
         for issue in analyze_file(config)
     )
 
@@ -3864,7 +3877,7 @@ def test_hardcoded_dev_url_slop_fires_for_runtime_value_in_config(tmp_path):
         encoding="utf-8",
     )
     assert any(
-        issue.get("id") == "HARDCODED_DEV_URL_SLOP"
+        issue.get("detector_id") == "HARDCODED_DEV_URL_SLOP"
         for issue in analyze_file(config)
     )
 
@@ -5244,7 +5257,11 @@ def test_unused_import_reports_local_alias_and_namespace_names():
         import * as Icons from './icons';
         export const Card = () => React.createElement('div');
     """)
-    issues = [issue for issue in _issues_for(code) if issue["id"] == "UNUSED_IMPORT"]
+    issues = [
+        issue
+        for issue in _issues_for(code)
+        if issue["detector_id"] == "UNUSED_IMPORT"
+    ]
     assert len(issues) == 1
     assert "PrimaryButton" in issues[0]["issue"]
     assert "Icons" in issues[0]["issue"]
@@ -5313,7 +5330,7 @@ def test_low_contrast_slop_fires_for_poor_contrast(tmp_path):
     # yellow-300 (~#fde047) on white (#ffffff) has near-1:1 contrast ratio
     dynamic_colors = {"yellow-300": "#fde047", "white": "#ffffff"}
     issues = analyze_file(p, dynamic_colors=dynamic_colors)
-    assert any(i.get("id") == "LOW_CONTRAST_SLOP" for i in issues)
+    assert any(i.get("detector_id") == "LOW_CONTRAST_SLOP" for i in issues)
 
 
 def test_low_contrast_slop_skips_without_dynamic_colors(tmp_path):
@@ -6546,7 +6563,9 @@ def test_window_confirm_slop_fires_exactly_once():
         tmp = f.name
     try:
         issues = analyze_file(Path(tmp))
-        confirm_issues = [i for i in issues if i.get("id") == "WINDOW_CONFIRM_SLOP"]
+        confirm_issues = [
+            i for i in issues if i.get("detector_id") == "WINDOW_CONFIRM_SLOP"
+        ]
         assert len(confirm_issues) == 1, (
             f"Expected exactly 1 WINDOW_CONFIRM_SLOP issue, got {len(confirm_issues)}"
         )
@@ -6569,9 +6588,10 @@ def test_tabindex_positive_not_duplicated_with_removed_rule():
     try:
         issues = analyze_file(Path(tmp))
         positive_ids = [
-            i.get("id")
+            i.get("detector_id")
             for i in issues
-            if "TABINDEX" in (i.get("id") or "") and "ZERO" not in (i.get("id") or "")
+            if "TABINDEX" in (i.get("detector_id") or "")
+            and "ZERO" not in (i.get("detector_id") or "")
         ]
         # Should only see TABINDEX_POSITIVE_SLOP, NOT the removed POSITIVE_TABINDEX_SLOP
         assert "POSITIVE_TABINDEX_SLOP" not in positive_ids
@@ -7165,7 +7185,9 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
         "uidetox.commands.scan.detect_all",
         lambda path=".": type("P", (), {"to_dict": lambda s: {}})(),
     )
-    monkeypatch.setattr("uidetox.commands.scan.add_issues", lambda issues: len(issues))
+    monkeypatch.setattr(
+        "uidetox.commands.scan.add_issues", lambda issues, **kwargs: len(issues)
+    )
     monkeypatch.setattr("uidetox.commands.scan.increment_scans", lambda: None)
     monkeypatch.setattr("uidetox.commands.scan.save_run_snapshot", lambda **kw: None)
     monkeypatch.setattr("uidetox.commands.scan.save_scan_summary", lambda **kw: None)
@@ -8143,8 +8165,10 @@ def test_suppress_run_prunes_matching_issues_from_live_queue_and_diff_baseline(
     config = load_config()
 
     assert config["ignore_patterns"] == ["spacing"]
-    assert state["issues"] == [live_keep]
-    assert state["diff_baseline"] == [baseline_keep]
+    assert [issue["id"] for issue in state["issues"]] == [live_keep["id"]]
+    assert [issue["id"] for issue in state["diff_baseline"]] == [
+        baseline_keep["id"]
+    ]
 
 
 def test_suppress_run_reapplies_existing_pattern_to_prune_diff_baseline(
@@ -8220,7 +8244,7 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
     monkeypatch.setattr(rescan_cmd, "analyze_directory", fake_analyze_directory)
 
@@ -8229,7 +8253,39 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     assert analyzed_path == root.resolve()
 
 
-def test_rescan_batches_queue_and_preserves_recurrence_semantics(
+def test_rescan_invalid_path_preserves_queue_and_scan_stats(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import rescan as rescan_cmd
+    from uidetox.findings import Finding
+    from uidetox.state import save_state
+
+    monkeypatch.chdir(tmp_path)
+    finding = Finding.create(
+        detector_id="KEEP-ME",
+        category="quality",
+        severity="warning",
+        confidence=1,
+        message="Existing queue entry",
+        provenance="manual",
+    )
+    save_state(
+        {
+            "issues": [finding],
+            "resolved": [],
+            "stats": {"total_found": 1, "total_resolved": 0, "scans_run": 4},
+        }
+    )
+    state_path = tmp_path / ".uidetox" / "state.json"
+    before = state_path.read_bytes()
+
+    with pytest.raises(SystemExit):
+        rescan_cmd.run(argparse.Namespace(path=str(tmp_path / "missing")))
+
+    assert state_path.read_bytes() == before
+
+
+def test_rescan_batches_all_current_findings_without_history_credit(
     tmp_path, monkeypatch, capsys
 ):
     import uidetox.state as state_module
@@ -8300,7 +8356,7 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
     monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        rescan_cmd, "compute_design_score", lambda state: {"blended_score": 100}
+        rescan_cmd, "score_current_snapshot", lambda state, **kwargs: {"blended_score": 100}
     )
     monkeypatch.setattr(
         rescan_cmd, "analyze_directory", lambda *args, **kwargs: findings
@@ -8318,14 +8374,135 @@ def test_rescan_batches_queue_and_preserves_recurrence_semantics(
     persisted = original_load_state()["issues"]
     assert [issue["file"] for issue in persisted] == [
         "src/Recurring.tsx",
+        "src/Resolved.tsx",
         "src/First.tsx",
         "src/Second.tsx",
     ]
-    assert persisted[0]["tier"] == "T3"
     output = capsys.readouterr().out
-    assert "Queued 3 mechanical anti-pattern issues" in output
-    assert "Skipped 1 already-resolved issue" in output
-    assert "Escalated 1 recurring issue" in output
+    assert "Queued 4 mechanical anti-pattern issues" in output
+
+
+def test_rescan_requeues_current_runtime_and_contract_findings(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import rescan as rescan_cmd
+    from uidetox.findings import Finding
+
+    runtime = Finding.create(
+        detector_id="runtime-text-clipped",
+        category="overflow",
+        severity="error",
+        confidence=0.9,
+        message="Text clips",
+        provenance="runtime",
+        runtime_anchor={
+            "url": "http://localhost:3000",
+            "viewport": "mobile",
+            "selector": "#total",
+            "scenario": "default",
+        },
+    )
+    contract = Finding.create(
+        detector_id="contract-frontend-only",
+        category="contract",
+        severity="warning",
+        confidence=0.85,
+        message="Missing backend",
+        provenance="contract",
+        contract_anchor={"kind": "frontend_only", "normalized_path": "/orders"},
+    )
+    captured = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []})
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        rescan_cmd,
+        "current_map_findings",
+        lambda _root: ((runtime, contract), True),
+    )
+    monkeypatch.setattr(
+        rescan_cmd,
+        "add_issues",
+        lambda findings, **kwargs: captured.update(
+            findings=list(findings), **kwargs
+        )
+        or 2,
+    )
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        rescan_cmd,
+        "score_current_snapshot",
+        lambda state, **kwargs: {"blended_score": 0},
+    )
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert {item.provenance for item in captured["findings"]} == {
+        "runtime",
+        "contract",
+    }
+    assert captured["qualified_complete"] is True
+
+
+def test_stale_map_findings_cannot_qualify_rescan(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from uidetox.commands import scan as scan_cmd
+
+    map_path = tmp_path / ".uidetox" / "frontend-map.json"
+    map_path.parent.mkdir()
+    map_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_frontend_map",
+        lambda _path: SimpleNamespace(
+            target=".",
+            evidence={"runtime_status": "stale"},
+            nodes=(),
+            project_map={},
+        ),
+    )
+    monkeypatch.setattr(scan_cmd, "frontend_map_is_fresh", lambda *args: False)
+
+    findings, qualified = scan_cmd.current_map_findings(tmp_path)
+
+    assert findings == ()
+    assert qualified is False
+
+
+@pytest.mark.parametrize("status", ("degraded", "partial", "failed", "stale"))
+def test_noncurrent_map_findings_cannot_qualify_scan(
+    tmp_path,
+    monkeypatch,
+    status,
+):
+    from types import SimpleNamespace
+
+    from uidetox.commands import scan as scan_cmd
+
+    map_path = tmp_path / ".uidetox" / "frontend-map.json"
+    map_path.parent.mkdir()
+    map_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        scan_cmd,
+        "load_frontend_map",
+        lambda _path: SimpleNamespace(
+            target=".",
+            evidence={"runtime_status": status},
+            nodes=(),
+            project_map={},
+        ),
+    )
+    monkeypatch.setattr(scan_cmd, "frontend_map_is_fresh", lambda *_args: True)
+
+    findings, qualified = scan_cmd.current_map_findings(tmp_path)
+
+    assert findings == ()
+    assert qualified is False
 
 
 def test_viz_run_uses_project_root_on_cold_start_from_subdirectory(
@@ -9395,8 +9572,12 @@ class TestStateAndMemoryChaosResilience:
 
         state = load_state()
 
-        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
-        assert state["resolved"] == [{"id": "ISSUE-2", "file": "src/App.tsx"}]
+        assert [(issue["id"], issue["file"]) for issue in state["issues"]] == [
+            ("ISSUE-1", "src/App.tsx")
+        ]
+        assert [(issue["id"], issue["file"]) for issue in state["resolved"]] == [
+            ("ISSUE-2", "src/App.tsx")
+        ]
         assert state["stats"] == {"total_found": 0, "total_resolved": 0, "scans_run": 0}
 
     def test_load_state_normalizes_diff_baseline_shapes(self, tmp_path, monkeypatch):
@@ -9421,7 +9602,9 @@ class TestStateAndMemoryChaosResilience:
 
         state = load_state()
 
-        assert state["diff_baseline"] == [{"id": "BASE-1", "file": "src/App.tsx"}]
+        assert [
+            (issue["id"], issue["file"]) for issue in state["diff_baseline"]
+        ] == [("BASE-1", "src/App.tsx")]
 
     def test_load_state_backfills_missing_diff_baseline_for_legacy_state(
         self, tmp_path, monkeypatch
@@ -9447,7 +9630,9 @@ class TestStateAndMemoryChaosResilience:
         state = load_state()
 
         assert state["diff_baseline"] == []
-        assert state["issues"] == [{"id": "ISSUE-1", "file": "src/App.tsx"}]
+        assert [(issue["id"], issue["file"]) for issue in state["issues"]] == [
+            ("ISSUE-1", "src/App.tsx")
+        ]
 
     def test_load_state_normalizes_subjective_score_and_history(
         self, tmp_path, monkeypatch
@@ -9577,7 +9762,7 @@ class TestStateAndMemoryChaosResilience:
         payload = json.loads(capsys.readouterr().out)
 
         assert payload["subjective_score"] is None
-        assert payload["design_score"] == 50
+        assert payload["design_score"] == 0
 
     def test_load_run_history_skips_non_dict_snapshot_files(
         self, tmp_path, monkeypatch
@@ -9601,6 +9786,37 @@ class TestStateAndMemoryChaosResilience:
         assert len(runs) == 1
         assert runs[0]["timestamp"] == "2026-05-02T00:00:01Z"
         assert runs[0]["_file"] == "run_2026-05-02T00-00-01.json"
+
+    def test_history_snapshot_scores_against_current_evidence_hashes(
+        self, tmp_path, monkeypatch
+    ):
+        import uidetox.history as history
+
+        hashes = {"source": "s", "map": "m", "runtime": "r"}
+        received = {}
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(history, "load_state", lambda: {"issues": []})
+        monkeypatch.setattr(history, "load_config", lambda: {})
+        monkeypatch.setattr(
+            history,
+            "project_visual_evidence_status",
+            lambda _config: type("Visual", (), {"to_dict": lambda self: {}})(),
+        )
+        monkeypatch.setattr(history, "current_evidence_hashes", lambda: hashes)
+        monkeypatch.setattr(
+            history,
+            "score_current_snapshot",
+            lambda state, **kwargs: received.update(kwargs)
+            or {
+                "blended_score": 0,
+                "objective_score": 0,
+                "subjective_score": None,
+            },
+        )
+
+        history.save_run_snapshot()
+
+        assert received["evidence_hashes"] == hashes
 
     def test_load_run_history_skips_invalid_utf8_snapshot_files(
         self, tmp_path, monkeypatch
@@ -10109,12 +10325,16 @@ def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):
     from uidetox.fileset import FRONTEND_EXTENSIONS, ProjectFileSet
 
     expected_extensions = {
+        ".astro",
+        ".cjs",
         ".css",
+        ".htm",
         ".html",
         ".js",
         ".jsx",
         ".less",
         ".md",
+        ".mjs",
         ".sass",
         ".scss",
         ".svelte",
@@ -10351,11 +10571,16 @@ def test_analyzer_public_import_contract():
     assert callable(analyze_directory)
 
 
+def _legacy_issue_view(issue):
+    keys = ("file", "tier", "issue", "command", "line", "column", "snippet")
+    return {"id": issue["detector_id"], **{key: issue[key] for key in keys if key in issue}}
+
+
 def test_analyzer_regex_issue_shape_and_order(tmp_path):
     source = tmp_path / "copy.md"
     source.write_text("Unlock the power", encoding="utf-8")
 
-    assert analyze_file(source) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(source)] == [
         {
             "id": "GENERIC_COPY_SLOP",
             "file": str(source.resolve()),
@@ -10376,13 +10601,16 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
     source = tmp_path / "button.tsx"
     source.write_text('<button className="px-4">Save</button>', encoding="utf-8")
 
-    assert analyze_file(source) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(source)] == [
         {
             "id": "MISSING_HOVER_STATES",
             "file": str(source.resolve()),
             "tier": "T2",
             "issue": "Button element without hover: state detected.",
             "command": "Add hover:, focus:, and active: states to all interactive elements.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
         },
         {
             "id": "MISSING_FOCUS_SLOP",
@@ -10390,6 +10618,9 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
             "tier": "T2",
             "issue": "Interactive element without focus: state — accessibility gap.",
             "command": "Add focus:ring or focus:outline states for keyboard accessibility.",
+            "line": 1,
+            "column": 1,
+            "snippet": '<button className="px-4">Save</button>',
         },
         {
             "id": "BUTTON_TYPE_MISSING_SLOP",
@@ -10410,7 +10641,7 @@ def test_analyzer_css_and_unsupported_issue_output_contract(tmp_path):
     unsupported = tmp_path / "representative.txt"
     unsupported.write_text("transition: all\n", encoding="utf-8")
 
-    assert analyze_file(css) == [
+    assert [_legacy_issue_view(issue) for issue in analyze_file(css)] == [
         {
             "id": "TRANSITION_ALL_SLOP",
             "file": str(css.resolve()),

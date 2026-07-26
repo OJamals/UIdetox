@@ -10,9 +10,11 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from time import perf_counter
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -20,30 +22,30 @@ from uidetox.capabilities import (
     capture_install_guidance,
     chromium_install_guidance,
 )
-from uidetox.runtime_layout import RuntimeFinding, detect_runtime_findings
-from uidetox.utils import now_iso
-
-
-@dataclass(frozen=True)
-class RuntimeViewport:
-    name: str
-    width: int
-    height: int
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeViewport":
-        return cls(
-            name=str(value["name"]),
-            width=int(value["width"]),
-            height=int(value["height"]),
-        )
-
-
-DEFAULT_VIEWPORTS = (
-    RuntimeViewport("mobile", 390, 844),
-    RuntimeViewport("tablet", 768, 1024),
-    RuntimeViewport("desktop", 1440, 900),
+from uidetox.findings import Finding
+from uidetox.runtime_layout import detect_runtime_findings
+from uidetox.runtime_scenarios import (
+    DEFAULT_VIEWPORTS,
+    RUNTIME_OBSERVATION_LIMITS,
+    RuntimeCaptureRecord,
+    RuntimeCoverage,
+    RuntimeDiagnostic,
+    RuntimeDomBudget,
+    RuntimeReadiness,
+    RuntimeReadinessPolicy,
+    RuntimeScenario,
+    RuntimeScenarioAction,
+    RuntimeViewport,
+    RuntimeViewportDiscovery,
+    bounded_tuple,
+    discover_runtime_viewports,
+    normalize_runtime_urls,
+    runtime_capture_id,
+    sanitize_runtime_text,
+    sanitize_runtime_url,
+    validate_runtime_observation_plan,
 )
+from uidetox.utils import now_iso
 
 
 @dataclass(frozen=True)
@@ -56,9 +58,11 @@ class RuntimeElement:
     order: int
     bounds: dict[str, float]
     styles: dict[str, str]
+    source_hint: str = ""
+    source_selectors: tuple[str, ...] = ()
     states: dict[str, Any] = field(default_factory=dict)
     measurements: dict[str, Any] = field(default_factory=dict)
-    findings: tuple[RuntimeFinding, ...] = ()
+    findings: tuple[Finding, ...] = ()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeElement":
@@ -75,10 +79,16 @@ class RuntimeElement:
             order=int(value.get("order", 0)),
             bounds={str(key): float(item) for key, item in dict(bounds).items()},
             styles={str(key): str(item) for key, item in dict(styles).items()},
+            source_hint=str(value.get("source_hint", "")),
+            source_selectors=tuple(
+                str(item)
+                for item in value.get("source_selectors", [])
+                if isinstance(item, str)
+            ),
             states=dict(states),
             measurements=(dict(measurements) if isinstance(measurements, dict) else {}),
             findings=tuple(
-                RuntimeFinding.from_dict(dict(item))
+                Finding.from_dict(dict(item))
                 for item in value.get("findings", [])
                 if isinstance(item, dict)
             ),
@@ -126,6 +136,9 @@ class RuntimePage:
     viewport: RuntimeViewport
     elements: tuple[RuntimeElement, ...]
     screenshot: str | None = None
+    capture_id: str = ""
+    scenario: str = "default"
+    state: str = "initial"
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimePage":
@@ -142,7 +155,37 @@ class RuntimePage:
                 if value.get("screenshot") is not None
                 else None
             ),
+            capture_id=str(value.get("capture_id", "")),
+            scenario=str(value.get("scenario", "default")),
+            state=str(value.get("state", "initial")),
         )
+
+
+def _legacy_capture(page: RuntimePage, generated_at: str) -> RuntimeCaptureRecord:
+    capture_id = page.capture_id or runtime_capture_id(
+        page.scenario,
+        page.state,
+        page.url,
+        page.viewport,
+    )
+    return RuntimeCaptureRecord(
+        capture_id=capture_id,
+        scenario=page.scenario,
+        state=page.state,
+        url=page.url,
+        viewport=page.viewport,
+        status="completed",
+        readiness=RuntimeReadiness("current", "legacy", 0),
+        coverage=RuntimeCoverage(
+            total=len(page.elements),
+            candidates=len(page.elements),
+            eligible=len(page.elements),
+            emitted=len(page.elements),
+            budget=len(page.elements),
+        ),
+        started_at=generated_at,
+        completed_at=generated_at,
+    )
 
 
 @dataclass(frozen=True)
@@ -151,6 +194,57 @@ class RuntimeObservation:
     requested_urls: tuple[str, ...]
     pages: tuple[RuntimePage, ...]
     errors: tuple[str, ...] = ()
+    captures: tuple[RuntimeCaptureRecord, ...] = ()
+    viewport_discovery: RuntimeViewportDiscovery | None = None
+    status: str = ""
+
+    def __post_init__(self) -> None:
+        sanitized_errors = tuple(sanitize_runtime_text(error) for error in self.errors)
+        if sanitized_errors != self.errors:
+            object.__setattr__(self, "errors", sanitized_errors)
+        pages = tuple(
+            page
+            if page.capture_id
+            else replace(
+                page,
+                capture_id=runtime_capture_id(
+                    page.scenario,
+                    page.state,
+                    page.url,
+                    page.viewport,
+                ),
+            )
+            for page in self.pages
+        )
+        if pages != self.pages:
+            object.__setattr__(self, "pages", pages)
+        captures = self.captures
+        if not captures and pages:
+            captures = tuple(
+                _legacy_capture(page, self.generated_at) for page in pages
+            )
+            object.__setattr__(self, "captures", captures)
+        completed = sum(capture.status == "completed" for capture in captures)
+        failed = sum(capture.status == "failed" for capture in captures)
+        degraded = any(
+            capture.readiness.status == "degraded"
+            or capture.coverage.truncated
+            for capture in captures
+            if capture.status == "completed"
+        )
+        if failed and completed:
+            status = "partial"
+        elif failed or (self.errors and not completed):
+            status = "failed"
+        elif completed and degraded:
+            status = "degraded"
+        elif completed and self.errors:
+            status = "partial"
+        elif completed:
+            status = "current"
+        else:
+            status = "absent"
+        object.__setattr__(self, "status", status)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -164,6 +258,16 @@ class RuntimeObservation:
                 RuntimePage.from_dict(dict(page)) for page in value.get("pages", [])
             ),
             errors=tuple(str(error) for error in value.get("errors", [])),
+            captures=tuple(
+                RuntimeCaptureRecord.from_dict(dict(capture))
+                for capture in value.get("captures", [])
+                if isinstance(capture, dict)
+            ),
+            viewport_discovery=(
+                RuntimeViewportDiscovery.from_dict(dict(value["viewport_discovery"]))
+                if isinstance(value.get("viewport_discovery"), dict)
+                else None
+            ),
         )
 
 
@@ -176,22 +280,72 @@ def observe_frontend(
     screenshot_namer: Callable[[str, RuntimeViewport], str] | None = None,
     full_page: bool = True,
     settle_ms: int = 250,
+    scenarios: Iterable[RuntimeScenario] | None = None,
+    readiness: RuntimeReadinessPolicy | None = None,
+    dom_budget: RuntimeDomBudget = RuntimeDomBudget(),
+    source_root: str | Path | None = None,
+    viewport_discovery: RuntimeViewportDiscovery | None = None,
 ) -> RuntimeObservation:
-    """Observe initial rendered state for each URL and viewport.
+    """Observe explicit browser scenarios through one bounded capture engine.
 
     The caller must start the dev server. Individual navigation failures are
     recorded so other URLs/viewports can still complete; missing Playwright or
     browser binaries fail immediately with an actionable error.
     """
 
-    normalized_urls = _normalize_urls(urls)
-    normalized_viewports = tuple(viewports)
+    normalized_urls = normalize_runtime_urls(urls)
+    normalized_viewports = bounded_tuple(
+        viewports,
+        limit=RUNTIME_OBSERVATION_LIMITS.viewports,
+        label="Runtime viewport count",
+    )
     if not normalized_viewports:
         raise ValueError("At least one runtime viewport is required.")
-    if timeout_ms <= 0:
-        raise ValueError("timeout_ms must be greater than zero.")
-    if settle_ms < 0:
-        raise ValueError("settle_ms must be zero or greater.")
+    if viewport_discovery is not None and source_root is not None:
+        raise ValueError(
+            "Provide runtime viewport discovery or a source root, not both."
+        )
+    effective_discovery = viewport_discovery or (
+        discover_runtime_viewports(
+            source_root,
+            base_viewports=normalized_viewports,
+        )
+        if source_root is not None
+        else None
+    )
+    if effective_discovery is not None:
+        normalized_viewports = effective_discovery.viewports
+    active_scenarios = (
+        bounded_tuple(
+            scenarios,
+            limit=RUNTIME_OBSERVATION_LIMITS.scenarios,
+            label="Runtime scenario count",
+        )
+        if scenarios is not None
+        else tuple(
+            RuntimeScenario(
+                name="default",
+                url=url,
+                expected_state="initial",
+                readiness=readiness
+                or RuntimeReadinessPolicy(settle_ms=settle_ms),
+            )
+            for url in normalized_urls
+        )
+    )
+    if not active_scenarios:
+        raise ValueError("At least one runtime scenario is required.")
+    unrequested_urls = {
+        scenario.url for scenario in active_scenarios
+    } - set(normalized_urls)
+    if unrequested_urls:
+        raise ValueError("Runtime scenario URLs must be included in requested URLs.")
+    validate_runtime_observation_plan(
+        active_scenarios,
+        normalized_viewports,
+        timeout_ms=timeout_ms,
+        settle_ms=settle_ms,
+    )
 
     screenshot_root = None
     if screenshots_dir is not None:
@@ -207,28 +361,33 @@ def observe_frontend(
         ) from exc
 
     pages: list[RuntimePage] = []
+    captures: list[RuntimeCaptureRecord] = []
     errors: list[str] = []
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             try:
-                for url in normalized_urls:
-                    for viewport in normalized_viewports:
-                        runtime_page, error = _observe_page(
-                            browser,
-                            url,
-                            viewport,
-                            timeout_ms=timeout_ms,
-                            settle_ms=settle_ms,
-                            screenshot_root=screenshot_root,
-                            screenshot_namer=screenshot_namer,
-                            full_page=full_page,
-                            playwright_timeout_error=PlaywrightTimeoutError,
+                for scenario in active_scenarios:
+                    for viewport in _scenario_viewports(
+                        scenario,
+                        normalized_viewports,
+                    ):
+                        scenario_pages, scenario_captures, scenario_errors = (
+                            _observe_scenario(
+                                browser,
+                                scenario,
+                                viewport,
+                                timeout_ms=timeout_ms,
+                                dom_budget=dom_budget,
+                                screenshot_root=screenshot_root,
+                                screenshot_namer=screenshot_namer,
+                                full_page=full_page,
+                                playwright_timeout_error=PlaywrightTimeoutError,
+                            )
                         )
-                        if runtime_page is not None:
-                            pages.append(runtime_page)
-                        if error is not None:
-                            errors.append(error)
+                        pages.extend(scenario_pages)
+                        captures.extend(scenario_captures)
+                        errors.extend(scenario_errors)
             finally:
                 browser.close()
     except RuntimeError:
@@ -245,61 +404,420 @@ def observe_frontend(
         requested_urls=normalized_urls,
         pages=tuple(pages),
         errors=tuple(errors),
+        captures=tuple(captures),
+        viewport_discovery=effective_discovery,
     )
 
 
-def _observe_page(
+def _scenario_viewports(
+    scenario: RuntimeScenario,
+    available: tuple[RuntimeViewport, ...],
+) -> tuple[RuntimeViewport, ...]:
+    if not scenario.viewports:
+        return available
+    requested = set(scenario.viewports)
+    return tuple(viewport for viewport in available if viewport.name in requested)
+
+
+def _scenario_states(scenario: RuntimeScenario) -> tuple[str, ...]:
+    states = tuple(
+        action.state for action in scenario.actions if action.kind == "capture"
+    )
+    return states or (scenario.expected_state,)
+
+
+def _finalize_capture_diagnostics(
+    captures: Iterable[RuntimeCaptureRecord],
+    diagnostics: Iterable[RuntimeDiagnostic],
+) -> tuple[RuntimeCaptureRecord, ...]:
+    by_state: dict[str, list[RuntimeDiagnostic]] = {}
+    for diagnostic in diagnostics:
+        by_state.setdefault(diagnostic.state, []).append(diagnostic)
+    finalized = []
+    for capture in captures:
+        merged = []
+        seen: set[tuple[str, ...]] = set()
+        capture_url = sanitize_runtime_url(capture.url)
+        for diagnostic in (
+            *capture.diagnostics,
+            *by_state.get(capture.state, ()),
+        ):
+            if (
+                diagnostic.scenario != capture.scenario
+                or diagnostic.state != capture.state
+                or diagnostic.url != capture_url
+                or diagnostic.viewport != capture.viewport.name
+            ):
+                continue
+            key = (
+                diagnostic.kind,
+                diagnostic.code,
+                diagnostic.message,
+                diagnostic.scenario,
+                diagnostic.state,
+                diagnostic.url,
+                diagnostic.viewport,
+                diagnostic.source,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(diagnostic)
+        finalized.append(replace(capture, diagnostics=tuple(merged)))
+    return tuple(finalized)
+
+
+def _observe_scenario(
     browser: Any,
-    url: str,
+    scenario: RuntimeScenario,
     viewport: RuntimeViewport,
     *,
     timeout_ms: int,
-    settle_ms: int,
+    dom_budget: RuntimeDomBudget,
     screenshot_root: Path | None,
     screenshot_namer: Callable[[str, RuntimeViewport], str] | None,
     full_page: bool,
     playwright_timeout_error: type[BaseException],
-) -> tuple[RuntimePage | None, str | None]:
+) -> tuple[
+    tuple[RuntimePage, ...],
+    tuple[RuntimeCaptureRecord, ...],
+    tuple[str, ...],
+]:
     context = browser.new_context(
         viewport={"width": viewport.width, "height": viewport.height},
         reduced_motion="reduce",
     )
     page = context.new_page()
+    states = _scenario_states(scenario)
+    state_context = {"state": states[0]}
+    diagnostics: list[RuntimeDiagnostic] = []
+    _install_diagnostic_listeners(
+        page,
+        diagnostics,
+        scenario=scenario,
+        viewport=viewport,
+        state_context=state_context,
+    )
+    started_at = now_iso()
+    readiness = RuntimeReadiness("failed", "navigation", 0)
+    pages: list[RuntimePage] = []
+    captures: list[RuntimeCaptureRecord] = []
+    errors: list[str] = []
     try:
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            try:
-                page.wait_for_load_state(
-                    "networkidle",
-                    timeout=min(3_000, timeout_ms),
-                )
-            except playwright_timeout_error:
-                pass
-            page.wait_for_timeout(settle_ms)
-            elements = _attach_runtime_findings(
-                _elements_from_payload(page.evaluate(_RUNTIME_EVALUATE_SCRIPT))
+            page.goto(
+                scenario.url,
+                wait_until="domcontentloaded",
+                timeout=timeout_ms,
             )
-            screenshot = _capture_runtime_screenshot(
+            readiness = _wait_for_readiness(
                 page,
-                viewport,
-                screenshot_root=screenshot_root,
-                screenshot_namer=screenshot_namer,
-                full_page=full_page,
+                scenario.readiness,
+                timeout_ms=timeout_ms,
+                playwright_timeout_error=playwright_timeout_error,
             )
-            return (
-                RuntimePage(
-                    url=page.url,
-                    title=page.title(),
+            if readiness.status == "failed":
+                raise RuntimeError(readiness.detail or "Runtime readiness failed.")
+            captured_states: set[str] = set()
+            for action in scenario.actions:
+                if action.kind == "capture":
+                    state_context["state"] = action.state
+                    runtime_page, capture = _capture_scenario_state(
+                        page,
+                        scenario=scenario,
+                        state=action.state,
+                        viewport=viewport,
+                        readiness=readiness,
+                        diagnostics=diagnostics,
+                        dom_budget=dom_budget,
+                        started_at=started_at,
+                        screenshot_root=screenshot_root,
+                        screenshot_namer=screenshot_namer,
+                        full_page=full_page,
+                    )
+                    pages.append(runtime_page)
+                    captures.append(capture)
+                    captured_states.add(action.state)
+                else:
+                    _perform_action(page, action)
+            if not captured_states:
+                state_context["state"] = scenario.expected_state
+                runtime_page, capture = _capture_scenario_state(
+                    page,
+                    scenario=scenario,
+                    state=scenario.expected_state,
                     viewport=viewport,
-                    elements=elements,
-                    screenshot=screenshot,
-                ),
-                None,
-            )
+                    readiness=readiness,
+                    diagnostics=diagnostics,
+                    dom_budget=dom_budget,
+                    started_at=started_at,
+                    screenshot_root=screenshot_root,
+                    screenshot_namer=screenshot_namer,
+                    full_page=full_page,
+                )
+                pages.append(runtime_page)
+                captures.append(capture)
         except Exception as exc:
-            return None, f"{url} [{viewport.name}]: {exc}"
+            state = state_context["state"]
+            message = sanitize_runtime_text(
+                f"{scenario.url} [{viewport.name}/{scenario.name}/{state}]: {exc}"
+            )
+            errors.append(message)
+            diagnostics.append(
+                _diagnostic(
+                    kind="action",
+                    code="browser-action-failed",
+                    message=str(exc),
+                    scenario=scenario,
+                    state=state,
+                    viewport=viewport,
+                    source="scenario",
+                )
+            )
+            completed_ids = {capture.capture_id for capture in captures}
+            for state in states:
+                capture_id = runtime_capture_id(
+                    scenario.name,
+                    state,
+                    scenario.url,
+                    viewport,
+                )
+                if capture_id in completed_ids:
+                    continue
+                captures.append(
+                    RuntimeCaptureRecord(
+                        capture_id=capture_id,
+                        scenario=scenario.name,
+                        state=state,
+                        url=scenario.url,
+                        viewport=viewport,
+                        status="failed",
+                        readiness=readiness,
+                        coverage=RuntimeCoverage.empty(dom_budget.candidates),
+                        started_at=started_at,
+                        completed_at=now_iso(),
+                        diagnostics=tuple(diagnostics),
+                    )
+                )
     finally:
         context.close()
+    return (
+        tuple(pages),
+        _finalize_capture_diagnostics(captures, diagnostics),
+        tuple(errors),
+    )
+
+
+def _wait_for_readiness(
+    page: Any,
+    policy: RuntimeReadinessPolicy,
+    *,
+    timeout_ms: int,
+    playwright_timeout_error: type[BaseException],
+) -> RuntimeReadiness:
+    started = perf_counter()
+    strategy = "settle"
+    detail = ""
+    status = "current"
+    try:
+        if policy.selector:
+            strategy = "selector"
+            page.wait_for_selector(
+                policy.selector,
+                state="visible",
+                timeout=timeout_ms,
+            )
+        elif policy.app_hook:
+            strategy = "app-hook"
+            page.wait_for_function(
+                "(hook) => hook.split('.').reduce((value, key) => "
+                "value?.[key], window) === true",
+                policy.app_hook,
+                timeout=timeout_ms,
+            )
+        elif policy.mutation_idle_ms:
+            strategy = "mutation-idle"
+            outcome = page.evaluate(
+                """
+                policy => new Promise(resolve => {
+                  const finish = outcome => {
+                    observer.disconnect();
+                    clearTimeout(idleTimer);
+                    clearTimeout(limitTimer);
+                    resolve(outcome);
+                  };
+                  let idleTimer = setTimeout(() => finish("idle"), policy.idle);
+                  const limitTimer = setTimeout(
+                    () => finish("timeout"),
+                    policy.timeout
+                  );
+                  const observer = new MutationObserver(() => {
+                    clearTimeout(idleTimer);
+                    idleTimer = setTimeout(
+                      () => finish("idle"),
+                      policy.idle
+                    );
+                  });
+                  observer.observe(document, {
+                    subtree: true,
+                    childList: true,
+                    attributes: true,
+                    characterData: true
+                  });
+                })
+                """,
+                {
+                    "idle": policy.mutation_idle_ms,
+                    "timeout": timeout_ms,
+                },
+            )
+            if outcome == "timeout":
+                status = "degraded"
+                detail = "mutation-idle timed out"
+        elif policy.request_idle_ms:
+            strategy = "request-idle"
+            page.wait_for_load_state(
+                "networkidle",
+                timeout=min(policy.request_idle_ms, timeout_ms),
+            )
+    except playwright_timeout_error as exc:
+        status = (
+            "failed"
+            if strategy in {"selector", "app-hook"}
+            else "degraded"
+        )
+        detail = f"{strategy} timed out: {exc}"
+    if policy.settle_ms:
+        page.wait_for_timeout(policy.settle_ms)
+        if status == "degraded":
+            detail = f"{detail}; settle fallback {policy.settle_ms}ms"
+    return RuntimeReadiness(
+        status=status,
+        strategy=strategy,
+        duration_ms=round((perf_counter() - started) * 1_000),
+        detail=detail,
+    )
+
+
+def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
+    if action.kind == "click":
+        page.locator(action.selector).click(timeout=action.timeout_ms)
+    elif action.kind == "fill":
+        value = os.environ.get(action.env)
+        if value is None:
+            raise ValueError(
+                f"Runtime scenario environment variable is missing: {action.env}"
+            )
+        try:
+            page.locator(action.selector).fill(value, timeout=action.timeout_ms)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Runtime fill failed for selector {action.selector}: "
+                f"{type(exc).__name__}"
+            ) from exc
+    elif action.kind == "key":
+        page.locator(action.selector).press(action.key, timeout=action.timeout_ms)
+    elif action.kind == "wait-for-selector":
+        page.wait_for_selector(
+            action.selector,
+            state="visible",
+            timeout=action.timeout_ms,
+        )
+    elif action.kind == "wait-for-state":
+        if action.selector:
+            page.wait_for_selector(
+                action.selector,
+                state=action.state,
+                timeout=action.timeout_ms,
+            )
+        else:
+            page.wait_for_load_state(action.state, timeout=action.timeout_ms)
+
+
+def _capture_scenario_state(
+    page: Any,
+    *,
+    scenario: RuntimeScenario,
+    state: str,
+    viewport: RuntimeViewport,
+    readiness: RuntimeReadiness,
+    diagnostics: list[RuntimeDiagnostic],
+    dom_budget: RuntimeDomBudget,
+    started_at: str,
+    screenshot_root: Path | None,
+    screenshot_namer: Callable[[str, RuntimeViewport], str] | None,
+    full_page: bool,
+) -> tuple[RuntimePage, RuntimeCaptureRecord]:
+    payload = page.evaluate(_runtime_evaluate_script(dom_budget))
+    elements, coverage = _elements_and_coverage_from_payload(payload, dom_budget)
+    elements = _attach_runtime_findings(elements)
+    capture_id = runtime_capture_id(scenario.name, state, scenario.url, viewport)
+    capture_diagnostics = list(diagnostics)
+    if coverage.truncated:
+        capture_diagnostics.append(
+            _diagnostic(
+                kind="coverage",
+                code="runtime-dom-budget-exceeded",
+                message=(
+                    f"Emitted {coverage.emitted}/{coverage.eligible} eligible "
+                    f"elements from {coverage.total} total."
+                ),
+                scenario=scenario,
+                state=state,
+                viewport=viewport,
+                source="dom-budget",
+            )
+        )
+    screenshot = _capture_runtime_screenshot(
+        page,
+        viewport,
+        screenshot_root=screenshot_root,
+        screenshot_namer=_stateful_screenshot_namer(
+            screenshot_namer,
+            scenario,
+            state,
+        ),
+        full_page=full_page,
+    )
+    runtime_page = RuntimePage(
+        url=page.url,
+        title=page.title(),
+        viewport=viewport,
+        elements=elements,
+        screenshot=screenshot,
+        capture_id=capture_id,
+        scenario=scenario.name,
+        state=state,
+    )
+    return runtime_page, RuntimeCaptureRecord(
+        capture_id=capture_id,
+        scenario=scenario.name,
+        state=state,
+        url=scenario.url,
+        viewport=viewport,
+        status="completed",
+        readiness=readiness,
+        coverage=coverage,
+        started_at=started_at,
+        completed_at=now_iso(),
+        diagnostics=tuple(capture_diagnostics),
+    )
+
+
+def _stateful_screenshot_namer(
+    namer: Callable[[str, RuntimeViewport], str] | None,
+    scenario: RuntimeScenario,
+    state: str,
+) -> Callable[[str, RuntimeViewport], str] | None:
+    if namer is None or (scenario.name == "default" and state == "initial"):
+        return namer
+
+    def name(url: str, viewport: RuntimeViewport) -> str:
+        base = Path(namer(url, viewport))
+        suffix = f"-{scenario.name}-{state}"
+        return f"{base.stem}{suffix}{base.suffix}"
+
+    return name
 
 
 def _capture_runtime_screenshot(
@@ -352,26 +870,129 @@ def _capture_screenshot_atomically(
         temporary.unlink(missing_ok=True)
 
 
-def _normalize_urls(urls: str | Iterable[str]) -> tuple[str, ...]:
-    values = [urls] if isinstance(urls, str) else list(urls)
-    normalized: list[str] = []
-    for value in values:
-        url = str(value).strip()
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError(f"Runtime URL must be absolute HTTP(S): {url}")
-        if url not in normalized:
-            normalized.append(url)
-    if not normalized:
-        raise ValueError("At least one runtime URL is required.")
-    return tuple(normalized)
+def _diagnostic(
+    *,
+    kind: str,
+    code: str,
+    message: str,
+    scenario: RuntimeScenario,
+    state: str,
+    viewport: RuntimeViewport,
+    source: str,
+    severity: str = "error",
+) -> RuntimeDiagnostic:
+    return RuntimeDiagnostic(
+        kind=kind,
+        code=code,
+        message=message,
+        severity=severity,
+        scenario=scenario.name,
+        state=state,
+        url=scenario.url,
+        viewport=viewport.name,
+        source=source,
+    )
 
 
-def _elements_from_payload(payload: Any) -> tuple[RuntimeElement, ...]:
-    if not isinstance(payload, list):
-        raise ValueError("Runtime DOM observer returned a non-list payload.")
-    return tuple(
-        RuntimeElement.from_dict(item) for item in payload if isinstance(item, dict)
+def _install_diagnostic_listeners(
+    page: Any,
+    diagnostics: list[RuntimeDiagnostic],
+    *,
+    scenario: RuntimeScenario,
+    viewport: RuntimeViewport,
+    state_context: dict[str, str],
+) -> None:
+    if not hasattr(page, "on"):
+        return
+
+    def add(kind: str, code: str, message: str, source: str) -> None:
+        diagnostics.append(
+            _diagnostic(
+                kind=kind,
+                code=code,
+                message=message,
+                scenario=scenario,
+                state=state_context["state"],
+                viewport=viewport,
+                source=source,
+            )
+        )
+
+    def console(message: Any) -> None:
+        if str(getattr(message, "type", "")).lower() == "error":
+            add(
+                "console",
+                "browser-console-error",
+                str(getattr(message, "text", message)),
+                "console",
+            )
+
+    def page_error(error: Any) -> None:
+        add("page", "browser-page-error", str(error), "pageerror")
+
+    def request_failed(request: Any) -> None:
+        failure = getattr(request, "failure", "")
+        add(
+            "network",
+            "browser-request-failed",
+            f"{getattr(request, 'url', '')}: {failure}",
+            "requestfailed",
+        )
+
+    def response(received: Any) -> None:
+        status = int(getattr(received, "status", 0))
+        if status >= 400:
+            add(
+                "network",
+                "browser-http-error",
+                f"HTTP {status}: {getattr(received, 'url', '')}",
+                "response",
+            )
+
+    page.on("console", console)
+    page.on("pageerror", page_error)
+    page.on("requestfailed", request_failed)
+    page.on("response", response)
+
+
+def _elements_and_coverage_from_payload(
+    payload: Any,
+    budget: RuntimeDomBudget,
+) -> tuple[tuple[RuntimeElement, ...], RuntimeCoverage]:
+    if isinstance(payload, list):
+        elements = tuple(
+            RuntimeElement.from_dict(item)
+            for item in payload
+            if isinstance(item, dict)
+        )
+        count = len(elements)
+        return elements, RuntimeCoverage(
+            total=count,
+            candidates=count,
+            eligible=count,
+            emitted=count,
+            budget=budget.candidates,
+        )
+    if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
+        raise ValueError("Runtime DOM observer returned an invalid payload.")
+    elements = tuple(
+        RuntimeElement.from_dict(item)
+        for item in payload["elements"]
+        if isinstance(item, dict)
+    )
+    raw_coverage = payload.get("coverage", {})
+    if not isinstance(raw_coverage, dict):
+        raise ValueError("Runtime DOM observer returned invalid coverage.")
+    coverage = RuntimeCoverage.from_dict(raw_coverage)
+    if coverage.emitted != len(elements):
+        raise ValueError("Runtime DOM coverage does not match emitted elements.")
+    return elements, coverage
+
+
+def _runtime_evaluate_script(budget: RuntimeDomBudget) -> str:
+    return (
+        _RUNTIME_EVALUATE_SCRIPT.replace("__UIDETOX_SCAN__", str(budget.scan))
+        .replace("__UIDETOX_CANDIDATES__", str(budget.candidates))
     )
 
 
@@ -403,13 +1024,24 @@ async () => {
   await new Promise(resolve => requestAnimationFrame(
     () => requestAnimationFrame(resolve)
   ));
-  const structuralCandidates = Array.from(document.querySelectorAll([
+  const structuralSelector = [
     "header", "nav", "main", "aside", "section", "article", "footer",
     "form", "table", "dialog", "button", "a[href]", "input", "select",
     "textarea", "[role]", "[tabindex]"
-  ].join(",")));
-  const allElements = Array.from(document.body?.querySelectorAll("*") || [])
-    .slice(0, 3000);
+  ].join(",");
+  const elementCollection = document.body?.querySelectorAll("*") || [];
+  const totalElements = elementCollection.length;
+  const allElements = [];
+  for (
+    let index = 0;
+    index < Math.min(totalElements, __UIDETOX_SCAN__);
+    index += 1
+  ) {
+    allElements.push(elementCollection[index]);
+  }
+  const structuralCandidates = allElements.filter(
+    element => element.matches(structuralSelector)
+  );
   const round = value => Math.round(value * 100) / 100;
   const pixels = value => {
     const parsed = Number.parseFloat(value);
@@ -438,10 +1070,50 @@ async () => {
     return "";
   };
 
-  const selectorFor = (element) => {
+  const geometryCache = new WeakMap();
+  const geometryFor = element => {
+    if (geometryCache.has(element)) return geometryCache.get(element);
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const result = {
+      style,
+      rect,
+      role: element.getAttribute("role") || implicitRole(element),
+      visible: !(
+        style.display === "none"
+        || style.visibility === "hidden"
+        || Number(style.opacity) === 0
+        || rect.width <= 0
+        || rect.height <= 0
+      ),
+      scrollAxes: {
+        x: ["auto", "scroll"].includes(style.overflowX),
+        y: ["auto", "scroll"].includes(style.overflowY)
+      }
+    };
+    geometryCache.set(element, result);
+    return result;
+  };
+
+  const sourceSelectorsFor = (element) => {
+    const selectors = [];
     const testId = element.getAttribute("data-testid");
-    if (testId) return `[data-testid="${testId.replaceAll('"', '\\"')}"]`;
-    if (element.id) return `#${CSS.escape(element.id)}`;
+    if (testId) selectors.push(`[data-testid="${testId.replaceAll('"', '\\"')}"]`);
+    const dataTest = element.getAttribute("data-test");
+    if (dataTest) selectors.push(`[data-test="${dataTest.replaceAll('"', '\\"')}"]`);
+    if (element.id) selectors.push(`#${CSS.escape(element.id)}`);
+    for (const className of element.classList) {
+      if (/^[-_A-Za-z][-\w]*$/.test(className)) selectors.push(`.${className}`);
+    }
+    selectors.push(element.tagName.toLowerCase());
+    return Array.from(new Set(selectors));
+  };
+
+  const selectorFor = (element, sourceSelectors = sourceSelectorsFor(element)) => {
+    const stable = sourceSelectors.find(
+      selector => selector.startsWith("#") || selector.startsWith("[data-")
+    );
+    if (stable) return stable;
     const parts = [];
     let current = element;
     while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
@@ -477,17 +1149,7 @@ async () => {
     "menuitem", "option", "slider", "spinbutton", "switch", "tab"
   ]);
 
-  const isVisible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return !(
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      Number(style.opacity) === 0 ||
-      rect.width <= 0 ||
-      rect.height <= 0
-    );
-  };
+  const isVisible = element => geometryFor(element).visible;
 
   const canvasContext = document.createElement("canvas").getContext("2d");
   const fontMetrics = (style, text) => {
@@ -512,7 +1174,8 @@ async () => {
   };
 
   const logicalSides = (style, physical) => {
-    const vertical = style.writingMode.startsWith("vertical");
+    const vertical = style.writingMode.startsWith("vertical")
+      || style.writingMode.startsWith("sideways");
     if (!vertical) {
       return {
         inlineStart: style.direction === "rtl" ? physical.right : physical.left,
@@ -524,10 +1187,10 @@ async () => {
     return {
       inlineStart: style.direction === "rtl" ? physical.bottom : physical.top,
       inlineEnd: style.direction === "rtl" ? physical.top : physical.bottom,
-      blockStart: style.writingMode === "vertical-rl"
+      blockStart: style.writingMode.endsWith("-rl")
         ? physical.right
         : physical.left,
-      blockEnd: style.writingMode === "vertical-rl"
+      blockEnd: style.writingMode.endsWith("-rl")
         ? physical.left
         : physical.right
     };
@@ -611,7 +1274,7 @@ async () => {
 
   const paintedSurface = (element, style) => {
     const parentBackground = element.parentElement
-      ? getComputedStyle(element.parentElement).backgroundColor
+      ? geometryFor(element.parentElement).style.backgroundColor
       : "";
     const hasBorder = [
       style.borderTopWidth,
@@ -670,12 +1333,12 @@ async () => {
       child => (child.textContent || "").trim()
     );
     const blockChildren = childrenWithText.filter(child => (
-      !["contents", "inline"].includes(getComputedStyle(child).display)
+      !["contents", "inline"].includes(geometryFor(child).style.display)
     ));
     const flowChildren = blockChildren.length
       ? blockChildren
       : childrenWithText.filter(
-          child => getComputedStyle(child).display === "contents"
+          child => geometryFor(child).style.display === "contents"
         );
     if (!flowChildren.length) {
       return (element.textContent || "").trim() ? 1 : 0;
@@ -690,24 +1353,17 @@ async () => {
 
   const isSingleTextFlow = element => textFlowCount(element) <= 1;
 
-  const scrollAxesCache = new WeakMap();
-  const scrollAxesFor = (element) => {
-    if (scrollAxesCache.has(element)) return scrollAxesCache.get(element);
-    const style = getComputedStyle(element);
-    const axes = {
-      x: ["auto", "scroll"].includes(style.overflowX),
-      y: ["auto", "scroll"].includes(style.overflowY)
-    };
-    scrollAxesCache.set(element, axes);
-    return axes;
-  };
+  const scrollAxesFor = element => geometryFor(element).scrollAxes;
 
   const isScrollRegion = element => {
     const axes = scrollAxesFor(element);
     return axes.x || axes.y;
   };
 
-  const clippingEvidence = (element, rect, style) => {
+  const clippingCache = new WeakMap();
+  const clippingEvidence = element => {
+    if (clippingCache.has(element)) return clippingCache.get(element);
+    const {rect, style} = geometryFor(element);
     const overflow = {top: 0, right: 0, bottom: 0, left: 0};
     const subject = {
       top: rect.top,
@@ -718,12 +1374,13 @@ async () => {
     let clippingAncestorSelector = "";
     let ancestor = element.parentElement;
     while (ancestor) {
-      const ancestorStyle = getComputedStyle(ancestor);
+      const ancestorGeometry = geometryFor(ancestor);
+      const ancestorStyle = ancestorGeometry.style;
       const clipsX = ["clip", "hidden"].includes(ancestorStyle.overflowX);
       const clipsY = ["clip", "hidden"].includes(ancestorStyle.overflowY);
       const scrollsX = ["auto", "scroll"].includes(ancestorStyle.overflowX);
       const scrollsY = ["auto", "scroll"].includes(ancestorStyle.overflowY);
-      const ancestorRect = ancestor.getBoundingClientRect();
+      const ancestorRect = ancestorGeometry.rect;
       if (clipsX || clipsY) {
         const inner = {
           top: ancestorRect.top + pixels(ancestorStyle.borderTopWidth),
@@ -764,34 +1421,83 @@ async () => {
       ancestor = ancestor.parentElement;
     }
     const logical = logicalSides(style, overflow);
-    return {
+    const result = {
       clipped: Math.max(...Object.values(overflow)) > 1,
       clippingAncestorSelector,
       overflow,
       logical
     };
+    clippingCache.set(element, result);
+    return result;
   };
+
+  allElements.forEach(geometryFor);
+  const descendantCache = new WeakMap();
+  for (const element of [...allElements].reverse()) {
+    let bounds = null;
+    let containsScrollRegionX = false;
+    let containsScrollRegionY = false;
+    for (const child of element.children) {
+      if (!geometryCache.has(child)) continue;
+      const childGeometry = geometryFor(child);
+      const childSummary = descendantCache.get(child);
+      containsScrollRegionX ||= (
+        childGeometry.scrollAxes.x
+        || Boolean(childSummary?.containsScrollRegionX)
+      );
+      containsScrollRegionY ||= (
+        childGeometry.scrollAxes.y
+        || Boolean(childSummary?.containsScrollRegionY)
+      );
+      if (!childGeometry.visible) continue;
+      const childBounds = childSummary?.bounds;
+      const rect = childGeometry.rect;
+      const aggregate = childBounds
+        ? {
+            top: Math.min(rect.top, childBounds.top),
+            right: Math.max(rect.right, childBounds.right),
+            bottom: Math.max(rect.bottom, childBounds.bottom),
+            left: Math.min(rect.left, childBounds.left)
+          }
+        : {
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left
+          };
+      bounds = bounds
+        ? {
+            top: Math.min(bounds.top, aggregate.top),
+            right: Math.max(bounds.right, aggregate.right),
+            bottom: Math.max(bounds.bottom, aggregate.bottom),
+            left: Math.min(bounds.left, aggregate.left)
+          }
+        : aggregate;
+    }
+    descendantCache.set(element, {
+      bounds,
+      containsScrollRegionX,
+      containsScrollRegionY
+    });
+  }
 
   const measurementCache = new Map();
   const baseMeasurement = (element) => {
     if (measurementCache.has(element)) return measurementCache.get(element);
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    const role = element.getAttribute("role") || implicitRole(element);
+    const {style, rect, role} = geometryFor(element);
     const text = textGeometry(element, style, rect);
     const control = isControl(element, role);
     const visualContainer = isVisualContainer(element, style);
     const boxControl = isBoxControl(element, role, style);
     const scrollAxes = scrollAxesFor(element);
-    let containsScrollRegionX = false;
-    let containsScrollRegionY = false;
-    for (const descendant of Array.from(element.querySelectorAll("*"))) {
-      const descendantAxes = scrollAxesFor(descendant);
-      containsScrollRegionX ||= descendantAxes.x;
-      containsScrollRegionY ||= descendantAxes.y;
-      if (containsScrollRegionX && containsScrollRegionY) break;
-    }
-    const clipEvidence = clippingEvidence(element, rect, style);
+    const descendantSummary = descendantCache.get(element);
+    const containsScrollRegionX = Boolean(
+      descendantSummary?.containsScrollRegionX
+    );
+    const containsScrollRegionY = Boolean(
+      descendantSummary?.containsScrollRegionY
+    );
+    const clipEvidence = clippingEvidence(element);
     const clipsX = ["clip", "hidden"].includes(style.overflowX);
     const clipsY = ["clip", "hidden"].includes(style.overflowY);
     const lineClamp = Number.parseInt(style.webkitLineClamp, 10);
@@ -800,30 +1506,26 @@ async () => {
       (Number.isFinite(lineClamp) && lineClamp > 0)
     );
     let descendantClipped = false;
-    if ((clipsX || clipsY) && element.children.length) {
+    if (
+      (clipsX || clipsY)
+      && element.children.length
+      && descendantSummary?.bounds
+    ) {
       const contentLeft = rect.left + pixels(style.borderLeftWidth);
       const contentRight = rect.right - pixels(style.borderRightWidth);
       const contentTop = rect.top + pixels(style.borderTopWidth);
       const contentBottom = rect.bottom - pixels(style.borderBottomWidth);
-      descendantClipped = Array.from(element.querySelectorAll("*")).some(child => {
-        if (!isVisible(child)) return false;
-        const childRect = child.getBoundingClientRect();
-        const childStyle = getComputedStyle(child);
-        const childClipping = clippingEvidence(child, childRect, childStyle);
-        if (childClipping.clippingAncestorSelector !== selectorFor(element)) {
-          return false;
-        }
-        return (
-          (clipsX && (
-            childRect.left < contentLeft - 1 ||
-            childRect.right > contentRight + 1
-          )) ||
-          (clipsY && (
-            childRect.top < contentTop - 1 ||
-            childRect.bottom > contentBottom + 1
-          ))
-        );
-      });
+      const childBounds = descendantSummary.bounds;
+      descendantClipped = (
+        (clipsX && (
+          childBounds.left < contentLeft - 1
+          || childBounds.right > contentRight + 1
+        ))
+        || (clipsY && (
+          childBounds.top < contentTop - 1
+          || childBounds.bottom > contentBottom + 1
+        ))
+      );
     }
     const measurements = {
       hasText: Boolean(text),
@@ -898,142 +1600,197 @@ async () => {
     return result;
   };
 
-  const median = values => {
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2
-      ? sorted[middle]
-      : (sorted[middle - 1] + sorted[middle]) / 2;
+  const peerStats = values => {
+    const sorted = values
+      .map((value, index) => ({value, index}))
+      .sort((first, second) => first.value - second.value);
+    const rankByIndex = new Map(
+      sorted.map((item, rank) => [item.index, rank])
+    );
+    const deviations = Array(values.length).fill(null);
+    const ranges = Array(values.length).fill(Infinity);
+    for (let index = 0; index < values.length; index += 1) {
+      const peerCount = values.length - 1;
+      if (peerCount < 2) continue;
+      const removedRank = rankByIndex.get(index);
+      const peerValue = rank => sorted[
+        rank + (rank >= removedRank ? 1 : 0)
+      ].value;
+      const minimum = peerValue(0);
+      const maximum = peerValue(peerCount - 1);
+      ranges[index] = maximum - minimum;
+      if (ranges[index] > 2) continue;
+      const middle = Math.floor(peerCount / 2);
+      const peerMedian = peerCount % 2
+        ? peerValue(middle)
+        : (peerValue(middle - 1) + peerValue(middle)) / 2;
+      deviations[index] = Math.abs(values[index] - peerMedian);
+    }
+    return {deviations, ranges};
   };
 
-  const clusteredPeerDeviation = (values, index) => {
-    const peers = values.filter((_value, peerIndex) => peerIndex !== index);
-    if (peers.length < 2 || Math.max(...peers) - Math.min(...peers) > 2) {
-      return 0;
+  const overlapsOnAxis = (first, second, row) => {
+    const firstRect = baseMeasurement(first).rect;
+    const secondRect = baseMeasurement(second).rect;
+    const start = row
+      ? Math.max(firstRect.top, secondRect.top)
+      : Math.max(firstRect.left, secondRect.left);
+    const end = row
+      ? Math.min(firstRect.bottom, secondRect.bottom)
+      : Math.min(firstRect.right, secondRect.right);
+    const size = row
+      ? Math.min(firstRect.height, secondRect.height)
+      : Math.min(firstRect.width, secondRect.width);
+    return size > 0 && (end - start) / size >= 0.5;
+  };
+
+  const partitionPeerGroups = (siblings, row, provenance) => {
+    const ordered = [...siblings].sort((first, second) => {
+      const firstRect = baseMeasurement(first).rect;
+      const secondRect = baseMeasurement(second).rect;
+      return row
+        ? firstRect.top - secondRect.top
+        : firstRect.left - secondRect.left;
+    });
+    const groups = [];
+    for (const sibling of ordered) {
+      const current = groups[groups.length - 1];
+      if (
+        current
+        && overlapsOnAxis(current.members[0], sibling, row)
+      ) {
+        current.members.push(sibling);
+      } else {
+        groups.push({members: [sibling], row, provenance});
+      }
     }
-    return Math.abs(values[index] - median(peers));
+    return groups.filter(group => group.members.length >= 3);
+  };
+
+  const analyzePeerGroup = group => {
+    const measured = group.members.map(baseMeasurement);
+    const anchors = group.row
+      ? [
+          measured.map(item => item.rect.top),
+          measured.map(item => item.rect.top + item.rect.height / 2),
+          measured.map(item => item.rect.bottom)
+        ]
+      : [
+          measured.map(item => item.rect.left),
+          measured.map(item => item.rect.left + item.rect.width / 2),
+          measured.map(item => item.rect.right)
+        ];
+    const anchorStats = anchors.map(peerStats);
+    const semanticKeys = group.members.map((item, index) => (
+      `${item.tagName.toLowerCase()}:${measured[index].role}`
+    ));
+    const equivalentPeers = semanticKeys.every(
+      value => value === semanticKeys[0]
+    );
+    const allText = measured.every(item => item.text);
+    const fontSizeStats = allText
+      ? peerStats(measured.map(item => item.text.fontSize))
+      : null;
+    const baselineStats = allText
+      ? peerStats(measured.map(item => item.text.baselineProxy))
+      : null;
+    const fontCounts = new Map();
+    if (allText) {
+      for (const item of measured) {
+        fontCounts.set(
+          item.style.fontFamily,
+          (fontCounts.get(item.style.fontFamily) || 0) + 1
+        );
+      }
+    }
+    return {
+      ...group,
+      measured,
+      anchorStats,
+      equivalentPeers,
+      allText,
+      fontSizeStats,
+      baselineStats,
+      fontCounts
+    };
+  };
+
+  const peerAnalysisCache = new WeakMap();
+  const peerCandidatesFor = parent => {
+    if (peerAnalysisCache.has(parent)) {
+      return peerAnalysisCache.get(parent);
+    }
+    const candidates = new Map();
+    const siblings = Array.from(parent.children).filter(
+      item => geometryCache.has(item) && isVisible(item)
+    );
+    const parentStyle = geometryFor(parent).style;
+    let groups = [];
+    if (parentStyle.display === "flex") {
+      const row = !parentStyle.flexDirection.startsWith("column");
+      groups = partitionPeerGroups(
+        siblings,
+        row,
+        row ? "flex-row" : "flex-column"
+      );
+    } else if (["grid", "inline-grid"].includes(parentStyle.display)) {
+      groups = [
+        ...partitionPeerGroups(siblings, true, "grid-row"),
+        ...partitionPeerGroups(siblings, false, "grid-column")
+      ];
+    }
+    for (const group of groups.map(analyzePeerGroup)) {
+      for (let index = 0; index < group.members.length; index += 1) {
+        const deviations = group.anchorStats
+          .map(stats => stats.deviations[index])
+          .filter(value => value !== null);
+        const candidate = {
+          group,
+          index,
+          deviation: deviations.length ? Math.min(...deviations) : 0
+        };
+        const member = group.members[index];
+        const memberCandidates = candidates.get(member) || [];
+        memberCandidates.push(candidate);
+        candidates.set(member, memberCandidates);
+      }
+    }
+    peerAnalysisCache.set(parent, candidates);
+    return candidates;
   };
 
   const enrichPeerMeasurements = (element, measurements) => {
     const parent = element.parentElement;
     if (!parent) return;
-    const parentStyle = getComputedStyle(parent);
-    const siblings = Array.from(parent.children)
-      .filter(isVisible)
-      .slice(0, 20);
-    if (siblings.length < 3 || !siblings.includes(element)) return;
-    const elementRect = baseMeasurement(element).rect;
-    const overlaps = (item, row) => {
-      const rect = baseMeasurement(item).rect;
-      const start = row
-        ? Math.max(elementRect.top, rect.top)
-        : Math.max(elementRect.left, rect.left);
-      const end = row
-        ? Math.min(elementRect.bottom, rect.bottom)
-        : Math.min(elementRect.right, rect.right);
-      const size = row
-        ? Math.min(elementRect.height, rect.height)
-        : Math.min(elementRect.width, rect.width);
-      return size > 0 && (end - start) / size >= 0.5;
-    };
-    const groups = [];
-    if (parentStyle.display === "flex") {
-      const row = !parentStyle.flexDirection.startsWith("column");
-      groups.push({
-        members: siblings.filter(item => overlaps(item, row)),
-        row,
-        provenance: row ? "flex-row" : "flex-column"
-      });
-    } else if (["grid", "inline-grid"].includes(parentStyle.display)) {
-      groups.push(
-        {
-          members: siblings.filter(item => overlaps(item, true)),
-          row: true,
-          provenance: "grid-row"
-        },
-        {
-          members: siblings.filter(item => overlaps(item, false)),
-          row: false,
-          provenance: "grid-column"
-        }
-      );
-    } else {
-      return;
-    }
-    const candidates = [];
-    for (const group of groups.filter(item => item.members.length >= 3)) {
-      const index = group.members.indexOf(element);
-      if (index < 0) continue;
-      const anchors = group.row
-        ? [
-            group.members.map(item => baseMeasurement(item).rect.top),
-            group.members.map(item => {
-              const rect = baseMeasurement(item).rect;
-              return rect.top + rect.height / 2;
-            }),
-            group.members.map(item => baseMeasurement(item).rect.bottom)
-          ]
-        : [
-            group.members.map(item => baseMeasurement(item).rect.left),
-            group.members.map(item => {
-              const rect = baseMeasurement(item).rect;
-              return rect.left + rect.width / 2;
-            }),
-            group.members.map(item => baseMeasurement(item).rect.right)
-          ];
-      const deviations = anchors
-        .map(values => clusteredPeerDeviation(values, index))
-        .filter(value => value > 0);
-      candidates.push({
-        ...group,
-        deviation: deviations.length ? Math.min(...deviations) : 0
-      });
-    }
+    const candidates = peerCandidatesFor(parent).get(element) || [];
     if (!candidates.length) return;
-    const misalignedGroups = candidates.filter(item => item.deviation > 0);
-    const peerGroup = (misalignedGroups.length
-      ? misalignedGroups
-      : candidates
-    ).sort(
+    const misaligned = candidates.filter(item => item.deviation > 0);
+    const peer = (misaligned.length ? misaligned : candidates).sort(
       (first, second) => first.deviation - second.deviation
     )[0];
-    const semanticKeys = peerGroup.members.map(item => {
-      const measured = baseMeasurement(item);
-      return `${item.tagName.toLowerCase()}:${measured.role}`;
-    });
-    const equivalentPeers = semanticKeys.every(
-      value => value === semanticKeys[0]
-    );
-    measurements.layoutPeerProvenance = peerGroup.provenance;
-    measurements.layoutPeerSelectors = peerGroup.members.map(selectorFor);
-    if (equivalentPeers && peerGroup.deviation > 0) {
-      measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
-      measurements.layoutDeviation = round(peerGroup.deviation);
+    const {group, index, deviation} = peer;
+    measurements.layoutPeerProvenance = group.provenance;
+    measurements.layoutPeerGroup = selectorFor(parent);
+    measurements.layoutPeerCount = group.members.length;
+    if (group.equivalentPeers && deviation > 0) {
+      measurements.layoutAxis = group.row ? "vertical" : "horizontal";
+      measurements.layoutDeviation = round(deviation);
     }
-
-    const index = peerGroup.members.indexOf(element);
-    const textPeers = peerGroup.members.map(item => baseMeasurement(item));
-    if (equivalentPeers && textPeers.every(item => item.text)) {
-      const peerSizes = textPeers
-        .filter((_item, peerIndex) => peerIndex !== index)
-        .map(item => item.text.fontSize);
-      if (Math.max(...peerSizes) - Math.min(...peerSizes) <= 1) {
-        const baselines = textPeers.map(item => item.text.baselineProxy);
-        measurements.fontBaselineDeviation = round(
-          clusteredPeerDeviation(baselines, index)
-        );
-      }
-      const peerFonts = textPeers
-        .filter((_item, peerIndex) => peerIndex !== index)
-        .map(item => item.style.fontFamily);
-      const expectedFont = peerFonts[0];
-      if (
-        peerFonts.every(value => value === expectedFont) &&
-        textPeers[index].style.fontFamily !== expectedFont
-      ) {
-        measurements.fontMismatch = true;
-        measurements.expectedFontFamily = expectedFont;
-      }
+    if (!group.equivalentPeers || !group.allText) return;
+    if (group.fontSizeStats.ranges[index] <= 1) {
+      measurements.fontBaselineDeviation = round(
+        group.baselineStats.deviations[index] || 0
+      );
+    }
+    const actualFont = group.measured[index].style.fontFamily;
+    if (
+      group.fontCounts.size === 2
+      && group.fontCounts.get(actualFont) === 1
+    ) {
+      measurements.fontMismatch = true;
+      measurements.expectedFontFamily = [...group.fontCounts.keys()].find(
+        value => value !== actualFont
+      );
     }
   };
 
@@ -1041,12 +1798,11 @@ async () => {
   const textElementPattern = /^(?:h[1-6]|p|li|label|legend|blockquote|figcaption|td|th|dt|dd|span|small|strong|em)$/;
   for (const element of allElements) {
     if (!isVisible(element)) continue;
-    const style = getComputedStyle(element);
-    const role = element.getAttribute("role") || implicitRole(element);
+    const {style, role} = geometryFor(element);
     const tag = element.tagName.toLowerCase();
     const hasText = Boolean((element.textContent || "").trim());
     const parentDisplay = element.parentElement
-      ? getComputedStyle(element.parentElement).display
+      ? geometryFor(element.parentElement).style.display
       : "";
     if (
       isControl(element, role) ||
@@ -1061,13 +1817,31 @@ async () => {
   const documentOrder = new Map(
     allElements.map((element, index) => [element, index])
   );
-  return Array.from(candidateSet)
+  const priority = element => {
+    if (
+      element.hasAttribute("data-uidetox-source")
+      || element.hasAttribute("data-testid")
+      || element.hasAttribute("data-test")
+      || element.id
+    ) return 0;
+    const measured = baseMeasurement(element);
+    if (isControl(element, measured.role)) return 1;
+    if (
+      element.matches(structuralSelector)
+      || measured.measurements.isVisualContainer
+      || measured.measurements.clippedByAncestor
+      || measured.measurements.isScrollRegion
+    ) return 2;
+    return 3;
+  };
+  const eligible = Array.from(candidateSet)
     .filter(isVisible)
     .sort((first, second) => (
-      (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
-    ))
-    .slice(0, 1500)
-    .map((element, candidateOrder) => {
+      priority(first) - priority(second)
+      || (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
+    ));
+  const selected = eligible.slice(0, __UIDETOX_CANDIDATES__);
+  const elements = selected.map((element, candidateOrder) => {
     const {style, rect, role, measurements} = baseMeasurement(element);
     enrichPeerMeasurements(element, measurements);
 
@@ -1083,13 +1857,16 @@ async () => {
     }
     if ("disabled" in element) states.disabled = Boolean(element.disabled);
     states.tabIndex = element.tabIndex;
+    const sourceSelectors = sourceSelectorsFor(element);
 
     return {
       kind,
       tag,
       role,
       name: nameFor(element),
-      selector: selectorFor(element),
+      selector: selectorFor(element, sourceSelectors),
+      source_hint: element.getAttribute("data-uidetox-source") || "",
+      source_selectors: sourceSelectors,
       order: documentOrder.get(element) ?? candidateOrder,
       bounds: {
         x: round(rect.x),
@@ -1129,5 +1906,19 @@ async () => {
       measurements
     };
   });
+  return {
+    elements,
+    coverage: {
+      total: totalElements,
+      candidates: candidateSet.size,
+      eligible: eligible.length,
+      emitted: elements.length,
+      budget: __UIDETOX_CANDIDATES__,
+      truncated: (
+        totalElements > allElements.length
+        || eligible.length > elements.length
+      )
+    }
+  };
 }
 """

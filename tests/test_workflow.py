@@ -4,21 +4,24 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 import uidetox.workflow as workflow_module
 from uidetox.cli import parse_args
 from uidetox.commands import loop as loop_command
 from uidetox.visual_evidence import VisualEvidenceStatus
 from uidetox.workflow import (
-    AdapterResult,
     PHASES,
     WAITING_AGENT,
     WAITING_REVIEW,
     WAITING_SELECTION,
     WAITING_VERIFICATION,
+    AdapterResult,
     WorkflowAdapters,
     WorkflowEngine,
     WorkflowInputs,
     build_workflow_inputs,
+    in_process_adapters,
 )
 
 
@@ -50,10 +53,24 @@ class FakeWorkflow:
         if phase == "issue_planning":
             signals["issues_pending"] = self.pending
         if phase == "status_evaluation":
+            blockers = []
+            if self.pending:
+                blockers.append({"code": "pending_findings"})
+            if self.score < context.inputs.target_score:
+                blockers.append({"code": "target_score"})
+            if not self.verification_fresh or not context.inputs.verification_fresh:
+                blockers.append({"code": "stale_evidence"})
+            if not context.inputs.review_fingerprint:
+                blockers.append({"code": "missing_structured_review"})
             signals.update(
                 {
                     "issues_pending": self.pending,
                     "blended_score": self.score,
+                    "eligibility": {
+                        "eligible": not blockers,
+                        "blockers": blockers,
+                        "score": {"blended_score": self.score},
+                    },
                 }
             )
         if phase == "semantic_map":
@@ -62,7 +79,7 @@ class FakeWorkflow:
             artifact.write_text('{"schema_version": 1}\n', encoding="utf-8")
             artifacts = {
                 "frontend_map": str(artifact),
-                "project_map": f"{artifact}#project_map",
+                "contract_graph": f"{artifact}#project_map",
             }
         else:
             artifacts = {
@@ -96,7 +113,7 @@ def _inputs(
         verification_fingerprint=verification,
         target_score=target,
         proposal_id=proposal,
-        subjective_score=score,
+        review_fingerprint="" if score is None else f"review-{score}",
         verification_fresh=fresh,
     )
 
@@ -137,12 +154,7 @@ def test_workflow_waits_for_agent_then_selectively_resumes_issue_dependents(
 
     waiting = engine.run(_inputs(queue="queue-with-issues"))
     assert waiting.waiting == WAITING_AGENT
-    assert fake.calls == [
-        "mechanical_checks",
-        "static_analysis",
-        "semantic_map",
-        "issue_planning",
-    ]
+    assert fake.calls == [phase.id for phase in PHASES if phase.id != "finish_eligibility"]
 
     fake.pending = 0
     resumed = engine.run(_inputs(queue="queue-empty"))
@@ -151,7 +163,8 @@ def test_workflow_waits_for_agent_then_selectively_resumes_issue_dependents(
     assert fake.calls.count("mechanical_checks") == 1
     assert fake.calls.count("semantic_map") == 1
     assert fake.calls.count("issue_planning") == 2
-    assert fake.calls[-5:] == [
+    assert fake.calls[-6:] == [
+        "issue_planning",
         "redesign_planning",
         "prototype_generation",
         "subjective_review",
@@ -175,8 +188,34 @@ def test_workflow_waits_for_subjective_review_input(tmp_path) -> None:
     result = _engine(tmp_path, fake).run(_inputs(score=None))
 
     assert result.waiting == WAITING_REVIEW
+    assert result.phase == "status_evaluation"
+    assert fake.calls[-1] == "status_evaluation"
+
+
+def test_production_review_phase_waits_without_marking_incomplete_review_complete(
+    tmp_path, monkeypatch
+) -> None:
+    fake = FakeWorkflow()
+    runners = dict(fake.adapters().runners)
+    runners["subjective_review"] = in_process_adapters().runners["subjective_review"]
+    monkeypatch.setattr(workflow_module, "load_state", lambda: {"subjective": {}})
+    monkeypatch.setattr(
+        workflow_module,
+        "current_evidence_hashes",
+        lambda _root: {"source": "s", "map": "m", "runtime": "r"},
+    )
+    engine = WorkflowEngine(
+        tmp_path,
+        WorkflowAdapters(runners),
+        state_path=tmp_path / ".uidetox" / "workflow-state.json",
+    )
+
+    result = engine.run(_inputs())
+    state = json.loads(result.state_path.read_text(encoding="utf-8"))
+
+    assert result.waiting == WAITING_REVIEW
     assert result.phase == "subjective_review"
-    assert fake.calls[-1] == "prototype_generation"
+    assert state["phases"]["subjective_review"]["status"] == "pending"
 
 
 def test_workflow_waits_when_verification_is_stale_or_blocked(tmp_path) -> None:
@@ -185,8 +224,7 @@ def test_workflow_waits_when_verification_is_stale_or_blocked(tmp_path) -> None:
 
     assert result.waiting == WAITING_VERIFICATION
     assert result.phase == "status_evaluation"
-    assert fake.calls[-1] == "subjective_review"
-    assert "status_evaluation" not in fake.calls
+    assert fake.calls[-1] == "status_evaluation"
 
 
 def test_failed_phase_is_retryable_and_never_completes_later_phases(
@@ -278,7 +316,13 @@ def test_artifact_invalidation_preserves_unaffected_issue_gate_signal(
     resumed_state = json.loads(resumed.state_path.read_text(encoding="utf-8"))
 
     assert resumed.waiting == WAITING_AGENT
-    assert fake.calls[baseline_count:] == ["semantic_map"]
+    assert fake.calls[baseline_count:] == [
+        "semantic_map",
+        "redesign_planning",
+        "prototype_generation",
+        "subjective_review",
+        "status_evaluation",
+    ]
     assert fake.calls.count("issue_planning") == 1
     assert resumed_state["signals"]["issues_pending"] == 2
 
@@ -338,7 +382,7 @@ def test_external_verification_change_controls_status_gate(tmp_path) -> None:
     )
 
     assert waiting.waiting == WAITING_VERIFICATION
-    assert fake.calls[baseline_count:] == []
+    assert fake.calls[baseline_count:] == ["status_evaluation"]
 
 
 def test_loop_preview_remains_default_and_does_not_create_workflow_state(
@@ -359,7 +403,6 @@ def test_loop_preview_remains_default_and_does_not_create_workflow_state(
             orchestrator=False,
             execute=False,
             proposal_id=None,
-            review_score=None,
         )
     )
     output = capsys.readouterr().out
@@ -369,7 +412,7 @@ def test_loop_preview_remains_default_and_does_not_create_workflow_state(
     assert not (tmp_path / ".uidetox" / "workflow-state.json").exists()
 
 
-def test_cli_documents_execute_inputs_and_keeps_preview_default() -> None:
+def test_cli_documents_execute_inputs_and_rejects_legacy_scalar_review() -> None:
     preview = parse_args(["loop"])
     execute = parse_args(
         [
@@ -377,15 +420,14 @@ def test_cli_documents_execute_inputs_and_keeps_preview_default() -> None:
             "--execute",
             "--proposal-id",
             "REDESIGN-01-task-flow",
-            "--review-score",
-            "97",
         ]
     )
 
     assert preview.execute is False
     assert execute.execute is True
     assert execute.proposal_id == "REDESIGN-01-task-flow"
-    assert execute.review_score == 97
+    with pytest.raises(SystemExit):
+        parse_args(["loop", "--review-score", "97"])
 
 
 def test_workflow_inputs_track_backend_source_and_design_dials(
@@ -409,21 +451,18 @@ def test_workflow_inputs_track_backend_source_and_design_dials(
         tmp_path,
         target_score=95,
         proposal_id=None,
-        subjective_score=None,
     )
     backend.write_text("@app.post('/items')\ndef items(): ...\n", encoding="utf-8")
     second = build_workflow_inputs(
         tmp_path,
         target_score=95,
         proposal_id=None,
-        subjective_score=None,
     )
     config_path.write_text('{"DESIGN_VARIANCE": 9}\n', encoding="utf-8")
     third = build_workflow_inputs(
         tmp_path,
         target_score=95,
         proposal_id=None,
-        subjective_score=None,
     )
 
     assert first.source_fingerprint != second.source_fingerprint
@@ -457,7 +496,6 @@ def test_required_visual_evidence_controls_verification_freshness(
         tmp_path,
         target_score=95,
         proposal_id=None,
-        subjective_score=100,
         require_visual_evidence=True,
     )
 

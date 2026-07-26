@@ -15,7 +15,6 @@ from uidetox.project_map import ProjectMap
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
-
 REDESIGN_SET_FILE = "redesigns.json"
 _DISTANCE_KEYS = (
     "topology",
@@ -173,7 +172,7 @@ class RedesignSet:
     proposals: tuple[RedesignProposal, ...]
     pairwise_distances: tuple[ProposalDistance, ...]
     unknowns: tuple[str, ...]
-    parity: dict[str, Any] = field(default_factory=dict)
+    contract_lineage: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -181,10 +180,10 @@ class RedesignSet:
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RedesignSet":
         version = int(value.get("schema_version", 0))
-        if version != 1:
-            raise ValueError(f"Unsupported redesign schema {version}; expected 1.")
+        if version != 2:
+            raise ValueError(f"Unsupported redesign schema {version}; expected 2.")
         return cls(
-            schema_version=version,
+            schema_version=2,
             generated_at=str(value.get("generated_at", "")),
             frontend_map_generated_at=str(value.get("frontend_map_generated_at", "")),
             target=str(value.get("target", ".")),
@@ -199,7 +198,7 @@ class RedesignSet:
                 for item in value.get("pairwise_distances", [])
             ),
             unknowns=tuple(str(item) for item in value.get("unknowns", [])),
-            parity=dict(value.get("parity", {})),
+            contract_lineage=dict(value.get("contract_lineage", {})),
         )
 
 
@@ -249,7 +248,7 @@ _STRATEGIES = (
         migration_steps=(
             "Extract current actions and validation into task outcomes.",
             "Introduce TaskShell while rendering existing behavior inside step modules.",
-            "Move state ownership only after parity checks pass per step.",
+            "Move state ownership only after contract-lineage checks pass per step.",
         ),
         relevance={"form-flow": 8, "generic-page": 2},
     ),
@@ -388,7 +387,7 @@ _STRATEGIES = (
         migration_steps=(
             "Inventory current actions as named capabilities with permission rules.",
             "Introduce CommandRegistry beside existing navigation.",
-            "Replace duplicate action surfaces after telemetry and parity checks.",
+            "Replace duplicate action surfaces after telemetry and contract checks.",
         ),
         relevance={"data-workspace": 6, "generic-page": 4, "form-flow": 2},
     ),
@@ -432,13 +431,13 @@ def propose_redesigns(
 
     project_map = ProjectMap.from_dict(frontend_map.project_map)
     serialized_project_map = project_map.to_dict()
-    parity = {
+    contract_lineage = {
         "counts": project_map.counts,
         "findings": serialized_project_map["findings"],
         "evidence": dict(project_map.evidence),
     }
     return RedesignSet(
-        schema_version=1,
+        schema_version=2,
         generated_at=now_iso(),
         frontend_map_generated_at=frontend_map.generated_at,
         target=active_brief.target,
@@ -447,7 +446,7 @@ def propose_redesigns(
         proposals=proposals,
         pairwise_distances=tuple(pairwise),
         unknowns=frontend_map.contracts.unknown,
-        parity=parity,
+        contract_lineage=contract_lineage,
     )
 
 
@@ -524,7 +523,7 @@ def _build_proposal(
         strategy.migration_steps,
     )
     evidence_freshness = _proposal_evidence_freshness(frontend_map)
-    parity_blockers = _parity_blockers(frontend_map)
+    contract_blockers = _contract_blockers(frontend_map)
     preserved = tuple(
         dict.fromkeys(
             frontend_map.contracts.must_preserve
@@ -543,7 +542,7 @@ def _build_proposal(
     feasibility_blockers = tuple(
         dict.fromkeys(
             dependency_blockers
-            + parity_blockers
+            + contract_blockers
             + (
                 (
                     "Runtime evidence is stale and cannot validate this proposal."
@@ -558,7 +557,7 @@ def _build_proposal(
         preserved,
         source_targets,
         evidence_freshness,
-        parity_blockers,
+        contract_blockers,
         brief,
     )
     acceptance_checks = observable_checks
@@ -852,7 +851,7 @@ def _proposal_evidence_freshness(frontend_map: FrontendMap) -> dict[str, Any]:
     }
 
 
-def _parity_blockers(frontend_map: FrontendMap) -> tuple[str, ...]:
+def _contract_blockers(frontend_map: FrontendMap) -> tuple[str, ...]:
     project_map = ProjectMap.from_dict(frontend_map.project_map)
     blockers: list[str] = []
     labels = {
@@ -863,7 +862,7 @@ def _parity_blockers(frontend_map: FrontendMap) -> tuple[str, ...]:
     }
     for finding in project_map.findings:
         blockers.append(
-            f"{labels.get(finding.kind, 'Resolve operation parity')}: "
+            f"{labels.get(finding.kind, 'Resolve contract lineage')}: "
             f"{finding.normalized_path or 'unknown path'}."
         )
     return tuple(blockers)
@@ -873,7 +872,7 @@ def _observable_acceptance_checks(
     preserved: tuple[str, ...],
     source_targets: tuple[str, ...],
     freshness: dict[str, Any],
-    parity_blockers: tuple[str, ...],
+    contract_blockers: tuple[str, ...],
     brief: RedesignBrief,
 ) -> tuple[str, ...]:
     modules = ", ".join(source_targets) or "the mapped source modules"
@@ -889,9 +888,9 @@ def _observable_acceptance_checks(
         checks.append(
             f"Runtime check: recapture {urls} at the recorded viewports and compare behavior."
         )
-    for blocker in parity_blockers:
+    for blocker in contract_blockers:
         checks.append(
-            "Operation parity check: rerun `uidetox map` and confirm resolved finding — "
+            "Contract lineage check: rerun `uidetox map` and confirm resolved finding — "
             + blocker
         )
     checks.extend(
