@@ -12,9 +12,13 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 
+from uidetox.fileset import ProjectFileSet
+
 _MAX_ACTION_TIMEOUT_MS = 30_000
 _MAX_DOM_SCAN = 50_000
 _MAX_DOM_CANDIDATES = 10_000
+_MAX_RESPONSIVE_BOUNDARIES = 8
+_MAX_RESPONSIVE_SOURCE_BYTES = 1_000_000
 _SUPPORTED_ACTIONS = frozenset(
     {
         "click",
@@ -24,6 +28,23 @@ _SUPPORTED_ACTIONS = frozenset(
         "wait-for-state",
         "capture",
     }
+)
+_SELECTOR_STATES = frozenset({"attached", "detached", "visible", "hidden"})
+_LOAD_STATES = frozenset({"load", "domcontentloaded", "networkidle"})
+_ACTION_FIELDS = {
+    "click": {"kind", "selector", "timeout_ms"},
+    "fill": {"kind", "selector", "env", "timeout_ms"},
+    "key": {"kind", "selector", "key", "timeout_ms"},
+    "wait-for-selector": {"kind", "selector", "timeout_ms"},
+    "wait-for-state": {"kind", "selector", "state", "timeout_ms"},
+    "capture": {"kind", "state"},
+}
+_RESPONSIVE_BOUNDARY_PATTERN = re.compile(
+    r"@(?P<kind>media|container)\b[^{}]{0,500}?"
+    r"\(\s*(?:(?:min-|max-)?(?:width|inline-size)\s*:\s*"
+    r"|(?:width|inline-size)\s*(?:<=|>=|<|>)\s*)"
+    r"(?P<width>\d+)px\s*\)",
+    flags=re.IGNORECASE,
 )
 
 
@@ -61,6 +82,17 @@ class RuntimeViewport:
     name: str
     width: int
     height: int
+    kind: str = "registry"
+    boundary_px: int | None = None
+    relation: str = ""
+    sources: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _safe_identifier(self.name, "viewport name")
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("Runtime viewport dimensions must be positive.")
+        if self.relation not in {"", "below", "above"}:
+            raise ValueError("Runtime viewport relation must be below or above.")
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeViewport":
@@ -68,6 +100,14 @@ class RuntimeViewport:
             name=str(value["name"]),
             width=int(value["width"]),
             height=int(value["height"]),
+            kind=str(value.get("kind", "registry")),
+            boundary_px=(
+                int(value["boundary_px"])
+                if value.get("boundary_px") is not None
+                else None
+            ),
+            relation=str(value.get("relation", "")),
+            sources=tuple(str(item) for item in value.get("sources", [])),
         )
 
 
@@ -82,6 +122,126 @@ VIEWPORT_REGISTRY = MappingProxyType(
 DEFAULT_VIEWPORTS = tuple(
     VIEWPORT_REGISTRY[name] for name in ("mobile", "tablet", "desktop")
 )
+
+
+@dataclass(frozen=True)
+class RuntimeResponsiveBoundary:
+    width: int
+    kinds: tuple[str, ...]
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeViewportDiscovery:
+    viewports: tuple[RuntimeViewport, ...]
+    boundaries: tuple[RuntimeResponsiveBoundary, ...] = ()
+    total_boundaries: int = 0
+    truncated: bool = False
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "RuntimeViewportDiscovery":
+        return cls(
+            viewports=tuple(
+                RuntimeViewport.from_dict(dict(item))
+                for item in value.get("viewports", [])
+                if isinstance(item, dict)
+            ),
+            boundaries=tuple(
+                RuntimeResponsiveBoundary(
+                    width=int(item["width"]),
+                    kinds=tuple(str(kind) for kind in item.get("kinds", [])),
+                    sources=tuple(str(source) for source in item.get("sources", [])),
+                )
+                for item in value.get("boundaries", [])
+                if isinstance(item, dict)
+            ),
+            total_boundaries=int(value.get("total_boundaries", 0)),
+            truncated=bool(value.get("truncated", False)),
+        )
+
+
+def discover_runtime_viewports(
+    root: str | Path,
+    *,
+    base_viewports: Iterable[RuntimeViewport] = DEFAULT_VIEWPORTS,
+    max_boundaries: int = _MAX_RESPONSIVE_BOUNDARIES,
+) -> RuntimeViewportDiscovery:
+    """Supplement the canonical registry with source-derived boundary probes."""
+
+    if not 1 <= max_boundaries <= _MAX_RESPONSIVE_BOUNDARIES:
+        raise ValueError(
+            f"Runtime responsive boundary budget must be 1-{_MAX_RESPONSIVE_BOUNDARIES}."
+        )
+    root_path = Path(root).expanduser().resolve()
+    discovered: dict[int, dict[str, set[str]]] = {}
+    for path in ProjectFileSet(root_path).discover():
+        try:
+            if path.stat().st_size > _MAX_RESPONSIVE_SOURCE_BYTES:
+                continue
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        relative = path.relative_to(root_path).as_posix()
+        for match in _RESPONSIVE_BOUNDARY_PATTERN.finditer(content):
+            width = int(match.group("width"))
+            if not 240 <= width <= 2_560:
+                continue
+            evidence = discovered.setdefault(
+                width,
+                {"kinds": set(), "sources": set()},
+            )
+            evidence["kinds"].add(match.group("kind").lower())
+            evidence["sources"].add(relative)
+
+    widths = sorted(discovered)
+    if len(widths) > max_boundaries:
+        selected_indexes = (
+            {len(widths) // 2}
+            if max_boundaries == 1
+            else {
+                round(index * (len(widths) - 1) / (max_boundaries - 1))
+                for index in range(max_boundaries)
+            }
+        )
+        selected_widths = [widths[index] for index in sorted(selected_indexes)]
+    else:
+        selected_widths = widths
+    boundaries = tuple(
+        RuntimeResponsiveBoundary(
+            width=width,
+            kinds=tuple(sorted(discovered[width]["kinds"])),
+            sources=tuple(sorted(discovered[width]["sources"])),
+        )
+        for width in selected_widths
+    )
+    viewports = list(base_viewports)
+    occupied_widths = {viewport.width for viewport in viewports}
+    for boundary in boundaries:
+        probe_kind = "-".join(boundary.kinds)
+        for relation, width in (
+            ("below", boundary.width - 1),
+            ("above", boundary.width + 1),
+        ):
+            if width < 240 or width > 2_560 or width in occupied_widths:
+                continue
+            occupied_widths.add(width)
+            viewports.append(
+                RuntimeViewport(
+                    name=f"{probe_kind}-{boundary.width}-{relation}",
+                    width=width,
+                    height=VIEWPORT_REGISTRY["desktop"].height,
+                    kind="boundary",
+                    boundary_px=boundary.width,
+                    relation=relation,
+                    sources=boundary.sources,
+                )
+            )
+    return RuntimeViewportDiscovery(
+        viewports=tuple(viewports),
+        boundaries=boundaries,
+        total_boundaries=len(widths),
+        truncated=len(widths) > len(boundaries),
+    )
 
 
 @dataclass(frozen=True)
@@ -215,7 +375,6 @@ class RuntimeReadinessPolicy:
 class RuntimeScenarioAction:
     kind: str
     selector: str = ""
-    value: str = ""
     env: str = ""
     key: str = ""
     state: str = ""
@@ -236,38 +395,40 @@ class RuntimeScenarioAction:
             raise ValueError("Runtime wait-for-state action requires state.")
         if self.kind == "capture" and not self.state:
             raise ValueError("Runtime capture action requires state.")
+        if self.kind == "fill" and not self.env:
+            raise ValueError(
+                "Runtime fill values require an environment variable reference."
+            )
         if self.state:
             _safe_identifier(self.state, "action state")
         if self.env and not re.fullmatch(r"[A-Z][A-Z0-9_]*", self.env):
             raise ValueError("Runtime action env must name an environment variable.")
-        secret_selector = re.search(
-            r"(?:password|token|secret|credential)",
-            self.selector,
-            flags=re.IGNORECASE,
-        )
-        if self.kind == "fill" and secret_selector and self.value:
-            raise ValueError(
-                "Runtime secret fills require an environment variable reference."
-            )
-        if self.value and self.env:
-            raise ValueError("Runtime fill accepts value or env, not both.")
+        if self.kind != "fill" and self.env:
+            raise ValueError("Runtime action env is only valid for fill.")
+        if self.kind != "key" and self.key:
+            raise ValueError("Runtime action key is only valid for key.")
+        if self.kind not in {"wait-for-state", "capture"} and self.state:
+            raise ValueError(f"Runtime {self.kind} action does not accept state.")
+        if self.kind == "capture" and self.selector:
+            raise ValueError("Runtime capture action does not accept selector.")
+        if self.kind == "wait-for-state":
+            allowed_states = _SELECTOR_STATES if self.selector else _LOAD_STATES
+            if self.state not in allowed_states:
+                domain = ", ".join(sorted(allowed_states))
+                raise ValueError(
+                    f"Runtime wait-for-state must be one of: {domain}."
+                )
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeScenarioAction":
-        allowed = {
-            "kind",
-            "selector",
-            "value",
-            "env",
-            "key",
-            "state",
-            "timeout_ms",
-        }
+        kind = str(value.get("kind", ""))
+        if kind not in _SUPPORTED_ACTIONS:
+            raise ValueError(f"Unsupported runtime action: {kind}")
+        allowed = _ACTION_FIELDS[kind]
         _reject_unknown(value, allowed, "action")
         return cls(
-            kind=str(value.get("kind", "")),
+            kind=kind,
             selector=str(value.get("selector", "")),
-            value=str(value.get("value", "")),
             env=str(value.get("env", "")),
             key=str(value.get("key", "")),
             state=str(value.get("state", "")),

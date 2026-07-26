@@ -30,6 +30,7 @@ from uidetox.runtime_scenarios import (
     RuntimeReadinessPolicy,
     RuntimeScenario,
     RuntimeScenarioAction,
+    discover_runtime_viewports,
     load_runtime_scenarios,
 )
 
@@ -82,22 +83,84 @@ def _capture_record(
     )
 
 
-def test_scenario_schema_rejects_unsafe_or_unbounded_actions(tmp_path: Path) -> None:
+def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with pytest.raises(ValueError, match="Unsupported runtime action"):
         RuntimeScenarioAction.from_dict({"kind": "destroy", "selector": "#account"})
+    with pytest.raises(ValueError, match="Unknown runtime action fields: value"):
+        RuntimeScenarioAction.from_dict(
+            {"kind": "fill", "selector": "#nickname", "value": "inline-bypass"}
+        )
     with pytest.raises(ValueError, match="environment variable"):
         RuntimeScenarioAction.from_dict(
-            {"kind": "fill", "selector": "input[type=password]", "value": "secret"}
+            {"kind": "fill", "selector": "#nickname"}
+        )
+    with pytest.raises(ValueError, match="Unknown runtime action fields: key"):
+        RuntimeScenarioAction.from_dict(
+            {"kind": "click", "selector": "#save", "key": "Enter"}
+        )
+    with pytest.raises(ValueError, match="must be one of"):
+        RuntimeScenarioAction.from_dict(
+            {"kind": "wait-for-state", "state": "visible"}
+        )
+    with pytest.raises(ValueError, match="must be one of"):
+        RuntimeScenarioAction.from_dict(
+            {
+                "kind": "wait-for-state",
+                "selector": "#ready",
+                "state": "networkidle",
+            }
         )
     with pytest.raises(ValueError, match="timeout_ms"):
         RuntimeScenarioAction.from_dict(
             {"kind": "wait-for-selector", "selector": "#ready", "timeout_ms": 0}
         )
+    fill = RuntimeScenarioAction.from_dict(
+        {"kind": "fill", "selector": "#nickname", "env": "UIDETOX_TEST_VALUE"}
+    )
+    assert fill.env == "UIDETOX_TEST_VALUE"
+    monkeypatch.setenv(fill.env, "never-print-this-value")
+    locator = SimpleNamespace(
+        fill=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("never-print-this-value")
+        )
+    )
+    with pytest.raises(RuntimeError) as fill_error:
+        runtime_observer._perform_action(
+            SimpleNamespace(locator=lambda _selector: locator),
+            fill,
+        )
+    assert "never-print-this-value" not in str(fill_error.value)
 
     outside = tmp_path.parent / "outside-runtime-scenarios.json"
     outside.write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError, match="inside"):
         load_runtime_scenarios(outside, root=tmp_path)
+
+
+def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> None:
+    (tmp_path / "responsive.css").write_text(
+        """
+@media (max-width: 600px) { main { display: block; } }
+@container card (inline-size >= 42rem) { article { display: grid; } }
+@container card (min-width: 500px) { article { gap: 1rem; } }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    discovery = discover_runtime_viewports(
+        tmp_path,
+        base_viewports=(VIEWPORT_REGISTRY["desktop"],),
+    )
+
+    assert discovery.total_boundaries == 2
+    assert discovery.truncated is False
+    assert {boundary.width for boundary in discovery.boundaries} == {500, 600}
+    probes = [viewport for viewport in discovery.viewports if viewport.kind == "boundary"]
+    assert {viewport.width for viewport in probes} == {499, 501, 599, 601}
+    assert all(viewport.sources == ("responsive.css",) for viewport in probes)
 
 
 def test_observation_status_never_promotes_partial_or_degraded_to_current() -> None:
@@ -948,6 +1011,130 @@ def test_top_aligned_variable_height_peer_is_not_misaligned(
     )
 
     assert "runtime-layout-misalignment" not in _finding_codes(short)
+
+
+@pytest.mark.browser
+def test_peer_analysis_covers_aligned_and_outlier_tails_after_twenty(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "peer-tail.html"
+    aligned = "".join(
+        f'<article class="peer">Aligned {index}</article>' for index in range(24)
+    )
+    outliers = "".join(
+        f'<article class="peer">Outlier row {index}</article>' for index in range(24)
+    )
+    fixture.write_text(
+        f"""
+<!doctype html>
+<style>
+  .row {{ display: flex; align-items: flex-start; }}
+  .peer {{ flex: 0 0 44px; height: 40px; }}
+  #tail-outlier {{ margin-top: 12px; }}
+</style>
+<main>
+  <section class="row">{aligned}<article class="peer" id="tail-aligned">Tail</article></section>
+  <section class="row">{outliers}<article class="peer" id="tail-outlier">Tail</article></section>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    observation = observe_frontend(
+        f"{origin}/{fixture.name}",
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+    assert observation.pages, observation.errors
+    elements = {
+        element.selector: element for element in observation.pages[0].elements
+    }
+
+    assert elements["#tail-aligned"].measurements["layoutPeerCount"] == 25
+    assert "runtime-layout-misalignment" not in _finding_codes(
+        elements["#tail-aligned"]
+    )
+    assert elements["#tail-outlier"].measurements["layoutPeerCount"] == 25
+    assert "runtime-layout-misalignment" in _finding_codes(
+        elements["#tail-outlier"]
+    )
+
+
+@pytest.mark.browser
+def test_source_boundary_text_zoom_and_long_localization_runtime_probes(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    boundary = tmp_path / "boundary.html"
+    boundary.write_text(
+        """
+<!doctype html>
+<link rel="stylesheet" href="responsive.css">
+<main id="boundary">Boundary</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "responsive.css").write_text(
+        "@media (max-width: 640px) { main { display: grid; } }",
+        encoding="utf-8",
+    )
+    adversarial = tmp_path / "adversarial-copy.html"
+    adversarial.write_text(
+        """
+<!doctype html>
+<style>
+  html { font-size: 200%; }
+  #zoom-copy, #localized-action {
+    display: block;
+    width: 120px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+</style>
+<main>
+  <p id="zoom-copy">Zoomed text must remain completely readable</p>
+  <button id="localized-action">Änderungen unwiderruflich speichern</button>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    boundary_observation = observe_frontend(
+        f"{origin}/{boundary.name}",
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        source_root=tmp_path,
+        settle_ms=0,
+    )
+    discovery = boundary_observation.viewport_discovery
+    assert discovery is not None
+    assert discovery.total_boundaries == 1
+    assert {page.viewport.width for page in boundary_observation.pages} == {
+        639,
+        641,
+        1440,
+    }
+    assert all(
+        page.viewport.boundary_px == 640
+        for page in boundary_observation.pages
+        if page.viewport.kind == "boundary"
+    )
+
+    copy_observation = observe_frontend(
+        f"{origin}/{adversarial.name}",
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+    elements = {
+        element.selector: element for element in copy_observation.pages[0].elements
+    }
+    assert elements["#zoom-copy"].measurements["fontSize"] == 32
+    assert "runtime-text-clipped" in _finding_codes(elements["#zoom-copy"])
+    assert "runtime-text-clipped" in _finding_codes(
+        elements["#localized-action"]
+    )
 
 
 @pytest.mark.browser

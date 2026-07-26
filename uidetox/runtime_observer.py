@@ -35,6 +35,8 @@ from uidetox.runtime_scenarios import (
     RuntimeScenario,
     RuntimeScenarioAction,
     RuntimeViewport,
+    RuntimeViewportDiscovery,
+    discover_runtime_viewports,
     normalize_runtime_urls,
     runtime_capture_id,
 )
@@ -188,6 +190,7 @@ class RuntimeObservation:
     pages: tuple[RuntimePage, ...]
     errors: tuple[str, ...] = ()
     captures: tuple[RuntimeCaptureRecord, ...] = ()
+    viewport_discovery: RuntimeViewportDiscovery | None = None
     status: str = ""
 
     def __post_init__(self) -> None:
@@ -252,6 +255,11 @@ class RuntimeObservation:
                 for capture in value.get("captures", [])
                 if isinstance(capture, dict)
             ),
+            viewport_discovery=(
+                RuntimeViewportDiscovery.from_dict(dict(value["viewport_discovery"]))
+                if isinstance(value.get("viewport_discovery"), dict)
+                else None
+            ),
         )
 
 
@@ -267,6 +275,7 @@ def observe_frontend(
     scenarios: Iterable[RuntimeScenario] | None = None,
     readiness: RuntimeReadinessPolicy | None = None,
     dom_budget: RuntimeDomBudget = RuntimeDomBudget(),
+    source_root: str | Path | None = None,
 ) -> RuntimeObservation:
     """Observe explicit browser scenarios through one bounded capture engine.
 
@@ -279,6 +288,16 @@ def observe_frontend(
     normalized_viewports = tuple(viewports)
     if not normalized_viewports:
         raise ValueError("At least one runtime viewport is required.")
+    viewport_discovery = (
+        discover_runtime_viewports(
+            source_root,
+            base_viewports=normalized_viewports,
+        )
+        if source_root is not None
+        else None
+    )
+    if viewport_discovery is not None:
+        normalized_viewports = viewport_discovery.viewports
     if timeout_ms <= 0:
         raise ValueError("timeout_ms must be greater than zero.")
     if settle_ms < 0:
@@ -332,16 +351,16 @@ def observe_frontend(
                     ):
                         scenario_pages, scenario_captures, scenario_errors = (
                             _observe_scenario(
-                            browser,
-                            scenario,
-                            viewport,
-                            timeout_ms=timeout_ms,
-                            dom_budget=dom_budget,
-                            screenshot_root=screenshot_root,
-                            screenshot_namer=screenshot_namer,
-                            full_page=full_page,
-                            playwright_timeout_error=PlaywrightTimeoutError,
-                        )
+                                browser,
+                                scenario,
+                                viewport,
+                                timeout_ms=timeout_ms,
+                                dom_budget=dom_budget,
+                                screenshot_root=screenshot_root,
+                                screenshot_namer=screenshot_namer,
+                                full_page=full_page,
+                                playwright_timeout_error=PlaywrightTimeoutError,
+                            )
                         )
                         pages.extend(scenario_pages)
                         captures.extend(scenario_captures)
@@ -363,6 +382,7 @@ def observe_frontend(
         pages=tuple(pages),
         errors=tuple(errors),
         captures=tuple(captures),
+        viewport_discovery=viewport_discovery,
     )
 
 
@@ -621,12 +641,18 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
     if action.kind == "click":
         page.locator(action.selector).click(timeout=action.timeout_ms)
     elif action.kind == "fill":
-        value = os.environ.get(action.env) if action.env else action.value
-        if action.env and value is None:
+        value = os.environ.get(action.env)
+        if value is None:
             raise ValueError(
                 f"Runtime scenario environment variable is missing: {action.env}"
             )
-        page.locator(action.selector).fill(value or "", timeout=action.timeout_ms)
+        try:
+            page.locator(action.selector).fill(value, timeout=action.timeout_ms)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Runtime fill failed for selector {action.selector}: "
+                f"{type(exc).__name__}"
+            ) from exc
     elif action.kind == "key":
         page.locator(action.selector).press(action.key, timeout=action.timeout_ms)
     elif action.kind == "wait-for-selector":
@@ -1512,144 +1538,197 @@ async () => {
     return result;
   };
 
-  const median = values => {
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2
-      ? sorted[middle]
-      : (sorted[middle - 1] + sorted[middle]) / 2;
+  const peerStats = values => {
+    const sorted = values
+      .map((value, index) => ({value, index}))
+      .sort((first, second) => first.value - second.value);
+    const rankByIndex = new Map(
+      sorted.map((item, rank) => [item.index, rank])
+    );
+    const deviations = Array(values.length).fill(null);
+    const ranges = Array(values.length).fill(Infinity);
+    for (let index = 0; index < values.length; index += 1) {
+      const peerCount = values.length - 1;
+      if (peerCount < 2) continue;
+      const removedRank = rankByIndex.get(index);
+      const peerValue = rank => sorted[
+        rank + (rank >= removedRank ? 1 : 0)
+      ].value;
+      const minimum = peerValue(0);
+      const maximum = peerValue(peerCount - 1);
+      ranges[index] = maximum - minimum;
+      if (ranges[index] > 2) continue;
+      const middle = Math.floor(peerCount / 2);
+      const peerMedian = peerCount % 2
+        ? peerValue(middle)
+        : (peerValue(middle - 1) + peerValue(middle)) / 2;
+      deviations[index] = Math.abs(values[index] - peerMedian);
+    }
+    return {deviations, ranges};
   };
 
-  const clusteredPeerDeviation = (values, index) => {
-    const peers = values.filter((_value, peerIndex) => peerIndex !== index);
-    if (peers.length < 2 || Math.max(...peers) - Math.min(...peers) > 2) {
-      return null;
+  const overlapsOnAxis = (first, second, row) => {
+    const firstRect = baseMeasurement(first).rect;
+    const secondRect = baseMeasurement(second).rect;
+    const start = row
+      ? Math.max(firstRect.top, secondRect.top)
+      : Math.max(firstRect.left, secondRect.left);
+    const end = row
+      ? Math.min(firstRect.bottom, secondRect.bottom)
+      : Math.min(firstRect.right, secondRect.right);
+    const size = row
+      ? Math.min(firstRect.height, secondRect.height)
+      : Math.min(firstRect.width, secondRect.width);
+    return size > 0 && (end - start) / size >= 0.5;
+  };
+
+  const partitionPeerGroups = (siblings, row, provenance) => {
+    const ordered = [...siblings].sort((first, second) => {
+      const firstRect = baseMeasurement(first).rect;
+      const secondRect = baseMeasurement(second).rect;
+      return row
+        ? firstRect.top - secondRect.top
+        : firstRect.left - secondRect.left;
+    });
+    const groups = [];
+    for (const sibling of ordered) {
+      const current = groups[groups.length - 1];
+      if (
+        current
+        && overlapsOnAxis(current.members[0], sibling, row)
+      ) {
+        current.members.push(sibling);
+      } else {
+        groups.push({members: [sibling], row, provenance});
+      }
     }
-    return Math.abs(values[index] - median(peers));
+    return groups.filter(group => group.members.length >= 3);
+  };
+
+  const analyzePeerGroup = group => {
+    const measured = group.members.map(baseMeasurement);
+    const anchors = group.row
+      ? [
+          measured.map(item => item.rect.top),
+          measured.map(item => item.rect.top + item.rect.height / 2),
+          measured.map(item => item.rect.bottom)
+        ]
+      : [
+          measured.map(item => item.rect.left),
+          measured.map(item => item.rect.left + item.rect.width / 2),
+          measured.map(item => item.rect.right)
+        ];
+    const anchorStats = anchors.map(peerStats);
+    const semanticKeys = group.members.map((item, index) => (
+      `${item.tagName.toLowerCase()}:${measured[index].role}`
+    ));
+    const equivalentPeers = semanticKeys.every(
+      value => value === semanticKeys[0]
+    );
+    const allText = measured.every(item => item.text);
+    const fontSizeStats = allText
+      ? peerStats(measured.map(item => item.text.fontSize))
+      : null;
+    const baselineStats = allText
+      ? peerStats(measured.map(item => item.text.baselineProxy))
+      : null;
+    const fontCounts = new Map();
+    if (allText) {
+      for (const item of measured) {
+        fontCounts.set(
+          item.style.fontFamily,
+          (fontCounts.get(item.style.fontFamily) || 0) + 1
+        );
+      }
+    }
+    return {
+      ...group,
+      measured,
+      anchorStats,
+      equivalentPeers,
+      allText,
+      fontSizeStats,
+      baselineStats,
+      fontCounts
+    };
+  };
+
+  const peerAnalysisCache = new WeakMap();
+  const peerCandidatesFor = parent => {
+    if (peerAnalysisCache.has(parent)) {
+      return peerAnalysisCache.get(parent);
+    }
+    const candidates = new Map();
+    const siblings = Array.from(parent.children).filter(
+      item => geometryCache.has(item) && isVisible(item)
+    );
+    const parentStyle = geometryFor(parent).style;
+    let groups = [];
+    if (parentStyle.display === "flex") {
+      const row = !parentStyle.flexDirection.startsWith("column");
+      groups = partitionPeerGroups(
+        siblings,
+        row,
+        row ? "flex-row" : "flex-column"
+      );
+    } else if (["grid", "inline-grid"].includes(parentStyle.display)) {
+      groups = [
+        ...partitionPeerGroups(siblings, true, "grid-row"),
+        ...partitionPeerGroups(siblings, false, "grid-column")
+      ];
+    }
+    for (const group of groups.map(analyzePeerGroup)) {
+      for (let index = 0; index < group.members.length; index += 1) {
+        const deviations = group.anchorStats
+          .map(stats => stats.deviations[index])
+          .filter(value => value !== null);
+        const candidate = {
+          group,
+          index,
+          deviation: deviations.length ? Math.min(...deviations) : 0
+        };
+        const member = group.members[index];
+        const memberCandidates = candidates.get(member) || [];
+        memberCandidates.push(candidate);
+        candidates.set(member, memberCandidates);
+      }
+    }
+    peerAnalysisCache.set(parent, candidates);
+    return candidates;
   };
 
   const enrichPeerMeasurements = (element, measurements) => {
     const parent = element.parentElement;
     if (!parent) return;
-    const parentStyle = geometryFor(parent).style;
-    const siblings = Array.from(parent.children)
-      .filter(isVisible)
-      .slice(0, 20);
-    if (siblings.length < 3 || !siblings.includes(element)) return;
-    const elementRect = baseMeasurement(element).rect;
-    const overlaps = (item, row) => {
-      const rect = baseMeasurement(item).rect;
-      const start = row
-        ? Math.max(elementRect.top, rect.top)
-        : Math.max(elementRect.left, rect.left);
-      const end = row
-        ? Math.min(elementRect.bottom, rect.bottom)
-        : Math.min(elementRect.right, rect.right);
-      const size = row
-        ? Math.min(elementRect.height, rect.height)
-        : Math.min(elementRect.width, rect.width);
-      return size > 0 && (end - start) / size >= 0.5;
-    };
-    const groups = [];
-    if (parentStyle.display === "flex") {
-      const row = !parentStyle.flexDirection.startsWith("column");
-      groups.push({
-        members: siblings.filter(item => overlaps(item, row)),
-        row,
-        provenance: row ? "flex-row" : "flex-column"
-      });
-    } else if (["grid", "inline-grid"].includes(parentStyle.display)) {
-      groups.push(
-        {
-          members: siblings.filter(item => overlaps(item, true)),
-          row: true,
-          provenance: "grid-row"
-        },
-        {
-          members: siblings.filter(item => overlaps(item, false)),
-          row: false,
-          provenance: "grid-column"
-        }
-      );
-    } else {
-      return;
-    }
-    const candidates = [];
-    for (const group of groups.filter(item => item.members.length >= 3)) {
-      const index = group.members.indexOf(element);
-      if (index < 0) continue;
-      const anchors = group.row
-        ? [
-            group.members.map(item => baseMeasurement(item).rect.top),
-            group.members.map(item => {
-              const rect = baseMeasurement(item).rect;
-              return rect.top + rect.height / 2;
-            }),
-            group.members.map(item => baseMeasurement(item).rect.bottom)
-          ]
-        : [
-            group.members.map(item => baseMeasurement(item).rect.left),
-            group.members.map(item => {
-              const rect = baseMeasurement(item).rect;
-              return rect.left + rect.width / 2;
-            }),
-            group.members.map(item => baseMeasurement(item).rect.right)
-          ];
-      const deviations = anchors
-        .map(values => clusteredPeerDeviation(values, index))
-        .filter(value => value !== null);
-      candidates.push({
-        ...group,
-        deviation: deviations.length ? Math.min(...deviations) : 0
-      });
-    }
+    const candidates = peerCandidatesFor(parent).get(element) || [];
     if (!candidates.length) return;
-    const misalignedGroups = candidates.filter(item => item.deviation > 0);
-    const peerGroup = (misalignedGroups.length
-      ? misalignedGroups
-      : candidates
-    ).sort(
+    const misaligned = candidates.filter(item => item.deviation > 0);
+    const peer = (misaligned.length ? misaligned : candidates).sort(
       (first, second) => first.deviation - second.deviation
     )[0];
-    const semanticKeys = peerGroup.members.map(item => {
-      const measured = baseMeasurement(item);
-      return `${item.tagName.toLowerCase()}:${measured.role}`;
-    });
-    const equivalentPeers = semanticKeys.every(
-      value => value === semanticKeys[0]
-    );
-    measurements.layoutPeerProvenance = peerGroup.provenance;
-    measurements.layoutPeerSelectors = peerGroup.members.map(
-      member => selectorFor(member)
-    );
-    if (equivalentPeers && peerGroup.deviation > 0) {
-      measurements.layoutAxis = peerGroup.row ? "vertical" : "horizontal";
-      measurements.layoutDeviation = round(peerGroup.deviation);
+    const {group, index, deviation} = peer;
+    measurements.layoutPeerProvenance = group.provenance;
+    measurements.layoutPeerGroup = selectorFor(parent);
+    measurements.layoutPeerCount = group.members.length;
+    if (group.equivalentPeers && deviation > 0) {
+      measurements.layoutAxis = group.row ? "vertical" : "horizontal";
+      measurements.layoutDeviation = round(deviation);
     }
-
-    const index = peerGroup.members.indexOf(element);
-    const textPeers = peerGroup.members.map(item => baseMeasurement(item));
-    if (equivalentPeers && textPeers.every(item => item.text)) {
-      const peerSizes = textPeers
-        .filter((_item, peerIndex) => peerIndex !== index)
-        .map(item => item.text.fontSize);
-      if (Math.max(...peerSizes) - Math.min(...peerSizes) <= 1) {
-        const baselines = textPeers.map(item => item.text.baselineProxy);
-        measurements.fontBaselineDeviation = round(
-          clusteredPeerDeviation(baselines, index) || 0
-        );
-      }
-      const peerFonts = textPeers
-        .filter((_item, peerIndex) => peerIndex !== index)
-        .map(item => item.style.fontFamily);
-      const expectedFont = peerFonts[0];
-      if (
-        peerFonts.every(value => value === expectedFont) &&
-        textPeers[index].style.fontFamily !== expectedFont
-      ) {
-        measurements.fontMismatch = true;
-        measurements.expectedFontFamily = expectedFont;
-      }
+    if (!group.equivalentPeers || !group.allText) return;
+    if (group.fontSizeStats.ranges[index] <= 1) {
+      measurements.fontBaselineDeviation = round(
+        group.baselineStats.deviations[index] || 0
+      );
+    }
+    const actualFont = group.measured[index].style.fontFamily;
+    if (
+      group.fontCounts.size === 2
+      && group.fontCounts.get(actualFont) === 1
+    ) {
+      measurements.fontMismatch = true;
+      measurements.expectedFontFamily = [...group.fontCounts.keys()].find(
+        value => value !== actualFont
+      );
     }
   };
 

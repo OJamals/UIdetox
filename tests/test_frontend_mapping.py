@@ -2,6 +2,8 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from uidetox.cli import parse_args
 from uidetox.commands import compare as compare_command
 from uidetox.commands import map as map_command
@@ -32,7 +34,9 @@ from uidetox.runtime_observer import (
 from uidetox.runtime_scenarios import (
     RuntimeCaptureRecord,
     RuntimeCoverage,
+    RuntimeDiagnostic,
     RuntimeReadiness,
+    discover_runtime_viewports,
 )
 
 
@@ -83,6 +87,41 @@ export function Dashboard() {
     (src / "theme.css").write_text(
         ":root { --color-accent: #c2410c; --space-unit: 0.5rem; }",
         encoding="utf-8",
+    )
+
+
+def _runtime_capture(
+    *,
+    capture_id: str,
+    scenario: str,
+    state: str,
+    url: str,
+    viewport: RuntimeViewport,
+    diagnostics: tuple[RuntimeDiagnostic, ...],
+    status: str = "completed",
+) -> RuntimeCaptureRecord:
+    failed = status == "failed"
+    return RuntimeCaptureRecord(
+        capture_id=capture_id,
+        scenario=scenario,
+        state=state,
+        url=url,
+        viewport=viewport,
+        status=status,
+        readiness=RuntimeReadiness(
+            "failed" if failed else "current",
+            "navigation" if failed else "selector",
+            1,
+            "navigation failed" if failed else "",
+        ),
+        coverage=(
+            RuntimeCoverage.empty(100)
+            if failed
+            else RuntimeCoverage(0, 0, 0, 0, 10)
+        ),
+        started_at="2026-07-26T00:00:00Z",
+        completed_at="2026-07-26T00:00:01Z",
+        diagnostics=diagnostics,
     )
 
 
@@ -139,6 +178,53 @@ def _runtime_observation() -> RuntimeObservation:
         generated_at="2026-07-16T12:00:00Z",
         requested_urls=("http://localhost:3000/dashboard?view=all",),
         pages=tuple(pages),
+    )
+
+
+def _diagnostic_observation() -> RuntimeObservation:
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    page = RuntimePage(
+        url="http://localhost:3000/dashboard",
+        title="Dashboard",
+        viewport=viewport,
+        elements=(),
+        capture_id="diagnostic-capture",
+        scenario="diagnostics",
+        state="error",
+    )
+    diagnostics = tuple(
+        RuntimeDiagnostic(
+            kind=kind,
+            code=code,
+            message=message,
+            severity="error",
+            scenario="diagnostics",
+            state="error",
+            url=page.url,
+            viewport=viewport.name,
+            source=source,
+        )
+        for kind, code, message, source in (
+            ("console", "browser-console-error", "console failed", "console"),
+            ("page", "browser-page-error", "page failed", "pageerror"),
+            ("network", "browser-request-failed", "request failed", "requestfailed"),
+            ("network", "browser-http-error", "HTTP 500", "response"),
+            ("action", "browser-action-failed", "click failed", "scenario"),
+        )
+    )
+    capture = _runtime_capture(
+        capture_id=page.capture_id,
+        scenario=page.scenario,
+        state=page.state,
+        url=page.url,
+        viewport=viewport,
+        diagnostics=(*diagnostics, diagnostics[0]),
+    )
+    return RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+        captures=(capture,),
     )
 
 
@@ -305,6 +391,38 @@ def test_runtime_observation_round_trips_serializable_evidence():
     observation = _runtime_observation()
 
     assert RuntimeObservation.from_dict(observation.to_dict()) == observation
+
+
+def test_frontend_map_persists_responsive_boundary_discovery(tmp_path):
+    _write_frontend(tmp_path)
+    stylesheet = tmp_path / "src" / "theme.css"
+    stylesheet.write_text(
+        stylesheet.read_text(encoding="utf-8")
+        + "\n@media (min-width: 720px) { main { display: grid; } }",
+        encoding="utf-8",
+    )
+    discovery = discover_runtime_viewports(
+        tmp_path,
+        base_viewports=(RuntimeViewport("desktop", 1440, 900),),
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:00Z",
+        requested_urls=("http://localhost:3000",),
+        pages=(),
+        viewport_discovery=discovery,
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=observation)
+    responsive = frontend_map.evidence["runtime_viewport_discovery"]
+
+    assert responsive["total_boundaries"] == 1
+    assert responsive["truncated"] is False
+    assert {viewport["width"] for viewport in responsive["viewports"]} == {
+        719,
+        721,
+        1440,
+    }
+    assert responsive["boundaries"][0]["sources"] == ("src/theme.css",)
 
 
 def test_frontend_map_round_trips_through_persisted_artifact(tmp_path):
@@ -1039,10 +1157,11 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(tmp_path)
     captured = {}
 
-    def fake_observe(urls, *, screenshots_dir, timeout_ms):
+    def fake_observe(urls, *, screenshots_dir, timeout_ms, source_root):
         captured["urls"] = urls
         captured["screenshots_dir"] = screenshots_dir
         captured["timeout_ms"] = timeout_ms
+        captured["source_root"] = source_root
         return _runtime_observation()
 
     monkeypatch.setattr(map_command, "observe_frontend", fake_observe)
@@ -1066,9 +1185,133 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     assert captured["urls"] == ["http://localhost:3000/dashboard?view=all"]
     assert captured["screenshots_dir"] == tmp_path / ".uidetox" / "runtime-screenshots"
     assert captured["timeout_ms"] == 2500
+    assert captured["source_root"] == tmp_path
     output = capsys.readouterr().out
     assert "Runtime     : 2 page/view(s) (desktop, mobile)" in output
     assert "Findings    : 2 rendered layout issue(s)" in output
+
+
+def test_runtime_diagnostics_project_to_typed_findings_and_queue_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    observation = _diagnostic_observation()
+    queued_findings = []
+    monkeypatch.setattr(
+        map_command,
+        "observe_frontend",
+        lambda _urls, **_options: observation,
+    )
+    monkeypatch.setattr(
+        map_command,
+        "add_issues",
+        lambda findings: queued_findings.extend(findings) or len(findings),
+    )
+    artifact = tmp_path / ".uidetox" / "frontend-map.json"
+
+    map_command.run(
+        Namespace(
+            target="src",
+            runtime=True,
+            urls=["http://localhost:3000/dashboard"],
+            screenshots=False,
+            timeout=2500,
+            output=str(artifact),
+            json=False,
+        )
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    expected = {
+        "browser-console-error",
+        "browser-page-error",
+        "browser-request-failed",
+        "browser-http-error",
+        "browser-action-failed",
+    }
+    runtime_findings = payload["evidence"]["runtime_findings"]
+    assert {finding["code"] for finding in runtime_findings} == expected
+    assert len(runtime_findings) == len(expected)
+    assert all(finding["provenance"] == "runtime" for finding in runtime_findings)
+    assert all(
+        finding["runtime_anchor"]["scenario"] == "diagnostics"
+        and finding["runtime_anchor"]["state"] == "error"
+        and finding["runtime_anchor"]["source"]
+        and finding["runtime_anchor"]["capture_id"] == "diagnostic-capture"
+        for finding in runtime_findings
+    )
+    queued_codes = [
+        finding.code for finding in queued_findings if finding.code in expected
+    ]
+    assert sorted(queued_codes) == sorted(expected)
+
+
+def test_map_command_persists_failed_runtime_artifact_before_signaling(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_frontend(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    diagnostic = RuntimeDiagnostic(
+        kind="action",
+        code="browser-action-failed",
+        message="selector unavailable",
+        severity="error",
+        scenario="failed",
+        state="initial",
+        url="http://localhost:3000/fail",
+        viewport=viewport.name,
+        source="scenario",
+    )
+    capture = _runtime_capture(
+        capture_id="failed-capture",
+        scenario="failed",
+        state="initial",
+        url=diagnostic.url,
+        viewport=viewport,
+        status="failed",
+        diagnostics=(diagnostic,),
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-26T00:00:01Z",
+        requested_urls=(diagnostic.url,),
+        pages=(),
+        errors=("navigation failed",),
+        captures=(capture,),
+    )
+    monkeypatch.setattr(
+        map_command,
+        "observe_frontend",
+        lambda _urls, **_options: observation,
+    )
+    artifact = tmp_path / ".uidetox" / "failed-map.json"
+
+    with pytest.raises(RuntimeError, match="Runtime observation failed"):
+        map_command.run(
+            Namespace(
+                target="src",
+                runtime=True,
+                urls=[diagnostic.url],
+                screenshots=False,
+                timeout=2500,
+                output=str(artifact),
+                json=False,
+            )
+        )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["evidence"]["runtime_status"] == "failed"
+    assert payload["evidence"]["runtime_errors"] == ["navigation failed"]
+    assert payload["evidence"]["runtime_capture_matrix"][0]["status"] == "failed"
+    assert payload["evidence"]["runtime_diagnostics"][0]["code"] == (
+        "browser-action-failed"
+    )
+    assert payload["evidence"]["runtime_findings"][0]["code"] == (
+        "browser-action-failed"
+    )
 
 
 def test_compare_and_prototype_commands_consume_redesign_artifact(

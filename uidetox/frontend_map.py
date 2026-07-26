@@ -22,8 +22,10 @@ from urllib.parse import urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
 from uidetox.fileset import ProjectFileSet
+from uidetox.findings import Finding
 from uidetox.project_map import build_project_map, project_source_manifest
 from uidetox.runtime_observer import RuntimeObservation
+from uidetox.runtime_scenarios import RuntimeCaptureRecord, RuntimeDiagnostic
 from uidetox.semantic_adapters import (
     ApplicationSemantics,
     ModuleSemantics,
@@ -41,6 +43,14 @@ MAX_SOURCE_BYTES = 1_000_000
 STYLE_EXTENSIONS = {".css", ".less", ".sass", ".scss"}
 
 _CSS_TOKEN_PATTERN = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
+
+_DIAGNOSTIC_CATEGORIES = {
+    "action": "interaction",
+    "console": "runtime",
+    "coverage": "coverage",
+    "network": "integration",
+    "page": "runtime",
+}
 
 
 @dataclass(frozen=True)
@@ -691,7 +701,8 @@ def map_frontend(
     runtime_screenshots = [
         page.screenshot for page in runtime_pages if page.screenshot is not None
     ]
-    runtime_findings = [
+    runtime_captures = tuple(runtime.captures) if runtime is not None else ()
+    element_runtime_findings = [
         {
             "url": page.url,
             "viewport": page.viewport.name,
@@ -704,14 +715,27 @@ def map_frontend(
                 url=page.url,
                 viewport=page.viewport.name,
                 selector=element.selector,
+                scenario=page.scenario,
             ).to_dict(),
         }
         for page in runtime_pages
         for element in page.elements
         for finding in element.findings
     ]
+    diagnostic_runtime_findings = [
+        {
+            **dict(finding.runtime_anchor),
+            "selector": "",
+            "element": finding.evidence.get("kind", "browser"),
+            **finding.to_dict(),
+        }
+        for finding in _runtime_diagnostic_findings(runtime_captures)
+    ]
+    runtime_findings = [
+        *element_runtime_findings,
+        *diagnostic_runtime_findings,
+    ]
     runtime_finding_counts = Counter(finding["code"] for finding in runtime_findings)
-    runtime_captures = tuple(runtime.captures) if runtime is not None else ()
     runtime_diagnostics = [
         asdict(diagnostic)
         for capture in runtime_captures
@@ -799,6 +823,12 @@ def map_frontend(
             ],
             "runtime_diagnostics": runtime_diagnostics,
             "runtime_coverage": runtime_coverage,
+            "runtime_viewport_discovery": (
+                asdict(runtime.viewport_discovery)
+                if runtime is not None
+                and runtime.viewport_discovery is not None
+                else None
+            ),
         },
         project_map=project_map.to_dict(),
     )
@@ -997,6 +1027,66 @@ def _adapter_capability_summary(
             "confidence": min(item.capability.confidence for item in items),
         }
     return summary
+
+
+def _runtime_diagnostic_finding(
+    diagnostic: RuntimeDiagnostic,
+    capture: RuntimeCaptureRecord,
+) -> Finding:
+    anchor = {
+        "url": diagnostic.url,
+        "viewport": diagnostic.viewport,
+        "scenario": diagnostic.scenario,
+        "state": diagnostic.state,
+        "source": diagnostic.source,
+        "capture_id": capture.capture_id,
+    }
+    return Finding.create(
+        detector_id=diagnostic.code,
+        category=_DIAGNOSTIC_CATEGORIES.get(diagnostic.kind, "runtime"),
+        severity=diagnostic.severity,
+        confidence=1.0,
+        message=diagnostic.message,
+        provenance="runtime",
+        evidence={
+            "kind": diagnostic.kind,
+            "source": diagnostic.source,
+        },
+        runtime_anchor=anchor,
+        suppression_key=(
+            f"{diagnostic.code}:{diagnostic.scenario}:{diagnostic.state}:"
+            f"{diagnostic.url}:{diagnostic.viewport}:{diagnostic.source}"
+        ),
+        verifier={
+            "kind": "runtime",
+            "detector_id": diagnostic.code,
+            **anchor,
+        },
+    )
+
+
+def _runtime_diagnostic_findings(
+    captures: Iterable[RuntimeCaptureRecord],
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
+    seen: set[tuple[str, ...]] = set()
+    for capture in captures:
+        for diagnostic in capture.diagnostics:
+            key = (
+                diagnostic.code,
+                diagnostic.kind,
+                diagnostic.message,
+                diagnostic.scenario,
+                diagnostic.state,
+                diagnostic.url,
+                diagnostic.viewport,
+                diagnostic.source,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(_runtime_diagnostic_finding(diagnostic, capture))
+    return tuple(findings)
 
 
 def _merge_runtime_evidence(

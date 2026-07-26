@@ -41,17 +41,11 @@ def run(args: argparse.Namespace) -> None:
         observation_options = {
             "screenshots_dir": screenshot_dir,
             "timeout_ms": getattr(args, "timeout", 15_000),
+            "source_root": root,
         }
         if scenarios is not None:
             observation_options["scenarios"] = scenarios
         runtime_observation = observe_frontend(urls, **observation_options)
-        if not runtime_observation.pages:
-            detail = (
-                runtime_observation.errors[0]
-                if runtime_observation.errors
-                else "no pages observed"
-            )
-            raise RuntimeError(f"Runtime observation failed: {detail}")
 
     frontend_map = map_frontend(root, target, runtime_observation)
     output_arg = getattr(args, "output", None)
@@ -66,6 +60,13 @@ def run(args: argparse.Namespace) -> None:
     ]
     contract_graph = ProjectMap.from_dict(frontend_map.project_map)
     queued = add_issues([*runtime_findings, *contract_graph.findings])
+    if runtime_observation is not None and not runtime_observation.pages:
+        detail = (
+            runtime_observation.errors[0]
+            if runtime_observation.errors
+            else "no pages observed"
+        )
+        raise RuntimeError(f"Runtime observation failed: {detail}")
 
     if getattr(args, "json", False):
         print(json.dumps(frontend_map.to_dict(), indent=2, sort_keys=True))
