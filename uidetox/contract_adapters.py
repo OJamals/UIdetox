@@ -18,7 +18,9 @@ from uidetox.contract_graph import (
     ContractObservation,
     SourceAnchor,
     _json_value,
+    _schema_observation_state,
     _unknown_anchor,
+    contract_schema_observations,
     normalize_route_path,
 )
 
@@ -29,6 +31,8 @@ HTTP_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 class _PythonProvenance:
     model_classes: frozenset[str]
     entity_classes: frozenset[str]
+    dependency_injectors: frozenset[str]
+    mapped_annotations: frozenset[str]
     security_injectors: frozenset[str]
     security_bindings: frozenset[str]
 
@@ -205,6 +209,10 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
             request_schema = _openapi_content_schema(
                 operation.get("requestBody"), document
             )
+            request_schemas = contract_schema_observations(
+                request_schema,
+                fallback="request",
+            )
             responses = operation.get("responses", {})
             response_map = (
                 {str(key): value for key, value in responses.items()}
@@ -221,17 +229,19 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                 for status in response_map
                 if str(status).startswith(("4", "5"))
             )
-            response_schema = next(
-                (
-                    schema
-                    for status in success_statuses
-                    if (
-                        schema := _openapi_content_schema(
-                            response_map.get(status), document
-                        )
+            response_schemas = tuple(
+                schema_observation
+                for status in success_statuses
+                if (
+                    schema := _openapi_content_schema(
+                        response_map.get(status), document
                     )
-                ),
-                None,
+                )
+                for schema_observation in contract_schema_observations(
+                    schema,
+                    fallback=f"response:{status}",
+                    status=status,
+                )
             )
             error_schemas = tuple(
                 (status, schema)
@@ -279,8 +289,8 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                     parameters=parameters,
                     dynamic=unresolved,
                     classification=_classify_path(normalized),
-                    request_schema=request_schema,
-                    response_schema=response_schema,
+                    request_schemas=request_schemas,
+                    response_schemas=response_schemas,
                     error_schemas=error_schemas,
                     status_codes=tuple(
                         sorted((*success_statuses, *error_statuses))
@@ -300,11 +310,14 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                     ),
                     evidence={
                         "request": (
-                            "present" if request_schema is not None else "absent"
+                            "present" if request_schemas else "absent"
                         ),
                         "response": (
-                            "present"
-                            if response_schema is not None
+                            _schema_observation_state(
+                                response_schemas,
+                                statuses_distinguish=True,
+                            )
+                            if response_schemas
                             else "absent"
                             if success_statuses
                             else "unknown"
@@ -1109,8 +1122,11 @@ def _python_provenance(
     model_bases: set[str] = set()
     declarative_bases: set[str] = set()
     declarative_factories: set[str] = set()
+    dependency_injectors: set[str] = set()
+    mapped_annotations: set[str] = set()
     security_injectors: set[str] = set()
     security_factories: set[str] = set()
+    security_bindings: set[str] = set()
     for statement in tree.body:
         if not isinstance(statement, ast.ImportFrom):
             continue
@@ -1123,6 +1139,10 @@ def _python_provenance(
                 declarative_bases.add(binding)
             elif module == "sqlalchemy.orm" and imported.name == "declarative_base":
                 declarative_factories.add(binding)
+            elif module == "sqlalchemy.orm" and imported.name == "Mapped":
+                mapped_annotations.add(binding)
+            elif module == "fastapi" and imported.name == "Depends":
+                dependency_injectors.add(binding)
             elif module == "fastapi" and imported.name == "Security":
                 security_injectors.add(binding)
             elif module.startswith("fastapi.security"):
@@ -1144,7 +1164,7 @@ def _python_provenance(
         if callee in declarative_factories:
             declarative_bases.update(names)
         if callee in security_factories:
-            security_factories.update(names)
+            security_bindings.update(names)
 
     model_classes: set[str] = set()
     entity_classes: set[str] = set()
@@ -1169,8 +1189,10 @@ def _python_provenance(
     return _PythonProvenance(
         model_classes=frozenset(model_classes),
         entity_classes=frozenset(entity_classes),
+        dependency_injectors=frozenset(dependency_injectors),
+        mapped_annotations=frozenset(mapped_annotations),
         security_injectors=frozenset(security_injectors),
-        security_bindings=frozenset(security_factories),
+        security_bindings=frozenset(security_bindings),
     )
 
 
@@ -1209,12 +1231,12 @@ def _enrich_python_operations(
     }
     provenance = _python_provenance(tree, classes)
     model_schemas = {
-        name: _python_class_schema(node, classes)
+        name: _python_class_schema(node, classes, provenance)
         for name, node in classes.items()
         if _python_class_kind(node, provenance) == "model"
     }
     entities = {
-        name: _python_class_fields(node, classes)
+        name: _python_class_fields(node, classes, provenance)
         for name, node in classes.items()
         if _python_class_kind(node, provenance) == "entity"
     }
@@ -1247,7 +1269,7 @@ def _enrich_python_operation(
         return operation
     security_names: list[str] = []
     generic_dependency = False
-    request_schema = operation.request_schema
+    request_schemas = operation.request_schemas
     positional = [*handler.args.posonlyargs, *handler.args.args]
     defaults = [None] * (len(positional) - len(handler.args.defaults)) + list(
         handler.args.defaults
@@ -1257,7 +1279,11 @@ def _enrich_python_operation(
             injector = _dotted_name(default.func)
             dependency = _dotted_name(default.args[0]) if default.args else ""
             if (
-                injector in provenance.security_injectors
+                injector
+                in (
+                    provenance.security_injectors
+                    | provenance.dependency_injectors
+                )
                 and dependency in provenance.security_bindings
             ):
                 security_names.append(dependency)
@@ -1266,12 +1292,12 @@ def _enrich_python_operation(
                 generic_dependency = True
                 continue
         annotation_name = _annotation_name(argument.annotation)
-        if annotation_name in model_schemas and request_schema is None:
-            request_schema = {
-                "name": annotation_name,
-                **model_schemas[annotation_name],
-            }
-    response_schema = operation.response_schema
+        if annotation_name in model_schemas and not request_schemas:
+            request_schemas = contract_schema_observations(
+                model_schemas[annotation_name],
+                fallback=annotation_name,
+            )
+    response_schemas = operation.response_schemas
     status_codes = list(operation.status_codes)
     for decorator in handler.decorator_list:
         if not isinstance(decorator, ast.Call):
@@ -1280,20 +1306,23 @@ def _enrich_python_operation(
             if keyword.arg == "response_model":
                 response_name = _annotation_name(keyword.value)
                 if response_name in model_schemas:
-                    response_schema = {
-                        "name": response_name,
-                        **model_schemas[response_name],
-                    }
+                    response_schemas = contract_schema_observations(
+                        model_schemas[response_name],
+                        fallback=response_name,
+                    )
             elif keyword.arg == "status_code":
                 status = _ast_literal(keyword.value)
                 if status is not None:
                     status_codes.append(str(status))
             elif keyword.arg == "dependencies":
                 generic_dependency = True
-    if response_schema is None:
+    if not response_schemas:
         return_name = _annotation_name(handler.returns)
         if return_name in model_schemas:
-            response_schema = {"name": return_name, **model_schemas[return_name]}
+            response_schemas = contract_schema_observations(
+                model_schemas[return_name],
+                fallback=return_name,
+            )
 
     anchor = operation.sources[0] if operation.sources else _unknown_anchor()
     lineage: list[dict[str, Any]] = [
@@ -1353,13 +1382,16 @@ def _enrich_python_operation(
     evidence = {
         **operation.evidence,
         "request": (
-            "present"
-            if request_schema is not None
+            _schema_observation_state(request_schemas)
+            if request_schemas
             else operation.evidence.get("request", "unknown")
         ),
         "response": (
-            "present"
-            if response_schema is not None
+            _schema_observation_state(
+                response_schemas,
+                statuses_distinguish=True,
+            )
+            if response_schemas
             else operation.evidence.get("response", "unknown")
         ),
         "status": (
@@ -1377,8 +1409,8 @@ def _enrich_python_operation(
     )
     return replace(
         operation,
-        request_schema=request_schema,
-        response_schema=response_schema,
+        request_schemas=request_schemas,
+        response_schemas=response_schemas,
         status_codes=tuple(sorted(set(status_codes))),
         auth=auth,
         authorization="absent" if auth == "absent" else operation.authorization,
@@ -1435,8 +1467,9 @@ def _python_class_kind(
 def _python_class_schema(
     node: ast.ClassDef,
     classes: Mapping[str, ast.ClassDef],
+    provenance: _PythonProvenance,
 ) -> dict[str, Any]:
-    properties = _python_class_fields(node, classes)
+    properties = _python_class_fields(node, classes, provenance)
     required = [
         statement.target.id
         for statement in node.body
@@ -1455,6 +1488,7 @@ def _python_class_schema(
 def _python_class_fields(
     node: ast.ClassDef,
     classes: Mapping[str, ast.ClassDef],
+    provenance: _PythonProvenance,
 ) -> dict[str, dict[str, Any]]:
     fields: dict[str, dict[str, Any]] = {}
     for statement in node.body:
@@ -1463,7 +1497,7 @@ def _python_class_fields(
         ):
             continue
         fields[statement.target.id] = _python_annotation_schema(
-            statement.annotation, classes
+            statement.annotation, classes, provenance
         )
     return fields
 
@@ -1471,7 +1505,31 @@ def _python_class_fields(
 def _python_annotation_schema(
     annotation: ast.expr | None,
     classes: Mapping[str, ast.ClassDef],
+    provenance: _PythonProvenance,
 ) -> dict[str, Any]:
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        alternatives = (annotation.left, annotation.right)
+        concrete = next(
+            (
+                item
+                for item in alternatives
+                if _annotation_name(item) not in {"None", "NoneType"}
+            ),
+            None,
+        )
+        result = _python_annotation_schema(concrete, classes, provenance)
+        result["nullable"] = True
+        return result
+    if isinstance(annotation, ast.Subscript):
+        annotation_base = _dotted_name(annotation.value)
+        if annotation_base in provenance.mapped_annotations:
+            return _python_annotation_schema(annotation.slice, classes, provenance)
+        if _annotation_name(annotation.value) == "Optional":
+            result = _python_annotation_schema(
+                annotation.slice, classes, provenance
+            )
+            result["nullable"] = True
+            return result
     name = _annotation_name(annotation)
     lowered = name.lower()
     scalar = {
@@ -1488,8 +1546,12 @@ def _python_annotation_schema(
     ):
         return {
             "type": "array",
-            "items": _python_annotation_schema(annotation.slice, classes),
+            "items": _python_annotation_schema(
+                annotation.slice, classes, provenance
+            ),
         }
+    if isinstance(annotation, ast.Subscript) and name in classes:
+        return {"type": "unknown"}
     if name in classes:
         return {"name": name, "type": "object"}
     result = {"type": scalar.get(lowered, "unknown")}

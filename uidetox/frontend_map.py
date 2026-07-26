@@ -34,7 +34,7 @@ from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
 SCHEMA_VERSION = 1
-EXTRACTOR_VERSION = 2
+EXTRACTOR_VERSION = 3
 FRONTEND_MAP_FILE = "frontend-map.json"
 MAX_SOURCE_BYTES = 1_000_000
 
@@ -304,10 +304,23 @@ def map_frontend(
             )
             signal_counts[region.name] += 1
 
-        actions = Counter(item.name for item in facts.actions)
-        for name, count in sorted(actions.items()):
-            action_id = _node_id("action", relative_path, name)
-            first_line = next(item.line for item in facts.actions if item.name == name)
+        ui_owners = set(record.component_ids)
+        actions = Counter(
+            (item.owner, item.name, item.target) for item in facts.actions
+        )
+        for (action_owner, name, action_target), count in sorted(actions.items()):
+            action_id = _node_id(
+                "action",
+                relative_path,
+                f"{action_owner}:{name}:{action_target}",
+            )
+            first_line = next(
+                item.line
+                for item in facts.actions
+                if item.owner == action_owner
+                and item.name == name
+                and item.target == action_target
+            )
             nodes.append(
                 FrontendNode(
                     id=action_id,
@@ -317,15 +330,23 @@ def map_frontend(
                     line=first_line,
                     metadata={
                         "occurrences": count,
+                        "owner": action_owner,
+                        "target": action_target,
                         "extractor": facts.extractor,
                         "confidence": facts.confidence,
                     },
                 )
             )
-            edges.append(FrontendEdge(owner_id, action_id, "exposes"))
+            edges.append(
+                FrontendEdge(
+                    record.component_ids.get(action_owner, owner_id),
+                    action_id,
+                    "exposes",
+                )
+            )
 
         for state in facts.states:
-            state_id = _node_id("state", relative_path, state.name)
+            state_id = _node_id("state", relative_path, state.owner, state.name)
             nodes.append(
                 FrontendNode(
                     id=state_id,
@@ -334,14 +355,39 @@ def map_frontend(
                     file=relative_path,
                     line=state.line,
                     metadata={
+                        "owner": state.owner,
                         "extractor": facts.extractor,
                         "confidence": facts.confidence,
                     },
                 )
             )
-            edges.append(FrontendEdge(owner_id, state_id, "owns"))
+            edges.append(
+                FrontendEdge(
+                    record.component_ids.get(state.owner, owner_id),
+                    state_id,
+                    "owns",
+                )
+            )
 
         call_count = len(facts.network_calls)
+        action_ui_owners: dict[str, set[str]] = defaultdict(set)
+        for action in facts.actions:
+            if action.target and action.owner in ui_owners:
+                action_ui_owners[action.target].add(action.owner)
+
+        def ui_owner_for_call(call_owner: str) -> str:
+            if call_owner in ui_owners:
+                return call_owner
+            owners = action_ui_owners.get(call_owner, set())
+            return next(iter(owners)) if len(owners) == 1 else ""
+
+        call_ui_owners = {
+            index: ui_owner_for_call(call.owner)
+            for index, call in enumerate(facts.network_calls)
+        }
+        call_counts_by_ui_owner = Counter(
+            owner for owner in call_ui_owners.values() if owner
+        )
         mutation_count = sum(
             call.method not in {None, "GET", "HEAD", "OPTIONS"}
             for call in facts.network_calls
@@ -359,12 +405,24 @@ def map_frontend(
             name = call.url or call.url_expression or call.target
             identity = f"{call.target}:{call.method or '?'}:{name}:{call.line}:{index}"
             data_id = _node_id("data", relative_path, identity)
+            call_ui_owner = call_ui_owners[index]
+            attributable_ui = bool(
+                call_ui_owner and call_counts_by_ui_owner[call_ui_owner] == 1
+            )
             state_names = {
                 state
                 for state in (
-                    _contract_ui_state(item.name) for item in facts.states
+                    _contract_ui_state(item.name)
+                    for item in facts.states
+                    if item.owner == call_ui_owner
                 )
                 if state is not None
+            }
+            action_names = {
+                item.name
+                for item in facts.actions
+                if item.owner == call_ui_owner
+                and (call.owner == call_ui_owner or item.target == call.owner)
             }
             request_contracts = {
                 reference: module.contracts[reference]
@@ -397,11 +455,18 @@ def map_frontend(
                 "request_contracts": request_contracts,
                 "response_contracts": response_contracts,
                 "ui_actions": (
-                    sorted({item.name for item in facts.actions})
-                    if call_count == 1
+                    sorted(action_names)
+                    if attributable_ui
                     else []
                 ),
-                "ui_states": sorted(state_names) if call_count == 1 else [],
+                "ui_states": sorted(state_names) if attributable_ui else [],
+                "ui_lifecycle_evidence": (
+                    "present"
+                    if attributable_ui and state_names
+                    else "absent"
+                    if attributable_ui or not call_ui_owner
+                    else "unknown"
+                ),
                 "mutation": call.method not in {None, "GET", "HEAD", "OPTIONS"},
                 "cache_invalidation": (
                     "present"
@@ -430,12 +495,9 @@ def map_frontend(
                     if not auth_evidence and call_count == 1
                     else "unknown"
                 ),
-                "ui_required": bool(
-                    facts.declared_ui_modules
-                    or facts.regions
-                    or facts.actions
-                    or facts.states
-                ),
+                "ui_required": bool(call_ui_owner),
+                "owner": call.owner,
+                "ui_owner": call_ui_owner,
                 "extractor": facts.extractor,
                 "confidence": facts.confidence,
             }
@@ -451,7 +513,13 @@ def map_frontend(
                     metadata=metadata,
                 )
             )
-            edges.append(FrontendEdge(owner_id, data_id, "reads"))
+            edges.append(
+                FrontendEdge(
+                    record.component_ids.get(call_ui_owner, owner_id),
+                    data_id,
+                    "reads",
+                )
+            )
 
         for route in facts.routes:
             route_id = _node_id("route", relative_path, route.name)

@@ -1423,3 +1423,322 @@ def dashboard():
         ("load_user", "User"),
         ("load_team", "Team"),
     }
+
+
+def _typed_frontend_operation(
+    *,
+    request_contracts: dict[str, dict] | None = None,
+    response_contracts: dict[str, dict] | None = None,
+    method: str = "POST",
+) -> dict[str, object]:
+    return {
+        "id": "data:typed",
+        "kind": "data",
+        "name": "/items",
+        "file": "src/client.ts",
+        "line": 7,
+        "metadata": {
+            "transport": "http",
+            "method": method,
+            "request_contracts": request_contracts or {},
+            "response_contracts": response_contracts or {},
+            "auth": "absent",
+            "authorization": "absent",
+            "tenant": "absent",
+            "error_evidence": "absent",
+            "ui_required": False,
+            "extractor": "test",
+            "confidence": 1.0,
+        },
+    }
+
+
+def _write_items_openapi(
+    root: Path,
+    *,
+    request_schema: dict | None = None,
+    responses: dict[str, dict] | None = None,
+    method: str = "post",
+) -> None:
+    operation: dict[str, object] = {
+        "responses": {
+            status: {
+                "content": {"application/json": {"schema": schema}}
+            }
+            for status, schema in (responses or {"200": {"type": "string"}}).items()
+        }
+    }
+    if request_schema is not None:
+        operation["requestBody"] = {
+            "content": {"application/json": {"schema": request_schema}}
+        }
+    (root / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {"/items": {method: operation}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_multiple_distinct_dto_references_are_not_first_wins(tmp_path) -> None:
+    _write_items_openapi(tmp_path, request_schema={"type": "string"})
+    graph = build_project_map(
+        tmp_path,
+        [
+            _typed_frontend_operation(
+                request_contracts={
+                    "A": {"type": "string"},
+                    "B": {"type": "integer"},
+                }
+            )
+        ],
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+    request_nodes = {
+        edge.target
+        for edge in graph.edges
+        if edge.source == operation.id and edge.kind == "accepts"
+    }
+
+    assert operation.attributes["evidence"]["request"] == "contradictory"
+    assert {
+        node.name for node in graph.nodes if node.id in request_nodes
+    } == {"A", "B"}
+    assert any(
+        finding.detector_id == "contract-evidence-contradictory"
+        for finding in graph.findings
+    )
+
+
+def test_semantically_duplicate_dto_references_collapse_once(tmp_path) -> None:
+    _write_items_openapi(tmp_path, request_schema={"type": "string"})
+    graph = build_project_map(
+        tmp_path,
+        [
+            _typed_frontend_operation(
+                request_contracts={
+                    "A": {"type": "string"},
+                    "B": {"type": "string"},
+                }
+            )
+        ],
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+    request_nodes = [
+        node
+        for edge in graph.edges
+        if edge.source == operation.id and edge.kind == "accepts"
+        for node in graph.nodes
+        if node.id == edge.target
+    ]
+
+    assert operation.attributes["evidence"]["request"] == "present"
+    assert len(request_nodes) == 1
+    assert request_nodes[0].attributes["type_identities"] == ["A", "B"]
+
+
+@pytest.mark.parametrize(
+    ("responses", "expected_types"),
+    [
+        (
+            {"200": {"type": "string"}, "201": {"type": "integer"}},
+            {"200": "string", "201": "integer"},
+        ),
+        (
+            {"200": {"type": "string"}, "201": {"type": "string"}},
+            {"200": "string", "201": "string"},
+        ),
+    ],
+)
+def test_openapi_preserves_every_success_response_variant(
+    tmp_path,
+    responses,
+    expected_types,
+) -> None:
+    _write_items_openapi(tmp_path, responses=responses)
+    graph = build_project_map(tmp_path)
+    route = next(node for node in graph.nodes if node.kind == "route")
+    response_nodes = [
+        node
+        for edge in graph.edges
+        if edge.source == route.id and edge.kind == "returns"
+        for node in graph.nodes
+        if node.id == edge.target
+    ]
+    roundtrip = ProjectMap.from_dict(graph.to_dict())
+
+    assert route.attributes["evidence"]["response"] == "present"
+    assert {
+        str(node.attributes["status"]): node.attributes["type"]
+        for node in response_nodes
+    } == expected_types
+    assert {
+        str(node.attributes["status"])
+        for node in roundtrip.nodes
+        if node.kind == "response_schema"
+    } == {"200", "201"}
+
+
+def test_ambiguous_statusless_frontend_response_does_not_hide_variants(
+    tmp_path,
+) -> None:
+    _write_items_openapi(
+        tmp_path,
+        responses={"200": {"type": "string"}, "201": {"type": "integer"}},
+        method="get",
+    )
+    graph = build_project_map(
+        tmp_path,
+        [
+            _typed_frontend_operation(
+                response_contracts={"Item": {"type": "string"}},
+                method="GET",
+            )
+        ],
+    )
+
+    assert any(
+        finding.detector_id == "contract-response-evidence-unknown"
+        for finding in graph.findings
+    )
+
+
+def test_same_shape_success_variants_do_not_conflict_with_frontend_shape(
+    tmp_path,
+) -> None:
+    _write_items_openapi(
+        tmp_path,
+        responses={"200": {"type": "string"}, "201": {"type": "string"}},
+        method="get",
+    )
+    graph = build_project_map(
+        tmp_path,
+        [
+            _typed_frontend_operation(
+                response_contracts={"Item": {"type": "string"}},
+                method="GET",
+            )
+        ],
+    )
+
+    assert not any(
+        finding.detector_id
+        in {
+            "contract-response-evidence-unknown",
+            "contract-response-field-type-mismatch",
+            "contract-evidence-contradictory",
+        }
+        for finding in graph.findings
+    )
+
+
+def test_sqlalchemy_mapped_annotations_preserve_qualified_field_types(
+    tmp_path,
+) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import FastAPI
+from sqlalchemy.orm import DeclarativeBase as SABase
+from sqlalchemy.orm import Mapped as ColumnType
+from sqlalchemy.orm import mapped_column
+
+app = FastAPI()
+
+class Base(SABase):
+    pass
+
+class Item(Base):
+    __tablename__ = "items"
+    id: ColumnType[int] = mapped_column(primary_key=True)
+    tags: ColumnType[list[str]] = mapped_column()
+    note: ColumnType[str | None] = mapped_column()
+
+@app.get("/items")
+def items():
+    return Item()
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = build_project_map(tmp_path)
+    fields = {
+        node.name: dict(node.attributes)
+        for node in graph.nodes
+        if node.kind == "database_field"
+    }
+
+    assert fields["id"]["type"] == "integer"
+    assert fields["tags"] == {"type": "array", "items": {"type": "string"}}
+    assert fields["note"] == {"type": "string", "nullable": True}
+
+
+def test_unqualified_mapped_annotation_remains_unknown(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import FastAPI
+
+app = FastAPI()
+
+class Mapped:
+    pass
+
+class Item:
+    __tablename__ = "items"
+    id: Mapped[int]
+
+@app.get("/items")
+def items():
+    return Item()
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = build_project_map(tmp_path)
+    field = next(node for node in graph.nodes if node.kind == "database_field")
+
+    assert field.name == "id"
+    assert field.attributes["type"] == "unknown"
+
+
+def test_qualified_depends_security_binding_marks_auth_present(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import Depends as Inject, FastAPI
+from fastapi.security import OAuth2PasswordBearer as OAuth
+
+app = FastAPI()
+oauth2_scheme = OAuth(tokenUrl="/token")
+
+@app.get("/items")
+def items(token=Inject(oauth2_scheme)):
+    return []
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = build_project_map(tmp_path)
+    auth = next(node for node in graph.nodes if node.kind == "auth_requirement")
+
+    assert auth.capability_status == "present"
+    assert auth.name == "oauth2_scheme"
+
+
+def test_name_only_depends_security_binding_remains_unknown(tmp_path) -> None:
+    (tmp_path / "app.py").write_text(
+        """
+from fastapi import Depends, FastAPI
+
+app = FastAPI()
+oauth2_scheme = lambda: "token"
+
+@app.get("/items")
+def items(token=Depends(oauth2_scheme)):
+    return []
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = build_project_map(tmp_path)
+    auth = next(node for node in graph.nodes if node.kind == "auth_requirement")
+
+    assert auth.capability_status == "unknown"
+    assert auth.name == "authentication"

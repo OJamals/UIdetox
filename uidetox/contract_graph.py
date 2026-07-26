@@ -123,6 +123,23 @@ class ContractEdge:
 
 
 @dataclass(frozen=True)
+class ContractSchema:
+    """One source-identified schema variant, optionally anchored to a status."""
+
+    identities: tuple[str, ...]
+    shape: dict[str, Any]
+    status: str | None = None
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ContractSchema":
+        return cls(
+            identities=tuple(str(item) for item in value.get("identities", [])),
+            shape=dict(value.get("shape", {})),
+            status=_string_or_none(value.get("status")),
+        )
+
+
+@dataclass(frozen=True)
 class ContractObservation:
     """Internal adapter fact converted into contract graph nodes."""
 
@@ -135,8 +152,8 @@ class ContractObservation:
     dynamic: bool = False
     classification: str = "application"
     sources: tuple[SourceAnchor, ...] = ()
-    request_schema: dict[str, Any] | None = None
-    response_schema: dict[str, Any] | None = None
+    request_schemas: tuple[ContractSchema, ...] = ()
+    response_schemas: tuple[ContractSchema, ...] = ()
     error_schemas: tuple[tuple[str, dict[str, Any]], ...] = ()
     status_codes: tuple[str, ...] = ()
     auth: str = "unknown"
@@ -164,8 +181,8 @@ class ContractObservation:
             sources=tuple(
                 SourceAnchor.from_dict(item) for item in value.get("sources", [])
             ),
-            request_schema=_mapping_or_none(value.get("request_schema")),
-            response_schema=_mapping_or_none(value.get("response_schema")),
+            request_schemas=_schemas_from_observation_dict(value, "request"),
+            response_schemas=_schemas_from_observation_dict(value, "response"),
             error_schemas=tuple(
                 (str(status), dict(schema))
                 for status, schema in value.get("error_schemas", [])
@@ -496,7 +513,16 @@ def _contract_group_contradiction(
                     (
                         _error_schemas_from_graph(operation.id, outgoing)
                         if axis == "error"
-                        else _schema_from_graph(operation.id, relation, outgoing)
+                        else sorted(
+                            {
+                                json.dumps(shape, sort_keys=True, default=str)
+                                for _status, shape in _schema_variants_from_graph(
+                                    operation.id,
+                                    relation,
+                                    outgoing,
+                                )
+                            }
+                        )
                     ),
                     sort_keys=True,
                     default=str,
@@ -589,8 +615,11 @@ def _operation_contract_node(operation: ContractObservation) -> ContractNode:
     anchor = operation.sources[0] if operation.sources else _unknown_anchor()
     kind = "client_operation" if operation.side == "frontend" else "route"
     evidence = {
-        "request": "present" if operation.request_schema else "unknown",
-        "response": "present" if operation.response_schema else "unknown",
+        "request": _schema_observation_state(operation.request_schemas),
+        "response": _schema_observation_state(
+            operation.response_schemas,
+            statuses_distinguish=True,
+        ),
         "error": "present" if operation.error_schemas else "unknown",
         "status": "present" if operation.status_codes else "unknown",
         "ui_lifecycle": "present" if operation.ui_states else "unknown",
@@ -649,18 +678,24 @@ def _append_operation_contract(
     operation_node: ContractNode,
     operation: ContractObservation,
 ) -> None:
-    for kind, schema in (
-        ("request_schema", operation.request_schema),
-        ("response_schema", operation.response_schema),
+    for kind, schemas in (
+        ("request_schema", operation.request_schemas),
+        ("response_schema", operation.response_schemas),
     ):
-        if schema:
+        for schema in schemas:
             _append_schema_contract(
                 nodes,
                 edges,
                 operation_node,
                 kind,
-                schema,
-                name=str(schema.get("name", kind)),
+                schema.shape,
+                name=(
+                    schema.identities[0]
+                    if schema.identities
+                    else str(schema.shape.get("name", kind))
+                ),
+                status=schema.status,
+                identities=schema.identities,
             )
     for status, schema in operation.error_schemas:
         _append_schema_contract(
@@ -797,9 +832,10 @@ def _append_schema_contract(
     *,
     name: str,
     status: str | None = None,
+    identities: tuple[str, ...] = (),
 ) -> None:
     schema_node = ContractNode(
-        _contract_id(kind, operation_node.id, name, status or ""),
+        _contract_id(kind, operation_node.id, *identities, name, status or ""),
         kind,
         name,
         operation_node.side,
@@ -810,7 +846,8 @@ def _append_schema_contract(
             for key, value in schema.items()
             if key not in {"properties", "items"}
         }
-        | ({"status": status} if status is not None else {}),
+        | ({"status": status} if status is not None else {})
+        | ({"type_identities": list(identities)} if identities else {}),
     )
     nodes.append(schema_node)
     edges.append(
@@ -901,36 +938,36 @@ def _first_contract_difference(
         )
     for label in ("request", "response"):
         relation = "accepts" if label == "request" else "returns"
-        front_schema = _schema_from_graph(frontend.id, relation, outgoing)
-        back_schema = _schema_from_graph(backend.id, relation, outgoing)
-        front_state = _operation_evidence_state(frontend, label, bool(front_schema))
-        back_state = _operation_evidence_state(backend, label, bool(back_schema))
+        front_schemas = _schema_variants_from_graph(frontend.id, relation, outgoing)
+        back_schemas = _schema_variants_from_graph(backend.id, relation, outgoing)
+        front_state = _operation_evidence_state(frontend, label, bool(front_schemas))
+        back_state = _operation_evidence_state(backend, label, bool(back_schemas))
         state_difference = _evidence_state_difference(
             label, front_state, back_state, "schema"
         )
         if state_difference is not None:
             return state_difference
-        if front_state == back_state == "present" and front_schema and back_schema:
-            difference = _schema_difference(front_schema, back_schema)
+        if front_state == back_state == "present" and front_schemas and back_schemas:
+            difference = _schema_variants_difference(
+                label,
+                front_schemas,
+                back_schemas,
+            )
             if difference is not None:
-                suffix, field_name, detail, expected, actual, investigate = difference
-                return (
-                    f"{label}_{suffix}",
-                    field_name,
-                    f"{label.title()} contract {detail}.",
-                    expected,
-                    actual,
-                    investigate,
-                )
+                return difference
         elif front_state == back_state == "present":
             return (
                 f"{label}_evidence_unknown",
                 "",
                 f"{label.title()} schema evidence is incomplete.",
-                back_schema,
-                front_schema,
+                back_schemas,
+                front_schemas,
                 True,
             )
+
+    ui_difference = _ui_lifecycle_difference(frontend, backend, outgoing)
+    if ui_difference is not None:
+        return ui_difference
 
     front_auth = _auth_from_graph(frontend.id, outgoing)
     back_auth = _auth_from_graph(backend.id, outgoing)
@@ -1006,57 +1043,6 @@ def _first_contract_difference(
             sorted(front_statuses),
             False,
         )
-    front_states = {
-        node.name for node in outgoing.get((frontend.id, "renders_state"), [])
-    }
-    front_ui_state = _operation_evidence_state(
-        frontend, "ui_lifecycle", bool(front_states)
-    )
-    ui_required = bool(front.get("ui_required", True))
-    if ui_required and front_ui_state == "contradictory":
-        return (
-            "ui_state_evidence_contradictory",
-            "",
-            "Frontend lifecycle evidence contradicts itself.",
-            "present",
-            front_ui_state,
-            True,
-        )
-    if ui_required and front_ui_state == "unknown":
-        return (
-            "ui_state_evidence_unknown",
-            "",
-            "Frontend lifecycle evidence is incomplete.",
-            "present",
-            front_ui_state,
-            True,
-        )
-    if ui_required and front_ui_state == "absent" and (
-        front_status_state == "present"
-        or _operation_evidence_state(frontend, "response", False) == "present"
-    ):
-        return (
-            "ui_state_missing",
-            "",
-            "A response-bearing operation has no user-visible lifecycle states.",
-            ["loading", "error", "empty", "success"],
-            [],
-            False,
-        )
-    if (
-        ui_required
-        and back_errors
-        and front_ui_state == "present"
-        and "error" not in front_states
-    ):
-        return (
-            "error_state_missing",
-            "",
-            "Backend error contract has no user-visible frontend error state.",
-            sorted(back_errors),
-            sorted(front_states),
-            False,
-        )
     if front.get("mutation"):
         cache_state = _operation_evidence_state(
             frontend,
@@ -1090,6 +1076,59 @@ def _first_contract_difference(
                 "absent",
                 False,
             )
+    return None
+
+
+def _ui_lifecycle_difference(
+    frontend: ContractNode,
+    backend: ContractNode,
+    outgoing: Mapping[tuple[str, str], list[ContractNode]],
+) -> tuple[str, str, str, Any, Any, bool] | None:
+    if not bool(frontend.attributes.get("ui_required", True)):
+        return None
+    states = {
+        node.name for node in outgoing.get((frontend.id, "renders_state"), [])
+    }
+    evidence = _operation_evidence_state(frontend, "ui_lifecycle", bool(states))
+    expected = (
+        {"loading", "error", "success"}
+        if frontend.attributes.get("mutation")
+        else {"loading", "error", "empty", "success"}
+    )
+    if evidence == "contradictory":
+        return (
+            "ui_state_evidence_contradictory",
+            "",
+            "Frontend lifecycle evidence contradicts itself.",
+            sorted(expected),
+            evidence,
+            True,
+        )
+    if evidence == "unknown":
+        return (
+            "ui_state_evidence_unknown",
+            "",
+            "Frontend lifecycle ownership is ambiguous.",
+            sorted(expected),
+            evidence,
+            True,
+        )
+    response_bearing = (
+        _operation_evidence_state(frontend, "response", False) == "present"
+        or _operation_evidence_state(backend, "response", False) == "present"
+    )
+    if not response_bearing:
+        return None
+    missing = expected - states
+    if evidence == "absent" or missing:
+        return (
+            "ui_state_missing",
+            "",
+            "Response-bearing UI operation lacks lifecycle coverage.",
+            sorted(expected),
+            sorted(states),
+            False,
+        )
     return None
 
 
@@ -1262,15 +1301,93 @@ def _schema_difference(
     return None
 
 
-def _schema_from_graph(
+def _schema_variants_from_graph(
     operation_id: str,
     relation: str,
     outgoing: Mapping[tuple[str, str], list[ContractNode]],
-) -> dict[str, Any] | None:
-    schemas = outgoing.get((operation_id, relation), [])
-    if not schemas:
-        return None
-    return _schema_from_node(schemas[0], outgoing)
+) -> tuple[tuple[str | None, dict[str, Any]], ...]:
+    return tuple(
+        (
+            _string_or_none(node.attributes.get("status")),
+            _schema_from_node(node, outgoing),
+        )
+        for node in sorted(
+            outgoing.get((operation_id, relation), []),
+            key=lambda item: (
+                str(item.attributes.get("status", "")),
+                item.name,
+                item.id,
+            ),
+        )
+    )
+
+
+def _schema_variants_difference(
+    label: str,
+    frontend: tuple[tuple[str | None, dict[str, Any]], ...],
+    backend: tuple[tuple[str | None, dict[str, Any]], ...],
+) -> tuple[str, str, str, Any, Any, bool] | None:
+    front_statuses = {status for status, _shape in frontend if status is not None}
+    back_statuses = {status for status, _shape in backend if status is not None}
+    fully_statused = len(front_statuses) == len(frontend) and len(back_statuses) == len(
+        backend
+    )
+    comparisons: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    if fully_statused:
+        if front_statuses != back_statuses:
+            return (
+                f"{label}_status_mismatch",
+                "",
+                f"{label.title()} status variants differ.",
+                sorted(back_statuses),
+                sorted(front_statuses),
+                False,
+            )
+        front_by_status = {status: shape for status, shape in frontend}
+        back_by_status = {status: shape for status, shape in backend}
+        comparisons = [
+            (str(status), front_by_status[status], back_by_status[status])
+            for status in sorted(front_statuses)
+        ]
+    else:
+        front_shapes = _unique_schema_shapes(frontend)
+        back_shapes = _unique_schema_shapes(backend)
+        if len(front_shapes) != 1 or len(back_shapes) != 1:
+            return (
+                f"{label}_evidence_unknown",
+                "",
+                f"{label.title()} variants are not fully status-anchored.",
+                back_shapes,
+                front_shapes,
+                True,
+            )
+        comparisons = [("", front_shapes[0], back_shapes[0])]
+
+    for status, front_shape, back_shape in comparisons:
+        difference = _schema_difference(front_shape, back_shape)
+        if difference is None:
+            continue
+        suffix, field_name, detail, expected, actual, investigate = difference
+        status_detail = f" status {status}" if status else ""
+        return (
+            f"{label}_{suffix}",
+            field_name,
+            f"{label.title()}{status_detail} contract {detail}.",
+            expected,
+            actual,
+            investigate,
+        )
+    return None
+
+
+def _unique_schema_shapes(
+    variants: tuple[tuple[str | None, dict[str, Any]], ...],
+) -> tuple[dict[str, Any], ...]:
+    unique = {
+        json.dumps(shape, sort_keys=True, default=str): shape
+        for _status, shape in variants
+    }
+    return tuple(unique[key] for key in sorted(unique))
 
 
 def _error_schemas_from_graph(
@@ -1290,7 +1407,8 @@ def _schema_from_node(
     schema = {
         key: _json_value(value)
         for key, value in node.attributes.items()
-        if key != "status" and not (key == "required" and isinstance(value, bool))
+        if key not in {"status", "type_identities"}
+        and not (key == "required" and isinstance(value, bool))
     }
     fields = outgoing.get((node.id, "has_field"), [])
     if fields:
@@ -1423,10 +1541,6 @@ def _finding_evidence_value(value: Any) -> Any:
     return normalized
 
 
-def _mapping_or_none(value: Any) -> dict[str, Any] | None:
-    return dict(value) if isinstance(value, Mapping) else None
-
-
 def _unknown_anchor() -> SourceAnchor:
     return SourceAnchor("", 0, "unknown", "unknown", 0.0)
 
@@ -1465,15 +1579,73 @@ def _lineage_edge(kind: str) -> str:
     }.get(kind, "relates_to")
 
 
-def _first_contract_shape(*values: Any) -> dict[str, Any] | None:
+def contract_schema_observations(
+    *values: Any,
+    fallback: str,
+    status: str | None = None,
+) -> tuple[ContractSchema, ...]:
+    """Normalize all schema identities; collapse only semantic duplicates."""
+
+    candidates: list[tuple[str, dict[str, Any]]] = []
     for value in values:
         if isinstance(value, Mapping):
             if "type" in value or "properties" in value or "items" in value:
-                return dict(value)
-            for name, candidate in sorted(value.items(), key=lambda item: str(item[0])):
+                shape = dict(value)
+                identity = str(shape.pop("name", fallback))
+                candidates.append((identity, shape))
+                continue
+            for name, candidate in value.items():
                 if isinstance(candidate, Mapping):
-                    return {"name": str(name), **dict(candidate)}
-    return None
+                    shape = dict(candidate)
+                    identity = str(shape.pop("name", name))
+                    candidates.append((identity, shape))
+    grouped: dict[str, tuple[dict[str, Any], list[str]]] = {}
+    for identity, shape in candidates:
+        key = json.dumps(
+            {"status": status, "shape": shape},
+            sort_keys=True,
+            default=str,
+        )
+        existing_shape, identities = grouped.setdefault(key, (shape, []))
+        if identity not in identities:
+            identities.append(identity)
+        grouped[key] = (existing_shape, identities)
+    return tuple(
+        ContractSchema(tuple(sorted(identities)), shape, status)
+        for key, (shape, identities) in sorted(grouped.items())
+    )
+
+
+def _schemas_from_observation_dict(
+    value: Mapping[str, Any],
+    label: str,
+) -> tuple[ContractSchema, ...]:
+    plural = value.get(f"{label}_schemas")
+    if isinstance(plural, list):
+        return tuple(
+            ContractSchema.from_dict(item)
+            for item in plural
+            if isinstance(item, Mapping)
+        )
+    return contract_schema_observations(
+        value.get(f"{label}_schema"),
+        fallback=f"{label}_schema",
+    )
+
+
+def _schema_observation_state(
+    schemas: tuple[ContractSchema, ...],
+    *,
+    statuses_distinguish: bool = False,
+) -> str:
+    if not schemas:
+        return "unknown"
+    if len(schemas) == 1:
+        return "present"
+    if statuses_distinguish and all(schema.status is not None for schema in schemas):
+        statuses = [schema.status for schema in schemas]
+        return "present" if len(statuses) == len(set(statuses)) else "contradictory"
+    return "contradictory"
 
 
 def _migrate_legacy_project_map(value: Mapping[str, Any]) -> ProjectMap:

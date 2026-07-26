@@ -13,10 +13,11 @@ from uidetox.contract_graph import (
     ContractObservation,
     ProjectMap,
     SourceAnchor,
-    _first_contract_shape,
     _normalize_method,
+    _schema_observation_state,
     _string_or_none,
     build_contract_graph,
+    contract_schema_observations,
     dedupe_contract_observations,
     normalize_route_path,
     reconcile_contract_graph,
@@ -99,13 +100,15 @@ def _frontend_observations(
         normalized, parameters, unresolved = normalize_route_path(path)
         method = _normalize_method(metadata.get("method"))
         dynamic = bool(metadata.get("dynamic", False)) or unresolved or path is None
-        request_schema = _first_contract_shape(
+        request_schemas = contract_schema_observations(
             metadata.get("request_contracts"),
             metadata.get("request_schema"),
+            fallback="request_schema",
         )
-        response_schema = _first_contract_shape(
+        response_schemas = contract_schema_observations(
             metadata.get("response_contracts"),
             metadata.get("response_schema"),
+            fallback="response_schema",
         )
         ui_states = tuple(
             sorted(
@@ -125,8 +128,8 @@ def _frontend_observations(
                 normalized_path=normalized,
                 parameters=parameters,
                 dynamic=dynamic,
-                request_schema=request_schema,
-                response_schema=response_schema,
+                request_schemas=request_schemas,
+                response_schemas=response_schemas,
                 error_schemas=tuple(
                     (str(status), dict(schema))
                     for status, schema in dict(
@@ -167,14 +170,19 @@ def _frontend_observations(
                 ),
                 evidence={
                     "request": (
-                        "present"
-                        if request_schema is not None
+                        _schema_observation_state(request_schemas)
+                        if request_schemas
                         else "absent"
                         if method in {"GET", "HEAD", "OPTIONS"}
                         else "unknown"
                     ),
                     "response": (
-                        "present" if response_schema is not None else "unknown"
+                        _schema_observation_state(
+                            response_schemas,
+                            statuses_distinguish=True,
+                        )
+                        if response_schemas
+                        else "unknown"
                     ),
                     "error": (
                         "present"
@@ -185,7 +193,14 @@ def _frontend_observations(
                         "present" if metadata.get("status_codes") else "unknown"
                     ),
                     "ui_lifecycle": (
-                        "present" if ui_states else "absent"
+                        str(metadata["ui_lifecycle_evidence"])
+                        if metadata.get("ui_lifecycle_evidence")
+                        in {"present", "absent", "unknown", "contradictory"}
+                        else "present"
+                        if ui_states
+                        else "unknown"
+                        if metadata.get("ui_required")
+                        else "absent"
                     ),
                     "cache": str(
                         metadata.get("cache_invalidation", "unknown")

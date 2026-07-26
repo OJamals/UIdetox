@@ -1218,3 +1218,189 @@ export function App() {
         and edge["kind"] == "triggers"
         for edge in graph["edges"]
     )
+
+
+def _write_ui_contract_fixture(root: Path, source: str) -> ProjectMap:
+    src = root / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(source.strip(), encoding="utf-8")
+    (root / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/users": {
+                        "get": {
+                            "responses": {
+                                "200": {
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": {"type": "string"}
+                                                },
+                                                "required": ["id"],
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return ProjectMap.from_dict(map_frontend(root, "src").project_map)
+
+
+def test_production_ui_call_links_each_owned_lifecycle_state(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+import { useState } from "react";
+
+interface User { id: string }
+
+export function App() {
+  const [loading] = useState(false);
+  const [error] = useState(false);
+  const [empty] = useState(false);
+  const [success] = useState(false);
+  axios.get<User>("/users");
+  return <button onClick={() => undefined}>Load</button>;
+}
+""",
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+    nodes = {node.id: node for node in graph.nodes}
+    states = {
+        nodes[edge.target].name
+        for edge in graph.edges
+        if edge.source == operation.id and edge.kind == "renders_state"
+    }
+
+    assert operation.attributes["ui_required"] is True
+    assert states == {"loading", "error", "empty", "success"}
+    assert not any(
+        finding.detector_id.startswith("contract-ui-state")
+        for finding in graph.findings
+    )
+
+
+def test_production_ui_call_without_lifecycle_states_is_not_clean(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+
+interface User { id: string }
+
+export function App() {
+  axios.get<User>("/users");
+  return <main>Users</main>;
+}
+""",
+    )
+
+    assert any(
+        finding.detector_id == "contract-ui-state-missing"
+        for finding in graph.findings
+    )
+
+
+def test_production_multi_call_ui_owner_preserves_lifecycle_ambiguity(
+    tmp_path,
+) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+import { useState } from "react";
+
+interface User { id: string }
+
+export function App() {
+  const [loading] = useState(false);
+  axios.get<User>("/users");
+  axios.get<User>("/teams");
+  return <main>{loading ? "Loading" : "Ready"}</main>;
+}
+""",
+    )
+    operations = [node for node in graph.nodes if node.kind == "client_operation"]
+
+    assert len(operations) == 2
+    assert not any(
+        edge.source in {operation.id for operation in operations}
+        and edge.kind == "renders_state"
+        for edge in graph.edges
+    )
+    assert any(
+        finding.detector_id == "contract-ui-state-evidence-unknown"
+        for finding in graph.findings
+    )
+
+
+def test_lifecycle_states_remain_scoped_to_each_ui_owner(tmp_path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "App.tsx").write_text(
+        """
+import axios from "axios";
+import { useState } from "react";
+
+export function Users() {
+  const [loading] = useState(false);
+  axios.get("/users");
+  return <main>{loading ? "Loading" : "Users"}</main>;
+}
+
+export function Teams() {
+  const [loading] = useState(false);
+  axios.get("/teams");
+  return <main>{loading ? "Loading" : "Teams"}</main>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    graph = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+    nodes = {node.id: node for node in graph.nodes}
+    operations = {
+        node.attributes["path"]: node
+        for node in graph.nodes
+        if node.kind == "client_operation"
+    }
+
+    assert set(operations) == {"/users", "/teams"}
+    for operation in operations.values():
+        assert {
+            nodes[edge.target].name
+            for edge in graph.edges
+            if edge.source == operation.id and edge.kind == "renders_state"
+        } == {"loading"}
+
+
+def test_production_low_level_client_does_not_require_ui_lifecycle(tmp_path) -> None:
+    graph = _write_ui_contract_fixture(
+        tmp_path,
+        """
+import axios from "axios";
+
+interface User { id: string }
+
+export function loadUsers() {
+  return axios.get<User>("/users");
+}
+""",
+    )
+    operation = next(node for node in graph.nodes if node.kind == "client_operation")
+
+    assert operation.attributes["ui_required"] is False
+    assert not any(
+        finding.detector_id.startswith("contract-ui-state")
+        for finding in graph.findings
+    )

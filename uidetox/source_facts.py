@@ -148,6 +148,8 @@ class SourceOccurrence:
 
     name: str
     line: int
+    owner: str = field(default="", compare=False)
+    target: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -852,7 +854,13 @@ def _collect_semantic_node(
                     if item.type == "identifier"
                 ]
                 if identifiers:
-                    states.append(SourceOccurrence(identifiers[0], _line(node)))
+                    states.append(
+                        SourceOccurrence(
+                            identifiers[0],
+                            _line(node),
+                            _containing_callable(node),
+                        )
+                    )
     elif node.type in {"jsx_opening_element", "jsx_self_closing_element"}:
         tag = _text(node.child_by_field_name("name"))
         if not tag:
@@ -882,7 +890,15 @@ def _collect_semantic_node(
             )
             action_match = _ACTION_ATTRIBUTE_RE.match(attribute)
             if action_match:
-                actions.append(SourceOccurrence(action_match.group(1), _line(child)))
+                action_target = _text(value_node).strip("{}")
+                actions.append(
+                    SourceOccurrence(
+                        action_match.group(1),
+                        _line(child),
+                        _containing_callable(child),
+                        action_target if _is_identifier(action_target) else "",
+                    )
+                )
             if tag.rsplit(".", 1)[-1] == "Route":
                 route_match = _ROUTE_ATTRIBUTE_RE.match(attribute)
                 if route_match:
@@ -1213,9 +1229,9 @@ def _line(node) -> int:
 def _unique_occurrences(
     items: list[SourceOccurrence],
 ) -> tuple[SourceOccurrence, ...]:
-    unique: dict[str, SourceOccurrence] = {}
+    unique: dict[tuple[str, str], SourceOccurrence] = {}
     for item in items:
-        unique.setdefault(item.name, item)
+        unique.setdefault((item.owner, item.name), item)
     return tuple(unique.values())
 
 
