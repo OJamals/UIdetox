@@ -30,6 +30,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 017 | Replace route parity with typed full-stack contract lineage | P1 | L | 015, 016 | DONE — reviewed at `d0ec3b0`; 1,340 tests pass |
 | 018 | Replace initial-frame capture with efficient scenario observation | P1 | L | 015, 016 | DONE — reviewed at `43596ae`; 1,376 tests pass |
 | 019 | Replace guessed color checks with semantic design-quality evidence | P1 | L | 015, 016, 018 | DONE — merged as `591f306`; post-integration review clean; 1,396 tests pass |
+| 020 | Reproducible runtime-performance qualification and semantic hardening | P1 | M | 019 | IN PROGRESS — all implementation and qualification gates pass; integration pending |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

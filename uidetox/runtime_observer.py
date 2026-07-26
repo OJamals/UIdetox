@@ -2403,6 +2403,9 @@ async () => {
     selector: selectorFor(element),
     rect: baseMeasurement(element).rect
   }));
+  const minimumTargetShapeGap = targetRecords.some(
+    record => record.rect.width < 24 || record.rect.height < 24
+  ) ? -24 : -12;
   const targetCells = (rect, expansion = 0) => {
     const cells = [];
     const left = Math.floor((rect.left - expansion) / targetCellSize);
@@ -2449,26 +2452,22 @@ async () => {
       };
     }
     const rect = baseMeasurement(element).rect;
-    const candidates = new Set();
     const cells = targetCells(rect, 24);
-    const addCandidate = candidate => {
-      if (candidate.element !== element) candidates.add(candidate);
-    };
-    if (cells === null) {
-      targetRecords.forEach(addCandidate);
-    } else {
-      targetSpatialIndex.overflow.forEach(addCandidate);
+    let candidates = targetRecords;
+    if (cells !== null) {
+      candidates = new Set(targetSpatialIndex.overflow);
       for (const cell of cells) {
         for (const candidate of targetSpatialIndex.byCell.get(cell) || []) {
-          addCandidate(candidate);
+          candidates.add(candidate);
         }
       }
     }
     let nearest = null;
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
     for (const candidate of candidates) {
+      if (candidate.element === element) continue;
       const other = candidate.rect;
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
       const otherCenterX = other.left + other.width / 2;
       const otherCenterY = other.top + other.height / 2;
       const centerDistance = Math.hypot(
@@ -2491,10 +2490,9 @@ async () => {
         ? centerDistance - 24
         : Math.hypot(centerX - closestX, centerY - closestY) - 12;
       const intersects = shapeGap < 0;
-      const score = shapeGap;
-      if (!nearest || score < nearest.score) {
+      if (!nearest || shapeGap < nearest.score) {
         nearest = {
-          score,
+          score: shapeGap,
           selector: candidate.selector,
           centerDistance,
           shapeGap,
@@ -2502,6 +2500,7 @@ async () => {
           intersects,
           neighborShape: neighborUndersized ? "circle" : "rectangle"
         };
+        if (shapeGap <= minimumTargetShapeGap) break;
       }
     }
     const evidence = {

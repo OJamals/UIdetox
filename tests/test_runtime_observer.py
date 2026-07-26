@@ -2147,6 +2147,52 @@ def test_browser_target_spacing_bounds_pathological_spatial_cells(
 
 
 @pytest.mark.browser
+def test_browser_target_spacing_fallback_keeps_exact_global_minimum(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "target-spacing-exact-fallback.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  body { margin: 0; }
+  button { box-sizing: border-box; position: absolute; margin: 0; padding: 0; }
+  .large { left: 0; top: 20px; width: 300000px; height: 30px; }
+  #small-peer { left: 149994px; top: 29px; width: 12px; height: 12px; }
+</style>
+<button class="large" id="wide">Wide</button>
+<button class="large" id="large-peer">Large peer</button>
+<button id="small-peer" aria-label="Small peer"></button>
+""".strip(),
+        encoding="utf-8",
+    )
+    url = f"{local_http_server(tmp_path)}/{fixture.name}"
+
+    observation = observe_frontend(
+        url,
+        viewports=(VIEWPORT_REGISTRY["desktop"],),
+        settle_ms=0,
+    )
+
+    assert observation.status == "current", observation.errors
+    elements = {element.selector: element for element in observation.pages[0].elements}
+    spacing = elements["#wide"].measurements["targetSpacing"]
+    assert spacing == {
+        "status": "intersects",
+        "nearest_selector": "#small-peer",
+        "center_distance_px": 0,
+        "shape_gap_px": -24,
+        "neighbor_shape": "circle",
+        "edge_gap_px": 0,
+        "total_targets": 3,
+        "indexed_targets": 3,
+        "truncated": False,
+        "index": "bounded-linear-fallback",
+    }
+
+
+@pytest.mark.browser
 def test_browser_focus_evidence_requires_perceptible_computed_delta(
     tmp_path: Path,
     local_http_server,
