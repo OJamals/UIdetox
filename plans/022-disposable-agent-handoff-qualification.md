@@ -9,7 +9,7 @@
 
 ## Status
 
-- **State**: IN PROGRESS
+- **State**: DONE
 - **Priority**: P1
 - **Effort**: M
 - **Risk**: HIGH
@@ -28,6 +28,9 @@
 - **Archival stashes**: preserve Plan 016 as `stash@{0}` (`200608c`) and Plan
   015 as `stash@{1}` (`047d619`). Do not apply or drop either without explicit
   reconciliation evidence.
+- **Integration parity**: after the implementation push, local `HEAD`,
+  `master`, `origin/master`, and remote server `refs/heads/master` all equaled
+  `71407e8d254bf191f15b3423ab415d6c17e80812`; origin contained only `master`.
 
 ## Magic moment
 
@@ -349,7 +352,7 @@ an agent runner or evidence model to the production CLI.
       pass.
 - [x] Production LOC delta, deleted code, remaining risk, and next plan are
       recorded.
-- [ ] Local/origin/server parity is proven after push.
+- [x] Local/origin/server parity is proven after push.
 
 ## STOP conditions
 
