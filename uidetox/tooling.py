@@ -218,56 +218,49 @@ def _read_pyproject_dependency_names(root: Path) -> set[str]:
         return set()
 
     deps: set[str] = set()
+    project = data.get("project")
+    if not isinstance(project, dict):
+        project = {}
 
-    def add_spec(spec: str) -> None:
-        dep_name = _extract_requirement_name(spec)
-        if dep_name:
-            deps.add(dep_name)
+    spec_groups = [project.get("dependencies", []) or []]
+    for grouped_specs in (
+        project.get("optional-dependencies"),
+        data.get("dependency-groups"),
+    ):
+        if isinstance(grouped_specs, dict):
+            spec_groups.extend(
+                specs for specs in grouped_specs.values() if isinstance(specs, list)
+            )
 
-    project = data.get("project", {})
-    if isinstance(project, dict):
-        for spec in project.get("dependencies", []) or []:
-            if isinstance(spec, str):
-                add_spec(spec)
+    for specs in spec_groups:
+        for spec in specs:
+            if not isinstance(spec, str):
+                continue
+            dep_name = _extract_requirement_name(spec)
+            if dep_name:
+                deps.add(dep_name)
 
-        optional = project.get("optional-dependencies", {}) or {}
-        if isinstance(optional, dict):
-            for group_specs in optional.values():
-                if isinstance(group_specs, list):
-                    for spec in group_specs:
-                        if isinstance(spec, str):
-                            add_spec(spec)
+    tool = data.get("tool")
+    poetry = tool.get("poetry") if isinstance(tool, dict) else None
+    if not isinstance(poetry, dict):
+        return deps
 
-    dependency_groups = data.get("dependency-groups", {}) or {}
-    if isinstance(dependency_groups, dict):
-        for group_specs in dependency_groups.values():
-            if isinstance(group_specs, list):
-                for spec in group_specs:
-                    if isinstance(spec, str):
-                        add_spec(spec)
+    dependency_tables = [poetry.get("dependencies")]
+    poetry_groups = poetry.get("group")
+    if isinstance(poetry_groups, dict):
+        dependency_tables.extend(
+            group.get("dependencies")
+            for group in poetry_groups.values()
+            if isinstance(group, dict)
+        )
 
-    tool = data.get("tool", {}) or {}
-    if isinstance(tool, dict):
-        poetry = tool.get("poetry", {}) or {}
-        if isinstance(poetry, dict):
-            poetry_deps = poetry.get("dependencies", {}) or {}
-            if isinstance(poetry_deps, dict):
-                for name in poetry_deps:
-                    dep_name = _normalize_dep_name(name)
-                    if dep_name and dep_name != "python":
-                        deps.add(dep_name)
-
-            poetry_groups = poetry.get("group", {}) or {}
-            if isinstance(poetry_groups, dict):
-                for group in poetry_groups.values():
-                    if not isinstance(group, dict):
-                        continue
-                    group_deps = group.get("dependencies", {}) or {}
-                    if isinstance(group_deps, dict):
-                        for name in group_deps:
-                            dep_name = _normalize_dep_name(name)
-                            if dep_name and dep_name != "python":
-                                deps.add(dep_name)
+    for dependency_table in dependency_tables:
+        if not isinstance(dependency_table, dict):
+            continue
+        for name in dependency_table:
+            dep_name = _normalize_dep_name(name)
+            if dep_name and dep_name != "python":
+                deps.add(dep_name)
 
     return deps
 
