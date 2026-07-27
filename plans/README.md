@@ -34,6 +34,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 021 | Source-scope contract evidence and bound agent handoffs | P1 | M | 017, 019, 020 | DONE — 1,416 tests pass; prototype -84.28%; no all-to-all evidence |
 | 022 | End-to-end disposable-agent handoff qualification | P1 | M | 021 | DONE — 1,407 tests pass; 94/94 contracts and 3/3 viewports preserved |
 | 023 | Deterministic handoff qualification schema and runner | P1 | M | 022 | DONE |
+| 024 | Disposable-agent handoff repeatability matrix | P1 | M | 023 | DONE — 3/3 fresh agents pass; 1.0 accuracy; 1,425 tests; production LOC ±0 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
