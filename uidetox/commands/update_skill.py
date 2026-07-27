@@ -9,7 +9,6 @@ from pathlib import Path
 
 from uidetox.agent_integration import (
     SUPPORTED_AGENT_NAMES,
-    AgentInstallResult,
     AgentIntegrationEnvironment,
     default_data_dir,
     install_agent,
@@ -32,41 +31,6 @@ def _environment(data: Path, cwd: Path) -> AgentIntegrationEnvironment:
         output_fn=print,
         which=shutil.which,
     )
-
-
-def _render_install_result(result: AgentInstallResult) -> None:
-    for message in result.messages:
-        print(message)
-    if not result.success:
-        raise RuntimeError(result.error or "Agent integration failed.")
-
-
-def _install_for(agent: str, data: Path, cwd: Path) -> None:
-    _render_install_result(install_agent(agent, _environment(data, cwd)))
-
-
-def _install_claude(data: Path, cwd: Path) -> None:
-    _install_for("claude", data, cwd)
-
-
-def _install_cursor(data: Path, cwd: Path) -> None:
-    _install_for("cursor", data, cwd)
-
-
-def _install_gemini(data: Path, cwd: Path) -> None:
-    _install_for("gemini", data, cwd)
-
-
-def _install_codex(data: Path, cwd: Path) -> None:
-    _install_for("codex", data, cwd)
-
-
-def _install_windsurf(data: Path, cwd: Path) -> None:
-    _install_for("windsurf", data, cwd)
-
-
-def _install_copilot(data: Path, cwd: Path) -> None:
-    _install_for("copilot", data, cwd)
 
 
 def _exit_error(message: str, *, reinstall: bool = False) -> None:

@@ -11,33 +11,9 @@ import pytest
 
 import uidetox
 from uidetox.analyzer import analyze_file
-from uidetox.commands import autofix, check, finish, scan, update_skill
+from uidetox.commands import autofix, check, finish, scan
 from uidetox.commands.show import format_issue_location
 from uidetox.state import ensure_uidetox_dir, load_state, save_config
-
-
-def test_codex_install_keeps_existing_prompts_and_uses_uidetox_namespace(
-    tmp_path, monkeypatch
-):
-    data = tmp_path / "data"
-    (data / "commands").mkdir(parents=True)
-    (data / "reference").mkdir()
-    (data / "SKILL.md").write_text("skill", encoding="utf-8")
-    (data / "commands" / "audit.md").write_text("audit", encoding="utf-8")
-    (data / "reference" / "rules.md").write_text("rules", encoding="utf-8")
-
-    home = tmp_path / "home"
-    existing_prompt = home / ".codex" / "prompts" / "daily.md"
-    existing_prompt.parent.mkdir(parents=True)
-    existing_prompt.write_text("keep me", encoding="utf-8")
-    monkeypatch.setattr(update_skill.Path, "home", lambda: home)
-
-    update_skill._install_codex(data, tmp_path)
-
-    assert existing_prompt.read_text(encoding="utf-8") == "keep me"
-    assert (home / ".codex" / "prompts" / "uidetox" / "audit.md").read_text(
-        encoding="utf-8"
-    ) == "audit"
 
 
 def test_package_data_includes_transform_scripts():
@@ -9257,30 +9233,21 @@ class TestDiffSubcommandRegistration:
 
     def test_diff_is_not_a_dynamic_skill(self):
         """diff must be a real subcommand, not routed through skill_cmd."""
-        from uidetox.cli import _get_commands_dir
+        from uidetox.cli import _iter_dynamic_skill_names
 
-        cmd_dir = _get_commands_dir()
-        if cmd_dir is None:
-            return
-        skill_names = {
-            f.stem
-            for f in cmd_dir.glob("*.md")
-            if f.stem not in ["scan", "setup", "fix"]
-        }
-        assert "diff" not in skill_names, (
+        assert "diff" not in _iter_dynamic_skill_names(), (
             "diff should be a real command, not a dynamic skill"
         )
 
 
-def test_cli_get_commands_dir_prefers_project_root_commands(tmp_path, monkeypatch):
-    from uidetox.cli import _get_commands_dir
+def test_cli_get_commands_dirs_prefers_project_root_commands(tmp_path, monkeypatch):
+    from uidetox.cli import _get_commands_dirs
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".uidetox").mkdir()
     (tmp_path / "commands").mkdir()
 
-    cmd_dir = _get_commands_dir()
-    assert cmd_dir == tmp_path / "commands"
+    assert _get_commands_dirs()[0] == tmp_path / "commands"
 
 
 def test_cli_parse_args_registers_custom_claude_skill_directory(tmp_path, monkeypatch):

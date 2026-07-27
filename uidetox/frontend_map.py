@@ -1356,7 +1356,6 @@ def _merge_runtime_evidence(
 def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
     routes = sorted({node.name for node in nodes if node.kind == "route"})
     data_sources = sorted({node.name for node in nodes if node.kind == "data"})
-    actions = sorted({node.name for node in nodes if node.kind == "action"})
     runtime_pages = [node for node in nodes if node.kind == "runtime_page"]
     runtime_capture_states = {
         (
@@ -1365,57 +1364,29 @@ def _build_contract(nodes: list[FrontendNode]) -> ExperienceContract:
         )
         for node in runtime_pages
     }
-    runtime_routes = sorted({runtime_route(node.name) for node in runtime_pages})
-    runtime_actions = sorted(
-        {
-            (
-                str(node.metadata.get("role", "action")) or "action",
-                node.name,
-            )
-            for node in nodes
-            if node.kind == "runtime_action" and node.name
-        }
-    )
-    states = sorted(
-        {
-            node.name
-            for node in nodes
-            if node.kind == "state"
-            and re.search(
-                r"loading|error|empty|open|selected|success|pending",
-                node.name,
-                re.IGNORECASE,
-            )
-        }
-    )
-    regions = {node.name for node in nodes if node.kind == "region"}
-    runtime_region_tags = {
-        str(node.metadata.get("tag", ""))
-        for node in nodes
-        if node.kind == "runtime_region"
-    }
+    runtime_routes = sorted({_runtime_route(node.name) for node in runtime_pages})
+    contracts_by_kind: defaultdict[str, set[str]] = defaultdict(set)
+    for node in nodes:
+        if node.kind == "runtime_action" and not node.name:
+            continue
+        if node.kind == "state" and not re.search(
+            r"loading|error|empty|open|selected|success|pending",
+            node.name,
+            re.IGNORECASE,
+        ):
+            continue
+        contract = preservation_contract(node)
+        if contract:
+            contracts_by_kind[node.kind].add(contract)
 
-    must_preserve = [f"Route remains reachable: {route}" for route in routes]
+    must_preserve: list[str] = []
+    for kind in ("route", "runtime_page", "data", "action"):
+        must_preserve.extend(sorted(contracts_by_kind[kind]))
+    must_preserve.extend(sorted(contracts_by_kind["runtime_action"])[:40])
+    must_preserve.extend(sorted(contracts_by_kind["state"]))
     must_preserve.extend(
-        f"Observed runtime route remains reachable: {route}" for route in runtime_routes
+        sorted(contracts_by_kind["region"] | contracts_by_kind["runtime_region"])
     )
-    must_preserve.extend(
-        f"Data contract remains functional: {source}" for source in data_sources
-    )
-    must_preserve.extend(
-        f"Interaction capability remains available: {action}" for action in actions
-    )
-    must_preserve.extend(
-        f'Accessible runtime action remains available: {role} "{name}"'
-        for role, name in runtime_actions[:40]
-    )
-    must_preserve.extend(
-        f"User-visible state remains represented: {state}" for state in states
-    )
-    if "form" in regions or "form" in runtime_region_tags:
-        must_preserve.append(
-            "Form semantics, validation, and submission behavior remain functional."
-        )
 
     if runtime_pages:
         unknown = [
@@ -1577,7 +1548,30 @@ def _build_fingerprint(
     }
 
 
-def runtime_route(url: str) -> str:
+def preservation_contract(node: FrontendNode) -> str | None:
+    """Return the canonical preserved-contract identity for a frontend node."""
+
+    if node.kind == "route":
+        return f"Route remains reachable: {node.name}"
+    if node.kind == "runtime_page":
+        return f"Observed runtime route remains reachable: {_runtime_route(node.name)}"
+    if node.kind == "data":
+        return f"Data contract remains functional: {node.name}"
+    if node.kind == "action":
+        return f"Interaction capability remains available: {node.name}"
+    if node.kind == "runtime_action":
+        role = str(node.metadata.get("role", "action")) or "action"
+        return f'Accessible runtime action remains available: {role} "{node.name}"'
+    if node.kind == "state":
+        return f"User-visible state remains represented: {node.name}"
+    if (node.kind == "region" and node.name == "form") or (
+        node.kind == "runtime_region" and str(node.metadata.get("tag", "")) == "form"
+    ):
+        return "Form semantics, validation, and submission behavior remain functional."
+    return None
+
+
+def _runtime_route(url: str) -> str:
     parsed = urlsplit(url)
     return parsed.path + (f"?{parsed.query}" if parsed.query else "")
 

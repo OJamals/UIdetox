@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from uidetox.design_context import DesignDials, DesignIntent
-from uidetox.frontend_map import FrontendMap, frontend_map_is_fresh, runtime_route
+from uidetox.frontend_map import (
+    FrontendMap,
+    frontend_map_is_fresh,
+    preservation_contract,
+)
 from uidetox.project_map import ProjectMap
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
@@ -557,7 +561,6 @@ def _build_proposal(
         contract_blockers,
         brief,
     )
-    acceptance_checks = observable_checks
     density_instruction = _density_instruction(brief.visual_density)
     motion_instruction = _motion_instruction(brief.motion_intensity)
     layout_tree = _dialed_layout_tree(strategy.layout_tree, brief)
@@ -599,7 +602,7 @@ def _build_proposal(
         ),
         preserved_contracts=preserved,
         migration_steps=tuple(str(item["instruction"]) for item in migration_plan),
-        acceptance_checks=acceptance_checks,
+        acceptance_checks=observable_checks,
         source_targets=source_targets,
         fingerprint=fingerprint,
         novelty_score=novelty,
@@ -884,31 +887,7 @@ def _preserved_contract_evidence(
         evidence.add(provenance)
 
     for node in frontend_map.nodes:
-        contract = ""
-        if node.kind == "route":
-            contract = f"Route remains reachable: {node.name}"
-        elif node.kind == "runtime_page":
-            contract = (
-                f"Observed runtime route remains reachable: {runtime_route(node.name)}"
-            )
-        elif node.kind == "data":
-            contract = f"Data contract remains functional: {node.name}"
-        elif node.kind == "action":
-            contract = f"Interaction capability remains available: {node.name}"
-        elif node.kind == "runtime_action":
-            role = str(node.metadata.get("role", "action")) or "action"
-            contract = (
-                f'Accessible runtime action remains available: {role} "{node.name}"'
-            )
-        elif node.kind == "state":
-            contract = f"User-visible state remains represented: {node.name}"
-        elif (node.kind == "region" and node.name == "form") or (
-            node.kind == "runtime_region"
-            and str(node.metadata.get("tag", "")) == "form"
-        ):
-            contract = (
-                "Form semantics, validation, and submission behavior remain functional."
-            )
+        contract = preservation_contract(node)
         if contract:
             add(contract, node.file, f"frontend-map:{node.kind}:{node.id}")
 
