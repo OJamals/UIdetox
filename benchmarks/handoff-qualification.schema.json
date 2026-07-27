@@ -74,6 +74,16 @@
         "screenshots"
       ],
       "additionalProperties": false,
+      "dependentRequired": {
+        "frontend_map": [
+          "frontend_map_sha256",
+          "failed_or_error_resources"
+        ],
+        "frontend_map_sha256": [
+          "frontend_map",
+          "failed_or_error_resources"
+        ]
+      },
       "properties": {
         "http_status": {
           "type": "integer",
@@ -83,6 +93,18 @@
         "console_errors_or_warnings": {
           "type": "integer",
           "minimum": 0
+        },
+        "failed_or_error_resources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frontend_map": {
+          "type": "string",
+          "minLength": 1
+        },
+        "frontend_map_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         },
         "horizontal_overflow_viewports": {
           "type": "integer",

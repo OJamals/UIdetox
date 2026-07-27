@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from uidetox.redesign import RedesignProposal, RedesignSet
+from uidetox.runtime_scenarios import RuntimeViewport, runtime_capture_id
 from uidetox.state import ensure_uidetox_dir
 
 _QUALIFICATION_CONTRACT_V1 = (
@@ -32,7 +33,7 @@ _QUALIFICATION_CONTRACT_V1 = (
     "",
     "- Fresh status is exactly `completed`; use exactly `completed-with-runtime-capture-blocker` for the bounded launch/capture blocker below. No other `completed-*` status is valid.",
     "- `implementation_attempt_count` is `1` for the single prototype build effort. Count repeated recovery actions in `retry_count`, not failed commands or the first blocked runtime attempt.",
-    "- Required top-level fields: `schema_version`, `status`, `brief_sha256`, `implementation_attempt_count`, `retry_count`, `source_freshness_status`, `checked_source_paths`, `preserved_contracts`, `named_source_anchors`, `feasibility_blockers`, `runtime_unknowns`, `runtime_state_handoffs`, `viewports`, `commands`, `failures`, `recoveries`, `output_file_count`, `output_bytes`, `decision`.",
+    "- Exact completed top-level fields: `schema_version`, `status`, `brief_sha256`, `implementation_attempt_count`, `retry_count`, `source_freshness_status`, `checked_source_paths`, `preserved_contracts`, `named_source_anchors`, `feasibility_blockers`, `runtime_unknowns`, `runtime_state_handoffs`, `viewports`, `commands`, `failures`, `recoveries`, `output_file_count`, `output_bytes`, `decision`, `decision_evidence`, `runnable_prototype_path`, `launch_command`, `canonical_url`, `runtime_acceptance`. Do not add fields.",
     "- Set `schema_version` to `uidetox.disposable-agent-attempt.v1` and `source_freshness_status` to `fresh`.",
     "- Preserve source-manifest order in `checked_source_paths`. Each row contains `group`, `relative_path`, `expected_hash`, `actual_hash`, and `freshness_status: fresh`.",
     "- Preserve brief order in `preserved_contracts`. Each row contains exact `identity`, a `disposition` beginning `preserved`, and non-empty concrete `evidence`.",
@@ -41,7 +42,12 @@ _QUALIFICATION_CONTRACT_V1 = (
     "- Preserve Runtime-capture-matrix order in `runtime_state_handoffs`. Each row contains exact `capture_id`, `scenario`, `state`, `url`, and `viewport`, plus non-empty `disposition` and concrete `evidence`; keep blocked and unknown observations blocked or unknown.",
     "- Treat a captured error UI state as application evidence, not as a browser, console, or resource failure.",
     "- Preserve Runtime-viewport-discovery order in `viewports`. Each row contains exact `name`, integer `width` and `height`, exact `reference_screenshot`, and a `prototype_screenshot` under the disposable prototype path.",
-    "- Record command, exit-code, wall-time, failure, and recovery evidence. Put non-negative integer `output_file_count` and `output_bytes` at report top level. Set `decision` to `pursue`, `revise`, or `reject` with evidence.",
+    "- Each `commands` row has exactly `command`, integer `exit_code`, non-negative integer `wall_time_ms`, and non-empty `evidence`.",
+    "- Each `failures` row has exactly `stage`, `command`, integer `exit_code`, non-negative integer `wall_time_ms`, non-empty `exact_error`, and non-empty `disposition`.",
+    "- Each `recoveries` row has exactly `stage`, `action`, non-negative integer `wall_time_ms`, and non-empty `evidence`.",
+    "- Put non-negative integer `output_file_count` and `output_bytes` at report top level. Set `decision` to `pursue`, `revise`, or `reject`; add non-empty `decision_evidence`, `runnable_prototype_path`, `launch_command`, and `canonical_url`.",
+    "- `runnable_prototype_path` and every `prototype_screenshot` are relative paths without `..`; screenshots stay under the runnable prototype's directory. `canonical_url` exactly matches a Runtime-capture-matrix URL.",
+    "- `runtime_acceptance` has exactly `status`, `http_200`, `console_errors_or_warnings`, `failed_or_error_resource_requests`, `horizontal_overflow`, and `controller_capture_required`. For completed `status: passed`, use `true`, integer `0`, integer `0`, integer `0`, and `false`; for the runtime-blocker status use `status: blocked`, an `unknown`-prefixed string for each measurement, and `true`.",
     "- Write the final report as `qualification-result.json` in the isolated root. Return one final line containing exact status and that path.",
     "",
     "### Runtime acceptance and bounded recovery",
@@ -58,6 +64,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
     """Return an agent-ready brief for one selected redesign proposal."""
 
     proposal = _select_proposal(redesign_set, proposal_id)
+    _validate_runtime_capture_identities(proposal)
     baseline = redesign_set.baseline_fingerprint
     sibling_distances = [
         distance
@@ -270,6 +277,31 @@ def save_prototype_brief(
             pass
         raise
     return output_path
+
+
+def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
+    runtime = proposal.evidence_freshness.get("runtime", {})
+    if not isinstance(runtime, dict):
+        raise TypeError("Runtime freshness evidence must be an object.")
+    captures = runtime.get("runtime_capture_matrix", [])
+    if not isinstance(captures, list):
+        raise TypeError("Runtime capture matrix must be a list.")
+    for capture in captures:
+        if not isinstance(capture, dict) or not isinstance(
+            capture.get("viewport"), dict
+        ):
+            raise TypeError("Runtime capture matrix contains an invalid row.")
+        expected = runtime_capture_id(
+            str(capture.get("scenario", "")),
+            str(capture.get("state", "")),
+            str(capture.get("url", "")),
+            RuntimeViewport.from_dict(dict(capture["viewport"])),
+        )
+        if capture.get("capture_id") != expected:
+            raise ValueError(
+                "Runtime capture identity is not executable: "
+                f"expected {expected!r}, got {capture.get('capture_id')!r}."
+            )
 
 
 def _select_proposal(redesign_set: RedesignSet, proposal_id: str) -> RedesignProposal:

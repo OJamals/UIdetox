@@ -4,6 +4,8 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from uidetox.commands import redesign as redesign_command
 from uidetox.design_context import DesignIntent
 from uidetox.frontend_map import (
@@ -25,6 +27,7 @@ from uidetox.runtime_observer import (
     RuntimePage,
     RuntimeViewport,
 )
+from uidetox.runtime_scenarios import runtime_capture_id
 
 
 def _proposal(tmp_path):
@@ -515,7 +518,12 @@ def test_prototype_brief_preserves_runtime_states_and_emits_v1_contract(
             title=state,
             viewport=viewport,
             elements=(),
-            capture_id=f"qualification-{state}",
+            capture_id=runtime_capture_id(
+                "qualification",
+                state,
+                "http://localhost:3000/",
+                viewport,
+            ),
             scenario="qualification",
             state=state,
         )
@@ -555,7 +563,27 @@ def test_prototype_brief_preserves_runtime_states_and_emits_v1_contract(
     assert [
         (item["capture_id"], item["scenario"], item["state"])
         for item in runtime_freshness["runtime_capture_matrix"]
-    ] == [(f"qualification-{state}", "qualification", state) for state in states]
+    ] == [
+        (
+            runtime_capture_id(
+                "qualification",
+                state,
+                "http://localhost:3000/",
+                viewport,
+            ),
+            "qualification",
+            state,
+        )
+        for state in states
+    ]
+
+    invalid_payload = redesigns.to_dict()
+    invalid_payload["proposals"][0]["evidence_freshness"]["runtime"][
+        "runtime_capture_matrix"
+    ][0]["capture_id"] = "qualification-authenticated"
+    invalid_redesigns = type(redesigns).from_dict(invalid_payload)
+    with pytest.raises(ValueError, match="Runtime capture identity is not executable"):
+        build_prototype_brief(invalid_redesigns, invalid_redesigns.proposals[0].id)
 
     for label, key in (
         ("Runtime capture matrix", "runtime_capture_matrix"),
@@ -588,6 +616,16 @@ def test_prototype_brief_preserves_runtime_states_and_emits_v1_contract(
         "runtime_state_handoffs",
         "output_file_count",
         "output_bytes",
+        "Exact completed top-level fields:",
+        "Do not add fields.",
+        "wall_time_ms",
+        "exact_error",
+        "decision_evidence",
+        "runnable_prototype_path",
+        "runtime_acceptance",
+        "controller_capture_required",
+        "relative paths without `..`",
+        "exactly matches a Runtime-capture-matrix URL",
         "inline `data:` favicon",
         "zero console errors or warnings",
         "zero failed or 4xx/5xx resource requests",

@@ -9,11 +9,12 @@ import math
 import os
 import struct
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from statistics import mean, median
 from typing import Any
 
 SCHEMA_VERSION = 1
+V1_REPORT_SCHEMA = "uidetox.disposable-agent-attempt.v1"
 METRIC_FIELDS = (
     "wall_seconds",
     "input_tokens",
@@ -39,6 +40,9 @@ _ATTEMPT_FIELDS = {
 _RUNTIME_FIELDS = {
     "http_status",
     "console_errors_or_warnings",
+    "failed_or_error_resources",
+    "frontend_map",
+    "frontend_map_sha256",
     "horizontal_overflow_viewports",
     "screenshots",
 }
@@ -52,6 +56,89 @@ _SCREENSHOT_FIELDS = {
     "sha256",
 }
 _SHA256_LENGTH = 64
+_V1_COMPLETED_FIELDS = {
+    "schema_version",
+    "status",
+    "brief_sha256",
+    "implementation_attempt_count",
+    "retry_count",
+    "source_freshness_status",
+    "checked_source_paths",
+    "preserved_contracts",
+    "named_source_anchors",
+    "feasibility_blockers",
+    "runtime_unknowns",
+    "runtime_state_handoffs",
+    "viewports",
+    "commands",
+    "failures",
+    "recoveries",
+    "output_file_count",
+    "output_bytes",
+    "decision",
+    "decision_evidence",
+    "runnable_prototype_path",
+    "launch_command",
+    "canonical_url",
+    "runtime_acceptance",
+}
+_V1_STALE_FIELDS = {
+    "schema_version",
+    "status",
+    "brief_sha256",
+    "checked_source_paths",
+    "checked_source_path_count",
+    "fresh_source_path_count",
+    "stale_source_path_count",
+    "mismatches",
+    "implementation_attempt_count",
+    "retry_count",
+    "prototype_file_count",
+    "prototype_output_bytes",
+}
+_V1_ROW_FIELDS = {
+    "checked_source_paths": {
+        "group",
+        "relative_path",
+        "expected_hash",
+        "actual_hash",
+        "freshness_status",
+    },
+    "preserved_contracts": {"identity", "disposition", "evidence"},
+    "named_source_anchors": {
+        "source",
+        "existence_status",
+        "preservation_status",
+    },
+    "feasibility_blockers": {"identity", "disposition"},
+    "runtime_unknowns": {"identity", "disposition"},
+    "runtime_state_handoffs": {
+        "capture_id",
+        "scenario",
+        "state",
+        "url",
+        "viewport",
+        "disposition",
+        "evidence",
+    },
+    "viewports": {
+        "name",
+        "width",
+        "height",
+        "reference_screenshot",
+        "prototype_screenshot",
+    },
+    "commands": {"command", "exit_code", "wall_time_ms", "evidence"},
+    "failures": {
+        "stage",
+        "command",
+        "exit_code",
+        "wall_time_ms",
+        "exact_error",
+        "disposition",
+    },
+    "recoveries": {"stage", "action", "wall_time_ms", "evidence"},
+}
 
 
 class QualificationError(ValueError):
@@ -153,13 +240,43 @@ def _validate_attempt(attempt: dict[str, Any], path: Path) -> None:
     runtime = attempt.get("runtime")
     if runtime is None:
         return
-    runtime = _exact_object(runtime, _RUNTIME_FIELDS, "runtime")
+    runtime = _exact_object(
+        runtime,
+        _RUNTIME_FIELDS,
+        "runtime",
+        optional={
+            "failed_or_error_resources",
+            "frontend_map",
+            "frontend_map_sha256",
+        },
+    )
     for field in (
         "http_status",
         "console_errors_or_warnings",
         "horizontal_overflow_viewports",
     ):
         _non_negative_number(runtime[field], field, integer=True)
+    frontend_map = runtime.get("frontend_map")
+    frontend_map_hash = runtime.get("frontend_map_sha256")
+    if (frontend_map is None) != (frontend_map_hash is None):
+        raise QualificationError(
+            "runtime.frontend_map and runtime.frontend_map_sha256 must be paired"
+        )
+    if frontend_map is not None:
+        for field in ("frontend_map", "frontend_map_sha256"):
+            if not isinstance(runtime[field], str) or not runtime[field]:
+                raise QualificationError(f"runtime.{field}: expected string")
+        resources = runtime.get("failed_or_error_resources")
+        _non_negative_number(
+            resources,
+            "failed_or_error_resources",
+            integer=True,
+        )
+        digest = runtime["frontend_map_sha256"]
+        if len(digest) != _SHA256_LENGTH or any(
+            character not in "0123456789abcdef" for character in digest
+        ):
+            raise QualificationError("runtime.frontend_map_sha256: invalid digest")
     screenshots = runtime["screenshots"]
     if not isinstance(screenshots, list):
         raise QualificationError("runtime.screenshots: expected list")
@@ -222,6 +339,21 @@ def _string_list(value: Any, field: str) -> list[str]:
     return value
 
 
+def _handoff_projection(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projection = {
+        field: value.get(field)
+        for field in ("capture_id", "scenario", "state", "url", "viewport")
+    }
+    if any(
+        not isinstance(projection[field], str) or not projection[field]
+        for field in ("capture_id", "scenario", "state", "url")
+    ) or not isinstance(projection["viewport"], dict):
+        return None
+    return projection
+
+
 def _canonical(redesigns: dict[str, Any], proposal: dict[str, Any]) -> dict[str, Any]:
     freshness = proposal.get("evidence_freshness")
     if not isinstance(freshness, dict):
@@ -266,6 +398,21 @@ def _canonical(redesigns: dict[str, Any], proposal: dict[str, Any]) -> dict[str,
         _non_negative_number(width, f"viewport {name} width", integer=True)
         _non_negative_number(height, f"viewport {name} height", integer=True)
         normalized_viewports.append({"name": name, "width": width, "height": height})
+    runtime_state_handoffs = []
+    capture_matrix = runtime.get("runtime_capture_matrix", [])
+    if not isinstance(capture_matrix, list):
+        raise QualificationError("runtime capture matrix: expected list")
+    capture_ids: set[str] = set()
+    for capture in capture_matrix:
+        handoff = _handoff_projection(capture)
+        if (
+            handoff is None
+            or handoff["capture_id"] in capture_ids
+            or handoff["viewport"] not in viewports
+        ):
+            raise QualificationError("runtime capture matrix: invalid identity")
+        capture_ids.add(handoff["capture_id"])
+        runtime_state_handoffs.append(handoff)
 
     return {
         "preserved_contracts": _string_list(
@@ -289,6 +436,7 @@ def _canonical(redesigns: dict[str, Any], proposal: dict[str, Any]) -> dict[str,
         "source_manifest": manifest,
         "source_status": source.get("status"),
         "runtime": runtime,
+        "runtime_state_handoffs": runtime_state_handoffs,
         "viewports": normalized_viewports,
         "viewport_discovery": discovery,
     }
@@ -301,6 +449,187 @@ def _compact_json(value: Any) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _v1_report_required(content: bytes) -> bool:
+    marker = f"Report schema: `{V1_REPORT_SCHEMA}`.".encode()
+    _evidence, boundary, trusted_appendix = content.rpartition(
+        b"\nEND_UIDETOX_EVIDENCE\n"
+    )
+    return bool(boundary and marker in trusted_appendix)
+
+
+def _validate_v1_report(
+    report: dict[str, Any],
+    *,
+    stale: bool,
+    issues: list[str],
+) -> None:
+    fields = _V1_STALE_FIELDS if stale else _V1_COMPLETED_FIELDS
+    if set(report) != fields:
+        issues.append("report:v1-fields")
+    if report.get("schema_version") != V1_REPORT_SCHEMA:
+        issues.append("report:v1-schema")
+    allowed_statuses = (
+        {"blocked-stale-source"}
+        if stale
+        else {"completed", "completed-with-runtime-capture-blocker"}
+    )
+    if report.get("status") not in allowed_statuses:
+        issues.append("report:v1-status")
+
+    if stale:
+        rows = report.get("mismatches")
+        if isinstance(rows, list) and any(
+            not isinstance(row, dict)
+            or set(row)
+            != {
+                "manifest_group",
+                "path",
+                "expected_sha256",
+                "actual_sha256",
+                "freshness_status",
+            }
+            for row in rows
+        ):
+            issues.append("mismatches:row-fields")
+        return
+
+    for field, row_fields in _V1_ROW_FIELDS.items():
+        rows = report.get(field)
+        if not isinstance(rows, list):
+            issues.append(f"{field}:invalid")
+        elif any(not isinstance(row, dict) or set(row) != row_fields for row in rows):
+            issues.append(f"{field}:row-fields")
+    commands = report.get("commands")
+    if (
+        not isinstance(commands, list)
+        or not commands
+        or any(
+            not _valid_row_field(row, "command")
+            or not _valid_row_field(row, "evidence")
+            or isinstance(row.get("exit_code"), bool)
+            or not isinstance(row.get("exit_code"), int)
+            or isinstance(row.get("wall_time_ms"), bool)
+            or not isinstance(row.get("wall_time_ms"), int)
+            or row["wall_time_ms"] < 0
+            for row in commands
+            if isinstance(row, dict)
+        )
+    ):
+        issues.append("commands:invalid")
+    failures = report.get("failures")
+    if isinstance(failures, list) and any(
+        not all(
+            _valid_row_field(row, field)
+            for field in ("stage", "command", "exact_error", "disposition")
+        )
+        or isinstance(row.get("exit_code"), bool)
+        or not isinstance(row.get("exit_code"), int)
+        or isinstance(row.get("wall_time_ms"), bool)
+        or not isinstance(row.get("wall_time_ms"), int)
+        or row["wall_time_ms"] < 0
+        for row in failures
+        if isinstance(row, dict)
+    ):
+        issues.append("failures:invalid")
+    recoveries = report.get("recoveries")
+    if isinstance(recoveries, list) and any(
+        not all(
+            _valid_row_field(row, field) for field in ("stage", "action", "evidence")
+        )
+        or isinstance(row.get("wall_time_ms"), bool)
+        or not isinstance(row.get("wall_time_ms"), int)
+        or row["wall_time_ms"] < 0
+        for row in recoveries
+        if isinstance(row, dict)
+    ):
+        issues.append("recoveries:invalid")
+    if report.get("decision") not in {"pursue", "revise", "reject"} or any(
+        not _valid_row_field(report, field)
+        for field in (
+            "decision_evidence",
+            "runnable_prototype_path",
+            "launch_command",
+            "canonical_url",
+        )
+    ):
+        issues.append("decision:invalid")
+    prototype_path = report.get("runnable_prototype_path")
+    if not _safe_report_path(prototype_path):
+        issues.append("decision:prototype-path")
+        prototype_root = None
+    else:
+        prototype_root = PurePosixPath(prototype_path).parent
+        if prototype_root == PurePosixPath("."):
+            issues.append("decision:prototype-path")
+            prototype_root = None
+    canonical_url = report.get("canonical_url")
+    handoff_urls = {
+        row.get("url")
+        for row in report.get("runtime_state_handoffs", [])
+        if isinstance(row, dict) and isinstance(row.get("url"), str)
+    }
+    if canonical_url not in handoff_urls:
+        issues.append("decision:canonical-url")
+    viewports = report.get("viewports")
+    if isinstance(viewports, list) and any(
+        not isinstance(row, dict)
+        or not _safe_report_path(row.get("prototype_screenshot"))
+        or prototype_root is None
+        or not PurePosixPath(row["prototype_screenshot"]).is_relative_to(prototype_root)
+        for row in viewports
+    ):
+        issues.append("viewports:prototype-path")
+    runtime_acceptance = report.get("runtime_acceptance")
+    if not isinstance(runtime_acceptance, dict) or set(runtime_acceptance) != {
+        "status",
+        "http_200",
+        "console_errors_or_warnings",
+        "failed_or_error_resource_requests",
+        "horizontal_overflow",
+        "controller_capture_required",
+    }:
+        issues.append("runtime_acceptance:invalid")
+        return
+    acceptance_status = runtime_acceptance.get("status")
+    if acceptance_status == "passed":
+        valid_acceptance = (
+            runtime_acceptance.get("http_200") is True
+            and type(runtime_acceptance.get("console_errors_or_warnings")) is int
+            and runtime_acceptance["console_errors_or_warnings"] == 0
+            and type(runtime_acceptance.get("failed_or_error_resource_requests")) is int
+            and runtime_acceptance["failed_or_error_resource_requests"] == 0
+            and type(runtime_acceptance.get("horizontal_overflow")) is int
+            and runtime_acceptance["horizontal_overflow"] == 0
+            and runtime_acceptance.get("controller_capture_required") is False
+        )
+    elif acceptance_status == "blocked":
+        valid_acceptance = runtime_acceptance.get(
+            "controller_capture_required"
+        ) is True and all(
+            isinstance(runtime_acceptance.get(field), str)
+            and runtime_acceptance[field].startswith("unknown")
+            for field in (
+                "http_200",
+                "console_errors_or_warnings",
+                "failed_or_error_resource_requests",
+                "horizontal_overflow",
+            )
+        )
+    else:
+        valid_acceptance = False
+    if not valid_acceptance:
+        issues.append("runtime_acceptance:invalid")
+    expected_acceptance = (
+        "blocked"
+        if report.get("status") == "completed-with-runtime-capture-blocker"
+        else "passed"
+    )
+    if acceptance_status != expected_acceptance:
+        issues.append("runtime_acceptance:status")
+    if expected_acceptance == "blocked" and not failures:
+        issues.append("failures:missing-blocker")
 
 
 def _brief_issues(text: str, canonical: dict[str, Any]) -> list[str]:
@@ -338,8 +667,9 @@ def _brief_issues(text: str, canonical: dict[str, Any]) -> list[str]:
         ("runtime-urls", runtime.get("urls")),
         ("runtime-viewports", runtime.get("viewports")),
         ("runtime-screenshots", runtime.get("screenshots")),
+        ("runtime-capture-matrix", runtime.get("runtime_capture_matrix")),
     ):
-        if _compact_json(value) not in evidence:
+        if value is not None and _compact_json(value) not in evidence:
             issues.append(f"brief:{label}")
     if f"- Source: {canonical['source_status']}" not in evidence:
         issues.append("brief:source-freshness")
@@ -415,6 +745,13 @@ def _valid_row_field(
     )
 
 
+def _safe_report_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value or "\\" in value:
+        return False
+    path = PurePosixPath(value)
+    return not path.is_absolute() and ".." not in path.parts and bool(path.name)
+
+
 def _require_row_field(
     rows: list[dict[str, Any]],
     field: str,
@@ -469,6 +806,8 @@ def _completed_source(
     report: dict[str, Any],
     canonical: dict[str, Any],
     issues: list[str],
+    *,
+    v1_required: bool,
 ) -> dict[str, Any]:
     expected = list(canonical["source_hashes"])
     rows = report.get("checked_source_paths")
@@ -492,6 +831,10 @@ def _completed_source(
             and row.get("expected_hash") == expected_hash
             and row.get("actual_hash") == expected_hash
             and row.get("freshness_status") == "fresh"
+            and (
+                not v1_required
+                or row.get("group") == canonical["source_groups"].get(path)
+            )
         ):
             verified += 1
         else:
@@ -508,6 +851,202 @@ def _png_dimensions(content: bytes, path: Path) -> tuple[int, int]:
     if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
         raise QualificationError(f"invalid PNG header: {path}")
     return struct.unpack(">II", header[16:24])
+
+
+def _frontend_map_runtime_result(
+    runtime: dict[str, Any],
+    artifact_dir: Path,
+    canonical: dict[str, Any],
+    issues: list[str],
+) -> dict[str, Any]:
+    expected_handoffs = canonical["runtime_state_handoffs"]
+    frontend_map_value = runtime.get("frontend_map")
+    if frontend_map_value is None:
+        return {
+            "frontend_map_verified": False,
+            "state_captures_expected": len(expected_handoffs),
+            "state_captures_verified": 0,
+            "state_screenshots": [],
+            "state_screenshots_verified": 0,
+        }
+
+    issue_count = len(issues)
+    frontend_map_path = _resolve(
+        artifact_dir,
+        frontend_map_value,
+        "runtime frontend map",
+    )
+    try:
+        frontend_map, actual_map_hash = _load_json_artifact(
+            frontend_map_path,
+            "runtime frontend map",
+        )
+    except QualificationError:
+        issues.append("runtime:frontend-map")
+        return {
+            "frontend_map_verified": False,
+            "state_captures_expected": len(expected_handoffs),
+            "state_captures_verified": 0,
+            "state_screenshots": [],
+            "state_screenshots_verified": 0,
+        }
+    if actual_map_hash != runtime.get("frontend_map_sha256"):
+        issues.append("runtime:frontend-map-hash")
+    if runtime.get("failed_or_error_resources") != 0:
+        issues.append("runtime:resources")
+
+    evidence = frontend_map.get("evidence")
+    if not isinstance(evidence, dict):
+        issues.append("runtime:frontend-map")
+        evidence = {}
+    if evidence.get("runtime_status") != "current":
+        issues.append("runtime:frontend-map-status")
+    if (
+        evidence.get("runtime_errors") != []
+        or evidence.get("runtime_diagnostics") != []
+    ):
+        issues.append("runtime:frontend-map-diagnostics")
+
+    matrix = evidence.get("runtime_capture_matrix")
+    matrix = matrix if isinstance(matrix, list) else []
+    actual_handoffs = []
+    for capture in matrix:
+        projection = _handoff_projection(capture)
+        if projection is None:
+            issues.append("runtime:frontend-map-capture")
+            continue
+        actual_handoffs.append(projection)
+        if (
+            capture.get("status") != "completed"
+            or not isinstance(capture.get("readiness"), dict)
+            or capture["readiness"].get("status") != "current"
+            or capture.get("diagnostics") != []
+        ):
+            issues.append("runtime:frontend-map-capture")
+    capture_accounting = _account(
+        [_compact_json(row) for row in expected_handoffs],
+        [_compact_json(row) for row in actual_handoffs],
+        "runtime:frontend-map-captures",
+        issues,
+    )
+
+    nodes = frontend_map.get("nodes")
+    runtime_pages = (
+        [
+            node
+            for node in nodes
+            if isinstance(node, dict)
+            and node.get("kind") == "runtime_page"
+            and isinstance(node.get("metadata"), dict)
+        ]
+        if isinstance(nodes, list)
+        else []
+    )
+    pages_by_capture: dict[str, list[dict[str, Any]]] = {}
+    for node in runtime_pages:
+        metadata = node["metadata"]
+        capture_id = metadata.get("capture_id")
+        if isinstance(capture_id, str):
+            pages_by_capture.setdefault(capture_id, []).append(metadata)
+
+    root_value = frontend_map.get("root")
+    map_root = (
+        Path(root_value).expanduser().resolve()
+        if isinstance(root_value, str) and root_value
+        else None
+    )
+    map_parent = frontend_map_path.expanduser().resolve().parent
+    if (
+        map_root is None
+        or not map_root.is_dir()
+        or not map_root.is_relative_to(map_parent)
+    ):
+        issues.append("runtime:frontend-map-root")
+        map_root = None
+    screenshots: list[dict[str, Any]] = []
+    screenshot_paths: set[Path] = set()
+    state_captures_verified = 0
+    for expected in expected_handoffs:
+        capture_id = expected["capture_id"]
+        pages = pages_by_capture.get(capture_id, [])
+        if len(pages) != 1:
+            issues.append("runtime:state-page")
+            continue
+        page = pages[0]
+        expected_viewport = expected["viewport"]
+        expected_page = {
+            "capture_id": capture_id,
+            "scenario": expected["scenario"],
+            "state": expected["state"],
+            "runtime_url": expected["url"],
+            "viewport": {
+                "name": expected_viewport.get("name"),
+                "width": expected_viewport.get("width"),
+                "height": expected_viewport.get("height"),
+            },
+        }
+        actual_page = {field: page.get(field) for field in expected_page}
+        if actual_page != expected_page:
+            issues.append("runtime:state-page")
+            continue
+
+        screenshot_value = page.get("screenshot")
+        if (
+            map_root is None
+            or not isinstance(screenshot_value, str)
+            or not screenshot_value
+        ):
+            issues.append("runtime:state-screenshot")
+            continue
+        raw_path = Path(screenshot_value)
+        screenshot_path = (
+            raw_path.expanduser().resolve()
+            if raw_path.is_absolute()
+            else (map_root / raw_path).resolve()
+        )
+        try:
+            relative_path = screenshot_path.relative_to(map_root).as_posix()
+        except ValueError:
+            issues.append("runtime:state-screenshot")
+            continue
+        if screenshot_path in screenshot_paths:
+            issues.append("runtime:state-screenshot")
+            continue
+        screenshot_paths.add(screenshot_path)
+        try:
+            screenshot_bytes = _read_bytes(screenshot_path, "state screenshot")
+            width, height = _png_dimensions(screenshot_bytes, screenshot_path)
+        except QualificationError:
+            issues.append("runtime:state-screenshot")
+            continue
+        if width != expected_viewport.get("width") or height < expected_viewport.get(
+            "height", 0
+        ):
+            issues.append("runtime:state-screenshot")
+            continue
+        screenshots.append(
+            {
+                "capture_id": capture_id,
+                "path": relative_path,
+                "png_height": height,
+                "png_width": width,
+                "sha256": _sha256(screenshot_bytes),
+            }
+        )
+        state_captures_verified += 1
+
+    if set(pages_by_capture) != {
+        handoff["capture_id"] for handoff in expected_handoffs
+    }:
+        issues.append("runtime:state-page")
+    return {
+        "frontend_map_sha256": actual_map_hash,
+        "frontend_map_verified": len(issues) == issue_count,
+        "state_captures_expected": capture_accounting["expected"],
+        "state_captures_verified": state_captures_verified,
+        "state_screenshots": screenshots,
+        "state_screenshots_verified": len(screenshots),
+    }
 
 
 def _runtime_result(
@@ -584,13 +1123,27 @@ def _runtime_result(
             and actual_digest == screenshot["sha256"]
         ):
             verified += 1
-    return {
+    result = {
         "passed": len(issues) == runtime_issue_count,
         "screenshots_verified": verified,
         "http_status": runtime["http_status"],
         "console_errors_or_warnings": runtime["console_errors_or_warnings"],
         "horizontal_overflow_viewports": runtime["horizontal_overflow_viewports"],
     }
+    result.update(
+        _frontend_map_runtime_result(
+            runtime,
+            artifact_dir,
+            canonical,
+            issues,
+        )
+    )
+    result["failed_or_error_resources"] = runtime.get(
+        "failed_or_error_resources",
+        0,
+    )
+    result["passed"] = len(issues) == runtime_issue_count
+    return result
 
 
 def _completed(
@@ -600,17 +1153,30 @@ def _completed(
     artifact_dir: Path,
     canonical: dict[str, Any],
     brief_issues: list[str],
+    *,
+    v1_required: bool,
 ) -> dict[str, Any]:
     issues = list(brief_issues)
+    if v1_required:
+        _validate_v1_report(report, stale=False, issues=issues)
     status = report.get("status")
-    if not isinstance(status, str) or not (
-        status == "completed" or status.startswith("completed-")
-    ):
+    valid_status = (
+        status in {"completed", "completed-with-runtime-capture-blocker"}
+        if v1_required
+        else isinstance(status, str)
+        and (status == "completed" or status.startswith("completed-"))
+    )
+    if not valid_status:
         issues.append("report:status")
     if report.get("implementation_attempt_count") != 1:
         issues.append("report:implementation-attempt-count")
 
-    source = _completed_source(report, canonical, issues)
+    source = _completed_source(
+        report,
+        canonical,
+        issues,
+        v1_required=v1_required,
+    )
     identities: dict[str, dict[str, Any]] = {}
     specs = (
         ("preserved_contracts", "identity"),
@@ -691,6 +1257,48 @@ def _completed(
             for index, identity in enumerate(canonical[field])
         )
 
+    expected_handoffs = canonical["runtime_state_handoffs"]
+    if v1_required or expected_handoffs:
+        reported_handoffs = report.get("runtime_state_handoffs")
+        rows = reported_handoffs if isinstance(reported_handoffs, list) else []
+        if not isinstance(reported_handoffs, list):
+            issues.append("runtime_state_handoffs:invalid")
+        actual_handoffs = []
+        valid_rows = []
+        for row in rows:
+            projection = _handoff_projection(row)
+            if projection is None:
+                issues.append("runtime_state_handoffs:invalid")
+                continue
+            actual_handoffs.append(projection)
+            valid_rows.append(row)
+        accounting = _account(
+            [_compact_json(row) for row in expected_handoffs],
+            [_compact_json(row) for row in actual_handoffs],
+            "runtime_state_handoffs",
+            issues,
+        )
+        _require_row_field(
+            valid_rows,
+            "runtime_state_handoffs",
+            "disposition",
+            issues,
+        )
+        _require_row_field(
+            valid_rows,
+            "runtime_state_handoffs",
+            "evidence",
+            issues,
+        )
+        accounting["verified"] = sum(
+            index < len(valid_rows)
+            and _handoff_projection(valid_rows[index]) == expected
+            and _valid_row_field(valid_rows[index], "disposition")
+            and _valid_row_field(valid_rows[index], "evidence")
+            for index, expected in enumerate(expected_handoffs)
+        )
+        identities["runtime_state_handoffs"] = accounting
+
     report_viewports = report.get("viewports")
     viewport_names = (
         [
@@ -707,6 +1315,26 @@ def _completed(
         "viewports",
         issues,
     )
+    if v1_required:
+        references = canonical["runtime"].get("screenshots")
+        references = references if isinstance(references, list) else []
+        viewport_rows = report_viewports if isinstance(report_viewports, list) else []
+        verified_viewports = 0
+        for index, viewport in enumerate(canonical["viewports"]):
+            row = viewport_rows[index] if index < len(viewport_rows) else {}
+            if (
+                isinstance(row, dict)
+                and row.get("name") == viewport["name"]
+                and row.get("width") == viewport["width"]
+                and row.get("height") == viewport["height"]
+                and index < len(references)
+                and row.get("reference_screenshot") == references[index]
+                and _valid_row_field(row, "prototype_screenshot")
+            ):
+                verified_viewports += 1
+            else:
+                issues.append("viewports:handoff")
+        viewports["verified"] = verified_viewports
     runtime = _runtime_result(
         attempt,
         artifact_dir,
@@ -742,8 +1370,12 @@ def _stale_stop(
     name: str,
     report: dict[str, Any],
     canonical: dict[str, Any],
+    *,
+    v1_required: bool,
 ) -> dict[str, Any]:
     issues: list[str] = []
+    if v1_required:
+        _validate_v1_report(report, stale=True, issues=issues)
     if report.get("implementation_attempt_count") != 0:
         issues.append("stale-stop:implementation-attempt")
     if (
@@ -878,11 +1510,17 @@ def qualify(
         )
         brief_bytes = _read_bytes(brief_path, "brief")
         brief_hash = _sha256(brief_bytes)
+        v1_required = _v1_report_required(brief_bytes)
         hash_issues = (
             [] if report.get("brief_sha256") == brief_hash else ["brief:sha256"]
         )
         if report.get("status") == "blocked-stale-source":
-            result = _stale_stop(attempt["name"], report, canonical)
+            result = _stale_stop(
+                attempt["name"],
+                report,
+                canonical,
+                v1_required=v1_required,
+            )
             result["issues"] = hash_issues + result["issues"]
             result["passed"] = not result["issues"]
         else:
@@ -899,6 +1537,7 @@ def qualify(
                 report_path.parent,
                 canonical,
                 hash_issues + _brief_issues(text, canonical),
+                v1_required=v1_required,
             )
         result["artifacts"] = {
             "agent_report_sha256": report_hash,

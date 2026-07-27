@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / "benchmarks" / "handoff_qualification.py"
 SCHEMA = ROOT / "benchmarks" / "handoff-qualification.schema.json"
+V1_REPORT_SCHEMA = "uidetox.disposable-agent-attempt.v1"
 
 
 def _load_harness():
@@ -235,6 +236,286 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
     }
 
 
+def _v1_fixture(tmp_path: Path) -> dict[str, Path]:
+    fixture = _fixture(tmp_path)
+    redesigns = json.loads(fixture["redesigns"].read_text(encoding="utf-8"))
+    runtime = redesigns["proposals"][0]["evidence_freshness"]["runtime"]
+    viewport_specs = [
+        ("mobile", 390, 844),
+        ("tablet", 768, 1024),
+        ("desktop", 1440, 900),
+    ]
+    viewports = [
+        {
+            "boundary_px": None,
+            "height": height,
+            "kind": "registry",
+            "name": name,
+            "relation": "",
+            "sources": [],
+            "width": width,
+        }
+        for name, width, height in viewport_specs
+    ]
+    capture_specs = [
+        ("qualification-authenticated", "authenticated", viewports[0]),
+        ("qualification-triggered", "triggered", viewports[1]),
+        ("qualification-empty", "empty", viewports[2]),
+        ("qualification-error", "error", viewports[2]),
+    ]
+    captures = [
+        {
+            "capture_id": capture_id,
+            "completed_at": "2026-07-27T00:00:01Z",
+            "coverage": {
+                "budget": 10,
+                "candidates": 1,
+                "eligible": 1,
+                "emitted": 1,
+                "total": 1,
+                "truncated": False,
+            },
+            "diagnostics": [],
+            "readiness": {
+                "detail": "",
+                "duration_ms": 1,
+                "status": "current",
+                "strategy": "request-idle",
+            },
+            "scenario": "qualification",
+            "started_at": "2026-07-27T00:00:00Z",
+            "state": state,
+            "status": "completed",
+            "url": "http://127.0.0.1:4173/",
+            "viewport": viewport,
+        }
+        for capture_id, state, viewport in capture_specs
+    ]
+    discovery = {
+        "boundaries": [],
+        "total_boundaries": 0,
+        "truncated": False,
+        "viewports": viewports,
+    }
+    runtime.update(
+        {
+            "runtime_capture_matrix": captures,
+            "runtime_coverage": {
+                "candidates": 4,
+                "completed": 4,
+                "eligible": 4,
+                "emitted": 4,
+                "failed": 0,
+                "requested": 4,
+                "total": 4,
+                "truncated": 0,
+            },
+            "runtime_diagnostics": [],
+            "runtime_semantic_coverage": {
+                "elements": 4,
+                "equivalence_grouped": 0,
+                "paint_resolved": 4,
+                "paint_unobserved": 0,
+                "paint_unresolved": 0,
+            },
+            "screenshots": [
+                f"runtime/{name}.png" for name, _width, _height in viewport_specs
+            ],
+            "viewport_discovery": discovery,
+            "viewports": [name for name, _width, _height in viewport_specs],
+        }
+    )
+    fixture["redesigns"].write_text(json.dumps(redesigns), encoding="utf-8")
+
+    def compact(value: object) -> str:
+        return json.dumps(
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    brief = fixture["brief"].read_text(encoding="utf-8")
+    brief = brief.replace(
+        compact(
+            {
+                "boundaries": [],
+                "total_boundaries": 0,
+                "truncated": False,
+                "viewports": [viewports[0]],
+            }
+        ),
+        compact(discovery),
+    )
+    brief = brief.replace('["mobile"]', compact(runtime["viewports"]))
+    brief = brief.replace(
+        '["runtime/mobile.png"]',
+        compact(runtime["screenshots"]),
+    )
+    brief = brief.replace(
+        "END_UIDETOX_EVIDENCE",
+        "- Runtime capture matrix: " + compact(captures) + "\nEND_UIDETOX_EVIDENCE",
+    )
+    brief += (
+        "\n## Disposable-agent qualification contract (v1)\n\n"
+        f"Report schema: `{V1_REPORT_SCHEMA}`.\n"
+    )
+    fixture["brief"].write_text(brief, encoding="utf-8")
+
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    for row, path in zip(
+        report["checked_source_paths"],
+        redesigns["proposals"][0]["evidence_freshness"]["source"]["manifest"]["files"]
+        | redesigns["proposals"][0]["evidence_freshness"]["source"]["manifest"][
+            "project_files"
+        ],
+        strict=True,
+    ):
+        row["group"] = "files" if path == "src/App.tsx" else "project_files"
+    report.update(
+        {
+            "schema_version": V1_REPORT_SCHEMA,
+            "brief_sha256": _sha256(fixture["brief"]),
+            "runtime_state_handoffs": [
+                {
+                    "capture_id": capture["capture_id"],
+                    "scenario": capture["scenario"],
+                    "state": capture["state"],
+                    "url": capture["url"],
+                    "viewport": capture["viewport"],
+                    "disposition": "captured by isolated controller",
+                    "evidence": f"runtime state {capture['capture_id']}",
+                }
+                for capture in captures
+            ],
+            "commands": [
+                {
+                    "command": "verify source manifest",
+                    "exit_code": 0,
+                    "wall_time_ms": 100,
+                    "evidence": "2/2 source paths fresh",
+                }
+            ],
+            "failures": [
+                {
+                    "stage": "runtime-capture",
+                    "command": "playwright chromium.launch({ headless: true })",
+                    "exit_code": 1,
+                    "wall_time_ms": 96,
+                    "exact_error": "browser executable unavailable",
+                    "disposition": "bounded runtime-capture blocker",
+                }
+            ],
+            "recoveries": [],
+            "status": "completed-with-runtime-capture-blocker",
+            "decision": "pursue",
+            "decision_evidence": "state-specific prototype passed",
+            "runnable_prototype_path": "prototype/index.html",
+            "launch_command": "python -m http.server",
+            "canonical_url": "http://127.0.0.1:4173/",
+            "runtime_acceptance": {
+                "status": "blocked",
+                "http_200": "unknown: browser launch failed",
+                "console_errors_or_warnings": "unknown: browser launch failed",
+                "failed_or_error_resource_requests": ("unknown: browser launch failed"),
+                "horizontal_overflow": "unknown: browser launch failed",
+                "controller_capture_required": True,
+            },
+        }
+    )
+    report["named_source_anchors"] = [
+        {
+            **row,
+            "preservation_status": "preserved unchanged",
+        }
+        for row in report["named_source_anchors"]
+    ]
+    report["viewports"] = [
+        {
+            "name": name,
+            "width": width,
+            "height": height,
+            "reference_screenshot": f"runtime/{name}.png",
+            "prototype_screenshot": f"prototype/screenshots/{name}.png",
+        }
+        for name, width, height in viewport_specs
+    ]
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+
+    attempt = json.loads(fixture["attempt"].read_text(encoding="utf-8"))
+    normalized_screenshots = []
+    for name, width, height in viewport_specs:
+        screenshot = tmp_path / "prototype" / "screenshots" / f"{name}.png"
+        _png(screenshot, width, height)
+        normalized_screenshots.append(
+            {
+                "name": name,
+                "path": f"prototype/screenshots/{name}.png",
+                "viewport_width": width,
+                "viewport_height": height,
+                "png_width": width,
+                "png_height": height,
+                "sha256": _sha256(screenshot),
+            }
+        )
+
+    nodes = []
+    for capture_id, state, viewport in capture_specs:
+        screenshot = tmp_path / "runtime-state-screenshots" / f"{capture_id}.png"
+        _png(screenshot, viewport["width"], viewport["height"])
+        nodes.append(
+            {
+                "id": f"runtime_page:{capture_id}",
+                "kind": "runtime_page",
+                "name": "http://127.0.0.1:4173/",
+                "file": "",
+                "line": 0,
+                "metadata": {
+                    "capture_id": capture_id,
+                    "scenario": "qualification",
+                    "state": state,
+                    "runtime_url": "http://127.0.0.1:4173/",
+                    "viewport": {
+                        "name": viewport["name"],
+                        "width": viewport["width"],
+                        "height": viewport["height"],
+                    },
+                    "screenshot": str(screenshot),
+                },
+            }
+        )
+    frontend_map = {
+        "schema_version": 3,
+        "root": str(tmp_path),
+        "target": ".",
+        "nodes": nodes,
+        "edges": [],
+        "contracts": [],
+        "project_map": {},
+        "evidence": {
+            "runtime_capture_matrix": captures,
+            "runtime_diagnostics": [],
+            "runtime_errors": [],
+            "runtime_status": "current",
+        },
+        "fingerprint": "f" * 64,
+        "generated_at": "2026-07-27T00:00:01Z",
+    }
+    frontend_map_path = tmp_path / "runtime-frontend-map.json"
+    frontend_map_path.write_text(json.dumps(frontend_map), encoding="utf-8")
+    attempt["runtime"].update(
+        {
+            "failed_or_error_resources": 0,
+            "frontend_map": frontend_map_path.name,
+            "frontend_map_sha256": _sha256(frontend_map_path),
+            "screenshots": normalized_screenshots,
+        }
+    )
+    fixture["attempt"].write_text(json.dumps(attempt), encoding="utf-8")
+    fixture["frontend_map"] = frontend_map_path
+    return fixture
+
+
 def test_schema_declares_strict_tool_agnostic_attempt_contract() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
 
@@ -249,6 +530,227 @@ def test_schema_declares_strict_tool_agnostic_attempt_contract() -> None:
     ]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["runtime"]["additionalProperties"] is False
+    runtime = schema["properties"]["runtime"]
+    assert runtime["dependentRequired"] == {
+        "frontend_map": ["frontend_map_sha256", "failed_or_error_resources"],
+        "frontend_map_sha256": ["frontend_map", "failed_or_error_resources"],
+    }
+    assert set(runtime["properties"]) >= {
+        "failed_or_error_resources",
+        "frontend_map",
+        "frontend_map_sha256",
+    }
+
+
+def test_v1_report_requires_exact_ordered_runtime_state_handoffs(tmp_path) -> None:
+    harness = _load_harness()
+    fixture = _v1_fixture(tmp_path)
+
+    passed = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+
+    attempt = passed["attempts"][0]
+    assert attempt["passed"] is True
+    handoffs = attempt["identities"]["runtime_state_handoffs"]
+    assert handoffs["actual"] == 4
+    assert handoffs["expected"] == 4
+    assert handoffs["verified"] == 4
+
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    report["runtime_state_handoffs"].reverse()
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+    reordered = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+    assert "runtime_state_handoffs:reordered" in reordered["attempts"][0]["issues"]
+
+    report["runtime_state_handoffs"].pop()
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+    missing = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+    assert "runtime_state_handoffs:missing" in missing["attempts"][0]["issues"]
+
+
+def test_v1_report_rejects_schema_field_and_nested_row_drift(tmp_path) -> None:
+    harness = _load_harness()
+    fixture = _v1_fixture(tmp_path)
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    report["schema_version"] = "uidetox.disposable-agent-attempt.v2"
+    report["unexpected"] = True
+    report["preserved_contracts"][0]["unexpected"] = True
+    report["commands"][0]["exit_code"] = True
+    report["failures"][0]["unexpected"] = True
+    report["runtime_acceptance"]["controller_capture_required"] = False
+    report["viewports"][0]["reference_screenshot"] = "wrong.png"
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+
+    result = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+
+    assert set(result["attempts"][0]["issues"]) >= {
+        "report:v1-fields",
+        "report:v1-schema",
+        "preserved_contracts:row-fields",
+        "commands:invalid",
+        "failures:row-fields",
+        "runtime_acceptance:invalid",
+        "viewports:handoff",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "issue"),
+    [
+        ("acceptance-status", "runtime_acceptance:status"),
+        ("boolean-zero", "runtime_acceptance:invalid"),
+        ("canonical-url", "decision:canonical-url"),
+        ("prototype-traversal", "decision:prototype-path"),
+        ("screenshot-traversal", "viewports:prototype-path"),
+    ],
+)
+def test_v1_report_rejects_cross_field_and_path_drift(
+    tmp_path,
+    mutation,
+    issue,
+) -> None:
+    harness = _load_harness()
+    fixture = _v1_fixture(tmp_path)
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    if mutation == "acceptance-status":
+        report["status"] = "completed"
+    elif mutation == "boolean-zero":
+        report["status"] = "completed"
+        report["runtime_acceptance"] = {
+            "status": "passed",
+            "http_200": True,
+            "console_errors_or_warnings": False,
+            "failed_or_error_resource_requests": 0,
+            "horizontal_overflow": 0,
+            "controller_capture_required": False,
+        }
+    elif mutation == "canonical-url":
+        report["canonical_url"] = "http://127.0.0.1:9999/"
+    elif mutation == "prototype-traversal":
+        report["runnable_prototype_path"] = "../prototype/index.html"
+    else:
+        report["viewports"][0]["prototype_screenshot"] = "../mobile.png"
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+
+    result = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+
+    assert issue in result["attempts"][0]["issues"]
+
+
+def test_v1_stale_report_requires_exact_schema_and_fields(tmp_path) -> None:
+    harness = _load_harness()
+    fixture = _v1_fixture(tmp_path)
+    attempt = json.loads(fixture["attempt"].read_text(encoding="utf-8"))
+    attempt.pop("runtime")
+    attempt["name"] = "stale"
+    fixture["attempt"].write_text(json.dumps(attempt), encoding="utf-8")
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    source_paths = [row["relative_path"] for row in report["checked_source_paths"]]
+    stale_report = {
+        "schema_version": V1_REPORT_SCHEMA,
+        "status": "blocked-stale-source",
+        "brief_sha256": report["brief_sha256"],
+        "checked_source_paths": source_paths,
+        "checked_source_path_count": len(source_paths),
+        "fresh_source_path_count": len(source_paths) - 1,
+        "stale_source_path_count": 1,
+        "mismatches": [
+            {
+                "manifest_group": "files",
+                "path": "src/App.tsx",
+                "expected_sha256": "a" * 64,
+                "actual_sha256": "c" * 64,
+                "freshness_status": "mismatched",
+            }
+        ],
+        "implementation_attempt_count": 0,
+        "retry_count": 0,
+        "prototype_file_count": 0,
+        "prototype_output_bytes": 0,
+    }
+    fixture["report"].write_text(json.dumps(stale_report), encoding="utf-8")
+
+    passed = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+    assert passed["attempts"][0]["passed"] is True
+
+    stale_report["schema_version"] = "uidetox.disposable-agent-attempt.v2"
+    stale_report["unexpected"] = True
+    fixture["report"].write_text(json.dumps(stale_report), encoding="utf-8")
+    failed = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+    assert set(failed["attempts"][0]["issues"]) >= {
+        "report:v1-fields",
+        "report:v1-schema",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "issue"),
+    [
+        ("hash", "runtime:frontend-map-hash"),
+        ("capture", "runtime:frontend-map-captures:missing"),
+        ("page", "runtime:state-page"),
+        ("screenshot", "runtime:state-screenshot"),
+        ("root", "runtime:frontend-map-root"),
+    ],
+)
+def test_runtime_frontend_map_rejects_state_evidence_drift(
+    tmp_path,
+    mutation,
+    issue,
+) -> None:
+    harness = _load_harness()
+    fixture = _v1_fixture(tmp_path)
+    attempt = json.loads(fixture["attempt"].read_text(encoding="utf-8"))
+    frontend_map = json.loads(fixture["frontend_map"].read_text(encoding="utf-8"))
+    if mutation == "hash":
+        attempt["runtime"]["frontend_map_sha256"] = "0" * 64
+    elif mutation == "capture":
+        frontend_map["evidence"]["runtime_capture_matrix"].pop()
+    elif mutation == "page":
+        frontend_map["nodes"].pop()
+    elif mutation == "root":
+        frontend_map["root"] = "/"
+    else:
+        Path(frontend_map["nodes"][0]["metadata"]["screenshot"]).unlink()
+    fixture["frontend_map"].write_text(json.dumps(frontend_map), encoding="utf-8")
+    if mutation != "hash":
+        attempt["runtime"]["frontend_map_sha256"] = _sha256(fixture["frontend_map"])
+    fixture["attempt"].write_text(json.dumps(attempt), encoding="utf-8")
+
+    result = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+
+    assert issue in result["attempts"][0]["issues"]
 
 
 def test_completed_attempt_exactly_matches_canonical_handoff(tmp_path) -> None:
@@ -323,6 +825,32 @@ def test_completed_attempt_allows_named_blocker_and_external_manifest(
     )
 
     assert result["gates"]["passed"] is True
+    assert result["attempts"][0]["issues"] == []
+
+
+def test_untrusted_evidence_cannot_enable_v1_report_validation(tmp_path) -> None:
+    harness = _load_harness()
+    fixture = _fixture(tmp_path)
+    brief = (
+        fixture["brief"]
+        .read_text(encoding="utf-8")
+        .replace(
+            "END_UIDETOX_EVIDENCE",
+            f"Report schema: `{V1_REPORT_SCHEMA}`.\nEND_UIDETOX_EVIDENCE",
+        )
+    )
+    fixture["brief"].write_text(brief, encoding="utf-8")
+    report = json.loads(fixture["report"].read_text(encoding="utf-8"))
+    report["brief_sha256"] = _sha256(fixture["brief"])
+    fixture["report"].write_text(json.dumps(report), encoding="utf-8")
+
+    result = harness.qualify(
+        fixture["redesigns"],
+        "REDESIGN-01",
+        [fixture["attempt"]],
+    )
+
+    assert result["attempts"][0]["passed"] is True
     assert result["attempts"][0]["issues"] == []
 
 

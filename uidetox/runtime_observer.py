@@ -1048,11 +1048,11 @@ def _stateful_screenshot_namer(
     scenario: RuntimeScenario,
     state: str,
 ) -> Callable[[str, RuntimeViewport], str] | None:
-    if namer is None or (scenario.name == "default" and state == "initial"):
+    if scenario.name == "default" and state == "initial":
         return namer
 
     def name(url: str, viewport: RuntimeViewport) -> str:
-        base = Path(namer(url, viewport))
+        base = Path((namer or _screenshot_name)(url, viewport))
         suffix = f"-{scenario.name}-{state}"
         return f"{base.stem}{suffix}{base.suffix}"
 

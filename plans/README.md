@@ -36,7 +36,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 023 | Deterministic handoff qualification schema and runner | P1 | M | 022 | DONE |
 | 024 | Disposable-agent handoff repeatability matrix | P1 | M | 023 | DONE — 3/3 fresh agents pass; 1.0 accuracy; 1,425 tests; production LOC ±0 |
 | 025 | Prototype qualification contract and runtime-state handoff | P1 | M | 024 | DONE — 4/4 states and 3/3 viewports preserved; 1,425 tests; v1 contract emitted |
-| 026 | Deterministic v1 report validation and executable state qualification | P1 | M | 025 | TODO |
+| 026 | Deterministic v1 report validation and executable state qualification | P1 | M | 025 | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

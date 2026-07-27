@@ -1865,6 +1865,35 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
     assert not list(tmp_path.glob(".*.tmp"))
 
 
+def test_default_screenshot_namer_preserves_scenario_state_identity() -> None:
+    scenario = RuntimeScenario(
+        name="qualification",
+        url="http://127.0.0.1:4173/",
+    )
+    viewport = VIEWPORT_REGISTRY["desktop"]
+
+    empty = runtime_observer._stateful_screenshot_namer(None, scenario, "empty")
+    error = runtime_observer._stateful_screenshot_namer(None, scenario, "error")
+    base = Path(runtime_observer._screenshot_name(scenario.url, viewport))
+
+    assert empty is not None
+    assert error is not None
+    assert empty(scenario.url, viewport) == (
+        f"{base.stem}-qualification-empty{base.suffix}"
+    )
+    assert error(scenario.url, viewport) == (
+        f"{base.stem}-qualification-error{base.suffix}"
+    )
+    assert (
+        runtime_observer._stateful_screenshot_namer(
+            None,
+            RuntimeScenario(name="default", url=scenario.url),
+            "initial",
+        )
+        is None
+    )
+
+
 def test_observer_screenshot_failure_preserves_existing_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
