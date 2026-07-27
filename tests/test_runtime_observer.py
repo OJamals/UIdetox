@@ -280,6 +280,14 @@ def test_observation_rejects_capture_url_outside_requested_urls() -> None:
         )
 
 
+def test_observation_from_dict_rejects_non_object_capture() -> None:
+    with pytest.raises(
+        TypeError,
+        match="Runtime observation contains an invalid capture row",
+    ):
+        RuntimeObservation.from_dict({"captures": ["invalid"]})
+
+
 def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -531,6 +531,9 @@ class RuntimeObservation:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeObservation":
+        capture_rows = tuple(value.get("captures", []))
+        if not all(isinstance(capture, dict) for capture in capture_rows):
+            raise TypeError("Runtime observation contains an invalid capture row.")
         return cls(
             generated_at=str(value.get("generated_at", "")),
             requested_urls=tuple(str(url) for url in value.get("requested_urls", [])),
@@ -540,8 +543,7 @@ class RuntimeObservation:
             errors=tuple(str(error) for error in value.get("errors", [])),
             captures=tuple(
                 RuntimeCaptureRecord.from_dict(dict(capture))
-                for capture in value.get("captures", [])
-                if isinstance(capture, dict)
+                for capture in capture_rows
             ),
             viewport_discovery=(
                 RuntimeViewportDiscovery.from_dict(dict(value["viewport_discovery"]))

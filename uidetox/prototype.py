@@ -286,8 +286,6 @@ def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
     captures = runtime.get("runtime_capture_matrix", [])
     if not isinstance(captures, list):
         raise TypeError("Runtime capture matrix must be a list.")
-    if not all(isinstance(capture, dict) for capture in captures):
-        raise TypeError("Runtime capture matrix contains an invalid row.")
     RuntimeObservation.from_dict(
         {
             "generated_at": runtime.get("generated_at", ""),
