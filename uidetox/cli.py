@@ -105,12 +105,6 @@ def _get_commands_dirs() -> list[Path]:
     return command_dirs
 
 
-def _get_commands_dir() -> Path | None:
-    """Return the primary commands directory for compatibility callers."""
-    command_dirs = _get_commands_dirs()
-    return command_dirs[0] if command_dirs else None
-
-
 def _iter_dynamic_skill_names() -> list[str]:
     """Return the union of dynamic skill names across all known command sources."""
     skills: set[str] = set()

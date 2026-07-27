@@ -111,20 +111,6 @@ def test_missing_playwright_explains_capture_setup(
     assert CHROMIUM_COMMAND in error
 
 
-def test_missing_pillow_explains_capture_setup(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _block_imports(monkeypatch, {"PIL"})
-
-    result = capture._generate_visual_diff(
-        tmp_path / "before.png", tmp_path / "after.png"
-    )
-
-    assert CAPTURE_EXTRA_COMMAND in result["note"]
-    assert CHROMIUM_COMMAND in result["note"]
-
-
 def test_missing_pillow_explains_visual_extra(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

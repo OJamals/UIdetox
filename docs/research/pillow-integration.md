@@ -18,7 +18,12 @@ Keep Pillow as an optional `capture` dependency. Deepen its use inside a dedicat
 
 Highest-value change is architectural: consolidate screenshot acquisition around `runtime_observer.observe_frontend()`, then make a new Pillow-backed visual-evidence module consume its screenshots and `RuntimeElement.bounds`. This removes the duplicate Playwright path in `capture.py` and connects pixel evidence to UIdetox's existing semantic runtime map.
 
-## Current implementation
+## Baseline implementation at research time
+
+> Status update, 2026-07-26: the dedicated typed visual-evidence pipeline is
+> now canonical. `capture.py` orchestrates that pipeline directly, and the
+> orphaned `_generate_visual_diff()` compatibility adapter has been removed.
+> The table below records the pre-migration baseline, not current code.
 
 | Seam | Current behavior | Assessment |
 | --- | --- | --- |

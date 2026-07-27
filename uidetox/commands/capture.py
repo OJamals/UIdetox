@@ -199,55 +199,6 @@ def _capture_named_stage(
     return captured, observation
 
 
-def _generate_visual_diff(before_path: Path, after_path: Path) -> dict:
-    """Generate a visual diff summary between before and after screenshots.
-
-    Compatibility adapter over the typed visual-evidence engine.
-    """
-    diff_info = {
-        "before": str(before_path),
-        "after": str(after_path),
-        "timestamp": now_iso(),
-    }
-
-    try:
-        manifest = build_visual_evidence(
-            VisualEvidenceRequest(
-                comparisons=(
-                    VisualEvidenceCase(
-                        case_id=f"{before_path.stem}_{after_path.stem}",
-                        before_path=before_path,
-                        after_path=after_path,
-                    ),
-                ),
-                output_dir=before_path.parent,
-            )
-        )
-        comparison = manifest.comparisons[0]
-        diff_info.update(
-            {
-                "diff_image": str(comparison.artifacts[0].path),
-                "change_percentage": comparison.metrics.change_percentage,
-                "pixels_changed": comparison.metrics.pixels_changed,
-                "total_pixels": comparison.metrics.total_pixels,
-                "coverage_band": comparison.metrics.coverage_band,
-            }
-        )
-    except VisualEvidenceError as error:
-        if error.code == "missing_dependency":
-            diff_info["note"] = (
-                "Pillow not installed — pixel diff unavailable. Compare screenshots "
-                f"manually.\n{_CAPTURE_INSTALL_GUIDANCE}"
-            )
-        else:
-            diff_info["error_code"] = error.code
-            diff_info["error"] = str(error)
-    except Exception as e:
-        diff_info["error"] = str(e)
-
-    return diff_info
-
-
 def _atomic_write_json(path: Path, payload: dict) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     try:
@@ -507,9 +458,7 @@ def run(args: argparse.Namespace):
     snapshots = _snapshots_dir()
     visual_options = _visual_options(args, config, snapshots)
     visual_options["expected_viewports"] = (
-        tuple(VIEWPORT_REGISTRY)
-        if responsive
-        else ("desktop",)
+        tuple(VIEWPORT_REGISTRY) if responsive else ("desktop",)
     )
 
     if not _server_is_reachable(url):
@@ -557,8 +506,7 @@ def run(args: argparse.Namespace):
         )
         if observation is not None and observation.viewport_discovery is not None:
             visual_options["expected_viewports"] = tuple(
-                viewport.name
-                for viewport in observation.viewport_discovery.viewports
+                viewport.name for viewport in observation.viewport_discovery.viewports
             )
         if responsive:
             if captured:

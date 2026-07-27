@@ -41,6 +41,47 @@ def _request(
     return VisualEvidenceRequest(**values)  # type: ignore[arg-type]
 
 
+def _save_changed_image(path: Path, size: tuple[int, int], changed: int) -> None:
+    image = Image.new("RGB", size, (0, 0, 0))
+    pixels = image.load()
+    for index in range(changed):
+        pixels[index % size[0], index // size[0]] = (31, 0, 0)
+    image.save(path)
+
+
+@pytest.mark.parametrize(
+    ("changed", "percentage", "coverage_band"),
+    [
+        (1, 0.05, "trace"),
+        (2, 0.1, "localized"),
+        (99, 4.95, "localized"),
+        (100, 5.0, "noticeable"),
+        (399, 19.95, "noticeable"),
+        (400, 20.0, "broad"),
+        (999, 49.95, "broad"),
+        (1000, 50.0, "extensive"),
+    ],
+)
+def test_visual_diff_coverage_band_boundaries(
+    tmp_path: Path,
+    changed: int,
+    percentage: float,
+    coverage_band: str,
+) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    _save_changed_image(before, (100, 20), 0)
+    _save_changed_image(after, (100, 20), changed)
+
+    comparison = build_visual_evidence(_request(tmp_path, before, after)).comparisons[0]
+
+    assert comparison.metrics.change_percentage == percentage
+    assert comparison.metrics.pixels_changed == changed
+    assert comparison.metrics.total_pixels == 2000
+    assert comparison.metrics.coverage_band == coverage_band
+    assert comparison.artifacts[0].path.is_file()
+
+
 def test_visual_evidence_rejects_url_sources_without_fetching(
     tmp_path: Path,
 ) -> None:

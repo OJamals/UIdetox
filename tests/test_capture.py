@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import builtins
 import json
-import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
 
 from uidetox.commands import capture
 from uidetox.runtime_observer import (
@@ -17,14 +15,6 @@ from uidetox.runtime_observer import (
     RuntimePage,
     RuntimeViewport,
 )
-
-
-def _save_changed_image(path: Path, size: tuple[int, int], changed: int) -> None:
-    image = Image.new("RGB", size, (0, 0, 0))
-    pixels = image.load()
-    for index in range(changed):
-        pixels[index % size[0], index // size[0]] = (31, 0, 0)
-    image.save(path)
 
 
 def _observation(
@@ -49,96 +39,6 @@ def _observation(
         pages=pages,
         errors=errors,
     )
-
-
-@pytest.mark.parametrize(
-    ("changed", "percentage", "coverage_band"),
-    [
-        (1, 0.05, "trace"),
-        (2, 0.1, "localized"),
-        (99, 4.95, "localized"),
-        (100, 5.0, "noticeable"),
-        (399, 19.95, "noticeable"),
-        (400, 20.0, "broad"),
-        (999, 49.95, "broad"),
-        (1000, 50.0, "extensive"),
-    ],
-)
-def test_visual_diff_coverage_band_boundaries(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    changed: int,
-    percentage: float,
-    coverage_band: str,
-) -> None:
-    before = tmp_path / "before.png"
-    after = tmp_path / "after.png"
-    _save_changed_image(before, (100, 20), 0)
-    _save_changed_image(after, (100, 20), changed)
-    monkeypatch.setattr(capture, "now_iso", lambda: "2026-07-16T00:00:00Z")
-
-    result = capture._generate_visual_diff(before, after)
-
-    assert result == {
-        "before": str(before),
-        "after": str(after),
-        "timestamp": "2026-07-16T00:00:00Z",
-        "diff_image": str(tmp_path / "diff_before_after.png"),
-        "change_percentage": percentage,
-        "pixels_changed": changed,
-        "total_pixels": 2000,
-        "coverage_band": coverage_band,
-    }
-    assert Path(result["diff_image"]).is_file()
-
-
-def test_visual_diff_identical_images_and_amplified_output(tmp_path: Path) -> None:
-    before = tmp_path / "same-before.png"
-    after = tmp_path / "same-after.png"
-    Image.new("RGB", (2, 1), (0, 0, 0)).save(before)
-    changed = Image.new("RGB", (2, 1), (0, 0, 0))
-    changed.putpixel((1, 0), (20, 20, 0))
-    changed.save(after)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        result = capture._generate_visual_diff(before, before)
-        changed_result = capture._generate_visual_diff(before, after)
-
-    assert result["change_percentage"] == 0
-    assert result["pixels_changed"] == 0
-    assert result["coverage_band"] == "trace"
-
-    assert changed_result["change_percentage"] == 50.0
-    assert changed_result["pixels_changed"] == 1
-    with Image.open(changed_result["diff_image"]) as diff:
-        assert diff.getpixel((1, 0)) == (160, 160, 0)
-
-
-def test_visual_diff_rounds_percentage_to_two_decimals(tmp_path: Path) -> None:
-    before = tmp_path / "before.png"
-    after = tmp_path / "after.png"
-    _save_changed_image(before, (20, 15), 0)
-    _save_changed_image(after, (20, 15), 1)
-
-    result = capture._generate_visual_diff(before, after)
-
-    assert result["pixels_changed"] == 1
-    assert result["total_pixels"] == 300
-    assert result["change_percentage"] == 0.33
-
-
-def test_visual_diff_rejects_mismatched_dimensions(tmp_path: Path) -> None:
-    before = tmp_path / "before.png"
-    after = tmp_path / "after.png"
-    Image.new("RGB", (2, 1), (0, 0, 0)).save(before)
-    Image.new("RGB", (1, 2), (0, 0, 0)).save(after)
-
-    result = capture._generate_visual_diff(before, after)
-
-    assert result["error_code"] == "dimension_mismatch"
-    assert "2x1" in result["error"]
-    assert "1x2" in result["error"]
 
 
 def test_capture_screenshot_missing_package_is_actionable(
@@ -312,10 +212,7 @@ def test_responsive_capture_uses_source_boundary_discovery(
 
     assert observation is not None
     assert observation.viewport_discovery is observed["discovery"]
-    widths = {
-        viewport.width
-        for viewport, _path in observed["destinations"]
-    }
+    widths = {viewport.width for viewport, _path in observed["destinations"]}
     assert {639, 641}.issubset(widths)
     probes = [
         viewport
