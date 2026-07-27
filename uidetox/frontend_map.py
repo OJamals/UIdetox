@@ -316,21 +316,29 @@ def map_frontend(
             signal_counts[region.name] += 1
 
         ui_owners = set(record.component_ids)
-        actions = Counter(
-            (item.owner, item.name, item.target) for item in facts.actions
+        actions: dict[tuple[str, str, str], list[int]] = {}
+        ui_actions_by_call_owner: dict[str, dict[str, set[str]]] = defaultdict(
+            lambda: defaultdict(set)
         )
-        for (action_owner, name, action_target), count in sorted(actions.items()):
+        for action in facts.actions:
+            key = (action.owner, action.name, action.target)
+            summary = actions.setdefault(key, [action.line, 0])
+            summary[1] += 1
+            ui_actions_by_call_owner[action.owner][action.owner].add(action.name)
+            # Empty targets collapse onto the already-indexed direct owner.
+            ui_actions_by_call_owner[action.target or action.owner][action.owner].add(
+                action.name
+            )
+
+        for (
+            action_owner,
+            name,
+            action_target,
+        ), (first_line, count) in sorted(actions.items()):
             action_id = _node_id(
                 "action",
                 relative_path,
                 f"{action_owner}:{name}:{action_target}",
-            )
-            first_line = next(
-                item.line
-                for item in facts.actions
-                if item.owner == action_owner
-                and item.name == name
-                and item.target == action_target
             )
             nodes.append(
                 FrontendNode(
@@ -356,7 +364,11 @@ def map_frontend(
                 )
             )
 
+        ui_states_by_owner: dict[str, set[str]] = defaultdict(set)
         for state in facts.states:
+            ui_states_by_owner[state.owner].update(
+                filter(None, (_contract_ui_state(state.name),))
+            )
             state_id = _node_id("state", relative_path, state.owner, state.name)
             nodes.append(
                 FrontendNode(
@@ -381,15 +393,11 @@ def map_frontend(
             )
 
         call_count = len(facts.network_calls)
-        action_ui_owners: dict[str, set[str]] = defaultdict(set)
-        for action in facts.actions:
-            if action.target and action.owner in ui_owners:
-                action_ui_owners[action.target].add(action.owner)
 
         def ui_owner_for_call(call_owner: str) -> str:
             if call_owner in ui_owners:
                 return call_owner
-            owners = action_ui_owners.get(call_owner, set())
+            owners = ui_actions_by_call_owner.get(call_owner, {}).keys() & ui_owners
             return next(iter(owners)) if len(owners) == 1 else ""
 
         call_ui_owners = {
@@ -420,21 +428,10 @@ def map_frontend(
             attributable_ui = bool(
                 call_ui_owner and call_counts_by_ui_owner[call_ui_owner] == 1
             )
-            state_names = {
-                state
-                for state in (
-                    _contract_ui_state(item.name)
-                    for item in facts.states
-                    if item.owner == call_ui_owner
-                )
-                if state is not None
-            }
-            action_names = {
-                item.name
-                for item in facts.actions
-                if item.owner == call_ui_owner
-                and (call.owner == call_ui_owner or item.target == call.owner)
-            }
+            state_names = ui_states_by_owner.get(call_ui_owner, set())
+            action_names = ui_actions_by_call_owner.get(call.owner, {}).get(
+                call_ui_owner, set()
+            )
             request_contracts = {
                 reference: module.contracts[reference]
                 for reference in call.request_type_refs
