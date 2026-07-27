@@ -32,6 +32,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 019 | Replace guessed color checks with semantic design-quality evidence | P1 | L | 015, 016, 018 | DONE — merged as `591f306`; post-integration review clean; 1,396 tests pass |
 | 020 | Reproducible runtime-performance qualification and semantic hardening | P1 | M | 019 | DONE — merged as `8bda5d4`; 1,412 tests pass; generic ≤+1.15%, controls improved, geometry ≥30.72% faster |
 | 021 | Source-scope contract evidence and bound agent handoffs | P1 | M | 017, 019, 020 | DONE — 1,416 tests pass; prototype -84.28%; no all-to-all evidence |
+| 022 | End-to-end disposable-agent handoff qualification | P1 | M | 021 | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

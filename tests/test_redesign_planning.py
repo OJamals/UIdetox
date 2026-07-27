@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from pathlib import Path
 
@@ -382,10 +383,107 @@ def test_current_runtime_evidence_has_provenance_and_observable_check(
         "generated_at": "2026-07-17T00:00:00Z",
         "urls": ["http://localhost:3000/"],
         "viewports": ["desktop"],
+        "viewport_discovery": {},
         "screenshots": [],
         "stale_reason": None,
     }
     assert any(item.startswith("Runtime check:") for item in proposal.observable_checks)
+
+
+def test_prototype_brief_preserves_agent_handoff_inside_evidence_boundary(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        "export function App() { return <main />; }",
+        encoding="utf-8",
+    )
+    runtime = RuntimeObservation(
+        generated_at="2026-07-17T00:00:00Z",
+        requested_urls=(
+            "http://localhost:3000/",
+            "http://localhost:3000/projects",
+        ),
+        pages=(
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("mobile", 390, 844),
+                elements=(),
+                screenshot="runtime/mobile.png",
+            ),
+            RuntimePage(
+                url="http://localhost:3000/",
+                title="App",
+                viewport=RuntimeViewport("desktop", 1440, 900),
+                elements=(),
+                screenshot="runtime/desktop.png",
+            ),
+            RuntimePage(
+                url="http://localhost:3000/projects",
+                title="Projects",
+                viewport=RuntimeViewport("tablet", 768, 1024),
+                elements=(),
+                screenshot="runtime/tablet.png",
+            ),
+        ),
+    )
+
+    frontend_map = map_frontend(tmp_path, "src", runtime)
+    frontend_map.evidence["runtime_viewport_discovery"] = {
+        "viewports": [
+            {"name": "mobile", "width": 390, "height": 844},
+            {"name": "tablet", "width": 768, "height": 1024},
+            {"name": "desktop", "width": 1440, "height": 900},
+        ],
+        "boundaries": [],
+        "truncated": False,
+        "total_boundaries": 0,
+    }
+    redesigns = propose_redesigns(frontend_map, RedesignBrief(variants=1))
+    proposal = redesigns.proposals[0]
+    runtime_freshness = proposal.evidence_freshness["runtime"]
+    brief = build_prototype_brief(redesigns, proposal.id)
+    evidence_start = brief.index("\nBEGIN_UIDETOX_EVIDENCE\n")
+    evidence_end = brief.index("\nEND_UIDETOX_EVIDENCE\n")
+    evidence = brief[evidence_start:evidence_end]
+    source_manifest = json.dumps(
+        proposal.evidence_freshness["source"]["manifest"],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    assert f"- Source manifest: {source_manifest}" in evidence
+    assert source_manifest not in brief[:evidence_start]
+    assert source_manifest not in brief[evidence_end:]
+    assert "Preserved contracts:" in evidence
+    for contract in proposal.preserved_contracts:
+        assert f"- {contract}" in evidence
+    viewport_discovery = json.dumps(
+        runtime_freshness["viewport_discovery"],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert f"- Runtime viewport discovery: {viewport_discovery}" in evidence
+    assert viewport_discovery not in brief[:evidence_start]
+    assert viewport_discovery not in brief[evidence_end:]
+    for label, key in (
+        ("Runtime URLs", "urls"),
+        ("Runtime viewports", "viewports"),
+        ("Runtime screenshots", "screenshots"),
+    ):
+        value = json.dumps(
+            runtime_freshness[key],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        assert f"- {label}: {value}" in evidence
+        assert value not in brief[:evidence_start]
+        assert value not in brief[evidence_end:]
+    assert "Verify every source hash before editing; stop on any mismatch." in brief
 
 
 def test_redesign_command_retains_runtime_as_stale_on_automatic_refresh(

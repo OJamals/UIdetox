@@ -845,6 +845,9 @@ def _proposal_evidence_freshness(frontend_map: FrontendMap) -> dict[str, Any]:
             "generated_at": evidence.get("runtime_generated_at"),
             "urls": list(evidence.get("runtime_urls", [])),
             "viewports": list(evidence.get("runtime_viewports", [])),
+            "viewport_discovery": dict(
+                evidence.get("runtime_viewport_discovery") or {}
+            ),
             "screenshots": list(evidence.get("runtime_screenshots", [])),
             "stale_reason": stale_reason,
         },

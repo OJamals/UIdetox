@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
@@ -109,6 +110,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             "- Reuse production types and local fixtures; replace remote effects with inert adapters.",
             "- Implement all listed layout regions and responsive modes.",
             "- Preserve keyboard access, visible focus, semantic landmarks, and reading order.",
+            "- Verify every source hash before editing; stop on any mismatch.",
             "- Record what the prototype proves, disproves, and leaves unknown.",
             "- Stop after the questions are answered; production hardening belongs in a later implementation issue.",
             "",
@@ -125,9 +127,17 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             *(source_evidence or ["- None mapped."]),
             "Dependency-aware migration plan:",
             *(migration_evidence or ["- None mapped."]),
+            "Preserved contracts:",
+            *_bullets(proposal.preserved_contracts),
             "Evidence freshness:",
             f"- Source: {source_freshness.get('status', 'unknown')}",
+            f"- Source manifest: {_evidence_json(source_freshness.get('manifest', {}))}",
             f"- Runtime: {runtime_freshness.get('status', 'unknown')}",
+            f"- Runtime URLs: {_evidence_json(runtime_freshness.get('urls', []))}",
+            f"- Runtime viewports: {_evidence_json(runtime_freshness.get('viewports', []))}",
+            "- Runtime viewport discovery: "
+            + _evidence_json(runtime_freshness.get("viewport_discovery", {})),
+            f"- Runtime screenshots: {_evidence_json(runtime_freshness.get('screenshots', []))}",
             (
                 "- Runtime stale reason: " + str(runtime_freshness.get("stale_reason"))
                 if runtime_freshness.get("stale_reason")
@@ -222,6 +232,15 @@ def _select_proposal(redesign_set: RedesignSet, proposal_id: str) -> RedesignPro
 
 def _safe_slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "prototype"
+
+
+def _evidence_json(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _bullets(items: tuple[str, ...]) -> list[str]:
