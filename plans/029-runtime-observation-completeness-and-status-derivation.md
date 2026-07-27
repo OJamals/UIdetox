@@ -2,7 +2,7 @@
 
 ## Status
 
-IN PROGRESS
+DONE
 
 ## Magic moment
 
@@ -196,12 +196,12 @@ already-required canonical capture traversal.
 
 **Acceptance criteria:**
 
-- [ ] Commit and push only after every required gate passes.
-- [ ] Refresh graph after the source commit.
-- [ ] Prove `HEAD == master == origin/master == remote refs/heads/master`.
-- [ ] Root is clean; one worktree; only `master`; archival stashes exact; no
+- [x] Commit and push only after every required gate passes.
+- [x] Refresh graph after the source commit.
+- [x] Prove `HEAD == master == origin/master == remote refs/heads/master`.
+- [x] Root is clean; one worktree; only `master`; archival stashes exact; no
       test, qualification, Playwright, or Chromium workload remains.
-- [ ] No release, tag, or PyPI action occurs.
+- [x] No release, tag, or PyPI action occurs.
 
 **Dependencies:** Task 4
 
@@ -214,9 +214,9 @@ already-required canonical capture traversal.
       consumer boundaries remain compatible.
 - [x] Canonical artifacts replay and historical failures remain intentional.
 - [x] Full repository/package/invariant/review gates pass.
-- [ ] Local/origin/server SHA parity is proven after graph refresh.
+- [x] Local/origin/server SHA parity is proven after graph refresh.
 
-## Pre-integration execution results
+## Execution results
 
 - Capture passes fell from four to one. Page passes remained three.
 - Constructor-state distribution stayed exact:
@@ -229,7 +229,7 @@ already-required canonical capture traversal.
 - Scoped Ruff `E4/E7/E9/F/I`, Ruff format, unused-symbol coverage through Ruff
   `F`, full `compileall`, and `git diff --check` passed.
 - Production delta is `+16/-17`, net `-1` LOC. Tests are unchanged. Plan/docs
-  add 231 lines before final result updates. Production function count remains
+  add 290 lines. Production function count remains
   982 and class/model count remains 132; no symbol was added or removed.
 - Removed code: three post-validation capture scans and the redundant
   integer-count form of the five-way status decision. Added functions, types,
@@ -254,6 +254,13 @@ already-required canonical capture traversal.
   `141da884d26cac1bced1fe074680e4d8ec55fd027bec0acad33a4b55f1c5411f`.
 - Qualification evidence:
   `/Users/omar/Documents/Projects/.uidetox-qualification/029.CGurhh`.
+- Source commit:
+  `5a0d51cf079461261fe61785e58f10b1cfa482df`.
+- Graph refresh commit:
+  `6fdd593e9b8b5c34a5410b5e803b0e272d27b01d`; refreshed graph contains
+  6,027 nodes and 25,673 edges.
+- `HEAD`, `master`, `origin/master`, and remote `refs/heads/master` matched the
+  graph refresh commit after push.
 - Multi-axis review verdict: **APPROVE**. Correctness truth table is identical;
   control flow is smaller; authority stays in `RuntimeObservation`; no
   security boundary changes; capture aggregation drops from four linear passes

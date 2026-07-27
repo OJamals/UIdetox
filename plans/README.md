@@ -39,7 +39,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 026 | Deterministic v1 report validation and executable state qualification | P1 | M | 025 | DONE — 4/4 states; 1.0 accuracy; 1,440 tests; production +32 LOC |
 | 027 | Canonical runtime capture identity | P1 | S | 026 | DONE — 1,443 tests; production -1 LOC; graph 6,031/25,164 |
 | 028 | Runtime capture uniqueness and redirect semantics | P1 | S | 027 | DONE |
-| 029 | Runtime observation completeness and status derivation | P1 | S | 028 | IN PROGRESS |
+| 029 | Runtime observation completeness and status derivation | P1 | S | 028 | DONE — 1,451 tests; production -1 LOC; graph 6,027/25,673 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
