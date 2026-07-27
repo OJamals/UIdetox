@@ -723,20 +723,18 @@ def map_frontend(
         }
         for finding in _runtime_diagnostic_findings(runtime_captures)
     ]
-    runtime_findings = [
-        *element_runtime_findings,
-        *diagnostic_runtime_findings,
-    ]
+    runtime_findings = [*element_runtime_findings, *diagnostic_runtime_findings]
     runtime_finding_counts = Counter(finding["code"] for finding in runtime_findings)
     runtime_diagnostics = [
         asdict(diagnostic)
         for capture in runtime_captures
         for diagnostic in capture.diagnostics
     ]
+    runtime_status_counts = Counter(capture.status for capture in runtime_captures)
     runtime_coverage = {
         "requested": len(runtime_captures),
-        "completed": sum(capture.status == "completed" for capture in runtime_captures),
-        "failed": sum(capture.status == "failed" for capture in runtime_captures),
+        "completed": runtime_status_counts["completed"],
+        "failed": runtime_status_counts["failed"],
         "truncated": sum(capture.coverage.truncated for capture in runtime_captures),
         "total": sum(capture.coverage.total for capture in runtime_captures),
         "candidates": sum(capture.coverage.candidates for capture in runtime_captures),
