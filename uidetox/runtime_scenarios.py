@@ -621,6 +621,14 @@ class RuntimeCaptureRecord:
     diagnostics: tuple[RuntimeDiagnostic, ...] = ()
 
     def __post_init__(self) -> None:
+        expected = runtime_capture_id(
+            self.scenario, self.state, self.url, self.viewport
+        )
+        if self.capture_id != expected:
+            raise ValueError(
+                "Runtime capture identity is not executable: "
+                f"expected {expected!r}, got {self.capture_id!r}."
+            )
         if self.status not in {"completed", "failed"}:
             raise ValueError("Runtime capture status must be completed or failed.")
 

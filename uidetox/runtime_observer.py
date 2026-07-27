@@ -414,14 +414,8 @@ def _attach_design_findings(page: RuntimePage) -> RuntimePage:
 
 
 def _legacy_capture(page: RuntimePage, generated_at: str) -> RuntimeCaptureRecord:
-    capture_id = page.capture_id or runtime_capture_id(
-        page.scenario,
-        page.state,
-        page.url,
-        page.viewport,
-    )
     return RuntimeCaptureRecord(
-        capture_id=capture_id,
+        capture_id=page.capture_id,
         scenario=page.scenario,
         state=page.state,
         url=page.url,
@@ -454,9 +448,10 @@ class RuntimeObservation:
         sanitized_errors = tuple(sanitize_runtime_text(error) for error in self.errors)
         if sanitized_errors != self.errors:
             object.__setattr__(self, "errors", sanitized_errors)
+        normalize_page_ids = not self.captures
         pages = tuple(
             page
-            if page.capture_id
+            if page.capture_id and not normalize_page_ids
             else replace(
                 page,
                 capture_id=runtime_capture_id(
@@ -470,6 +465,14 @@ class RuntimeObservation:
         )
         if pages != self.pages:
             object.__setattr__(self, "pages", pages)
+        if self.captures:
+            capture_ids = {capture.capture_id for capture in self.captures}
+            for page in pages:
+                if page.capture_id not in capture_ids:
+                    raise ValueError(
+                        "Runtime page capture identity has no matching record: "
+                        f"{page.capture_id!r}."
+                    )
         captures = self.captures
         if not captures and pages:
             captures = tuple(_legacy_capture(page, self.generated_at) for page in pages)

@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from uidetox.redesign import RedesignProposal, RedesignSet
-from uidetox.runtime_scenarios import RuntimeViewport, runtime_capture_id
+from uidetox.runtime_scenarios import RuntimeCaptureRecord
 from uidetox.state import ensure_uidetox_dir
 
 _QUALIFICATION_CONTRACT_V1 = (
@@ -287,21 +287,9 @@ def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
     if not isinstance(captures, list):
         raise TypeError("Runtime capture matrix must be a list.")
     for capture in captures:
-        if not isinstance(capture, dict) or not isinstance(
-            capture.get("viewport"), dict
-        ):
+        if not isinstance(capture, dict):
             raise TypeError("Runtime capture matrix contains an invalid row.")
-        expected = runtime_capture_id(
-            str(capture.get("scenario", "")),
-            str(capture.get("state", "")),
-            str(capture.get("url", "")),
-            RuntimeViewport.from_dict(dict(capture["viewport"])),
-        )
-        if capture.get("capture_id") != expected:
-            raise ValueError(
-                "Runtime capture identity is not executable: "
-                f"expected {expected!r}, got {capture.get('capture_id')!r}."
-            )
+        RuntimeCaptureRecord.from_dict(capture)
 
 
 def _select_proposal(redesign_set: RedesignSet, proposal_id: str) -> RedesignProposal:

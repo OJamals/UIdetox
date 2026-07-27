@@ -36,6 +36,7 @@ from uidetox.runtime_scenarios import (
     discover_runtime_viewports,
     load_runtime_scenarios,
     normalize_runtime_urls,
+    runtime_capture_id,
     validate_runtime_observation_plan,
 )
 
@@ -59,17 +60,20 @@ def _finding_codes(element: RuntimeElement) -> set[str]:
 
 
 def _capture_record(
-    capture_id: str,
     *,
     status: str,
     readiness: str = "current",
+    scenario: str = "default",
+    state: str = "initial",
+    url: str = "https://example.invalid",
 ) -> RuntimeCaptureRecord:
+    viewport = VIEWPORT_REGISTRY["desktop"]
     return RuntimeCaptureRecord(
-        capture_id=capture_id,
-        scenario="default",
-        state="initial",
-        url="https://example.invalid",
-        viewport=VIEWPORT_REGISTRY["desktop"],
+        capture_id=runtime_capture_id(scenario, state, url, viewport),
+        scenario=scenario,
+        state=state,
+        url=url,
+        viewport=viewport,
         status=status,
         readiness=RuntimeReadiness(
             status=readiness,
@@ -86,6 +90,99 @@ def _capture_record(
         started_at="2026-07-26T00:00:00Z",
         completed_at="2026-07-26T00:00:01Z",
     )
+
+
+def test_runtime_capture_record_requires_executable_identity() -> None:
+    viewport = VIEWPORT_REGISTRY["desktop"]
+    fields = {
+        "scenario": "checkout",
+        "state": "ready",
+        "url": "https://example.invalid/checkout",
+        "viewport": viewport,
+        "status": "completed",
+        "readiness": RuntimeReadiness("current", "selector", 1),
+        "coverage": RuntimeCoverage(1, 1, 1, 1, 10),
+        "started_at": "2026-07-27T00:00:00Z",
+        "completed_at": "2026-07-27T00:00:01Z",
+    }
+    expected = runtime_capture_id(
+        fields["scenario"],
+        fields["state"],
+        fields["url"],
+        viewport,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"expected '{expected}', got 'checkout-ready'",
+    ):
+        RuntimeCaptureRecord(capture_id="checkout-ready", **fields)
+
+    canonical = RuntimeCaptureRecord(capture_id=expected, **fields)
+    serialized = asdict(canonical)
+    serialized["capture_id"] = "persisted-label"
+    with pytest.raises(
+        ValueError,
+        match=rf"expected '{expected}', got 'persisted-label'",
+    ):
+        RuntimeCaptureRecord.from_dict(serialized)
+
+
+def test_page_only_observation_replaces_descriptive_capture_identity() -> None:
+    viewport = VIEWPORT_REGISTRY["desktop"]
+    page = RuntimePage(
+        url="https://example.invalid/checkout",
+        title="Checkout",
+        viewport=viewport,
+        elements=(),
+        capture_id="checkout-ready",
+        scenario="checkout",
+        state="ready",
+    )
+    expected = runtime_capture_id(
+        page.scenario,
+        page.state,
+        page.url,
+        page.viewport,
+    )
+
+    observation = RuntimeObservation(
+        generated_at="2026-07-27T00:00:00Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+    )
+
+    assert observation.pages[0].capture_id == expected
+    assert observation.captures[0].capture_id == expected
+
+
+def test_observation_rejects_page_identity_without_matching_capture() -> None:
+    page = RuntimePage(
+        url="https://example.invalid/checkout",
+        title="Checkout",
+        viewport=VIEWPORT_REGISTRY["desktop"],
+        elements=(),
+        capture_id="checkout-ready",
+        scenario="checkout",
+        state="ready",
+    )
+    capture = _capture_record(
+        status="completed",
+        scenario=page.scenario,
+        state=page.state,
+        url=page.url,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Runtime page capture identity has no matching record: 'checkout-ready'",
+    ):
+        RuntimeObservation(
+            generated_at="2026-07-27T00:00:00Z",
+            requested_urls=(page.url,),
+            pages=(page,),
+            captures=(capture,),
+        )
 
 
 def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
@@ -467,27 +564,32 @@ def test_source_boundaries_supplement_canonical_viewports(tmp_path: Path) -> Non
 
 
 def test_observation_status_never_promotes_partial_or_degraded_to_current() -> None:
+    url = "https://example.invalid"
+    viewport = VIEWPORT_REGISTRY["desktop"]
     page = RuntimePage(
-        url="https://example.invalid",
+        url=url,
         title="Example",
-        viewport=VIEWPORT_REGISTRY["desktop"],
+        viewport=viewport,
         elements=(),
-        capture_id="ok",
+        capture_id=runtime_capture_id("default", "ok", url, viewport),
+        state="ok",
     )
     partial = RuntimeObservation(
         generated_at="2026-07-26T00:00:00Z",
-        requested_urls=("https://example.invalid",),
+        requested_urls=(url,),
         pages=(page,),
         captures=(
-            _capture_record("ok", status="completed"),
-            _capture_record("failed", status="failed"),
+            _capture_record(status="completed", state="ok"),
+            _capture_record(status="failed", state="failed"),
         ),
     )
     degraded = RuntimeObservation(
         generated_at="2026-07-26T00:00:00Z",
-        requested_urls=("https://example.invalid",),
+        requested_urls=(url,),
         pages=(page,),
-        captures=(_capture_record("ok", status="completed", readiness="degraded"),),
+        captures=(
+            _capture_record(status="completed", readiness="degraded", state="ok"),
+        ),
     )
 
     assert partial.status == "partial"
@@ -623,7 +725,12 @@ def test_context_close_diagnostics_are_finalized_on_capture(
         title="Late",
         viewport=VIEWPORT_REGISTRY["desktop"],
         elements=(),
-        capture_id="late",
+        capture_id=runtime_capture_id(
+            scenario.name,
+            "initial",
+            scenario.url,
+            VIEWPORT_REGISTRY["desktop"],
+        ),
     )
     monkeypatch.setattr(
         runtime_observer,
@@ -635,7 +742,7 @@ def test_context_close_diagnostics_are_finalized_on_capture(
         "_capture_scenario_state",
         lambda *_args, **_kwargs: (
             runtime_page,
-            _capture_record("late", status="completed"),
+            _capture_record(status="completed"),
         ),
     )
 
@@ -685,7 +792,7 @@ def test_finalization_preserves_capture_local_coverage_diagnostic(
         source="console",
     )
     capture = replace(
-        _capture_record("coverage", status="completed"),
+        _capture_record(status="completed"),
         coverage=RuntimeCoverage(
             total=20,
             candidates=10,
@@ -774,15 +881,11 @@ def test_finalization_keeps_diagnostics_on_their_exact_capture() -> None:
         )
     )
     first_capture = replace(
-        _capture_record("closed", status="completed"),
-        scenario="checkout",
-        state="closed",
+        _capture_record(status="completed", scenario="checkout", state="closed"),
         diagnostics=(first_state,),
     )
     second_capture = replace(
-        _capture_record("open", status="completed"),
-        scenario="checkout",
-        state="open",
+        _capture_record(status="completed", scenario="checkout", state="open"),
         diagnostics=(first_state, coverage, *mismatched_current_state),
     )
 
@@ -848,17 +951,23 @@ def test_runtime_diagnostics_are_sanitized_before_serialization(
     )
 
     viewport = VIEWPORT_REGISTRY["desktop"]
+    capture_id = runtime_capture_id(
+        scenario.name,
+        "initial",
+        scenario.url,
+        viewport,
+    )
     page_evidence = RuntimePage(
         url=scenario.url,
         title="Safe",
         viewport=viewport,
         elements=(),
-        capture_id="safe-capture",
+        capture_id=capture_id,
         scenario=scenario.name,
         state="initial",
     )
     capture = RuntimeCaptureRecord(
-        capture_id=page_evidence.capture_id,
+        capture_id=capture_id,
         scenario=scenario.name,
         state="initial",
         url=scenario.url,

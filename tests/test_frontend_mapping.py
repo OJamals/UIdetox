@@ -38,6 +38,7 @@ from uidetox.runtime_scenarios import (
     RuntimeDiagnostic,
     RuntimeReadiness,
     discover_runtime_viewports,
+    runtime_capture_id,
 )
 
 
@@ -93,7 +94,6 @@ export function Dashboard() {
 
 def _runtime_capture(
     *,
-    capture_id: str,
     scenario: str,
     state: str,
     url: str,
@@ -103,7 +103,7 @@ def _runtime_capture(
 ) -> RuntimeCaptureRecord:
     failed = status == "failed"
     return RuntimeCaptureRecord(
-        capture_id=capture_id,
+        capture_id=runtime_capture_id(scenario, state, url, viewport),
         scenario=scenario,
         state=state,
         url=url,
@@ -182,12 +182,14 @@ def _runtime_observation() -> RuntimeObservation:
 
 def _diagnostic_observation() -> RuntimeObservation:
     viewport = RuntimeViewport("desktop", 1440, 900)
+    url = "http://localhost:3000/dashboard"
+    capture_id = runtime_capture_id("diagnostics", "error", url, viewport)
     page = RuntimePage(
-        url="http://localhost:3000/dashboard",
+        url=url,
         title="Dashboard",
         viewport=viewport,
         elements=(),
-        capture_id="diagnostic-capture",
+        capture_id=capture_id,
         scenario="diagnostics",
         state="error",
     )
@@ -212,7 +214,6 @@ def _diagnostic_observation() -> RuntimeObservation:
         )
     )
     capture = _runtime_capture(
-        capture_id=page.capture_id,
         scenario=page.scenario,
         state=page.state,
         url=page.url,
@@ -350,7 +351,12 @@ def test_runtime_graph_identity_is_exact_per_capture_and_state(tmp_path):
             title="Dashboard",
             viewport=viewport,
             elements=(element,),
-            capture_id=f"capture-{state}",
+            capture_id=runtime_capture_id(
+                "checkout",
+                state,
+                "http://localhost:3000/dashboard",
+                viewport,
+            ),
             scenario="checkout",
             state=state,
         )
@@ -380,18 +386,25 @@ def test_runtime_graph_identity_is_exact_per_capture_and_state(tmp_path):
     assert len(runtime_nodes) == 4
     assert len({node.id for node in runtime_nodes}) == 4
     assert len(contains) == 2
-    assert {edge.metadata["capture_id"] for edge in contains} == {
-        "capture-loading",
-        "capture-ready",
+    expected_capture_ids = {
+        state: runtime_capture_id(
+            "checkout",
+            state,
+            "http://localhost:3000/dashboard",
+            viewport,
+        )
+        for state in ("loading", "ready")
     }
+    assert {edge.metadata["capture_id"] for edge in contains} == set(
+        expected_capture_ids.values()
+    )
     anchors = [
         node.metadata["findings"][0]["runtime_anchor"]
         for node in runtime_nodes
         if node.kind == "runtime_action"
     ]
     assert {(anchor["state"], anchor["capture_id"]) for anchor in anchors} == {
-        ("loading", "capture-loading"),
-        ("ready", "capture-ready"),
+        (state, capture_id) for state, capture_id in expected_capture_ids.items()
     }
 
 
@@ -570,7 +583,12 @@ def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
     observation = _runtime_observation()
     page = observation.pages[0]
     capture = RuntimeCaptureRecord(
-        capture_id="mobile-initial",
+        capture_id=runtime_capture_id(
+            "default",
+            "initial",
+            page.url,
+            page.viewport,
+        ),
         scenario="default",
         state="initial",
         url=page.url,
@@ -591,12 +609,13 @@ def test_map_frontend_uses_capture_completeness_not_nonempty_pages(tmp_path):
         started_at="2026-07-26T00:00:00Z",
         completed_at="2026-07-26T00:00:01Z",
     )
+    desktop = RuntimeViewport("desktop", 1440, 900)
     failed = RuntimeCaptureRecord(
-        capture_id="desktop-initial",
+        capture_id=runtime_capture_id("default", "initial", page.url, desktop),
         scenario="default",
         state="initial",
         url=page.url,
-        viewport=RuntimeViewport("desktop", 1440, 900),
+        viewport=desktop,
         status="failed",
         readiness=RuntimeReadiness(
             status="failed",
@@ -1505,7 +1524,8 @@ def test_runtime_diagnostics_project_to_typed_findings_and_queue_once(
         finding["runtime_anchor"]["scenario"] == "diagnostics"
         and finding["runtime_anchor"]["state"] == "error"
         and finding["runtime_anchor"]["source"]
-        and finding["runtime_anchor"]["capture_id"] == "diagnostic-capture"
+        and finding["runtime_anchor"]["capture_id"]
+        == observation.captures[0].capture_id
         for finding in runtime_findings
     )
     queued_codes = [
@@ -1533,7 +1553,6 @@ def test_map_command_persists_failed_runtime_artifact_before_signaling(
         source="scenario",
     )
     capture = _runtime_capture(
-        capture_id="failed-capture",
         scenario="failed",
         state="initial",
         url=diagnostic.url,
