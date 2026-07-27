@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uidetox.dev/schemas/handoff-qualification-attempt-v1.json",
+  "title": "UIdetox disposable-agent handoff qualification attempt",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "brief",
+    "agent_report",
+    "metrics"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "brief": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_report": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "wall_seconds",
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_write_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "http_status",
+        "console_errors_or_warnings",
+        "horizontal_overflow_viewports",
+        "screenshots"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "console_errors_or_warnings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "horizontal_overflow_viewports": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "screenshots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "path",
+              "viewport_width",
+              "viewport_height",
+              "png_width",
+              "png_height",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "viewport_width": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "viewport_height": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "png_width": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "png_height": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
