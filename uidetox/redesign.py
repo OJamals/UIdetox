@@ -834,6 +834,19 @@ def _proposal_evidence_freshness(frontend_map: FrontendMap) -> dict[str, Any]:
     if source_status == "stale" and runtime_status == "current":
         runtime_status = "stale"
         stale_reason = "Mapped source changed after the runtime observation."
+    runtime_handoff_evidence = json.loads(
+        json.dumps(
+            {
+                "runtime_capture_matrix": evidence.get("runtime_capture_matrix", []),
+                "runtime_diagnostics": evidence.get("runtime_diagnostics", []),
+                "runtime_coverage": evidence.get("runtime_coverage", {}),
+                "runtime_semantic_coverage": evidence.get(
+                    "runtime_semantic_coverage", {}
+                ),
+            },
+            sort_keys=True,
+        )
+    )
     return {
         "source": {
             "status": source_status,
@@ -850,6 +863,7 @@ def _proposal_evidence_freshness(frontend_map: FrontendMap) -> dict[str, Any]:
             ),
             "screenshots": list(evidence.get("runtime_screenshots", [])),
             "stale_reason": stale_reason,
+            **runtime_handoff_evidence,
         },
     }
 

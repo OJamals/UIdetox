@@ -13,7 +13,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / "benchmarks" / "handoff_qualification.py"
 SCHEMA = ROOT / "benchmarks" / "handoff-qualification.schema.json"
-PROMPT = ROOT / "benchmarks" / "handoff-qualification-prompt.md"
 
 
 def _load_harness():
@@ -679,32 +678,3 @@ def test_cli_writes_report_and_returns_gate_status(tmp_path) -> None:
 
     assert exit_code == 0
     assert json.loads(output.read_text(encoding="utf-8"))["gates"]["passed"] is True
-
-
-def test_controller_prompt_preserves_exact_agent_report_and_runtime_contract() -> None:
-    prompt = PROMPT.read_text(encoding="utf-8")
-
-    assert _sha256(PROMPT) == (
-        "a013bad95f9e961577768271c88a748112c3eb59af9624e40d56c109ac7bf266"
-    )
-    for required in (
-        "blocked-stale-source",
-        "completed-with-runtime-capture-blocker",
-        "checked_source_paths",
-        "source_freshness_status",
-        "preserved_contracts",
-        "named_source_anchors",
-        '"source"',
-        "feasibility_blockers",
-        "runtime_unknowns",
-        "output_file_count",
-        "output_bytes",
-        "inline `data:` favicon",
-        "zero console errors or warnings",
-        "at most one localhost launch/browser-capture attempt",
-    ):
-        assert required in prompt
-
-    assert (
-        prompt.index("`mobile`") < prompt.index("`tablet`") < prompt.index("`desktop`")
-    )

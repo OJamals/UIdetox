@@ -386,6 +386,18 @@ def test_current_runtime_evidence_has_provenance_and_observable_check(
         "viewport_discovery": {},
         "screenshots": [],
         "stale_reason": None,
+        "runtime_capture_matrix": json.loads(
+            json.dumps(frontend_map.evidence["runtime_capture_matrix"])
+        ),
+        "runtime_diagnostics": json.loads(
+            json.dumps(frontend_map.evidence["runtime_diagnostics"])
+        ),
+        "runtime_coverage": json.loads(
+            json.dumps(frontend_map.evidence["runtime_coverage"])
+        ),
+        "runtime_semantic_coverage": json.loads(
+            json.dumps(frontend_map.evidence["runtime_semantic_coverage"])
+        ),
     }
     assert any(item.startswith("Runtime check:") for item in proposal.observable_checks)
 
@@ -484,6 +496,117 @@ def test_prototype_brief_preserves_agent_handoff_inside_evidence_boundary(
         assert value not in brief[:evidence_start]
         assert value not in brief[evidence_end:]
     assert "Verify every source hash before editing; stop on any mismatch." in brief
+
+
+def test_prototype_brief_preserves_runtime_states_and_emits_v1_contract(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "App.tsx").write_text(
+        "export function App() { return <main />; }",
+        encoding="utf-8",
+    )
+    viewport = RuntimeViewport("desktop", 1440, 900)
+    states = ("authenticated", "triggered", "empty", "error")
+    pages = tuple(
+        RuntimePage(
+            url="http://localhost:3000/",
+            title=state,
+            viewport=viewport,
+            elements=(),
+            capture_id=f"qualification-{state}",
+            scenario="qualification",
+            state=state,
+        )
+        for state in states
+    )
+    frontend_map = map_frontend(
+        tmp_path,
+        "src",
+        RuntimeObservation(
+            generated_at="2026-07-26T00:00:00Z",
+            requested_urls=("http://localhost:3000/",),
+            pages=pages,
+        ),
+    )
+    redesigns = propose_redesigns(frontend_map, RedesignBrief(variants=1))
+    proposal = redesigns.proposals[0]
+    runtime_freshness = proposal.evidence_freshness["runtime"]
+    brief = build_prototype_brief(redesigns, proposal.id)
+    evidence_start = brief.index("\nBEGIN_UIDETOX_EVIDENCE\n")
+    evidence_end = brief.index("\nEND_UIDETOX_EVIDENCE\n")
+    evidence = brief[evidence_start:evidence_end]
+    appendix_start = brief.index("\n## Disposable-agent qualification contract (v1)\n")
+
+    for key in (
+        "runtime_capture_matrix",
+        "runtime_diagnostics",
+        "runtime_coverage",
+        "runtime_semantic_coverage",
+    ):
+        assert runtime_freshness[key] == json.loads(
+            json.dumps(frontend_map.evidence[key])
+        )
+    assert (
+        type(redesigns).from_dict(json.loads(json.dumps(redesigns.to_dict())))
+        == redesigns
+    )
+    assert [
+        (item["capture_id"], item["scenario"], item["state"])
+        for item in runtime_freshness["runtime_capture_matrix"]
+    ] == [(f"qualification-{state}", "qualification", state) for state in states]
+
+    for label, key in (
+        ("Runtime capture matrix", "runtime_capture_matrix"),
+        ("Runtime diagnostics", "runtime_diagnostics"),
+        ("Runtime coverage", "runtime_coverage"),
+        ("Runtime semantic coverage", "runtime_semantic_coverage"),
+    ):
+        value = json.dumps(
+            runtime_freshness[key],
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        assert f"- {label}: {value}" in evidence
+        assert value not in brief[:evidence_start]
+        assert value not in brief[evidence_end:]
+
+    assert appendix_start > evidence_end
+    appendix = brief[appendix_start:]
+    for required in (
+        "uidetox.disposable-agent-attempt.v1",
+        "blocked-stale-source",
+        "completed-with-runtime-capture-blocker",
+        "checked_source_paths",
+        "source_freshness_status",
+        "preserved_contracts",
+        "named_source_anchors",
+        "feasibility_blockers",
+        "runtime_unknowns",
+        "runtime_state_handoffs",
+        "output_file_count",
+        "output_bytes",
+        "inline `data:` favicon",
+        "zero console errors or warnings",
+        "zero failed or 4xx/5xx resource requests",
+        "at most one localhost launch/browser-capture attempt",
+        "No other `completed-*` status is valid.",
+        "exactly one row per Source target",
+        "Affected source modules are evidence, not additional anchor identities.",
+        "`qualification-result.json`",
+    ):
+        assert required in appendix
+    assert "runtime_state_handoffs" not in evidence
+    assert (
+        "Each row contains exact `capture_id`, `scenario`, `state`, `url`, and "
+        "`viewport`" in appendix
+    )
+    appendix_end = brief.index("\n## Acceptance checks\n")
+    contract = brief[appendix_start:appendix_end]
+    assert len(contract.encode("utf-8")) <= 8 * 1024
+    assert len(contract.splitlines()) <= 120
 
 
 def test_redesign_command_retains_runtime_as_stale_on_automatic_refresh(
