@@ -585,6 +585,22 @@ def test_prototype_brief_preserves_runtime_states_and_emits_v1_contract(
     with pytest.raises(ValueError, match="Runtime capture identity is not executable"):
         build_prototype_brief(invalid_redesigns, invalid_redesigns.proposals[0].id)
 
+    duplicate_payload = redesigns.to_dict()
+    duplicate_matrix = duplicate_payload["proposals"][0]["evidence_freshness"][
+        "runtime"
+    ]["runtime_capture_matrix"]
+    duplicate_matrix.append(dict(duplicate_matrix[0]))
+    duplicate_redesigns = type(redesigns).from_dict(duplicate_payload)
+    duplicate_id = duplicate_matrix[0]["capture_id"]
+    with pytest.raises(
+        ValueError,
+        match=rf"Runtime observation has duplicate capture identity: '{duplicate_id}'",
+    ):
+        build_prototype_brief(
+            duplicate_redesigns,
+            duplicate_redesigns.proposals[0].id,
+        )
+
     for label, key in (
         ("Runtime capture matrix", "runtime_capture_matrix"),
         ("Runtime diagnostics", "runtime_diagnostics"),

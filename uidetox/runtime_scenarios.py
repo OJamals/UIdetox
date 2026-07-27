@@ -702,6 +702,7 @@ def validate_runtime_observation_plan(
     work_units = 0
     time_budget_ms = 0
     available_names = {viewport.name for viewport in viewport_list}
+    capture_ids: set[str] = set()
     for scenario in scenario_list:
         requested_viewports = set(scenario.viewports)
         if requested_viewports - available_names:
@@ -709,18 +710,36 @@ def validate_runtime_observation_plan(
                 "Scenario viewports were not provided: "
                 f"{', '.join(sorted(requested_viewports - available_names))}"
             )
-        selected_viewports = (
-            len(requested_viewports) if requested_viewports else len(viewport_list)
+        selected_viewports = tuple(
+            viewport
+            for viewport in viewport_list
+            if not requested_viewports or viewport.name in requested_viewports
         )
-        capture_count = (
-            sum(action.kind == "capture" for action in scenario.actions) or 1
+        capture_states = tuple(
+            action.state for action in scenario.actions if action.kind == "capture"
+        ) or (scenario.expected_state,)
+        for viewport in selected_viewports:
+            for state in capture_states:
+                capture_id = runtime_capture_id(
+                    scenario.name,
+                    state,
+                    scenario.url,
+                    viewport,
+                )
+                if capture_id in capture_ids:
+                    raise ValueError(
+                        f"Runtime plan has duplicate capture identity: {capture_id!r}."
+                    )
+                capture_ids.add(capture_id)
+        capture_count = len(capture_states)
+        matrix_size += len(selected_viewports) * capture_count
+        work_units += len(selected_viewports) * (
+            1 + len(scenario.actions) + capture_count
         )
-        matrix_size += selected_viewports * capture_count
-        work_units += selected_viewports * (1 + len(scenario.actions) + capture_count)
         action_time = sum(
             action.timeout_ms for action in scenario.actions if action.kind != "capture"
         )
-        time_budget_ms += selected_viewports * (
+        time_budget_ms += len(selected_viewports) * (
             timeout_ms
             + action_time
             + scenario.readiness.request_idle_ms

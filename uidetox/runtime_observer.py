@@ -448,7 +448,8 @@ class RuntimeObservation:
         sanitized_errors = tuple(sanitize_runtime_text(error) for error in self.errors)
         if sanitized_errors != self.errors:
             object.__setattr__(self, "errors", sanitized_errors)
-        normalize_page_ids = not self.captures
+        captures = self.captures
+        normalize_page_ids = not captures
         pages = tuple(
             page
             if page.capture_id and not normalize_page_ids
@@ -465,18 +466,45 @@ class RuntimeObservation:
         )
         if pages != self.pages:
             object.__setattr__(self, "pages", pages)
-        if self.captures:
-            capture_ids = {capture.capture_id for capture in self.captures}
-            for page in pages:
-                if page.capture_id not in capture_ids:
-                    raise ValueError(
-                        "Runtime page capture identity has no matching record: "
-                        f"{page.capture_id!r}."
-                    )
-        captures = self.captures
         if not captures and pages:
             captures = tuple(_legacy_capture(page, self.generated_at) for page in pages)
             object.__setattr__(self, "captures", captures)
+        captures_by_id: dict[str, RuntimeCaptureRecord] = {}
+        for capture in captures:
+            if capture.capture_id in captures_by_id:
+                raise ValueError(
+                    "Runtime observation has duplicate capture identity: "
+                    f"{capture.capture_id!r}."
+                )
+            if not normalize_page_ids and capture.url not in self.requested_urls:
+                raise ValueError(
+                    f"Runtime capture URL was not requested: {capture.url!r}."
+                )
+            captures_by_id[capture.capture_id] = capture
+        page_ids: set[str] = set()
+        for page in pages:
+            if page.capture_id in page_ids:
+                raise ValueError(
+                    "Runtime observation has duplicate page identity: "
+                    f"{page.capture_id!r}."
+                )
+            page_ids.add(page.capture_id)
+            capture = captures_by_id.get(page.capture_id)
+            if capture is None:
+                raise ValueError(
+                    "Runtime page capture identity has no matching record: "
+                    f"{page.capture_id!r}."
+                )
+            # Capture URL is requested identity; page URL is resolved browser state.
+            if (page.scenario, page.state, page.viewport) != (
+                capture.scenario,
+                capture.state,
+                capture.viewport,
+            ):
+                raise ValueError(
+                    "Runtime page capture metadata does not match record: "
+                    f"{page.capture_id!r}."
+                )
         completed = sum(capture.status == "completed" for capture in captures)
         failed = sum(capture.status == "failed" for capture in captures)
         degraded = any(

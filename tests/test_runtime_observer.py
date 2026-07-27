@@ -185,6 +185,101 @@ def test_observation_rejects_page_identity_without_matching_capture() -> None:
         )
 
 
+def test_observation_rejects_duplicate_capture_identity() -> None:
+    capture = _capture_record(status="completed")
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Runtime observation has duplicate capture identity: "
+        rf"'{capture.capture_id}'",
+    ):
+        RuntimeObservation(
+            generated_at="2026-07-27T00:00:00Z",
+            requested_urls=(capture.url,),
+            pages=(),
+            captures=(capture, capture),
+        )
+
+
+def test_observation_rejects_duplicate_page_identity() -> None:
+    capture = _capture_record(status="completed")
+    page = RuntimePage(
+        url="https://example.invalid/resolved",
+        title="Resolved",
+        viewport=capture.viewport,
+        elements=(),
+        capture_id=capture.capture_id,
+        scenario=capture.scenario,
+        state=capture.state,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Runtime observation has duplicate page identity: "
+        rf"'{capture.capture_id}'",
+    ):
+        RuntimeObservation(
+            generated_at="2026-07-27T00:00:00Z",
+            requested_urls=(capture.url,),
+            pages=(page, page),
+            captures=(capture,),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("scenario", "other"),
+        ("state", "other"),
+        ("viewport", VIEWPORT_REGISTRY["mobile"]),
+    ),
+)
+def test_observation_rejects_page_metadata_drift_from_capture(
+    field: str,
+    value: object,
+) -> None:
+    capture = _capture_record(status="completed")
+    page = replace(
+        RuntimePage(
+            url="https://example.invalid/resolved",
+            title="Resolved",
+            viewport=capture.viewport,
+            elements=(),
+            capture_id=capture.capture_id,
+            scenario=capture.scenario,
+            state=capture.state,
+        ),
+        **{field: value},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Runtime page capture metadata does not match record: "
+        rf"'{capture.capture_id}'",
+    ):
+        RuntimeObservation(
+            generated_at="2026-07-27T00:00:00Z",
+            requested_urls=(capture.url,),
+            pages=(page,),
+            captures=(capture,),
+        )
+
+
+def test_observation_rejects_capture_url_outside_requested_urls() -> None:
+    capture = _capture_record(status="completed")
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Runtime capture URL was not requested: '{capture.url}'",
+    ):
+        RuntimeObservation(
+            generated_at="2026-07-27T00:00:00Z",
+            requested_urls=("https://example.invalid/other",),
+            pages=(),
+            captures=(capture,),
+        )
+
+
 def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -421,6 +516,21 @@ def test_runtime_work_limits_reject_before_playwright_launch(
             viewports=bounded_viewports[:2],
             scenarios=(time_scenario,),
             timeout_ms=limits.timeout_ms,
+            settle_ms=0,
+        )
+
+
+def test_runtime_plan_rejects_duplicate_capture_identities() -> None:
+    scenario = RuntimeScenario(
+        name="duplicate",
+        url="https://example.invalid",
+    )
+
+    with pytest.raises(ValueError, match="duplicate capture identity"):
+        validate_runtime_observation_plan(
+            (scenario, scenario),
+            (VIEWPORT_REGISTRY["desktop"],),
+            timeout_ms=1_000,
             settle_ms=0,
         )
 
@@ -1960,6 +2070,30 @@ def test_observer_owns_one_browser_and_atomically_names_all_viewports(
         if event[0] == "context"
     )
     assert len(observation.pages) == 2
+    assert all(
+        capture.url == "http://127.0.0.1:4173" for capture in observation.captures
+    )
+    assert all(
+        page.url == "http://127.0.0.1:4173/projects" for page in observation.pages
+    )
+    assert all(
+        (
+            page.scenario,
+            page.state,
+            page.viewport,
+        )
+        == (
+            capture.scenario,
+            capture.state,
+            capture.viewport,
+        )
+        and page.url != capture.url
+        for page, capture in zip(
+            observation.pages,
+            observation.captures,
+            strict=True,
+        )
+    )
     assert [Path(page.screenshot or "").name for page in observation.pages] == [
         "after_mobile.png",
         "after_desktop.png",

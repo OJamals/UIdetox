@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from uidetox.redesign import RedesignProposal, RedesignSet
-from uidetox.runtime_scenarios import RuntimeCaptureRecord
+from uidetox.runtime_observer import RuntimeObservation
 from uidetox.state import ensure_uidetox_dir
 
 _QUALIFICATION_CONTRACT_V1 = (
@@ -286,10 +286,16 @@ def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
     captures = runtime.get("runtime_capture_matrix", [])
     if not isinstance(captures, list):
         raise TypeError("Runtime capture matrix must be a list.")
-    for capture in captures:
-        if not isinstance(capture, dict):
-            raise TypeError("Runtime capture matrix contains an invalid row.")
-        RuntimeCaptureRecord.from_dict(capture)
+    if not all(isinstance(capture, dict) for capture in captures):
+        raise TypeError("Runtime capture matrix contains an invalid row.")
+    RuntimeObservation.from_dict(
+        {
+            "generated_at": runtime.get("generated_at", ""),
+            "requested_urls": runtime.get("urls", []),
+            "pages": [],
+            "captures": captures,
+        }
+    )
 
 
 def _select_proposal(redesign_set: RedesignSet, proposal_id: str) -> RedesignProposal:
