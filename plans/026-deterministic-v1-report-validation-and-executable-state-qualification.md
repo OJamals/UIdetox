@@ -2,7 +2,7 @@
 
 ## Status
 
-INTEGRATION PENDING
+DONE
 
 ## Magic moment
 
@@ -224,15 +224,15 @@ type, compatibility wrapper, or renderer-specific model.
 
 **Acceptance criteria:**
 
-- [ ] Commit only reviewed passing scope.
-- [ ] Merge to `master`, push, refresh graph after source commit, and prove
+- [x] Commit only reviewed passing scope.
+- [x] Merge to `master`, push, refresh graph after source commit, and prove
       `HEAD == master == origin/master == remote refs/heads/master`.
-- [ ] Remove short-lived branch only after parity.
-- [ ] No release, tag, or PyPI action occurs.
+- [x] Remove short-lived branch only after parity.
+- [x] No release, tag, or PyPI action occurs.
 
 **Verification:**
 
-- [ ] Final Git/worktree/branch/stash/process/remote rebaseline passes.
+- [x] Final Git/worktree/branch/stash/process/remote rebaseline passes.
 
 **Dependencies:** Task 5
 
@@ -250,7 +250,7 @@ type, compatibility wrapper, or renderer-specific model.
 - [x] No parallel validator/model/cache/graph/evidence/wrapper is added.
 - [x] Full repository/package/invariant/review gates pass.
 - [x] Archival stashes remain unchanged.
-- [ ] Local/origin/server SHA parity is proven.
+- [x] Local/origin/server SHA parity is proven.
 
 ## Execution results
 
@@ -340,6 +340,7 @@ Completed 2026-07-27.
   `4b7e2695fca88d84031866f5a5c608e61a801771de169528efe983069351a068`.
 - Multi-axis correctness/readability/architecture/security/performance review:
   APPROVE after all required findings above were fixed.
+- Codebase-memory full refresh: 6,028 nodes and 24,986 edges.
 
 ### Scope, artifacts, and next plan
 
