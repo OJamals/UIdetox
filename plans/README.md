@@ -37,7 +37,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 024 | Disposable-agent handoff repeatability matrix | P1 | M | 023 | DONE — 3/3 fresh agents pass; 1.0 accuracy; 1,425 tests; production LOC ±0 |
 | 025 | Prototype qualification contract and runtime-state handoff | P1 | M | 024 | DONE — 4/4 states and 3/3 viewports preserved; 1,425 tests; v1 contract emitted |
 | 026 | Deterministic v1 report validation and executable state qualification | P1 | M | 025 | DONE — 4/4 states; 1.0 accuracy; 1,440 tests; production +32 LOC |
-| 027 | Canonical runtime capture identity | P1 | S | 026 | IN PROGRESS |
+| 027 | Canonical runtime capture identity | P1 | S | 026 | DONE — 1,443 tests; production -1 LOC; graph 6,031/25,164 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

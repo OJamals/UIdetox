@@ -2,7 +2,7 @@
 
 ## Status
 
-IN PROGRESS
+DONE
 
 ## Magic moment
 
@@ -184,15 +184,15 @@ do not need record identity and must remain usable.
 
 **Acceptance criteria:**
 
-- [ ] Commit only reviewed passing scope.
-- [ ] Merge to `master`, push, refresh graph after source commit, and prove
+- [x] Commit only reviewed passing scope.
+- [x] Merge to `master`, push, refresh graph after source commit, and prove
       `HEAD == master == origin/master == remote refs/heads/master`.
-- [ ] Remove the short-lived branch only after parity.
-- [ ] No release, tag, or PyPI action occurs.
+- [x] Remove the short-lived branch only after parity.
+- [x] No release, tag, or PyPI action occurs.
 
 **Verification:**
 
-- [ ] Final Git/worktree/branch/stash/process/remote rebaseline passes.
+- [x] Final Git/worktree/branch/stash/process/remote rebaseline passes.
 
 **Dependencies:** Task 4
 
@@ -209,12 +209,13 @@ do not need record identity and must remain usable.
 - [x] No archived artifact or stash is rewritten or dropped.
 - [x] Full repository/package/invariant/review gates pass.
 - [x] Production code finishes smaller.
-- [ ] Local/origin/server SHA parity is proven.
+- [x] Local/origin/server SHA parity is proven.
 
 ## Execution results
 
-Completed implementation and qualification on 2026-07-27; integration parity is
-recorded after merge.
+Completed implementation and qualification on 2026-07-27. Implementation
+commit `e6ce2e5` was merged and pushed; the refreshed graph contains 6,031 nodes
+and 25,164 edges.
 
 ### Root-cause fixes
 
@@ -277,8 +278,8 @@ recorded after merge.
 
 - Production delta: 22 insertions, 23 deletions, net -1 LOC. Deleted code is
   the legacy page-ID fallback and prototype-specific capture-ID equation.
-- Tests: 169 insertions, 41 deletions, net +128 LOC. Plan/docs before final
-  integration: net +224 LOC. Total before final integration: net +351 LOC.
+- Tests: 169 insertions, 41 deletions, net +128 LOC. Plan/docs: net +300 LOC.
+  Total excluding graph binary refresh: net +427 LOC.
 - Remaining risk: an observation can still contain duplicate canonical capture
   records, and successful redirected pages retain resolved page URLs while
   capture records identify requested scenario URLs.
