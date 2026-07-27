@@ -21,10 +21,9 @@ from uidetox.contract_graph import (
     _schema_observation_state,
     _unknown_anchor,
     contract_schema_observations,
+    normalize_http_method,
     normalize_route_path,
 )
-
-HTTP_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 
 
 @dataclass(frozen=True)
@@ -202,7 +201,7 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
         for method, operation in sorted(
             path_item.items(), key=lambda item: str(item[0])
         ):
-            normalized_method = _normalize_method(method)
+            normalized_method = normalize_http_method(method)
             if normalized_method is None or not isinstance(operation, Mapping):
                 continue
             normalized, parameters, unresolved = normalize_route_path(str(route))
@@ -220,9 +219,7 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                 else {}
             )
             success_statuses = sorted(
-                str(status)
-                for status in response_map
-                if str(status).startswith("2")
+                str(status) for status in response_map if str(status).startswith("2")
             )
             error_statuses = sorted(
                 str(status)
@@ -292,9 +289,7 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                     request_schemas=request_schemas,
                     response_schemas=response_schemas,
                     error_schemas=error_schemas,
-                    status_codes=tuple(
-                        sorted((*success_statuses, *error_statuses))
-                    ),
+                    status_codes=tuple(sorted((*success_statuses, *error_statuses))),
                     auth=auth,
                     authorization=str(
                         operation.get(
@@ -309,9 +304,7 @@ def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
                         )
                     ),
                     evidence={
-                        "request": (
-                            "present" if request_schemas else "absent"
-                        ),
+                        "request": ("present" if request_schemas else "absent"),
                         "response": (
                             _schema_observation_state(
                                 response_schemas,
@@ -532,7 +525,9 @@ def _extract_javascript_routes(
                     confidence=0.92,
                 )
             )
-    return [_enrich_javascript_operation(item, content) for item in operations], adapters
+    return [
+        _enrich_javascript_operation(item, content) for item in operations
+    ], adapters
 
 
 def _operation(
@@ -548,9 +543,9 @@ def _operation(
 ) -> ContractObservation:
     normalized, parameters, unresolved = normalize_route_path(path)
     return ContractObservation(
-        identity=f"{extractor}:{file}:{line}:{_normalize_method(method) or '?'}:{normalized or '?'}",
+        identity=f"{extractor}:{file}:{line}:{normalize_http_method(method) or '?'}:{normalized or '?'}",
         side=side,
-        method=_normalize_method(method),
+        method=normalize_http_method(method),
         path=path,
         normalized_path=normalized,
         parameters=parameters,
@@ -559,7 +554,7 @@ def _operation(
         evidence={
             "request": (
                 "absent"
-                if _normalize_method(method) in {"GET", "HEAD", "OPTIONS"}
+                if normalize_http_method(method) in {"GET", "HEAD", "OPTIONS"}
                 else "unknown"
             ),
             "response": "unknown",
@@ -595,9 +590,9 @@ def _unsupported_operation(
 ) -> ContractObservation:
     normalized, parameters, _unresolved = normalize_route_path(path)
     return ContractObservation(
-        identity=f"{extractor}:{file}:{line}:{_normalize_method(method) or '?'}:{normalized or '?'}",
+        identity=f"{extractor}:{file}:{line}:{normalize_http_method(method) or '?'}:{normalized or '?'}",
         side="backend",
-        method=_normalize_method(method),
+        method=normalize_http_method(method),
         path=path,
         normalized_path=normalized,
         parameters=parameters,
@@ -611,7 +606,7 @@ def _methods_from_text(value: str) -> tuple[str, ...]:
     methods = {
         method
         for token in re.findall(r"[\"']([A-Za-z]+)[\"']", value)
-        if (method := _normalize_method(token)) is not None
+        if (method := normalize_http_method(token)) is not None
     }
     return tuple(sorted(methods))
 
@@ -866,13 +861,6 @@ def _fastify_registration_prefix(content: str) -> str:
         if code_positions[match.start()]
     }
     return next(iter(prefixes)) if len(prefixes) == 1 else ""
-
-
-def _normalize_method(value: Any) -> str | None:
-    if value is None:
-        return None
-    method = str(value).upper()
-    return method if method in HTTP_METHODS else None
 
 
 def _classify_path(path: str | None) -> str:
@@ -1226,9 +1214,7 @@ def _enrich_python_operations(
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    classes = {
-        node.name: node for node in tree.body if isinstance(node, ast.ClassDef)
-    }
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
     provenance = _python_provenance(tree, classes)
     model_schemas = {
         name: _python_class_schema(node, classes, provenance)
@@ -1280,10 +1266,7 @@ def _enrich_python_operation(
             dependency = _dotted_name(default.args[0]) if default.args else ""
             if (
                 injector
-                in (
-                    provenance.security_injectors
-                    | provenance.dependency_injectors
-                )
+                in (provenance.security_injectors | provenance.dependency_injectors)
                 and dependency in provenance.security_bindings
             ):
                 security_names.append(dependency)
@@ -1336,7 +1319,9 @@ def _enrich_python_operation(
         }
     ]
     calls = _function_call_names(handler)
-    service_names = [name for name in calls if name in functions and name != handler.name]
+    service_names = [
+        name for name in calls if name in functions and name != handler.name
+    ]
     entity_parents: list[tuple[str, str]] = [
         (name, f"handler:{handler.name}") for name in calls if name in entities
     ]
@@ -1395,9 +1380,7 @@ def _enrich_python_operation(
             else operation.evidence.get("response", "unknown")
         ),
         "status": (
-            "present"
-            if status_codes
-            else operation.evidence.get("status", "unknown")
+            "present" if status_codes else operation.evidence.get("status", "unknown")
         ),
     }
     auth = (
@@ -1525,9 +1508,7 @@ def _python_annotation_schema(
         if annotation_base in provenance.mapped_annotations:
             return _python_annotation_schema(annotation.slice, classes, provenance)
         if _annotation_name(annotation.value) == "Optional":
-            result = _python_annotation_schema(
-                annotation.slice, classes, provenance
-            )
+            result = _python_annotation_schema(annotation.slice, classes, provenance)
             result["nullable"] = True
             return result
     name = _annotation_name(annotation)
@@ -1546,9 +1527,7 @@ def _python_annotation_schema(
     ):
         return {
             "type": "array",
-            "items": _python_annotation_schema(
-                annotation.slice, classes, provenance
-            ),
+            "items": _python_annotation_schema(annotation.slice, classes, provenance),
         }
     if isinstance(annotation, ast.Subscript) and name in classes:
         return {"type": "unknown"}
@@ -1562,9 +1541,10 @@ def _python_annotation_schema(
 
 def _annotation_nullable(annotation: ast.expr | None) -> bool:
     if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
-        return _annotation_name(annotation.left) in {"None", "NoneType"} or _annotation_name(
-            annotation.right
-        ) in {"None", "NoneType"}
+        return _annotation_name(annotation.left) in {
+            "None",
+            "NoneType",
+        } or _annotation_name(annotation.right) in {"None", "NoneType"}
     if isinstance(annotation, ast.Subscript):
         return _annotation_name(annotation.value) == "Optional"
     return False

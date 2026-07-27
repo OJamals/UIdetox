@@ -19,8 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from uidetox.capabilities import visual_install_guidance
-from uidetox.utils import now_iso
-
+from uidetox.utils import canonical_sha256, now_iso
 
 VISUAL_EVIDENCE_SCHEMA_VERSION = 1
 DEFAULT_PIXEL_THRESHOLD = 30
@@ -348,16 +347,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _canonical_sha256(payload: dict[str, Any]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _normalized_sha256(image: Any) -> str:
     digest = hashlib.sha256()
     digest.update(str(image.mode).encode("ascii"))
@@ -594,7 +583,8 @@ def _load_png(
     )
 
 
-def _coverage_band(change_percentage: float) -> str:
+def visual_coverage_band(change_percentage: float) -> str:
+    """Classify changed-pixel percentage for generation and validation."""
     if change_percentage < 0.1:
         return "trace"
     if change_percentage < 5:
@@ -1142,7 +1132,7 @@ def _compare_images(
             total_pixels=total_pixels,
             change_percentage=round(raw_percentage, 2),
             changed_ratio=round(changed_ratio, 8),
-            coverage_band=_coverage_band(raw_percentage),
+            coverage_band=visual_coverage_band(raw_percentage),
             changed_bounds=changed_bounds,
             changed_bounds_ratio=round(
                 changed_bounds_area / total_pixels if total_pixels else 0.0,
@@ -1253,7 +1243,7 @@ def build_visual_evidence(
         parameters=parameters,
         comparisons=comparisons,
         freshness=FreshnessEvidence(
-            request_sha256=_canonical_sha256(freshness_payload),
+            request_sha256=canonical_sha256(freshness_payload),
             source_sha256s=source_sha256s,
             context_sha256s=dict(sorted(request.context_sha256s.items())),
         ),
@@ -1306,7 +1296,7 @@ def _request_hash_from_payload(payload: dict[str, Any]) -> str:
             if isinstance(comparison, dict)
         ],
     }
-    return _canonical_sha256(request_payload)
+    return canonical_sha256(request_payload)
 
 
 def visual_evidence_request_hash_from_payload(

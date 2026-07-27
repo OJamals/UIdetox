@@ -7,9 +7,8 @@ import re
 import tempfile
 from pathlib import Path
 
-from uidetox.state import get_uidetox_dir, ensure_uidetox_dir
+from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
-
 
 MEMORY_FILE = "memory.json"
 _SEARCH_TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -17,10 +16,6 @@ _SEARCH_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 def _memory_path() -> Path:
     return get_uidetox_dir() / MEMORY_FILE
-
-
-def _now_iso() -> str:
-    return now_iso()
 
 
 def _normalize_pattern_entries(entries: object) -> list[dict]:
@@ -305,7 +300,7 @@ def mark_file_reviewed(file_path: str, *, verdict: str = "clean"):
     """Mark a file as reviewed with a verdict (clean, has_issues, skipped)."""
     mem = load_memory()
     mem["reviewed_files"][file_path] = {
-        "reviewed_at": _now_iso(),
+        "reviewed_at": now_iso(),
         "verdict": verdict,
     }
     save_memory(mem)
@@ -336,7 +331,7 @@ def add_pattern(pattern: str, *, category: str = "general"):
         {
             "pattern": pattern,
             "category": category,
-            "learned_at": _now_iso(),
+            "learned_at": now_iso(),
         }
     )
     # Cap at 50 patterns — evict oldest
@@ -368,7 +363,7 @@ def add_note(note: str):
     mem["notes"].append(
         {
             "note": note,
-            "created_at": _now_iso(),
+            "created_at": now_iso(),
         }
     )
     # Cap at 30 notes — evict oldest
@@ -406,7 +401,7 @@ def record_fix_outcome(
             "issue": issue,
             "fix": fix,
             "outcome": outcome,
-            "recorded_at": _now_iso(),
+            "recorded_at": now_iso(),
         }
     )
     mem["fix_history"] = mem["fix_history"][-100:]
@@ -453,7 +448,7 @@ def save_session(
             "issues_fixed_this_session", 0
         )
         + issues_fixed,
-        "saved_at": _now_iso(),
+        "saved_at": now_iso(),
         "context": context,
     }
     save_memory(mem)
@@ -476,7 +471,7 @@ def save_scan_summary(
     """Auto-save the last scan summary for quick review without re-scanning."""
     mem = load_memory()
     mem["last_scan"] = {
-        "timestamp": _now_iso(),
+        "timestamp": now_iso(),
         "total_found": total_found,
         "by_tier": by_tier,
         "by_category": by_category,
@@ -500,7 +495,7 @@ def log_progress(action: str, details: str = ""):
         {
             "action": action,
             "details": details,
-            "timestamp": _now_iso(),
+            "timestamp": now_iso(),
         }
     )
     # Keep last 50 entries to avoid unbounded growth

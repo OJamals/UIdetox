@@ -16,6 +16,7 @@ from typing import Any
 from uidetox.design_context import DesignIntent
 from uidetox.prompt_safety import render_untrusted_data
 from uidetox.state import get_project_root, get_uidetox_dir
+from uidetox.utils import now_iso
 
 INTENT_EVENT_SCHEMA_VERSION = 1
 INTENT_EVENT_TYPE = "intent.confirmed"
@@ -123,10 +124,6 @@ class IntentArtifactResult:
     event_path: Path
     handoff_path: Path
     prompt: str
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _timestamp(value: str) -> datetime:
@@ -242,7 +239,7 @@ def build_intent_event(
         raise ValueError("Intent event source must be a stable internal identifier")
     root = (project_root or get_project_root()).resolve()
     context = _project_context(intent.scope, root)
-    timestamp = recorded_at or intent.confirmed_at or _utc_now()
+    timestamp = recorded_at or intent.confirmed_at or now_iso()
     _timestamp(timestamp)
     confirmed_at = intent.confirmed_at or timestamp
     _timestamp(confirmed_at)
@@ -566,7 +563,7 @@ def _write_latest_reference(
             "event_id": event["event_id"],
             "fingerprint": event["fingerprint"],
             "handoff_sha256": _handoff_sha256(prompt),
-            "updated_at": _utc_now(),
+            "updated_at": now_iso(),
         }
     )
     _atomic_replace_text(

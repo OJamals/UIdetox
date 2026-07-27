@@ -24,9 +24,9 @@ from uidetox.visual_evidence import (
     VisualMetrics,
     VisualRegion,
     validate_visual_evidence_request,
+    visual_coverage_band,
     visual_evidence_request_hash_from_payload,
 )
-
 
 WORKER_PROTOCOL_VERSION = 1
 DEFAULT_WORKER_TIMEOUT_SECONDS = 30.0
@@ -336,7 +336,7 @@ def assert_request_paths_allowed(
                     ),
                     path=resolved,
                 )
-    if not _is_within(output_dir, normalized.allowed_roots):
+    if not path_is_within(output_dir, normalized.allowed_roots):
         raise VisualEvidenceError(
             "worker_path",
             f"Output directory escapes allowed roots: {output_dir}",
@@ -919,7 +919,7 @@ def _validate_metrics(
         or not extrema_valid
         or not deltas_valid
         or metrics.exact_match != all(bounds[1] == 0 for bounds in metrics.extrema)
-        or metrics.coverage_band != _coverage_band(percentage)
+        or metrics.coverage_band != visual_coverage_band(percentage)
         or (metrics.pixels_changed == 0) != (metrics.changed_bounds is None)
     ):
         raise VisualEvidenceError(
@@ -960,18 +960,6 @@ def _validate_metrics(
                 "worker_response",
                 "Worker changed bounds are outside the image.",
             )
-
-
-def _coverage_band(change_percentage: float) -> str:
-    if change_percentage < 0.1:
-        return "trace"
-    if change_percentage < 5:
-        return "localized"
-    if change_percentage < 20:
-        return "noticeable"
-    if change_percentage < 50:
-        return "broad"
-    return "extensive"
 
 
 def _canonical_json(value: object) -> str:
@@ -1084,7 +1072,7 @@ def _validate_artifact(
         allowed_roots,
         role="artifact",
     )
-    if not _is_within(resolved, (output_dir,)):
+    if not path_is_within(resolved, (output_dir,)):
         raise VisualEvidenceError(
             "worker_response",
             f"Worker artifact escapes the output directory: {resolved}",
@@ -1128,7 +1116,7 @@ def _allowed_path(
             f"URL fetching is unsupported for the visual worker: {raw}",
         )
     resolved = value.expanduser().resolve()
-    if not _is_within(resolved, allowed_roots):
+    if not path_is_within(resolved, allowed_roots):
         raise VisualEvidenceError(
             "worker_path",
             f"Isolated visual-evidence {role} escapes allowed roots: {resolved}",
@@ -1137,7 +1125,8 @@ def _allowed_path(
     return resolved
 
 
-def _is_within(path: Path, roots: tuple[Path, ...]) -> bool:
+def path_is_within(path: Path, roots: tuple[Path, ...]) -> bool:
+    """Return whether a resolved path is inside any resolved root."""
     return any(path == root or root in path.parents for root in roots)
 
 

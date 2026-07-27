@@ -172,7 +172,7 @@ class ContractObservation:
         return cls(
             identity=str(value.get("identity", "")),
             side=str(value.get("side", "unknown")),
-            method=_normalize_method(value.get("method")),
+            method=normalize_http_method(value.get("method")),
             path=_string_or_none(value.get("path")),
             normalized_path=_string_or_none(value.get("normalized_path")),
             parameters=tuple(str(item) for item in value.get("parameters", [])),
@@ -243,8 +243,12 @@ class ProjectMap:
             )
         return cls(
             schema_version=version,
-            nodes=tuple(ContractNode.from_dict(item) for item in value.get("nodes", [])),
-            edges=tuple(ContractEdge.from_dict(item) for item in value.get("edges", [])),
+            nodes=tuple(
+                ContractNode.from_dict(item) for item in value.get("nodes", [])
+            ),
+            edges=tuple(
+                ContractEdge.from_dict(item) for item in value.get("edges", [])
+            ),
             findings=tuple(
                 Finding.from_dict(item) for item in value.get("findings", [])
             ),
@@ -540,7 +544,9 @@ def _contract_group_contradiction(
             return axis
 
     status_sets = {
-        tuple(sorted(str(item) for item in operation.attributes.get("status_codes", [])))
+        tuple(
+            sorted(str(item) for item in operation.attributes.get("status_codes", []))
+        )
         for operation in operations
         if _operation_evidence_state(
             operation,
@@ -626,7 +632,12 @@ def _operation_contract_node(operation: ContractObservation) -> ContractNode:
         "cache": operation.cache_invalidation,
         **operation.evidence,
     }
-    evidence_states = {*evidence.values(), operation.auth, operation.authorization, operation.tenant}
+    evidence_states = {
+        *evidence.values(),
+        operation.auth,
+        operation.authorization,
+        operation.tenant,
+    }
     if "contradictory" in evidence_states:
         capability_status = "contradictory"
     elif (
@@ -982,9 +993,7 @@ def _first_contract_difference(
 
     front_errors = _error_schemas_from_graph(frontend.id, outgoing)
     back_errors = _error_schemas_from_graph(backend.id, outgoing)
-    front_error_state = _operation_evidence_state(
-        frontend, "error", bool(front_errors)
-    )
+    front_error_state = _operation_evidence_state(frontend, "error", bool(front_errors))
     back_error_state = _operation_evidence_state(backend, "error", bool(back_errors))
     difference = _evidence_state_difference(
         "error", front_error_state, back_error_state, "envelope"
@@ -1006,9 +1015,7 @@ def _first_contract_difference(
                 front_errors[status], back_errors[status]
             )
             if schema_difference is not None:
-                suffix, field, detail, expected, actual, investigate = (
-                    schema_difference
-                )
+                suffix, field, detail, expected, actual, investigate = schema_difference
                 return (
                     f"error_{suffix}",
                     field,
@@ -1086,9 +1093,7 @@ def _ui_lifecycle_difference(
 ) -> tuple[str, str, str, Any, Any, bool] | None:
     if not bool(frontend.attributes.get("ui_required", True)):
         return None
-    states = {
-        node.name for node in outgoing.get((frontend.id, "renders_state"), [])
-    }
+    states = {node.name for node in outgoing.get((frontend.id, "renders_state"), [])}
     evidence = _operation_evidence_state(frontend, "ui_lifecycle", bool(states))
     expected = (
         {"loading", "error", "success"}
@@ -1515,7 +1520,8 @@ def _graph_operations_by_path(
     }
 
 
-def _normalize_method(value: Any) -> str | None:
+def normalize_http_method(value: Any) -> str | None:
+    """Return a supported uppercase HTTP method, or ``None``."""
     if value is None:
         return None
     method = str(value).upper()
@@ -1689,9 +1695,7 @@ def dedupe_contract_observations(
             operation.normalized_path or operation.path or "?",
         )
         normalized = (
-            operation
-            if operation.identity
-            else replace(operation, identity=identity)
+            operation if operation.identity else replace(operation, identity=identity)
         )
         payload = json.dumps(asdict(normalized), sort_keys=True, default=str)
         deduped[payload] = normalized

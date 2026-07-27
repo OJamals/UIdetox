@@ -1,4 +1,5 @@
 """State and Config Management for UIdetox."""
+
 import contextlib
 import json
 import os
@@ -17,6 +18,7 @@ from uidetox.utils import now_iso
 
 try:
     import fcntl as _fcntl
+
     _HAS_FLOCK = True
 except ImportError:
     _HAS_FLOCK = False  # Windows — locking is best-effort only
@@ -97,10 +99,6 @@ def ensure_uidetox_dir():
     d = get_uidetox_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _now_iso() -> str:
-    return now_iso()
 
 
 def _is_numeric_config_value(value: object) -> bool:
@@ -376,7 +374,7 @@ def add_issues(
             new_key = finding.fingerprint
             if new_key in dedup_keys:
                 continue
-            created_at = _now_iso()
+            created_at = now_iso()
             if isinstance(issue, dict):
                 issue["created_at"] = created_at
             payload = finding.to_dict()
@@ -387,7 +385,7 @@ def add_issues(
         if qualified_complete is not None:
             state["current_snapshot"] = {
                 "qualified_coverage": 1.0 if qualified_complete else 0.0,
-                "scanned_at": _now_iso(),
+                "scanned_at": now_iso(),
             }
         if accepted_count == 0 and qualified_complete is None:
             return 0
@@ -409,7 +407,7 @@ def increment_scans():
         state = load_state()
         state.setdefault("stats", {})
         state["stats"]["scans_run"] = state["stats"].get("scans_run", 0) + 1
-        state["last_scan"] = _now_iso()
+        state["last_scan"] = now_iso()
         save_state(state)
 
 
@@ -455,7 +453,7 @@ def batch_remove_issues(
             verification = verifications[r["id"]]
             r["status"] = "verified_resolved"
             r["last_verification"] = verification.to_dict()
-            r["resolved_at"] = _now_iso()
+            r["resolved_at"] = now_iso()
             if note:
                 r["note"] = note
             state.setdefault("resolved", []).append(r)
@@ -490,10 +488,9 @@ def record_verification_override(
                 "issue_ids": list(issue_ids),
                 "actor": actor.strip(),
                 "reason": reason.strip(),
-                "timestamp": _now_iso(),
+                "timestamp": now_iso(),
                 "results": {
-                    issue_id: result.to_dict()
-                    for issue_id, result in results.items()
+                    issue_id: result.to_dict() for issue_id, result in results.items()
                 },
             }
         )

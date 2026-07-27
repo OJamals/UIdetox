@@ -7,9 +7,13 @@ from pathlib import Path
 
 from uidetox.fileset import ProjectFileSet
 from uidetox.prompt_safety import render_untrusted_data
-from uidetox.state import get_project_root, get_uidetox_dir, load_state, load_config  # type: ignore
+from uidetox.state import (  # type: ignore
+    get_project_root,
+    get_uidetox_dir,
+    load_config,
+    load_state,
+)
 from uidetox.utils import now_iso  # type: ignore
-
 
 STAGES = ["observe", "diagnose", "prioritize", "fix", "verify"]
 
@@ -18,10 +22,6 @@ def _sessions_dir() -> Path:
     d = get_uidetox_dir() / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _now_iso() -> str:
-    return now_iso()
 
 
 def _session_id() -> str:
@@ -51,7 +51,7 @@ def create_session(stage: str, prompt: str) -> str:
         "session_id": session_id,
         "stage": stage,
         "status": "pending",
-        "created_at": _now_iso(),
+        "created_at": now_iso(),
         "completed_at": None,
     }
     with open(session_dir / "meta.json", "w", encoding="utf-8") as f:
@@ -102,7 +102,7 @@ def record_result(session_id: str, result: dict) -> bool:
         meta["review_reason"] = None
 
     meta["confidence"] = confidence
-    meta["completed_at"] = _now_iso()
+    meta["completed_at"] = now_iso()
 
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
@@ -179,7 +179,7 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
         "confidence": confidence,
         "status": meta.get("status"),
         "reason": meta.get("review_reason", "Below confidence threshold"),
-        "flagged_at": _now_iso(),
+        "flagged_at": now_iso(),
         "action_required": (
             "HUMAN_REVIEW_REQUIRED" if confidence < 0.6 else "REVIEW_RECOMMENDED"
         ),
@@ -295,6 +295,8 @@ def _build_memory_block(
             get_last_scan,
             get_notes,
             get_patterns,
+        )
+        from uidetox.memory import (
             get_session as get_mem_session,
         )
     except ImportError:
@@ -342,7 +344,9 @@ def _build_memory_block(
     if not memory_data:
         return ""
 
-    return "# Saved Context Data\n" + render_untrusted_data({"memory": memory_data}) + "\n"
+    return (
+        "# Saved Context Data\n" + render_untrusted_data({"memory": memory_data}) + "\n"
+    )
 
 
 def _build_deconfliction_block(

@@ -1,5 +1,7 @@
 """Shared utilities for UIdetox."""
 
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -12,6 +14,17 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 def now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def canonical_sha256(payload: object) -> str:
+    """Hash canonical compact JSON with SHA-256."""
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def safe_split_cmd(cmd: str) -> list[str]:

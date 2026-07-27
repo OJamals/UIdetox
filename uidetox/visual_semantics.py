@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from uidetox.frontend_map import (
 )
 from uidetox.runtime_observer import RuntimeElement, RuntimePage
 from uidetox.state import get_uidetox_dir
+from uidetox.utils import canonical_sha256
 from uidetox.visual_evidence import (
     DEFAULT_MAX_PIXELS,
     DEFAULT_PIXEL_THRESHOLD,
@@ -25,16 +25,6 @@ from uidetox.visual_evidence import (
     VisualRegion,
     inspect_visual_evidence,
 )
-
-
-def _canonical_hash(payload: Any) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _runtime_node(
@@ -197,7 +187,7 @@ def build_visual_context(
     context: dict[str, Any] = {}
     if frontend_map is not None:
         map_payload = frontend_map.to_dict()
-        hashes["frontend_map"] = _canonical_hash(map_payload)
+        hashes["frontend_map"] = canonical_sha256(map_payload)
         context["frontend_map"] = {
             "generated_at": frontend_map.generated_at,
             "target": frontend_map.target,
@@ -210,7 +200,7 @@ def build_visual_context(
         }
     if intent is not None:
         intent_payload = intent.to_dict()
-        hashes["design_intent"] = _canonical_hash(intent_payload)
+        hashes["design_intent"] = canonical_sha256(intent_payload)
         context["design_intent"] = intent_payload
     return hashes, context
 

@@ -9,7 +9,6 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from uidetox.visual_evidence import (
@@ -24,6 +23,7 @@ from uidetox.visual_worker_protocol import (
     VisualWorkerPolicy,
     assert_request_paths_allowed,
     normalize_worker_policy,
+    path_is_within,
     validate_worker_manifest,
     visual_request_to_dict,
 )
@@ -123,7 +123,7 @@ def build_visual_evidence_isolated(
     )
     if request.manifest_path is not None:
         manifest_path = request.manifest_path.expanduser().resolve()
-        if not _path_within(
+        if not path_is_within(
             manifest_path,
             normalized_policy.allowed_roots,
         ):
@@ -282,7 +282,3 @@ def _worker_exit_detail(returncode: int, stderr: bytes) -> str:
         status = f"exited with status {returncode}"
     detail = " ".join(stderr.decode("utf-8", errors="replace").split())[:1000]
     return f"Worker {status}." + (f" stderr: {detail}" if detail else "")
-
-
-def _path_within(path: Path, roots: tuple[Path, ...]) -> bool:
-    return any(path == root or root in path.parents for root in roots)

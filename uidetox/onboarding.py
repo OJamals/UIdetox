@@ -8,12 +8,12 @@ import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from uidetox.design_context import DesignSettings
 from uidetox.intent_journal import record_intent_artifacts
 from uidetox.state import get_uidetox_dir
+from uidetox.utils import now_iso
 
 ONBOARDING_VERSION = 1
 ONBOARDING_STEPS = ("intro", "agent", "capabilities", "intent", "handoff")
@@ -23,10 +23,6 @@ _STEP_DESCRIPTIONS = {
     "intent": "capture the website purpose, audience, primary job, and constraints",
     "handoff": "save a provenance-linked prompt for your coding agent",
 }
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _system_is_interactive() -> bool:
@@ -50,7 +46,7 @@ class OnboardingEnvironment:
             interactive=_system_is_interactive(),
             input_fn=input,
             output_fn=print,
-            now_fn=_utc_now,
+            now_fn=now_iso,
         )
 
 

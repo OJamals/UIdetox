@@ -3,7 +3,6 @@
 import argparse
 import sys
 from collections.abc import Callable
-from datetime import datetime, timezone
 
 from uidetox.design_context import (
     DesignIntent,
@@ -18,7 +17,7 @@ from uidetox.state import (
     load_config,
     save_config,
 )
-
+from uidetox.utils import now_iso
 
 DEFAULT_CONFIG = {
     "DESIGN_VARIANCE": 8,
@@ -151,13 +150,9 @@ def capture_interactive_intent(
         config.get("design_intent"),
         updates,
         evidence_source="user:interactive-setup",
-        confirmed_at=confirmed_at or _confirmed_now(),
+        confirmed_at=confirmed_at or now_iso(),
     )
     return DesignSettings.from_config(config), True
-
-
-def _confirmed_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def run(args: argparse.Namespace):
@@ -184,7 +179,7 @@ def run(args: argparse.Namespace):
         config.get("design_intent"),
         intent_updates,
         evidence_source="user:cli-setup",
-        confirmed_at=_confirmed_now(),
+        confirmed_at=now_iso(),
     )
     if configured_intent:
         config["design_intent"] = configured_intent
@@ -200,7 +195,7 @@ def run(args: argparse.Namespace):
             supplied_fields=set(intent_updates),
             input_fn=_prompt,
             output_fn=print,
-            confirmed_at=_confirmed_now(),
+            confirmed_at=now_iso(),
         )
         if interactive_changed:
             intent_update_sources.append("interactive")

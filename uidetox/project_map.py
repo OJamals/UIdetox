@@ -13,12 +13,12 @@ from uidetox.contract_graph import (
     ContractObservation,
     ProjectMap,
     SourceAnchor,
-    _normalize_method,
     _schema_observation_state,
     _string_or_none,
     build_contract_graph,
     contract_schema_observations,
     dedupe_contract_observations,
+    normalize_http_method,
     normalize_route_path,
     reconcile_contract_graph,
 )
@@ -98,7 +98,7 @@ def _frontend_observations(
             continue
         path = _string_or_none(_node_value(node, "name", None))
         normalized, parameters, unresolved = normalize_route_path(path)
-        method = _normalize_method(metadata.get("method"))
+        method = normalize_http_method(metadata.get("method"))
         dynamic = bool(metadata.get("dynamic", False)) or unresolved or path is None
         request_schemas = contract_schema_observations(
             metadata.get("request_contracts"),
@@ -165,9 +165,7 @@ def _frontend_observations(
                         "mutation", method not in {None, "GET", "HEAD", "OPTIONS"}
                     )
                 ),
-                cache_invalidation=str(
-                    metadata.get("cache_invalidation", "unknown")
-                ),
+                cache_invalidation=str(metadata.get("cache_invalidation", "unknown")),
                 evidence={
                     "request": (
                         _schema_observation_state(request_schemas)
@@ -202,9 +200,7 @@ def _frontend_observations(
                         if metadata.get("ui_required")
                         else "absent"
                     ),
-                    "cache": str(
-                        metadata.get("cache_invalidation", "unknown")
-                    ),
+                    "cache": str(metadata.get("cache_invalidation", "unknown")),
                 },
                 sources=(
                     SourceAnchor(
