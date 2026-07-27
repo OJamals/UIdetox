@@ -345,7 +345,7 @@ Final gates:
   prototype smokes, installed prototype generation, and `pip check`;
 - installed canonical brief hash matched checkout;
 - multi-axis review verdict: APPROVE;
-- graph refresh: 6,005 nodes and 24,585 edges.
+- graph refresh: 6,005 nodes and 24,591 edges.
 
 Package artifacts:
 
