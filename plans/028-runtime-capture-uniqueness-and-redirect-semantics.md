@@ -2,7 +2,7 @@
 
 ## Status
 
-READY TO INTEGRATE
+DONE
 
 ## Magic moment
 
@@ -207,15 +207,15 @@ matrix remains acceptable even though it cannot represent one observation key.
 
 **Acceptance criteria:**
 
-- [ ] Commit only reviewed passing scope.
-- [ ] Merge to `master`, push, refresh graph after source commit, and prove
+- [x] Commit only reviewed passing scope.
+- [x] Merge to `master`, push, refresh graph after source commit, and prove
       `HEAD == master == origin/master == remote refs/heads/master`.
-- [ ] Remove the short-lived branch only after parity.
-- [ ] No release, tag, or PyPI action occurs.
+- [x] Remove the short-lived branch only after parity.
+- [x] No release, tag, or PyPI action occurs.
 
 **Verification:**
 
-- [ ] Final Git/worktree/branch/stash/process/remote rebaseline passes.
+- [x] Final Git/worktree/branch/stash/process/remote rebaseline passes.
 
 **Dependencies:** Task 4
 
@@ -233,7 +233,7 @@ matrix remains acceptable even though it cannot represent one observation key.
 - [x] No archived artifact or stash is rewritten or dropped.
 - [x] Full repository/package/invariant/review gates pass.
 - [x] Production growth is evidenced and bounded to existing functions.
-- [ ] Local/origin/server SHA parity is proven.
+- [x] Local/origin/server SHA parity is proven.
 
 ## Execution results
 
@@ -258,7 +258,10 @@ matrix remains acceptable even though it cannot represent one observation key.
   35 canonical final rows and 20 intentionally noncanonical historical rows.
 - All seven preserved archive manifests and both archival stash object IDs
   remained exact.
-- LOC: production `+75/-22`; tests `+150/-0`; plans/docs `+288/-0`; total `+513/-22`.
+- Source commit `acc9742ad4f8430840e648e5ac622fce97011297` preceded graph
+  refresh commit `254634fa6b0d411b72fa9c54dfeeb712910741e7`; the refreshed graph
+  contains 6,026 nodes and 25,633 edges.
+- LOC: production `+75/-22`; tests `+150/-0`; plans/docs `+291/-0`; total `+516/-22`.
   Production function count remained unchanged.
 - Removed/replaced: prototype-specific row validation and direct
   `RuntimeCaptureRecord` dependency; set-only page foreign-key validation;
