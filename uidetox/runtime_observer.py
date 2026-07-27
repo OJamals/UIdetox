@@ -470,6 +470,7 @@ class RuntimeObservation:
             captures = tuple(_legacy_capture(page, self.generated_at) for page in pages)
             object.__setattr__(self, "captures", captures)
         captures_by_id: dict[str, RuntimeCaptureRecord] = {}
+        completed = failed = degraded = False
         for capture in captures:
             if capture.capture_id in captures_by_id:
                 raise ValueError(
@@ -481,6 +482,12 @@ class RuntimeObservation:
                     f"Runtime capture URL was not requested: {capture.url!r}."
                 )
             captures_by_id[capture.capture_id] = capture
+            if capture.status == "completed":
+                completed = True
+                degraded = degraded or capture.readiness.status == "degraded"
+                degraded = degraded or capture.coverage.truncated
+            elif capture.status == "failed":
+                failed = True
         page_ids: set[str] = set()
         for page in pages:
             if page.capture_id in page_ids:
@@ -505,25 +512,17 @@ class RuntimeObservation:
                     "Runtime page capture metadata does not match record: "
                     f"{page.capture_id!r}."
                 )
-        completed = sum(capture.status == "completed" for capture in captures)
-        failed = sum(capture.status == "failed" for capture in captures)
-        degraded = any(
-            capture.readiness.status == "degraded" or capture.coverage.truncated
-            for capture in captures
-            if capture.status == "completed"
-        )
-        if failed and completed:
-            status = "partial"
-        elif failed or (self.errors and not completed):
-            status = "failed"
-        elif completed and degraded:
-            status = "degraded"
-        elif completed and self.errors:
-            status = "partial"
+        if failed:
+            status = "partial" if completed else "failed"
         elif completed:
-            status = "current"
+            if degraded:
+                status = "degraded"
+            elif self.errors:
+                status = "partial"
+            else:
+                status = "current"
         else:
-            status = "absent"
+            status = "failed" if self.errors else "absent"
         object.__setattr__(self, "status", status)
 
     def to_dict(self) -> dict[str, Any]:
