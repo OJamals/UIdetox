@@ -8,7 +8,7 @@
 
 ## Status
 
-- **State**: IN PROGRESS
+- **State**: DONE
 - **Priority**: P1
 - **Effort**: M
 - **Risk**: MEDIUM
@@ -19,6 +19,8 @@
 - **Execution branch**: `codex/023-handoff-qualification-runner`
 - **Execution worktree**:
   `/Users/omar/Documents/Projects/.uidetox-worktrees/023-handoff-qualification-runner`
+- **Implementation commit**:
+  `0f5c8af201fe42397e0757925e4c3c0dc3f1bfd1`
 - **Live baseline**: root `HEAD`, `master`, `origin/master`, and remote
   `refs/heads/master` equal the planned-at SHA. Root is clean, one worktree
   existed before this plan, local and remote contain only `master`, and no
@@ -224,21 +226,110 @@ Commit only after every gate passes. Merge into `master`, push, verify local
 parity, then remove the short-lived branch/worktree. Refresh the shared graph
 only if indexed source changed.
 
+## Execution results
+
+The stdlib-only runner replayed the exact preserved Plan 022 stale-stop and
+final attempt artifacts. The stale stop passed with one exact
+`frontend/src/App.tsx` mismatch, zero implementation attempts, zero files, and
+zero output bytes. The recovered final attempt passed with:
+
+- source manifest: 44/44 paths current;
+- preserved contracts: 94/94 exact with valid preservation evidence;
+- named source anchors: 34/34 exact with valid existence/preservation status;
+- feasibility blockers: 24/24 exact with non-empty dispositions;
+- runtime unknowns: 3/3 exact with non-empty dispositions;
+- viewports: 3/3 exact;
+- normalized runtime evidence: HTTP 200, zero console errors/warnings, zero
+  horizontal-overflow viewports, and 3/3 PNG dimensions/hashes;
+- recovery: one passing stale stop followed by one passing completed attempt;
+- issues: zero in both attempts.
+
+The byte-identical repeated report is 5,356 bytes with SHA-256
+`98ff4b9899df516820a1aa1c10163e44c5857191ce573f7bcf9fbe44ad91c2a0`.
+Normalized manifest SHA-256 values are
+`b861ab9ef8c9b5275d5e12f9a62001dd6e857be14befdffa61b84f8df92aa6bb`
+for the stale attempt and
+`2a217bde0b6fd48aa9fa1d544a067115bccb5b42d10965866633c668dafc2ab2`
+for the final attempt.
+
+### Distribution
+
+| Metric | Samples | Min | Median | Mean | P90 | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| wall seconds | 30.03, 165.00 | 30.03 | 97.515 | 97.515 | 151.503 | 165.00 |
+| input tokens | 185,033, 1,030,675 | 185,033 | 607,854 | 607,854 | 946,110.8 | 1,030,675 |
+| cached input tokens | 148,011, 972,854 | 148,011 | 560,432.5 | 560,432.5 | 890,369.7 | 972,854 |
+| cache-write input tokens | 37,004, 57,755 | 37,004 | 47,379.5 | 47,379.5 | 55,679.9 | 57,755 |
+| output tokens | 1,688, 13,450 | 1,688 | 7,569 | 7,569 | 12,273.8 | 13,450 |
+| reasoning output tokens | 394, 1,218 | 394 | 806 | 806 | 1,135.6 | 1,218 |
+| retries | 0, 2 | 0 | 1 | 1 | 1.8 | 2 |
+| implementation attempts | 0, 1 | 0 | 0.5 | 0.5 | 0.9 | 1 |
+| output files | 0, 15 | 0 | 7.5 | 7.5 | 13.5 | 15 |
+| output bytes | 0, 775,963 | 0 | 387,981.5 | 387,981.5 | 698,366.7 | 775,963 |
+
+Completed-attempt contract-preservation accuracy is 1.0. The stale stop has no
+contract-accuracy sample because it correctly stopped before implementation.
+
+### Repository gates
+
+- focused warning-strict pytest: 82 passed;
+- full warning-strict pytest, cache disabled: 1,424 passed;
+- scoped Ruff and Ruff format: pass;
+- `compileall` for production and benchmarks: pass;
+- wheel/sdist metadata and build: pass;
+- final wheel: 499,759 bytes, SHA-256
+  `9b6fce8b4806884fc1eefb2db2b310709734b2cf6baa34ab51c0b1d64ce55610`;
+- fresh wheel install: 82 module imports, CLI
+  version/map/redesign/prototype smokes, and `pip check` pass;
+- repeated qualification, `git diff --check`, source/artifact/process/stash
+  invariants, and five-axis review: pass;
+- review verdict: APPROVE; no open correctness, readability, architecture,
+  security, or performance blocker.
+
+Production LOC delta is 0. Benchmark code/schema are +1,133 lines, tests are
++680 lines, and plan/docs are +342 lines. No pre-existing production,
+test, benchmark, or archival artifact was deleted: the new runner replaces
+external hand-accounting while preserving the exact Plan 022 evidence. Shared
+strict-object, identity, measurement, and artifact-snapshot helpers removed
+intra-runner duplication before commit. No dependency, production command,
+cache, graph, evidence type, compatibility wrapper, provider parser, browser
+launcher, or renderer-specific model was added.
+
+Remaining risks:
+
+- the two normalized manifests were written from one preserved Plan 022
+  qualification, so cross-tool and cross-agent distributions remain
+  unsampled;
+- HTTP/console/overflow values remain normalized controller inputs; the runner
+  verifies their values and screenshot bytes but does not launch or trust a
+  browser itself;
+- strict identity order intentionally rejects canonical reorderings, so future
+  schema evolution must increment the manifest version instead of adding a
+  compatibility path;
+- triggered, authenticated, and failure runtime states remain unobserved in
+  the preserved Plan 022 fixture.
+
+Next plan: Plan 024 should run a repeatability matrix of fresh disposable-agent
+attempts through this same schema, including injected stale, missing,
+reordered, malformed, and runtime-recovery cases. It should establish
+regression thresholds for wall time, tokens, retries, output size, and
+contract accuracy without adding production orchestration or provider parsers.
+
 ## Done criteria
 
-- [ ] Versioned normalized attempt schema exists and rejects drift.
-- [ ] Runner is benchmark-only and provider/browser-launch agnostic.
-- [ ] Stale-source safety and completed exact preservation are deterministic.
-- [ ] Every canonical source, identity, blocker, unknown, and viewport is
+- [x] Versioned normalized attempt schema exists and rejects drift.
+- [x] Runner is benchmark-only and provider/browser-launch agnostic.
+- [x] Stale-source safety and completed exact preservation are deterministic.
+- [x] Every canonical source, identity, blocker, unknown, and viewport is
       accounted for without fuzzy matching.
-- [ ] Browser screenshot dimensions/hashes and normalized runtime gates are
+- [x] Browser screenshot dimensions/hashes and normalized runtime gates are
       verified when supplied.
-- [ ] Report bytes are deterministic across repeated runs.
-- [ ] Plan 022 stale and final artifacts replay successfully.
-- [ ] Focused, full, package, invariant, and review gates pass.
-- [ ] No production CLI/model/cache/graph/evidence/dependency is added.
-- [ ] LOC delta, artifacts, risks, and next plan are recorded.
-- [ ] Local/origin/server parity is proven after push.
+- [x] Report bytes are deterministic across repeated runs.
+- [x] Plan 022 stale and final artifacts replay successfully.
+- [x] Focused, full, package, invariant, and review gates pass.
+- [x] No production CLI/model/cache/graph/evidence/dependency is added.
+- [x] LOC delta, artifacts, risks, and next plan are recorded.
+- [x] Local/origin/server parity is proven after push.
 
 ## STOP conditions
 
