@@ -657,45 +657,41 @@ def _python_receiver_prefixes(content: str) -> dict[str, str]:
     prefixes: dict[str, str] = {}
     factories = _python_framework_factories(content)
     code_positions = _python_code_positions(content)
+    prefix_argument = r"\b(?:prefix|url_prefix)\s*=\s*[\"'](?P<prefix>[^)]*?)[\"']"
+    prefix_args = rf"(?:[^)]*?{prefix_argument}[^)]*|[^)]*)"
     assignment = re.compile(
         r"\b(?P<receiver>[A-Za-z_$][\w$]*)\s*=\s*"
         r"(?P<factory>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)"
-        r"\s*\((?P<args>.*?)\)",
+        rf"\s*\({prefix_args}\)",
         re.DOTALL,
     )
     for match in assignment.finditer(content):
         if not code_positions[match.start()]:
             continue
         factory = factories.get(match.group("factory"))
-        if factory is None or factory[1] not in {"APIRouter", "Blueprint"}:
+        prefix = match.group("prefix")
+        if (
+            factory is None
+            or factory[1] not in {"APIRouter", "Blueprint"}
+            or prefix is None
+        ):
             continue
-        prefix_match = re.search(
-            r"\b(?:prefix|url_prefix)\s*=\s*[\"'](?P<prefix>.*?)[\"']",
-            match.group("args"),
-            re.DOTALL,
-        )
-        if prefix_match:
-            prefixes[match.group("receiver")] = prefix_match.group("prefix")
+        prefixes[match.group("receiver")] = prefix
 
     mount = re.compile(
         r"\b[A-Za-z_$][\w$]*\.(?:include_router|register_blueprint)"
-        r"\(\s*(?P<receiver>[A-Za-z_$][\w$]*)(?P<args>.*?)\)",
+        rf"\(\s*(?P<receiver>[A-Za-z_$][\w$]*){prefix_args}\)",
         re.DOTALL,
     )
     for match in mount.finditer(content):
-        if not code_positions[match.start()]:
+        prefix = match.group("prefix")
+        if not code_positions[match.start()] or prefix is None:
             continue
-        prefix_match = re.search(
-            r"\b(?:prefix|url_prefix)\s*=\s*[\"'](?P<prefix>.*?)[\"']",
-            match.group("args"),
-            re.DOTALL,
+        receiver = match.group("receiver")
+        prefixes[receiver] = _join_routes(
+            prefix,
+            prefixes.get(receiver, ""),
         )
-        if prefix_match:
-            receiver = match.group("receiver")
-            prefixes[receiver] = _join_routes(
-                prefix_match.group("prefix"),
-                prefixes.get(receiver, ""),
-            )
     return prefixes
 
 
