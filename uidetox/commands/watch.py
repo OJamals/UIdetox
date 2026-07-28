@@ -128,15 +128,10 @@ def run(args) -> None:
             time.sleep(interval)
             curr = _snapshot(root)
 
-            changed: list[str] = []
-
-            # Detect modified and new files
-            for fpath, mtime in curr.items():
-                if fpath not in prev or prev[fpath] != mtime:
-                    changed.append(fpath)
-
-            # Detect deleted files
-            deleted = [f for f in prev if f not in curr]
+            changed = [
+                fpath for fpath, mtime in curr.items() if prev.get(fpath) != mtime
+            ]
+            deleted = [fpath for fpath in prev if fpath not in curr]
 
             if not changed and not deleted:
                 continue
