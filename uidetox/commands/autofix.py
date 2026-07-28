@@ -2,6 +2,7 @@
 
 import argparse
 import subprocess
+from itertools import chain
 from pathlib import Path
 
 from uidetox.state import get_project_root, load_state, load_config
@@ -600,7 +601,6 @@ def run(args: argparse.Namespace):
     }
 
     changed_files = set()
-    transforms_run = set()
 
     def _normalize_issue_path(file_path: str) -> Path:
         path = Path(file_path)
@@ -608,25 +608,18 @@ def run(args: argparse.Namespace):
             return path
         return (project_root / path).resolve()
 
+    transform_groups: dict[str, list[list[dict]]] = {}
     for cat_name, cat_issues in grouped.items():
-        # Check for exact category match, then mapped match
         transform_name = _TRANSFORM_MAP.get(cat_name, f"{cat_name}.js")
+        transform_groups.setdefault(transform_name, []).append(cat_issues)
+
+    for transform_name, issue_groups in transform_groups.items():
         transform_file = transforms_dir / transform_name
 
         if not transform_file.exists():
             continue
 
-        # Avoid running the same transform on the same files twice
-        transform_key = str(transform_file)
-        if transform_key in transforms_run:
-            continue
-
-        # Collect all files needing this transform
-        files_to_fix = []
-        for cn, ci in grouped.items():
-            mapped = _TRANSFORM_MAP.get(cn, f"{cn}.js")
-            if mapped == transform_name:
-                files_to_fix.extend([i["file"] for i in ci])
+        files_to_fix = [issue["file"] for issue in chain.from_iterable(issue_groups)]
         files_to_fix = list(set(files_to_fix))
 
         # Only transform JS/TS files (jscodeshift doesn't handle CSS)
@@ -639,7 +632,6 @@ def run(args: argparse.Namespace):
         print(
             f"\n⚙️  Applying {transform_name} transforms via jscodeshift on {len(files_to_fix)} file(s)..."
         )
-        transforms_run.add(transform_key)
 
         for file_path in files_to_fix:
             normalized_path = _normalize_issue_path(file_path)
@@ -746,8 +738,6 @@ def run(args: argparse.Namespace):
                 )
         return
 
-    auto_commit = config.get("auto_commit", False)
-
     print("\n[AGENT INSTRUCTION]")
     print(
         f"Apply all {len(t1_issues)} T1 fixes listed above, working category by category."
@@ -756,7 +746,7 @@ def run(args: argparse.Namespace):
     print("  1. Open the file")
     print("  2. Apply the fix using the category guidance above")
     print('  3. Run `uidetox resolve <issue_id> --note "what you changed"` when done')
-    if auto_commit:
+    if config.get("auto_commit", False):
         print(
             "\n  AUTO-COMMIT is ON — each `resolve` will atomically commit the fix to git."
         )
