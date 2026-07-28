@@ -48,6 +48,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 035 | Watch snapshot-delta consolidation | P1 | S | 034 | DONE — 1,451 tests; production -5 LOC; cognitive 32→25; graph 6,027/25,784 |
 | 036 | Detect tool-list rendering consolidation | P1 | S | 035 | DONE — 1,451 tests; production -4 LOC; cognitive 20→12; graph 6,027/25,789 |
 | 037 | History summary selection simplification | P1 | S | 036 | DONE — 1,451 tests; production -7 LOC/-2 functions; graph 6,025/25,788 |
+| 038 | Show grouped issue scan consolidation | P1 | S | 037 | DONE — 1,451 tests; production -2 LOC; loops 5→4; graph 6,025/25,802 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
