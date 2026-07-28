@@ -18,7 +18,6 @@ _DIM = "\033[2m"
 _RED = "\033[31m"
 _YELLOW = "\033[33m"
 _GREEN = "\033[32m"
-_CYAN = "\033[36m"
 
 _TIER_COLOUR = {1: _DIM, 2: _YELLOW, 3: _RED, 4: _RED + _BOLD}
 _TIER_LABEL = {1: "T1", 2: "T2", 3: "T3", 4: "T4"}
