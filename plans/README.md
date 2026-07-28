@@ -43,6 +43,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 030 | Runtime coverage projection consolidation | P1 | S | 029 | DONE — 1,451 tests; production -2 LOC; graph 6,027/25,725 |
 | 031 | Source-fact attribution scan consolidation | P1 | S | 030 | DONE — 1,451 tests; production -3 LOC; cognitive 75→72; graph 6,027/25,725 |
 | 032 | Pyproject dependency normalization | P1 | S | 031 | DONE — 1,451 tests; production -7 LOC; cognitive 91→27; graph 6,027/25,737 |
+| 033 | Autofix transform batch consolidation | P1 | S | 032 | DONE — 1,451 tests; production -10 LOC; cognitive 95→89; graph 6,027/25,764 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
