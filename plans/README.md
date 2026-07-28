@@ -51,6 +51,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 038 | Show grouped issue scan consolidation | P1 | S | 037 | DONE — 1,451 tests; production -2 LOC; loops 5→4; graph 6,025/25,802 |
 | 039 | Relevant-context fallback scan short-circuit | P1 | S | 038 | DONE — 1,451 tests; production -3 LOC; live scans -25.6%; graph 6,025/25,809 |
 | 040 | Submit-binding direct scan consolidation | P1 | S | 039 | DONE — 1,451 tests; production -4 LOC; cognitive 7→4; loop scans 3→2; graph 6,025/25,813 |
+| 041 | JavaScript comment-mask branch consolidation | P1 | S | 040 | DONE — 1,451 tests; production -4 LOC; cognitive 18→16; scan sites 2→1; graph 6,025/25,808 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
