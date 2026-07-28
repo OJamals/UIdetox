@@ -508,80 +508,70 @@ def run(args: argparse.Namespace):
             visual_options["expected_viewports"] = tuple(
                 viewport.name for viewport in observation.viewport_discovery.viewports
             )
+        pairs: list[tuple[str, Path, Path]] | None = None
         if responsive:
-            if captured:
-                print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")
-
-                pairs: list[tuple[str, Path, Path]] = []
-                for after_path in captured:
-                    vp_name = after_path.stem.replace("after_", "")
-                    before_path = snapshots / f"before_{vp_name}.png"
-                    if before_path.exists():
-                        pairs.append((vp_name, before_path, after_path))
-                if pairs:
-                    print("\n🔍 Generating visual diffs...")
-                    try:
-                        diffs = _build_capture_evidence(
-                            pairs,
-                            snapshots,
-                            runtime_pages=runtime_pages,
-                            config=config,
-                            **visual_options,
-                        )
-                    except VisualEvidenceError as error:
-                        if error.code == "missing_dependency":
-                            print(f"  ⚠️  {error}")
-                            diffs = []
-                        else:
-                            print(
-                                f"❌ Visual evidence failed: {error}", file=sys.stderr
-                            )
-                            sys.exit(1)
-                    for diff in diffs:
-                        vp_name = str(diff["viewport"])
-                        change_pct = diff.get("change_percentage", "?")
-                        coverage_band = diff.get(
-                            "coverage_band",
-                            "unknown",
-                        )
-                        print(
-                            f"  {vp_name}: {change_pct}% changed-pixel "
-                            f"coverage ({coverage_band})"
-                        )
-                    _atomic_write_json(
-                        snapshots / "diff_meta.json",
-                        {
-                            "schema_version": 1,
-                            "comparisons": diffs,
-                        },
-                    )
-            else:
+            if not captured:
                 sys.exit(1)
+            print(f"\n✅ {len(captured)} responsive AFTER screenshots saved.")
+            pairs = []
+            for after_path in captured:
+                vp_name = after_path.stem.replace("after_", "")
+                before_path = snapshots / f"before_{vp_name}.png"
+                if before_path.exists():
+                    pairs.append((vp_name, before_path, after_path))
+            if pairs:
+                print("\n🔍 Generating visual diffs...")
         else:
             if not captured:
                 sys.exit(1)
             out_file = captured[0]
             print(f"✅ AFTER screenshot saved to {out_file}")
 
-            # Generate diff if before exists
             before_file = snapshots / "before.png"
             if before_file.exists():
+                pairs = [("desktop", before_file, out_file)]
                 print("\n🔍 Generating visual diff...")
-                try:
-                    diffs = _build_capture_evidence(
-                        [("desktop", before_file, out_file)],
-                        snapshots,
-                        runtime_pages=runtime_pages,
-                        config=config,
-                        **visual_options,
+            else:
+                print(
+                    "   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first."
+                )
+
+        if pairs:
+            try:
+                diffs = _build_capture_evidence(
+                    pairs,
+                    snapshots,
+                    runtime_pages=runtime_pages,
+                    config=config,
+                    **visual_options,
+                )
+            except VisualEvidenceError as error:
+                if error.code == "missing_dependency":
+                    print(f"{'  ' if responsive else '   '}⚠️  {error}")
+                    diffs = []
+                else:
+                    print(f"❌ Visual evidence failed: {error}", file=sys.stderr)
+                    sys.exit(1)
+            if responsive:
+                for diff in diffs:
+                    vp_name = str(diff["viewport"])
+                    change_pct = diff.get("change_percentage", "?")
+                    coverage_band = diff.get(
+                        "coverage_band",
+                        "unknown",
                     )
-                except VisualEvidenceError as error:
-                    if error.code == "missing_dependency":
-                        print(f"   ⚠️  {error}")
-                        diffs = []
-                    else:
-                        print(f"❌ Visual evidence failed: {error}", file=sys.stderr)
-                        sys.exit(1)
+                    print(
+                        f"  {vp_name}: {change_pct}% changed-pixel "
+                        f"coverage ({coverage_band})"
+                    )
+                _atomic_write_json(
+                    snapshots / "diff_meta.json",
+                    {
+                        "schema_version": 1,
+                        "comparisons": diffs,
+                    },
+                )
+            else:
                 diff = diffs[0] if diffs else {}
                 change_pct = diff.get("change_percentage", "?")
                 coverage_band = diff.get("coverage_band", "unknown")
@@ -591,10 +581,6 @@ def run(args: argparse.Namespace):
 
                 if diff:
                     _atomic_write_json(snapshots / "diff_meta.json", diff)
-            else:
-                print(
-                    "   ⚠️  No BEFORE screenshot found. Run `uidetox capture --stage before` first."
-                )
 
         # Copy to latest for review command
         latest = snapshots / "latest.png"
