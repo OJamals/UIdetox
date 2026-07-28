@@ -56,6 +56,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 043 | Python receiver-prefix scan consolidation | P1 | S | 042 | DONE |
 | 044 | Session-document loader consolidation | P1 | S | 043 | DONE — 1,451 tests; production -9 LOC; cognitive 24→10; loaders 2→1; graph 6,026/25,813 |
 | 045 | Session-memory entry normalizer consolidation | P1 | S | 044 | DONE — 1,451 tests; production -5 LOC/-1 function; cognitive 18→10; graph 6,024/25,804 |
+| 046 | Visual file-hash consolidation | P1 | S | 045 | DONE — 1,451 tests; production -8 LOC/-1 function; cognitive 6→3; graph 6,023/25,804 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
