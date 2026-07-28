@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 _FORM_TAG = re.compile(r"<form\b[^>]*>", re.IGNORECASE)
 _HANDLER_ATTRIBUTE = re.compile(r"\b(?:action|onsubmit)\s*=", re.IGNORECASE)
@@ -21,6 +21,7 @@ def reconcile_project_issues(
     """Remove per-file findings disproved by linked project evidence."""
 
     issue_list = list(issues)
+
     def detector(issue: dict) -> object:
         return issue.get("detector_id", issue.get("id"))
 
@@ -124,23 +125,18 @@ def _has_submit_binding(script: str, form_id: str) -> bool:
         rf"document\.getElementById\(\s*[\"']{escaped_id}[\"']\s*\)",
         rf"document\.querySelector\(\s*[\"']#{escaped_id}[\"']\s*\)",
     )
+    listener = r"\s*\.\s*addEventListener\(\s*([\"'])submit\1"
+    direct = rf"(?:{selectors[0]}|{selectors[1]})" + listener
+    if re.search(direct, script, re.IGNORECASE):
+        return True
     for selector in selectors:
-        if re.search(
-            selector + r"\s*\.\s*addEventListener\(\s*([\"'])submit\1",
-            script,
-            re.IGNORECASE,
-        ):
-            return True
         assignment = re.search(
             rf"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*{selector}\s*;?",
             script,
             re.IGNORECASE,
         )
-        if assignment is None:
-            continue
-        variable = re.escape(assignment.group(1))
-        if re.search(
-            rf"\b{variable}\s*\.\s*addEventListener\(\s*([\"'])submit\1",
+        if assignment is not None and re.search(
+            rf"\b{re.escape(assignment.group(1))}" + listener,
             script[assignment.end() :],
             re.IGNORECASE,
         ):
