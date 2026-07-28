@@ -46,6 +46,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 033 | Autofix transform batch consolidation | P1 | S | 032 | DONE — 1,451 tests; production -10 LOC; cognitive 95→89; graph 6,027/25,764 |
 | 034 | Capture evidence orchestration consolidation | P1 | S | 033 | DONE — 1,451 tests; production -14 LOC; cognitive 107→86; graph 6,027/25,769 |
 | 035 | Watch snapshot-delta consolidation | P1 | S | 034 | DONE — 1,451 tests; production -5 LOC; cognitive 32→25; graph 6,027/25,784 |
+| 036 | Detect tool-list rendering consolidation | P1 | S | 035 | DONE — 1,451 tests; production -4 LOC; cognitive 20→12; graph 6,027/25,789 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
