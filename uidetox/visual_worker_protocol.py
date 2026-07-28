@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -23,6 +22,7 @@ from uidetox.visual_evidence import (
     VisualEvidenceRequest,
     VisualMetrics,
     VisualRegion,
+    _sha256_file,
     validate_visual_evidence_request,
     visual_coverage_band,
     visual_evidence_request_hash_from_payload,
@@ -1128,14 +1128,6 @@ def _allowed_path(
 def path_is_within(path: Path, roots: tuple[Path, ...]) -> bool:
     """Return whether a resolved path is inside any resolved root."""
     return any(path == root or root in path.parents for root in roots)
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _validate_hash(value: str, role: str) -> None:
