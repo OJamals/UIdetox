@@ -18,7 +18,12 @@ def _memory_path() -> Path:
     return get_uidetox_dir() / MEMORY_FILE
 
 
-def _normalize_pattern_entries(entries: object) -> list[dict]:
+def _normalize_text_entries(
+    entries: object,
+    required_field: str,
+    optional_field: str,
+    trailing_optional_field: str | None = None,
+) -> list[dict]:
     if not isinstance(entries, list):
         return []
 
@@ -26,32 +31,18 @@ def _normalize_pattern_entries(entries: object) -> list[dict]:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        pattern = entry.get("pattern")
-        if not isinstance(pattern, str):
+        required_value = entry.get(required_field)
+        if not isinstance(required_value, str):
             continue
-        clean_entry = {"pattern": pattern}
-        if isinstance(entry.get("category"), str):
-            clean_entry["category"] = entry["category"]
-        if isinstance(entry.get("learned_at"), str):
-            clean_entry["learned_at"] = entry["learned_at"]
-        normalized.append(clean_entry)
-    return normalized
-
-
-def _normalize_note_entries(entries: object) -> list[dict]:
-    if not isinstance(entries, list):
-        return []
-
-    normalized: list[dict] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        note = entry.get("note")
-        if not isinstance(note, str):
-            continue
-        clean_entry = {"note": note}
-        if isinstance(entry.get("created_at"), str):
-            clean_entry["created_at"] = entry["created_at"]
+        clean_entry = {required_field: required_value}
+        optional_value = entry.get(optional_field)
+        if isinstance(optional_value, str):
+            clean_entry[optional_field] = optional_value
+        if trailing_optional_field is not None and isinstance(
+            trailing_value := entry.get(trailing_optional_field),
+            str,
+        ):
+            clean_entry[trailing_optional_field] = trailing_value
         normalized.append(clean_entry)
     return normalized
 
@@ -259,8 +250,10 @@ def load_memory() -> dict:
             # Reset to default if type is wrong (e.g., list corrupted to string)
             data[key] = default
 
-    data["patterns"] = _normalize_pattern_entries(data.get("patterns"))
-    data["notes"] = _normalize_note_entries(data.get("notes"))
+    data["patterns"] = _normalize_text_entries(
+        data.get("patterns"), "pattern", "category", "learned_at"
+    )
+    data["notes"] = _normalize_text_entries(data.get("notes"), "note", "created_at")
     data["fix_history"] = _normalize_fix_history(data.get("fix_history"))
     data["last_scan"] = _normalize_last_scan(data.get("last_scan"))
     data["session"] = _normalize_session(data.get("session"))
