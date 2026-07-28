@@ -6,7 +6,6 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-
 _IGNORED_STYLE_DIRS = {
     ".git",
     ".next",
@@ -52,7 +51,7 @@ def _project_root(filepath: Path) -> Path:
 def _stylesheet_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
     entries: list[tuple[str, int, int]] = []
     for stylesheet in root.rglob("*.css"):
-        if any(part in _IGNORED_STYLE_DIRS for part in stylesheet.relative_to(root).parts):
+        if not _IGNORED_STYLE_DIRS.isdisjoint(stylesheet.relative_to(root).parts):
             continue
         try:
             stat = stylesheet.stat()
@@ -118,14 +117,13 @@ def _semantic_class_has_state(
         return True
 
     state_pattern = "|".join(re.escape(state) for state in states)
+    state = rf":(?:{state_pattern})\b"
     for token in classes.split():
-        if not re.fullmatch(r"[A-Za-z_][\w-]*", token):
-            continue
         escaped = re.escape(token)
-        direct = rf"\.{escaped}(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*:(?:{state_pattern})\b"
-        nested = rf"\.{escaped}\s*\{{[^{{}}]*&:(?:{state_pattern})\b"
-        if re.search(direct, stylesheet) or re.search(
-            nested, stylesheet, re.DOTALL
+        direct = rf"\.{escaped}(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
+        nested = rf"\.{escaped}\s*\{{[^{{}}]*&{state}"
+        if re.fullmatch(r"[A-Za-z_][\w-]*", token) and re.search(
+            rf"(?:{direct}|{nested})", stylesheet, re.DOTALL
         ):
             return True
     return False
