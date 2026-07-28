@@ -53,6 +53,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 040 | Submit-binding direct scan consolidation | P1 | S | 039 | DONE — 1,451 tests; production -4 LOC; cognitive 7→4; loop scans 3→2; graph 6,025/25,813 |
 | 041 | JavaScript comment-mask branch consolidation | P1 | S | 040 | DONE — 1,451 tests; production -4 LOC; cognitive 18→16; scan sites 2→1; graph 6,025/25,808 |
 | 042 | Semantic class-state search consolidation | P1 | S | 041 | DONE |
+| 043 | Python receiver-prefix scan consolidation | P1 | S | 042 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
