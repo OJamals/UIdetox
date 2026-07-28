@@ -8,9 +8,10 @@ import io
 import json
 import re
 import tokenize
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import yaml
 
@@ -118,7 +119,7 @@ def extract_backend_observations(
             continue
         lower_name = path.name.lower()
         if path.suffix.lower() in {".json", ".yaml", ".yml"} and (
-            lower_name.startswith("openapi") or lower_name.startswith("swagger")
+            lower_name.startswith(("openapi", "swagger"))
         ):
             try:
                 content = path.read_text(encoding="utf-8")
@@ -956,15 +957,10 @@ def _javascript_code_positions(content: str) -> tuple[bool, ...]:
     while index < len(content):
         character = content[index]
         following = content[index + 1] if index + 1 < len(content) else ""
-        if character == "/" and following == "/":
-            end = content.find("\n", index + 2)
-            end = len(content) if end == -1 else end
-            positions[index:end] = [False] * (end - index)
-            index = end
-            continue
-        if character == "/" and following == "*":
-            close = content.find("*/", index + 2)
-            end = len(content) if close == -1 else close + 2
+        if character == "/" and following in ("/", "*"):
+            line_comment = following == "/"
+            end = content.find("\n" if line_comment else "*/", index + 2)
+            end = len(content) if end == -1 else end + (0 if line_comment else 2)
             positions[index:end] = [False] * (end - index)
             index = end
             continue
