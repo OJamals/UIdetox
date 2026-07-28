@@ -201,38 +201,29 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
         pass  # Non-critical
 
 
-def get_pending_reviews() -> list[dict]:
-    """Return all sessions flagged for human review."""
-    sessions_dir = _sessions_dir()
-    reviews = []
-    for session_dir in sorted(sessions_dir.iterdir()):
+def _load_session_documents(filename: str) -> list[dict]:
+    documents = []
+    for session_dir in sorted(_sessions_dir().iterdir()):
         if not session_dir.is_dir():
             continue
-        review_path = session_dir / "review_request.json"
-        if review_path.exists():
-            try:
-                review = json.loads(review_path.read_text())
-                reviews.append(review)
-            except (json.JSONDecodeError, OSError):
-                continue
-    return reviews
+        document_path = session_dir / filename
+        if not document_path.exists():
+            continue
+        try:
+            documents.append(json.loads(document_path.read_text()))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return documents
+
+
+def get_pending_reviews() -> list[dict]:
+    """Return all sessions flagged for human review."""
+    return _load_session_documents("review_request.json")
 
 
 def list_sessions() -> list[dict]:
     """Return all sessions with their metadata."""
-    sessions_dir = _sessions_dir()
-    results = []
-    for session_dir in sorted(sessions_dir.iterdir()):
-        if not session_dir.is_dir():
-            continue
-        meta_path = session_dir / "meta.json"
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text())
-                results.append(meta)
-            except (json.JSONDecodeError, OSError):
-                continue
-    return results
+    return _load_session_documents("meta.json")
 
 
 def get_session(session_id: str) -> dict | None:
