@@ -10,7 +10,7 @@ import yaml
 from uidetox.design_context import DesignSettings
 from uidetox.prompt_safety import render_untrusted_data
 from uidetox.rule_registry import get_rule
-from uidetox.state import load_state, load_config
+from uidetox.state import load_config, load_state
 
 
 def _is_uidetox_skill(path: Path) -> bool:
@@ -681,11 +681,10 @@ def _get_relevant_context(batch: list) -> list[tuple[str, str | None]]:
             continue
         desc = (issue.get("issue", "") + " " + issue.get("command", "")).lower()
         for keyword, (context, ref_file) in SKILL_CONTEXT.items():
-            matched = re.search(
+            if context not in seen_snippets and re.search(
                 rf"(?<![A-Za-z0-9_]){re.escape(keyword)}(?![A-Za-z0-9_])",
                 desc,
-            )
-            if matched and context not in seen_snippets:
+            ):
                 seen_snippets.add(context)
                 contexts.append((context, ref_file))
     return contexts
@@ -802,9 +801,7 @@ def run(args: argparse.Namespace):
         for key in ("rule_id", "credential_class", "evidence_fingerprint"):
             if key in iss:
                 issue_record[key] = iss[key]
-        print(
-            render_untrusted_data(issue_record)
-        )
+        print(render_untrusted_data(issue_record))
         print()
 
     print("  ━━━ DESIGN DIALS (calibrate your fixes to these values) ━━━")
