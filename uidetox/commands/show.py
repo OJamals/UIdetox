@@ -1,8 +1,9 @@
 """Show command: display issues with color-coded tiers, grouping, and rich detail."""
 
 import argparse
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
+
 from uidetox.state import load_state
 
 # ANSI color codes for terminal output
@@ -65,16 +66,13 @@ def run(args: argparse.Namespace):
 def _render_grouped(issues: list[dict]):
     """Group issues by file and render with color-coded tiers."""
     by_file: dict[str, list[dict]] = defaultdict(list)
+    tiers = defaultdict(int)
     for i in issues:
         by_file[i.get("file", "unknown")].append(i)
+        tiers[i.get("tier") or "T4"] += 1
 
     # Sort files by issue count (most issues first)
     sorted_files = sorted(by_file.items(), key=lambda x: -len(x[1]))
-
-    # Tier summary
-    tiers = defaultdict(int)
-    for i in issues:
-        tiers[i.get("tier") or "T4"] += 1
 
     tier_summary = " | ".join(
         f"{_COLORS.get(t, '')}{t}: {c}{_COLORS['reset']}"
