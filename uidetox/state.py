@@ -14,7 +14,7 @@ from uidetox.findings import (
     coerce_finding,
 )
 from uidetox.prompt_safety import sanitize_untrusted_data
-from uidetox.utils import now_iso
+from uidetox.utils import _normalize_dict_entries, now_iso
 
 try:
     import fcntl as _fcntl
@@ -179,17 +179,6 @@ def _normalize_tool_entry(tool: object) -> dict | None:
     return normalized
 
 
-def _normalize_tool_collection(value: object) -> list[dict]:
-    if not isinstance(value, list):
-        return []
-    normalized: list[dict] = []
-    for entry in value:
-        clean_entry = _normalize_tool_entry(entry)
-        if clean_entry is not None:
-            normalized.append(clean_entry)
-    return normalized
-
-
 def _normalize_tooling_config(tooling: object) -> dict:
     if not isinstance(tooling, dict):
         return {}
@@ -199,7 +188,9 @@ def _normalize_tooling_config(tooling: object) -> dict:
             normalized[key] = _normalize_tool_entry(normalized[key])
     for key in ("frontend", "backend", "database", "api"):
         if key in normalized:
-            normalized[key] = _normalize_tool_collection(normalized[key])
+            normalized[key] = _normalize_dict_entries(
+                normalized[key], _normalize_tool_entry
+            )
     if "package_manager" in normalized and not isinstance(
         normalized["package_manager"], str
     ):

@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
-from uidetox.utils import now_iso
+from uidetox.utils import _normalize_dict_entries, now_iso
 
 MEMORY_FILE = "memory.json"
 _SEARCH_TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -212,18 +212,6 @@ def _normalize_progress_entry(entry: object) -> dict | None:
     return normalized
 
 
-def _normalize_progress_log(entries: object) -> list[dict]:
-    if not isinstance(entries, list):
-        return []
-
-    normalized: list[dict] = []
-    for entry in entries:
-        clean_entry = _normalize_progress_entry(entry)
-        if clean_entry is not None:
-            normalized.append(clean_entry)
-    return normalized
-
-
 def load_memory() -> dict:
     """Load persistent agent memory, creating defaults if missing."""
     path = _memory_path()
@@ -257,7 +245,9 @@ def load_memory() -> dict:
     data["fix_history"] = _normalize_fix_history(data.get("fix_history"))
     data["last_scan"] = _normalize_last_scan(data.get("last_scan"))
     data["session"] = _normalize_session(data.get("session"))
-    data["progress_log"] = _normalize_progress_log(data.get("progress_log"))
+    data["progress_log"] = _normalize_dict_entries(
+        data.get("progress_log"), _normalize_progress_entry
+    )
     return data
 
 

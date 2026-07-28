@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
@@ -14,6 +15,19 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 def now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_dict_entries(
+    entries: object, normalize_entry: Callable[[object], dict | None]
+) -> list[dict]:
+    if not isinstance(entries, list):
+        return []
+    normalized: list[dict] = []
+    for entry in entries:
+        clean_entry = normalize_entry(entry)
+        if clean_entry is not None:
+            normalized.append(clean_entry)
+    return normalized
 
 
 def canonical_sha256(payload: object) -> str:
