@@ -54,6 +54,7 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 041 | JavaScript comment-mask branch consolidation | P1 | S | 040 | DONE — 1,451 tests; production -4 LOC; cognitive 18→16; scan sites 2→1; graph 6,025/25,808 |
 | 042 | Semantic class-state search consolidation | P1 | S | 041 | DONE |
 | 043 | Python receiver-prefix scan consolidation | P1 | S | 042 | DONE |
+| 044 | Session-document loader consolidation | P1 | S | 043 | DONE — 1,451 tests; production -9 LOC; cognitive 24→10; loaders 2→1; graph 6,026/25,813 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
