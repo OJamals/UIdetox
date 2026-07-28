@@ -2,17 +2,10 @@
 
 import argparse
 import json
-from uidetox.history import load_run_history, compare_runs
 
-
-def _safe_text(value: object, default: str = "") -> str:
-    return value if isinstance(value, str) else default
-
-
-def _safe_int(value: object, default: int = 0) -> int:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return int(value)
-    return default
+from uidetox.history import _coerce_history_int as _safe_int
+from uidetox.history import _coerce_history_text as _safe_text
+from uidetox.history import compare_runs, load_run_history
 
 
 def _safe_count(value: object) -> int:
@@ -25,7 +18,6 @@ def run(args: argparse.Namespace):
 
     summary_runs = compare_runs()
     full_runs = load_run_history() if show_full else []
-    runs = full_runs if show_full and use_json else summary_runs
 
     if not summary_runs:
         if use_json:
@@ -37,11 +29,12 @@ def run(args: argparse.Namespace):
         return
 
     if use_json:
+        runs = full_runs if show_full else summary_runs
         payload = {
             "runs": runs,
             "total": len(runs),
-            "first_score": summary_runs[0].get("score", 0) if summary_runs else 0,
-            "latest_score": summary_runs[-1].get("score", 0) if summary_runs else 0,
+            "first_score": summary_runs[0].get("score", 0),
+            "latest_score": summary_runs[-1].get("score", 0),
             "delta": (
                 summary_runs[-1].get("score", 0) - summary_runs[0].get("score", 0)
             )
