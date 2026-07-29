@@ -2688,6 +2688,53 @@ def test_observer_detects_rendered_layout_and_typography_defects(
 
 
 @pytest.mark.browser
+def test_observer_excludes_framework_dev_ui(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "framework-dev-ui.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<main><button id="app-action">App action</button></main>
+<nextjs-portal><button id="next-dev-action">Next dev action</button></nextjs-portal>
+<div id="vue-inspector-container">
+  <button id="vue-inspector-action">Vue inspector action</button>
+</div>
+<div id="__vue-devtools-container__">
+  <button id="vue-devtools-action">Vue DevTools action</button>
+</div>
+<astro-dev-toolbar>
+  <button id="astro-dev-action">Astro dev action</button>
+</astro-dev-toolbar>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    origin = local_http_server(tmp_path)
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("desktop", 1280, 800),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    selectors = {element.selector for element in observation.pages[0].elements}
+    assert "#app-action" in selectors
+    assert selectors.isdisjoint(
+        {
+            "#next-dev-action",
+            "#vue-inspector-action",
+            "#vue-devtools-action",
+            "#astro-dev-action",
+        }
+    )
+
+
+@pytest.mark.browser
 def test_fullstack_lab_runtime_observation_is_repeatable(
     tmp_path: Path,
     local_http_server,

@@ -1297,15 +1297,33 @@ async () => {
     "form", "table", "dialog", "button", "a[href]", "input", "select",
     "textarea", "[role]", "[tabindex]"
   ].join(",");
+  const frameworkDevUiSelector = [
+    "nextjs-portal",
+    "#vue-inspector-container",
+    "#__vue-devtools-container__",
+    "astro-dev-toolbar"
+  ].join(",");
+  const frameworkDevUiElements = new Set();
+  for (const root of document.querySelectorAll(frameworkDevUiSelector)) {
+    root.style.setProperty("display", "none", "important");
+    frameworkDevUiElements.add(root);
+    for (const descendant of root.querySelectorAll("*")) {
+      frameworkDevUiElements.add(descendant);
+    }
+  }
   const elementCollection = document.body?.querySelectorAll("*") || [];
-  const totalElements = elementCollection.length;
+  const totalElements = Math.max(
+    0,
+    elementCollection.length - frameworkDevUiElements.size
+  );
   const allElements = [];
   for (
     let index = 0;
-    index < Math.min(totalElements, __UIDETOX_SCAN__);
+    index < elementCollection.length && allElements.length < __UIDETOX_SCAN__;
     index += 1
   ) {
-    allElements.push(elementCollection[index]);
+    const element = elementCollection[index];
+    if (!frameworkDevUiElements.has(element)) allElements.push(element);
   }
   const structuralCandidates = allElements.filter(
     element => element.matches(structuralSelector)
