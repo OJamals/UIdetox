@@ -43,6 +43,7 @@ IGNORED_DIRECTORY_NAMES = frozenset(
         "dist",
         "node_modules",
         "out",
+        "playwright-report",
         "vendor",
     }
 )

@@ -18,7 +18,7 @@ def run(args: argparse.Namespace):
         profile = detect_all(project_root)
         if not profile.formatter:
             print("No formatter detected. Install biome or prettier.")
-            return
+            return False
         formatter = {
             "name": profile.formatter.name,
             "run_cmd": profile.formatter.run_cmd,
@@ -45,10 +45,10 @@ def run(args: argparse.Namespace):
         )
     except FileNotFoundError:
         print(f"Command not found. Install {formatter['name']}.")
-        return
+        return False
     except subprocess.TimeoutExpired:
         print("Format check timed out after 120s.")
-        return
+        return False
 
     output = result.stdout + result.stderr
 
@@ -67,3 +67,4 @@ def run(args: argparse.Namespace):
 
     if not fix and result.returncode != 0:
         print("\nRun 'uidetox format --fix' to auto-fix formatting issues.")
+    return result.returncode == 0

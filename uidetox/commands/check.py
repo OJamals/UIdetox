@@ -107,6 +107,7 @@ def run(args: argparse.Namespace):
 
     fix = getattr(args, "fix", False)
     steps_run = 0
+    checks_passed = True
     pre_existing_changes: set[str] = set()
 
     if fix and config.get("auto_commit", False):
@@ -191,7 +192,8 @@ def run(args: argparse.Namespace):
     if tooling.get("typescript"):
         print("  Running TypeScript check...")
         tsc_args = argparse.Namespace(fix=False)
-        tsc_cmd.run(tsc_args)
+        if tsc_cmd.run(tsc_args) is False:
+            checks_passed = False
         steps_run += 1
         print()
     else:
@@ -201,7 +203,8 @@ def run(args: argparse.Namespace):
     if tooling.get("linter"):
         print("  Running Linter check...")
         lint_args = argparse.Namespace(fix=False)
-        lint_cmd.run(lint_args)
+        if lint_cmd.run(lint_args) is False:
+            checks_passed = False
         steps_run += 1
         print()
     else:
@@ -211,7 +214,8 @@ def run(args: argparse.Namespace):
     if tooling.get("formatter"):
         print("  Running Formatter check...")
         fmt_args = argparse.Namespace(fix=False)
-        format_cmd.run(fmt_args)
+        if format_cmd.run(fmt_args) is False:
+            checks_passed = False
         steps_run += 1
         print()
     else:
@@ -225,3 +229,5 @@ def run(args: argparse.Namespace):
     print(f"Ran {steps_run} mechanical check(s).")
     print("Run 'uidetox status' to see the updated health score.")
     print("Run 'uidetox next' to start fixing any queued issues.")
+    if not checks_passed:
+        raise RuntimeError("Mechanical checks failed.")

@@ -23,6 +23,161 @@ def test_package_data_includes_transform_scripts():
     assert "data/transforms/*.js" in package_data
 
 
+def test_detect_linter_uses_eslint_builtin_json_formatter(tmp_path):
+    from uidetox.tooling import detect_linter
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"devDependencies": {"eslint": "^10.0.0"}}),
+        encoding="utf-8",
+    )
+
+    linter = detect_linter(tmp_path)
+
+    assert linter is not None
+    assert linter.run_cmd == "npx eslint --format json ."
+
+
+def test_detect_typescript_skips_config_without_a_compiler(tmp_path):
+    from uidetox.tooling import detect_typescript
+
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^7.0.0"}}),
+        encoding="utf-8",
+    )
+
+    assert detect_typescript(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("dependency", "command"),
+    [
+        ("vue-tsc", "npx vue-tsc --build"),
+        ("svelte-check", "npx svelte-check --tsconfig ./tsconfig.json"),
+    ],
+)
+def test_detect_typescript_prefers_framework_compiler(tmp_path, dependency, command):
+    from uidetox.tooling import detect_typescript
+
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"devDependencies": {dependency: "*", "typescript": "*"}}),
+        encoding="utf-8",
+    )
+
+    typescript = detect_typescript(tmp_path)
+
+    assert typescript is not None
+    assert typescript.run_cmd == command
+
+
+def test_detect_formatter_excludes_uidetox_artifacts(tmp_path):
+    from uidetox.tooling import detect_formatter
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"devDependencies": {"prettier": "^3.0.0"}}),
+        encoding="utf-8",
+    )
+
+    formatter = detect_formatter(tmp_path)
+
+    assert formatter is not None
+    assert formatter.run_cmd == "npx prettier --check . '!**/.uidetox/**'"
+    assert formatter.fix_cmd == "npx prettier --write . '!**/.uidetox/**'"
+
+
+@pytest.mark.parametrize(
+    ("dependency", "expected"),
+    [
+        ("vue", {"vue", "vite"}),
+        ("@angular/core", {"angular"}),
+    ],
+)
+def test_detect_frontend_names_primary_framework(tmp_path, dependency, expected):
+    from uidetox.tooling import detect_frontend
+
+    dependencies = {dependency: "*"}
+    if dependency == "vue":
+        dependencies["vite"] = "*"
+    (tmp_path / "package.json").write_text(
+        json.dumps({"dependencies": dependencies}),
+        encoding="utf-8",
+    )
+
+    assert {tool.name for tool in detect_frontend(tmp_path)} == expected
+
+
+def test_parse_diagnostics_accepts_eslint_json():
+    from uidetox.mechanical import parse_diagnostics
+
+    output = json.dumps(
+        [
+            {
+                "filePath": "/repo/src/App.tsx",
+                "messages": [
+                    {
+                        "ruleId": "no-console",
+                        "message": "Unexpected console statement.",
+                        "line": 4,
+                        "column": 3,
+                    }
+                ],
+            }
+        ]
+    )
+
+    diagnostics = parse_diagnostics("linter", output)
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0].path == "/repo/src/App.tsx"
+    assert diagnostics[0].code == "no-console"
+    assert diagnostics[0].message == "Unexpected console statement."
+
+
+def test_parse_diagnostics_defaults_null_eslint_coordinates():
+    from uidetox.mechanical import parse_diagnostics
+
+    output = json.dumps(
+        [
+            {
+                "filePath": "/repo/eslint.config.js",
+                "messages": [
+                    {
+                        "ruleId": None,
+                        "message": "Configuration failed.",
+                        "line": None,
+                        "column": None,
+                    }
+                ],
+            }
+        ]
+    )
+
+    diagnostics = parse_diagnostics("linter", output)
+
+    assert (diagnostics[0].line, diagnostics[0].column) == (0, 0)
+    assert diagnostics[0].code == "lint"
+
+
+def test_check_reports_failure_to_orchestrators(tmp_path, monkeypatch):
+    monkeypatch.setattr(check, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        check,
+        "load_config",
+        lambda: {
+            "tooling": {
+                "typescript": {"run_cmd": "tsc --noEmit"},
+                "linter": None,
+                "formatter": None,
+            }
+        },
+    )
+    monkeypatch.setattr(check.tsc_cmd, "run", lambda args: False)
+
+    with pytest.raises(RuntimeError, match="Mechanical checks failed"):
+        check.run(argparse.Namespace(fix=False))
+
+
 def test_scan_deduplicates_existing_issue_queue(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ensure_uidetox_dir()
@@ -753,6 +908,7 @@ def test_check_run_executes_mechanical_fix_commands_from_project_root(
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(check.subprocess, "run", fake_run)
+    monkeypatch.setattr(check.format_cmd, "run", lambda args: True)
     monkeypatch.setattr(
         check,
         "load_config",
@@ -10230,6 +10386,18 @@ def test_frontend_fileset_path_specific_and_basename_excludes(tmp_path):
 
     basename = ProjectFileSet(tmp_path, excludes=["generated"])
     assert basename.relative_paths() == []
+
+
+def test_frontend_fileset_ignores_playwright_reports(tmp_path):
+    from uidetox.fileset import ProjectFileSet
+
+    source = tmp_path / "src" / "App.vue"
+    report = tmp_path / "playwright-report" / "index.html"
+    for path in (source, report):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("<main>content</main>", encoding="utf-8")
+
+    assert ProjectFileSet(tmp_path).relative_paths() == ["src/App.vue"]
 
 
 def test_frontend_fileset_zones_extensions_and_explicit_target_safety(tmp_path):

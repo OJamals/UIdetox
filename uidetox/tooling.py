@@ -451,14 +451,22 @@ def detect_package_manager(root: Path) -> str | None:
 def detect_typescript(root: Path) -> ToolInfo | None:
     """Detect TypeScript configuration."""
     cfg = _find_any(root, ["tsconfig.json", "tsconfig.app.json", "tsconfig.build.json"])
-    if cfg:
-        return ToolInfo(
-            name="typescript",
-            config_file=cfg,
-            run_cmd=_npx_or_local(root, "tsc --noEmit"),
-            fix_cmd=None,
-        )
-    return None
+    if not cfg:
+        return None
+    if _has_dep(root, "vue-tsc"):
+        command = "vue-tsc --build"
+    elif _has_dep(root, "svelte-check"):
+        command = "svelte-check --tsconfig ./tsconfig.json"
+    elif _has_dep(root, "typescript"):
+        command = "tsc --noEmit"
+    else:
+        return None
+    return ToolInfo(
+        name="typescript",
+        config_file=cfg,
+        run_cmd=_npx_or_local(root, command),
+        fix_cmd=None,
+    )
 
 
 def detect_linter(root: Path) -> ToolInfo | None:
@@ -490,7 +498,7 @@ def detect_linter(root: Path) -> ToolInfo | None:
         return ToolInfo(
             name="eslint",
             config_file=eslint_cfg or "package.json",
-            run_cmd=_npx_or_local(root, "eslint --format unix ."),
+            run_cmd=_npx_or_local(root, "eslint --format json ."),
             fix_cmd=_npx_or_local(root, "eslint --fix ."),
         )
     return None
@@ -526,8 +534,8 @@ def detect_formatter(root: Path) -> ToolInfo | None:
         return ToolInfo(
             name="prettier",
             config_file=prettier_cfg or "package.json",
-            run_cmd=_npx_or_local(root, "prettier --check ."),
-            fix_cmd=_npx_or_local(root, "prettier --write ."),
+            run_cmd=_npx_or_local(root, "prettier --check . '!**/.uidetox/**'"),
+            fix_cmd=_npx_or_local(root, "prettier --write . '!**/.uidetox/**'"),
         )
     return None
 
@@ -573,6 +581,22 @@ def detect_frontend(root: Path) -> list[ToolInfo]:
                 name="astro",
                 config_file=cfg or "package.json",
                 run_cmd="npx astro check",
+            )
+        )
+    elif _has_dep(root, "@angular/core"):
+        found.append(
+            ToolInfo(
+                name="angular",
+                config_file="angular.json",
+                run_cmd=_npx_or_local(root, "ng build"),
+            )
+        )
+    elif _has_dep(root, "vue"):
+        found.append(
+            ToolInfo(
+                name="vue",
+                config_file="package.json",
+                run_cmd=_npx_or_local(root, "vite build"),
             )
         )
 

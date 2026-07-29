@@ -609,6 +609,8 @@ def _framework_for_script(
         "index",
     }:
         return "next"
+    if "@angular/core" in imports:
+        return "angular"
     if "react" in imports or extension in {".jsx", ".tsx"}:
         return "react"
     return "typescript" if extension == ".ts" else "javascript"
@@ -1071,6 +1073,13 @@ def _normalize_module_path(path: PurePosixPath) -> str:
 def _file_routes(document: SourceDocument) -> tuple[SourceOccurrence, ...]:
     path = PurePosixPath(document.relative_path)
     parts = list(path.parts)
+    if parts[:2] == ["src", "routes"] and path.name == "+page.svelte":
+        route_parts = [
+            _normalize_route_segment(part)
+            for part in parts[2:-1]
+            if not part.startswith("(")
+        ]
+        return (SourceOccurrence("/" + "/".join(filter(None, route_parts)), 1),)
     if "app" in parts and path.stem == "page":
         index = parts.index("app")
         route_parts = [

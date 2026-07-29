@@ -1095,6 +1095,61 @@ export function SharedSecondary() {
     assert type(frontend_map).from_dict(frontend_map.to_dict()) == frontend_map
 
 
+def test_sveltekit_file_routes_are_mapped(tmp_path):
+    routes = tmp_path / "src" / "routes"
+    pages = {
+        routes / "+page.svelte": "<main><h1>Home</h1></main>",
+        routes / "about" / "+page.svelte": "<main><h1>About</h1></main>",
+        routes
+        / "(shop)"
+        / "items"
+        / "[itemId]"
+        / "+page.svelte": "<main><h1>Item</h1></main>",
+        tmp_path
+        / "src"
+        / "lib"
+        / "routes"
+        / "+page.svelte": "<section>Not a route</section>",
+    }
+    for path, source in pages.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    frontend_map = map_frontend(tmp_path)
+
+    assert {
+        (node.name, node.file) for node in frontend_map.nodes if node.kind == "route"
+    } == {
+        ("/", "src/routes/+page.svelte"),
+        ("/about", "src/routes/about/+page.svelte"),
+        ("/items/:itemId", "src/routes/(shop)/items/[itemId]/+page.svelte"),
+    }
+
+
+def test_angular_script_framework_is_mapped(tmp_path):
+    source = tmp_path / "src" / "app"
+    source.mkdir(parents=True)
+    (source / "app.ts").write_text(
+        """
+import { Component } from "@angular/core";
+
+@Component({ selector: "app-root", templateUrl: "./app.html" })
+export class App {}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path)
+
+    assert "angular" in frontend_map.evidence["frameworks"]
+    assert any(
+        node.kind == "component"
+        and node.name == "App"
+        and node.metadata["framework"] == "angular"
+        for node in frontend_map.nodes
+    )
+
+
 def test_dynamic_route_candidates_are_computed_once_per_runtime_page(
     tmp_path, monkeypatch
 ):

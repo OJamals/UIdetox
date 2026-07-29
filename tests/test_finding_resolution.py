@@ -695,6 +695,10 @@ def test_detected_mechanical_tool_remains_available_to_verifier(
 
     command_module = tsc if module_name == "tsc" else lint
     (tmp_path / fixture_name).write_text("{}", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"devDependencies": {"typescript": "*", "eslint": "*"}}),
+        encoding="utf-8",
+    )
     captured = []
     runs = iter(
         [

@@ -12,7 +12,7 @@ def run(args: argparse.Namespace):
     typescript = resolve_tool("typescript", project_root, config)
     if not typescript:
         print("No TypeScript configuration found in this project.")
-        return
+        return False
     tsc_cmd = str(typescript["run_cmd"])
 
     print("==============================")
@@ -24,16 +24,16 @@ def run(args: argparse.Namespace):
     result, errors = run_diagnostics("typescript", tsc_cmd, project_root)
     if result.error == "command_not_found":
         print("Command not found. Install TypeScript: npm install -D typescript")
-        return
+        return False
     if result.error == "timeout":
         print("TypeScript check timed out after 120s.")
-        return
+        return False
     if result.returncode == 0:
         print("✅ No TypeScript errors found.")
-        return
+        return True
     if not errors:
         print(result.output[:2000])
-        return
+        return False
     queued = 0
     for error in errors:
         finding = diagnostic_finding("typescript", error)
@@ -49,3 +49,4 @@ def run(args: argparse.Namespace):
 
     print(f"\n📋 Queued {queued} TypeScript error(s) as T1 issues.")
     print("Run 'uidetox next' to start fixing them.")
+    return False

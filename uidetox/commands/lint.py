@@ -12,7 +12,7 @@ def run(args: argparse.Namespace):
     linter = resolve_tool("linter", project_root, config)
     if not linter:
         print("No linter detected. Install biome or eslint.")
-        return
+        return False
 
     fix = getattr(args, "fix", False)
     cmd = linter["fix_cmd"] if fix and linter.get("fix_cmd") else linter["run_cmd"]
@@ -26,18 +26,18 @@ def run(args: argparse.Namespace):
     result, errors = run_diagnostics("linter", cmd, project_root)
     if result.error == "command_not_found":
         print(f"Command not found. Install {linter['name']}.")
-        return
+        return False
     if result.error == "timeout":
         print("Lint check timed out after 120s.")
-        return
+        return False
     if result.returncode == 0:
         print("✅ No lint errors found.")
-        return
+        return True
     if fix:
         print("🔧 Auto-fix applied. Re-run without --fix to verify.")
         if result.output.strip():
             print(result.output[:1000])
-        return
+        return False
     queued = 0
     for error in errors:
         finding = diagnostic_finding("linter", error)
@@ -58,3 +58,4 @@ def run(args: argparse.Namespace):
         )
     else:
         print(result.output[:2000])
+    return False

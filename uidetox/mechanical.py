@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 import uuid
@@ -95,6 +96,26 @@ def parse_diagnostics(tool: str, output: str) -> tuple[MechanicalDiagnostic, ...
             for path, line, column, code, message in _TSC_ERROR.findall(output)
         )
     if tool == "linter":
+        try:
+            reports, _ = json.JSONDecoder().raw_decode(output.lstrip())
+        except (json.JSONDecodeError, TypeError):
+            reports = None
+        if isinstance(reports, list):
+            return tuple(
+                MechanicalDiagnostic(
+                    report["filePath"],
+                    int(message.get("line") or 0),
+                    int(message.get("column") or 0),
+                    str(message.get("ruleId") or "lint"),
+                    str(message.get("message", "")).strip(),
+                )
+                for report in reports
+                if isinstance(report, dict)
+                and isinstance(report.get("filePath"), str)
+                and isinstance(report.get("messages"), list)
+                for message in report["messages"]
+                if isinstance(message, dict) and message.get("message")
+            )
         return tuple(
             MechanicalDiagnostic(path, int(line), int(column), "lint", message.strip())
             for path, line, column, message in _LINT_ERROR.findall(output)
