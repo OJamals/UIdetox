@@ -2,12 +2,10 @@
 
 import json
 import math
-import os
 import re
-import tempfile
 from pathlib import Path
 
-from uidetox.state import _persistence_lock, ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import _persistence_lock, _save_json, get_uidetox_dir
 from uidetox.utils import _normalize_dict_entries, now_iso
 
 MEMORY_FILE = "memory.json"
@@ -266,14 +264,7 @@ def _default_memory() -> dict:
 
 def save_memory(memory: dict):
     """Save agent memory to disk atomically to prevent corruption."""
-    d = ensure_uidetox_dir()
-    target = _memory_path()
-    fd, tmp_path = tempfile.mkstemp(dir=d, prefix="memory_", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(memory, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, target)
+    _save_json(memory, MEMORY_FILE, "memory_")
 
 
 @_persistence_lock()

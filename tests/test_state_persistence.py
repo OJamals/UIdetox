@@ -1,3 +1,6 @@
+import pytest
+
+from uidetox.memory import save_memory
 from uidetox.state import (
     add_issue,
     add_issues,
@@ -6,6 +9,28 @@ from uidetox.state import (
     save_config,
     save_state,
 )
+
+
+@pytest.mark.parametrize(
+    ("save", "temporary_pattern"),
+    (
+        (save_config, "config_*.tmp"),
+        (save_state, "state_*.tmp"),
+        (save_memory, "memory_*.tmp"),
+    ),
+)
+def test_atomic_json_writers_remove_temporary_files_after_serialization_failure(
+    tmp_path,
+    monkeypatch,
+    save,
+    temporary_pattern,
+):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(TypeError, match="is not JSON serializable"):
+        save({"invalid": object()})
+
+    assert list((tmp_path / ".uidetox").glob(temporary_pattern)) == []
 
 
 def test_save_config_round_trip_is_atomic(tmp_path, monkeypatch):

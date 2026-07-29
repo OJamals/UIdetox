@@ -254,11 +254,15 @@ def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
     d = ensure_uidetox_dir()
     target = d / filename
     fd, tmp_path = tempfile.mkstemp(dir=d, prefix=temp_prefix, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, target)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, target)
+    finally:
+        with contextlib.suppress(OSError):
+            Path(tmp_path).unlink()
 
 
 def save_config(config: dict):
