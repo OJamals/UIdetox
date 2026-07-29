@@ -101,6 +101,18 @@ def ensure_uidetox_dir():
     return d
 
 
+def _load_json_object(input_path: Path, artifact: str) -> dict:
+    try:
+        value = json.loads(input_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"{artifact} not found: {input_path}") from exc
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{artifact} is unreadable: {input_path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{artifact} must contain a JSON object: {input_path}")
+    return value
+
+
 def _is_numeric_config_value(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 

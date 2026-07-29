@@ -16,7 +16,7 @@ from uidetox.frontend_map import (
     preservation_contract,
 )
 from uidetox.project_map import ProjectMap
-from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import _load_json_object, ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
 REDESIGN_SET_FILE = "redesigns.json"
@@ -494,15 +494,7 @@ def load_redesign_set(path: str | Path | None = None) -> RedesignSet:
         if path is None
         else Path(path).expanduser().resolve()
     )
-    try:
-        value = json.loads(input_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(f"Redesign artifact not found: {input_path}") from exc
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Redesign artifact is unreadable: {input_path}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"Redesign artifact must contain a JSON object: {input_path}")
-    return RedesignSet.from_dict(value)
+    return RedesignSet.from_dict(_load_json_object(input_path, "Redesign artifact"))
 
 
 def _build_proposal(

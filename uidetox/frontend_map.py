@@ -33,7 +33,7 @@ from uidetox.semantic_adapters import (
     SourceDocument,
     build_application_semantics,
 )
-from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import _load_json_object, ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
 SCHEMA_VERSION = 1
@@ -836,15 +836,7 @@ def load_frontend_map(path: str | Path | None = None) -> FrontendMap:
         if path is None
         else Path(path).expanduser().resolve()
     )
-    try:
-        value = json.loads(input_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(f"Frontend map not found: {input_path}") from exc
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Frontend map is unreadable: {input_path}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"Frontend map must contain a JSON object: {input_path}")
-    return FrontendMap.from_dict(value)
+    return FrontendMap.from_dict(_load_json_object(input_path, "Frontend map"))
 
 
 def retain_runtime_evidence(
