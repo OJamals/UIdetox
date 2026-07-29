@@ -1,6 +1,6 @@
 # Plan 047: Persisted-artifact loader consolidation
 
-Status: REJECTED
+Status: DONE
 
 ## Objective
 
@@ -8,9 +8,11 @@ Measure whether the graph-identical public
 `uidetox.frontend_map.load_frontend_map` and
 `uidetox.redesign.load_redesign_set` loaders can share one implementation
 while preserving their complete public and corruption behavior. Integrate only
-if the result reduces production LOC, function count, branch sites,
-cyclomatic/cognitive complexity, and concepts without wrappers or a new public
-interface.
+if the result reduces total production LOC, branch sites,
+cyclomatic/cognitive complexity, and repeated concepts without a new public
+interface or compatibility layer. Existing public loaders may remain as
+domain adapters; function count is secondary to total code and control-flow
+reduction.
 
 ## Live baseline
 
@@ -160,8 +162,9 @@ The smallest behavior-preserving proposal uses one new private
 `_load_json_object(input_path, artifact)` helper in the already imported
 `uidetox.state` module and retains both public loaders as path/model wrappers.
 Existing imports remain single lines, so they add no LOC or dependency edge.
-The proposal was measured in an isolated graph project; it was never applied
-to production.
+The proposal was measured in an isolated graph project. It was initially
+rejected, then applied after reassessment showed that the function-count gate
+misclassified required public adapters as new wrapper debt.
 
 | Metric | Current target | Lower bound | Delta |
 | --- | ---: | ---: | ---: |
@@ -187,11 +190,13 @@ selection, and model construction as distinct reader obligations:
   exposes its two-parameter/message contract to both public wrappers;
 - no capability disappears and callers gain no new behavior.
 
-The abstraction provides some locality but fails the required deletion and
-depth economics: it adds a function, leaves both public wrappers, and makes a
-new interface responsible for only ten lines of mechanics.
+The initial evaluation treated the added private function and retained public
+loaders as disqualifying. Reassessment instead applies the deletion test:
+removing the private seam recreates identical path-reading, JSON parsing,
+error translation, and object-root validation in two CRITICAL public loaders.
+The helper therefore earns its interface.
 
-## Decision
+## Initial decision
 
 REJECTED before production edits.
 
@@ -216,6 +221,72 @@ Full pytest, build/install, package, canonical qualification, historical
 Plan 025 replay, and canonical graph refresh are intentionally not run:
 their conditional gate applies only when implementation is viable, and no
 production/package/graph input changed.
+
+## Reassessment and implementation
+
+Explicit follow-up direction prioritized root-cause cleanup, replace over
+accumulate, and net code/control-flow reduction over isolated function count.
+That changes the decision:
+
+- `load_frontend_map` and `load_redesign_set` are existing stable public
+  interfaces, not newly accumulated compatibility wrappers;
+- their path selection and domain-model construction remain locally owned;
+- one private `uidetox.state._load_json_object` now owns UTF-8 reading, JSON
+  parsing, missing/unreadable error translation, and object-root validation;
+- dependency direction remains `frontend_map/redesign -> state`;
+- the private seam has exactly two direct CRITICAL adapters and no cycle;
+- deleting the seam recreates the duplicated implementation.
+
+Integrated source results:
+
+- physical production delta: `-4` lines (`16` insertions, `20` deletions);
+- target function lines: `34 -> 28`;
+- target branch sites: `8 -> 5`;
+- target cyclomatic complexity: `8 -> 4`;
+- target cognitive complexity: `12 -> 6`;
+- production totals: `40,027 -> 40,023` lines and `977 -> 978` functions;
+- public function count and every public interface remain unchanged;
+- differential semantic SHA-256 remains
+  `a990535d136af9153a091d1317c008202d873cd8d4b95c0e958e40c398603a88`;
+- focused warning-strict pytest: `4 passed`;
+- full warning-strict, cache-disabled pytest: `1,466 passed`;
+- scoped Ruff format/import checks, repository-wide Ruff `F`, `compileall`,
+  and `git diff --check` pass;
+- wheel/sdist build, fresh install, all 82 package imports, `pip check`, and
+  `uidetox --version` pass;
+- temporary full graph
+  `UIdetox-Plan047-reassessment` contains 6,044 nodes and 26,361 edges;
+  `_load_json_object` measures 10 lines / cyclomatic 4 / cognitive 6 and has
+  exactly two direct callers.
+- source commit:
+  `bd04ee3eb7e8b53bca7c6098123e4c2f24218851`;
+- final integrated source commit:
+  `ef8a94cc23b8f0038c4039e07885b4338844b1a4`;
+- canonical graph project `UIdetox-final-051` contains 6,059 nodes and 26,447
+  edges, bound to the final integrated source commit;
+- canonical graph commit:
+  `fe48f59dc536d513442fe1ac06408ca11adf2862`.
+
+Live revalidation on 2026-07-29 confirms:
+
+- complete dirty diff review found no behavior, architecture, quality, test,
+  or integration issue;
+- the external differential ran twice at the exact semantic SHA-256
+  `a990535d136af9153a091d1317c008202d873cd8d4b95c0e958e40c398603a88`;
+- source, fresh-wheel, and fresh-sdist executions retain that exact semantic
+  SHA-256;
+- three sandbox mutations covering non-object acceptance, leaked
+  `UnicodeDecodeError`, and changed unreadable-error text all changed the
+  semantic hash, proving the differential is red-capable;
+- the Plan 049 persistence-lock root fix and generated-stack QA fixes leave the
+  loader implementation and exact differential unchanged; the combined
+  repository now passes `1,466` warning-strict tests;
+- focused warning-strict pytest passed `4 passed`;
+- full warning-strict, cache-disabled pytest passed `1,466 passed`;
+- the canonical graph proves the helper's two direct CRITICAL adapters and no
+  new cycle;
+- source and graph integration are complete. Five-axis review found no
+  blocking or required findings.
 
 ## Plan 048 recommendation
 
@@ -248,10 +319,11 @@ No production integration if:
 - tests require changes;
 - a schema, model, enum, cache, facade, adapter, fallback, dependency, public
   interface, or compatibility layer is required;
-- production LOC or branch sites fail to fall;
-- production function count grows;
-- complexity merely moves;
-- public wrappers accumulate;
+- production LOC, branch sites, cyclomatic complexity, or cognitive complexity
+  fail to fall;
+- public function count grows or a compatibility wrapper accumulates;
+- the one private function increase is not offset by strict code and
+  control-flow reduction across both existing public adapters;
 - imports cycle;
 - archived stashes or qualification artifacts require mutation;
 - any gate remains unexplained.

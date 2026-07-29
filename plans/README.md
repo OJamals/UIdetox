@@ -57,6 +57,9 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 044 | Session-document loader consolidation | P1 | S | 043 | DONE — 1,451 tests; production -9 LOC; cognitive 24→10; loaders 2→1; graph 6,026/25,813 |
 | 045 | Session-memory entry normalizer consolidation | P1 | S | 044 | DONE — 1,451 tests; production -5 LOC/-1 function; cognitive 18→10; graph 6,024/25,804 |
 | 046 | Visual file-hash consolidation | P1 | S | 045 | DONE — 1,451 tests; production -8 LOC/-1 function; cognitive 6→3; graph 6,023/25,804 |
+| 047 | Persisted-artifact loader consolidation | P1 | S | 046 | DONE — 1,466 tests; production -4 LOC; cognitive 12→6; graph 6,059/26,447 |
+| 048 | Private collection-normalizer consolidation | P1 | S | 047 | DONE — 1,451 tests; production -5 LOC/-1 function; cognitive 8→4; graph 6,022/25,816 |
+| 049 | Capped memory-entry persistence consolidation | P1 | S | 047, 048 | DONE — 1,466 tests; production -3 LOC; lifecycle sites 4→1; multi-writer loss fixed; graph 6,059/26,447 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

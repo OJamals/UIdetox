@@ -445,25 +445,27 @@ Integration requires all:
 
 ## Plan 049 recommendation
 
-The refreshed graph has only three remaining exact-fingerprint production
-pairs:
+Plan 047 was later reassessed and its loader pair consolidated. The remaining
+exact-fingerprint production pairs are:
 
-1. `load_frontend_map` / `load_redesign_set`, already measured and rejected by
-   Plan 047 because public wrappers must survive and function count grows;
-2. `add_pattern` / `add_note`, public memory mutators whose field schemas and
+1. `add_pattern` / `add_note`, public memory mutators whose field schemas and
    signatures differ; and
-3. `get_patterns` / `get_fix_history`, public memory query wrappers whose
+2. `get_patterns` / `get_fix_history`, public memory query adapters whose
    limits and ranked text fields differ.
 
-Plan 049 should measure the two same-module memory pairs together, beginning
-with inbound traces, exact snippets, history, public-signature freeze, and a
-lower-bound function-count proof. Expected STOP condition: retaining all four
-public wrappers while adding a private helper cannot reduce function count.
-Proceed only if a wrapper-free design preserves every public signature and
-produces strict net-negative source, functions, and control flow.
+Plan 049 should follow the owning policy rather than fingerprint boundaries:
 
-Do not revisit the Plan 047 loaders, add a compatibility layer, change memory
-schema, or centralize only naming rather than policy.
+- measure the capped append/save family `add_pattern`, `add_note`,
+  `record_fix_outcome`, and `log_progress`;
+- evaluate one private append/cap/persist seam with all four existing public
+  functions retained as domain adapters;
+- leave `get_patterns`, `get_notes`, `get_fix_history`, and
+  `get_progress_log` unchanged because query ranking is already centralized in
+  `_rank_memory_entries` and further delegation would only add indirection.
+
+Proceed only with strict net-negative physical production LOC, fewer repeated
+load/append/cap/save sites, exact public/serialized behavior, and no new public
+surface or compatibility layer.
 
 ## STOP conditions
 
