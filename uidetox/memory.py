@@ -7,7 +7,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from uidetox.state import ensure_uidetox_dir, get_uidetox_dir
+from uidetox.state import _persistence_lock, ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import _normalize_dict_entries, now_iso
 
 MEMORY_FILE = "memory.json"
@@ -276,9 +276,25 @@ def save_memory(memory: dict):
     os.replace(tmp_path, target)
 
 
+@_persistence_lock()
+def _append_capped_memory_entry(
+    collection: str,
+    entry: dict,
+    timestamp_field: str,
+    limit: int,
+) -> None:
+    mem = load_memory()
+    entries = mem[collection]
+    entry[timestamp_field] = now_iso()
+    entries.append(entry)
+    mem[collection] = entries[-limit:]
+    save_memory(mem)
+
+
 # ── Reviewed Files ──────────────────────────────────────────────
 
 
+@_persistence_lock()
 def mark_file_reviewed(file_path: str, *, verdict: str = "clean"):
     """Mark a file as reviewed with a verdict (clean, has_issues, skipped)."""
     mem = load_memory()
@@ -309,17 +325,12 @@ def add_pattern(pattern: str, *, category: str = "general"):
 
     Patterns are capped at 50 entries in local JSON state.
     """
-    mem = load_memory()
-    mem["patterns"].append(
-        {
-            "pattern": pattern,
-            "category": category,
-            "learned_at": now_iso(),
-        }
+    _append_capped_memory_entry(
+        "patterns",
+        {"pattern": pattern, "category": category},
+        "learned_at",
+        50,
     )
-    # Cap at 50 patterns — evict oldest
-    mem["patterns"] = mem["patterns"][-50:]
-    save_memory(mem)
 
 
 def get_patterns(
@@ -342,16 +353,7 @@ def add_note(note: str):
 
     Notes are capped at 30 entries in JSON.
     """
-    mem = load_memory()
-    mem["notes"].append(
-        {
-            "note": note,
-            "created_at": now_iso(),
-        }
-    )
-    # Cap at 30 notes — evict oldest
-    mem["notes"] = mem["notes"][-30:]
-    save_memory(mem)
+    _append_capped_memory_entry("notes", {"note": note}, "created_at", 30)
 
 
 def get_notes(
@@ -377,18 +379,17 @@ def record_fix_outcome(
     outcome: str = "resolved",
 ):
     """Persist a fix outcome so future agents can reuse relevant project history."""
-    mem = load_memory()
-    mem["fix_history"].append(
+    _append_capped_memory_entry(
+        "fix_history",
         {
             "file": file_path,
             "issue": issue,
             "fix": fix,
             "outcome": outcome,
-            "recorded_at": now_iso(),
-        }
+        },
+        "recorded_at",
+        100,
     )
-    mem["fix_history"] = mem["fix_history"][-100:]
-    save_memory(mem)
 
 
 def get_fix_history(
@@ -409,6 +410,7 @@ def get_fix_history(
 # ── Session & Progress (auto-save) ─────────────────────────────
 
 
+@_persistence_lock()
 def save_session(
     *,
     phase: str,
@@ -443,6 +445,7 @@ def get_session() -> dict:
     return mem.get("session", {})
 
 
+@_persistence_lock()
 def save_scan_summary(
     *,
     total_found: int,
@@ -472,18 +475,12 @@ def get_last_scan() -> dict | None:
 
 def log_progress(action: str, details: str = ""):
     """Append to the auto-progress log. Called after every significant action."""
-    mem = load_memory()
-    log = mem.get("progress_log", [])
-    log.append(
-        {
-            "action": action,
-            "details": details,
-            "timestamp": now_iso(),
-        }
+    _append_capped_memory_entry(
+        "progress_log",
+        {"action": action, "details": details},
+        "timestamp",
+        50,
     )
-    # Keep last 50 entries to avoid unbounded growth
-    mem["progress_log"] = log[-50:]
-    save_memory(mem)
 
 
 def get_progress_log() -> list[dict]:
@@ -492,6 +489,7 @@ def get_progress_log() -> list[dict]:
     return mem.get("progress_log", [])
 
 
+@_persistence_lock()
 def clear_memory():
     """Reset agent memory (used when starting fresh)."""
     save_memory(_default_memory())

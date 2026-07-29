@@ -17,30 +17,29 @@ from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import _normalize_dict_entries, now_iso
 
 try:
-    import fcntl as _fcntl
-
-    _HAS_FLOCK = True
+    import fcntl as _locking
 except ImportError:
-    _HAS_FLOCK = False  # Windows — locking is best-effort only
+    import msvcrt as _locking
 
 
 @contextlib.contextmanager
-def _state_lock():
-    """Advisory POSIX file lock to serialize concurrent state mutations.
-    On platforms without fcntl (Windows), this is a no-op — concurrent
-    writes are still possible but won't crash.
-    """
-    if not _HAS_FLOCK:
-        yield
-        return
-    lock_path = get_uidetox_dir() / "state.lock"
-    ensure_uidetox_dir()
-    with open(lock_path, "a") as lf:
+def _persistence_lock():
+    """Serialize project persistence mutations across processes."""
+    lock_path = ensure_uidetox_dir() / "state.lock"
+    with open(lock_path, "a+b") as lock_file:
+        lock_file.seek(0)
+        if os.name == "nt":
+            _locking.locking(lock_file.fileno(), _locking.LK_LOCK, 1)
+        else:
+            _locking.flock(lock_file.fileno(), _locking.LOCK_EX)
         try:
-            _fcntl.flock(lf.fileno(), _fcntl.LOCK_EX)
             yield
         finally:
-            _fcntl.flock(lf.fileno(), _fcntl.LOCK_UN)
+            lock_file.seek(0)
+            if os.name == "nt":
+                _locking.locking(lock_file.fileno(), _locking.LK_UNLCK, 1)
+            else:
+                _locking.flock(lock_file.fileno(), _locking.LOCK_UN)
 
 
 UIDETOX_DIR = ".uidetox"
@@ -367,7 +366,7 @@ def add_issues(
     issues: Iterable[Finding | dict], *, qualified_complete: bool | None = None
 ) -> int:
     """Add unique pending issues in one locked persistence transaction."""
-    with _state_lock():
+    with _persistence_lock():
         state = load_state()
         pending = state.setdefault("issues", [])
         dedup_keys = {issue_dedup_key(existing) for existing in pending}
@@ -406,7 +405,7 @@ def add_issue(issue: Finding | dict) -> bool:
 
 def increment_scans():
     """Track number of scans run."""
-    with _state_lock():
+    with _persistence_lock():
         state = load_state()
         state.setdefault("stats", {})
         state["stats"]["scans_run"] = state["stats"].get("scans_run", 0) + 1
@@ -416,7 +415,7 @@ def increment_scans():
 
 def clear_issues():
     """Clear all pending issues (used by rescan)."""
-    with _state_lock():
+    with _persistence_lock():
         state = load_state()
         state["issues"] = []
         save_state(state)
@@ -443,7 +442,7 @@ def batch_remove_issues(
         for issue_id in issue_ids
     ):
         return []
-    with _state_lock():
+    with _persistence_lock():
         state = load_state()
         id_set = set(issue_ids)
         removed = [i for i in state.get("issues", []) if i.get("id") in id_set]
@@ -478,7 +477,7 @@ def record_verification_override(
     """Audit an explicit verifier override without resolving the findings."""
     if not actor.strip() or not reason.strip():
         raise ValueError("Verifier overrides require both actor and reason.")
-    with _state_lock():
+    with _persistence_lock():
         state = load_state()
         ids = set(issue_ids)
         for issue in state.get("issues", []):
