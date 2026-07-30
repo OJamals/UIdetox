@@ -105,15 +105,15 @@ def _build_stylesheet_facts(root: Path) -> _StylesheetFacts:
                 ),
             )
         )
-        direct = (
-            rf"\.([A-Za-z_][\w-]*)"
+        class_state = (
+            rf"(?=\.([A-Za-z_][\w-]*)(?:"
             rf"(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
+            rf"|\s*\{{[^{{}}]*&{state}"
+            rf"))"
         )
-        nested = rf"\.([A-Za-z_][\w-]*)\s*\{{[^{{}}]*&{state}"
         class_states.update(
             (match.group(1), states)
-            for pattern in (direct, nested)
-            for match in re.finditer(pattern, stylesheet, re.DOTALL)
+            for match in re.finditer(class_state, stylesheet, re.DOTALL)
         )
     return _StylesheetFacts(
         sources=tuple(identities),

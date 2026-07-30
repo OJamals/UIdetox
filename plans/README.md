@@ -69,7 +69,7 @@ non-security application correctness and performance audit. Security issues
 | 053 | Fail closed and delete dead CLI paths | P1 | M | 051 | BLOCKED — root workflow-owner changes remain dirty |
 | 054 | Consolidate atomic artifact replacement | P1 | M | 050 | BLOCKED — root state-owner changes remain dirty |
 | 055 | Separate backend source discovery from extraction | P1 | M | — | DONE — independently reviewed at `aa4210e`; 1,474 tests pass; 3.49x manifest speedup; route extractors 65→0 |
-| 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed; 1,476 tests pass; 2.41x/2.39x speedup; CSS class-state scans scale linearly |
+| 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed; 1,476 tests pass; 2.32x/2.43x speedup; nested-selector parity preserved |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

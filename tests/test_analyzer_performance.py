@@ -208,21 +208,32 @@ def test_stylesheet_fact_build_scans_full_source_constant_times(
         f".state-{index}:hover {{ color: navy; }}" for index in range(200)
     )
     (tmp_path / "styles.css").write_text(source, encoding="utf-8")
-    original_search = analyzer_interactions.re.search
-    full_source_searches = 0
+    original_regex_functions = {
+        name: getattr(analyzer_interactions.re, name)
+        for name in ("search", "findall", "finditer")
+    }
+    full_source_scans = 0
 
-    def count_search(pattern: str, string: str, flags: int = 0):
-        nonlocal full_source_searches
-        if string == source:
-            full_source_searches += 1
-        return original_search(pattern, string, flags)
+    def count_full_source_scans(function):
+        def wrapped(pattern: str, string: str, flags: int = 0):
+            nonlocal full_source_scans
+            if string == source:
+                full_source_scans += 1
+            return function(pattern, string, flags)
 
-    monkeypatch.setattr(analyzer_interactions.re, "search", count_search)
+        return wrapped
+
+    for name, function in original_regex_functions.items():
+        monkeypatch.setattr(
+            analyzer_interactions.re,
+            name,
+            count_full_source_scans(function),
+        )
 
     facts = analyzer_interactions._build_stylesheet_facts(tmp_path)
 
     assert len(facts.class_states) == 200
-    assert full_source_searches <= 4
+    assert full_source_scans <= 1 + len(analyzer_interactions._INTERACTION_STATE_GROUPS)
 
 
 def test_stylesheet_facts_preserve_selector_state_semantics(tmp_path: Path) -> None:
@@ -234,6 +245,8 @@ def test_stylesheet_facts_preserve_selector_state_semantics(tmp_path: Path) -> N
 .direct[data-kind="primary"]:hover { color: navy; }
 .nested { &:focus-visible { outline: 2px solid; } }
 .comma:is(.one, .two):hover, .other:hover { color: blue; }
+.outer:is(.inner:focus):focus-visible { outline: 2px solid; }
+.hover-outer:is(.hover-inner:hover):hover { color: navy; }
 :where(button, a):focus-visible { outline: 2px solid; }
 mybutton:hover { color: red; }
 /* .comment-state:hover { color: green; } */
@@ -245,6 +258,8 @@ mybutton:hover { color: red; }
     assert class_list_has_interaction_state("direct", component, "hover", "button")
     assert class_list_has_interaction_state("nested", component, "focus", "button")
     assert class_list_has_interaction_state("comma", component, "hover", "button")
+    assert class_list_has_interaction_state("inner", component, "focus", "button")
+    assert class_list_has_interaction_state("hover-inner", component, "hover", "button")
     assert class_list_has_interaction_state("missing", component, "focus", "button")
     assert not class_list_has_interaction_state("missing", component, "hover", "button")
     assert class_list_has_interaction_state(
