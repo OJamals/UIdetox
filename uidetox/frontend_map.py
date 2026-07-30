@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
@@ -24,6 +23,7 @@ from uidetox.analyzer_ast import ast_capabilities
 from uidetox.design_semantics import detect_design_findings
 from uidetox.fileset import ProjectFileSet
 from uidetox.findings import Finding
+from uidetox.persistence import atomic_replace_text
 from uidetox.project_map import build_project_map, project_source_manifest
 from uidetox.runtime_observer import RuntimeObservation, RuntimePage
 from uidetox.runtime_scenarios import RuntimeCaptureRecord, RuntimeDiagnostic
@@ -1600,20 +1600,5 @@ def _append_edge_once(
 
 
 def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_path = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.stem}_", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-    except Exception:
-        try:
-            os.unlink(temporary_path)
-        except OSError:
-            pass
-        raise
+    content = json.dumps(value, indent=2, sort_keys=True) + "\n"
+    atomic_replace_text(path, content, temp_prefix=f"{path.stem}_")
