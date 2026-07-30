@@ -34,7 +34,7 @@ def atomic_replace_text(
         except BaseException:
             with contextlib.suppress(OSError):
                 os.close(descriptor)
-                descriptor = None
+            descriptor = None
             raise
         descriptor = None
         with stream:

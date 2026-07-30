@@ -157,7 +157,7 @@ def test_atomic_replace_text_closes_raw_descriptor_when_fdopen_fails(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_atomic_replace_text_preserves_fdopen_error_when_first_close_fails(
+def test_atomic_replace_text_does_not_retry_indeterminate_descriptor_close(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -167,20 +167,21 @@ def test_atomic_replace_text_preserves_fdopen_error_when_first_close_fails(
     def fail_fdopen(*args, **kwargs):
         raise RuntimeError("fdopen failed")
 
-    def flaky_close(descriptor: int) -> None:
+    def close_then_fail(descriptor: int) -> None:
         nonlocal close_calls
         close_calls += 1
         if close_calls == 1:
-            raise OSError("close failed")
-        real_close(descriptor)
+            real_close(descriptor)
+            raise OSError("close failed after close")
+        raise AssertionError("descriptor close retried")
 
     monkeypatch.setattr(persistence.os, "fdopen", fail_fdopen)
-    monkeypatch.setattr(persistence.os, "close", flaky_close)
+    monkeypatch.setattr(persistence.os, "close", close_then_fail)
 
     with pytest.raises(RuntimeError, match="fdopen failed"):
         atomic_replace_text(tmp_path / "artifact.txt", "content")
 
-    assert close_calls == 2
+    assert close_calls == 1
     assert list(tmp_path.iterdir()) == []
 
 
