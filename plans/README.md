@@ -6,6 +6,9 @@ commit `d5898c9`; Plan 019 was refreshed on 2026-07-26 against `a97a7ad` after
 plans 015-018 landed. Execute in dependency order. Each executor must read its
 plan fully, honor STOP conditions, and replace superseded paths instead of
 accumulating parallel implementations. Root reviewer owns status updates.
+Plans 050-056 were generated on 2026-07-30 against `8bfd929` from the
+non-security application correctness and performance audit. Security issues
+14 and 15 are explicitly deferred and excluded from these plans.
 
 ## Execution order and status
 
@@ -60,6 +63,13 @@ accumulating parallel implementations. Root reviewer owns status updates.
 | 047 | Persisted-artifact loader consolidation | P1 | S | 046 | DONE — 1,466 tests; production -4 LOC; cognitive 12→6; graph 6,059/26,447 |
 | 048 | Private collection-normalizer consolidation | P1 | S | 047 | DONE — 1,451 tests; production -5 LOC/-1 function; cognitive 8→4; graph 6,022/25,816 |
 | 049 | Capped memory-entry persistence consolidation | P1 | S | 047, 048 | DONE — 1,466 tests; production -3 LOC; lifecycle sites 4→1; multi-writer loss fixed; graph 6,059/26,447 |
+| 050 | Emit JSON-safe canonical evidence projections | P1 | M | — | DONE — reviewed at `2c61550`; 1,471 tests pass; production +14 LOC |
+| 051 | Bound and consolidate mechanical command execution | P1 | S | — | DONE — independently reviewed at `fd1c060`; 1,480 tests pass; production +7 LOC; duplicate fix runners 2→0 |
+| 052 | Finalize session branches outside the user worktree | P1 | M | — | DONE — independently reviewed at `29ad66c`; 1,480 tests pass; production +321 LOC; destructive original-worktree finalize path removed |
+| 053 | Fail closed and delete dead CLI paths | P1 | M | 051 | BLOCKED — root workflow-owner changes remain dirty |
+| 054 | Consolidate atomic artifact replacement | P1 | M | 050 | BLOCKED — root state-owner changes remain dirty |
+| 055 | Separate backend source discovery from extraction | P1 | M | — | DONE — independently reviewed at `aa4210e`; 1,474 tests pass; 3.49x manifest speedup; route extractors 65→0 |
+| 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed; 1,475 tests pass; 1.87x/1.90x speedup; AST walks 198→33; inventories 648→2 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
@@ -82,6 +92,18 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (wit
   source-owned.
 - 019 depends on 015 and 018 so design-quality findings consume one evidence
   graph and one cached runtime measurement path.
+- 050 lands before 054 so capture/runtime payloads are demonstrably JSON-safe
+  before persistence lifecycles are consolidated.
+- 051 lands before 053 so the CLI result contract consumes one bounded
+  mechanical execution policy.
+- 052 is independent but should land before lower-risk performance work because
+  it removes a user-worktree mutation hazard.
+- 053 must not start until active changes in `loop.py`, `state.py`,
+  `workflow.py`, and their tests are integrated or cleared by their owner.
+- 054 must not start until active `state.py` persistence changes are integrated
+  and the code graph is refreshed.
+- 055 and 056 are independent of each other. Run them after correctness and
+  lifecycle plans; both have strict parity gates and high false-negative risk.
 
 ## Cleanup contract for plans 013-019
 
@@ -97,6 +119,41 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (wit
   helpers where feasible. Tests, fixtures, and migration readers are excluded
   from the production-code reduction target but must still avoid duplication.
 
+## Cleanup contract for plans 050-056
+
+- Fix the shared owning seam, not individual symptoms.
+- Replace before deleting callers; delete displaced implementations in the
+  same plan. No compatibility wrapper may survive merely to preserve dead
+  behavior.
+- Preserve canonical finding, runtime, map, and analyzer models. No second
+  schema, graph, cache, parser, persistence layer, or result hierarchy.
+- Plans 053 and 054 must finish with net-negative production plus shipped-asset
+  LOC. Plans 050-052, 055, and 056 must report LOC and deleted-symbol deltas and
+  justify any unavoidable growth.
+- Every performance change requires exact ordered semantic parity plus a
+  reproducible relative benchmark. Speed gained by skipping files, rules,
+  invalidation, or verification is failure.
+- Every executor must report focused/full test results, exact files changed,
+  production LOC delta, and removed stale/duplicate symbols.
+
+## Source findings
+
+- Plan 050: GitHub issues 3 and 4.
+- Plan 051: GitHub issue 8.
+- Plan 052: GitHub issue 9.
+- Plan 053: GitHub issues 5, 6, 7, and 10.
+- Plan 054: GitHub issue 11.
+- Plan 055: GitHub issue 12.
+- Plan 056: GitHub issue 13.
+
+## Deferred by maintainer
+
+- GitHub issue 14: project-authored content entering agent instructions.
+- GitHub issue 15: runtime URL credentials/query values in evidence artifacts.
+
+These security issues remain open, but no implementation plan or source change
+for them belongs in the current application/optimization sequence.
+
 ## Findings considered and rejected
 
 - Thread-pool/GIL concern: no benchmark showed a regression; Tree-sitter and file I/O may benefit from threads.
@@ -105,17 +162,29 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (wit
 - `tests/test_regressions.py` size: 788 tests run in roughly 1.5 seconds; size alone has no demonstrated cost.
 - Pillow pixel loop: real capture-only micro-hotspot, lower leverage than correctness and coverage work.
 - Formatter/linter command execution: commands use argv without `shell=True`; configured local tooling is an intended trust boundary.
+- Raw Ruff output: Ruff is not the configured project gate; its unbaselined
+  output is not a valid cleanup backlog.
+- Local `pip` advisory: it affects the development environment's installer,
+  not a declared UIdetox production dependency.
+- Thread-pool removal: sequential execution was not faster after semantic
+  precomputation; keep concurrency and remove repeated semantic work.
+- New plugin/provider runner: no validated workflow need justifies another
+  subsystem.
 
 ## Audit limits
 
-The 2026-07-25 audit was standard and hotspot-weighted. Its unresolved limits
-are implementation scope in plan 014:
+The 2026-07-29/30 audit was whole-repository and live for the root package:
+1,473 warning-strict tests, 15 browser tests, 13 calibration tests, 12
+release/update-skill tests, all 53 help surfaces, runtime map, watch, capture,
+and visual-evidence paths.
 
-- qualify all 218 rules with positive/negative expectations;
-- verify every bundled provider/design asset against canonical sources;
-- add Windows qualification;
-- run deterministic live Playwright scenarios;
-- smoke-test the installed wheel outside the checkout;
-- install and run dependency advisory checks.
+Current limits:
 
-Until plan 014 is DONE, capability claims in those areas remain unqualified.
+- `examples/fullstack-slop-lab` backend/frontend dependencies were not
+  materialized, so its API, production build, and Playwright suite were not
+  requalified in this audit.
+- Live qualification ran on macOS; existing release automation owns
+  cross-platform/wheel gates.
+- Plan 055 and Plan 056 speedups came from controlled runtime prototypes.
+  Their committed benchmark scripts and parity gates are implementation work,
+  not yet repository guarantees.

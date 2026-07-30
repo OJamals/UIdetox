@@ -316,11 +316,12 @@ def extract_source_facts(
         return None
 
     root_node = tree.root_node
-    imports, aliases = _extract_imports(_walk(root_node))
-    exports, default_component = _extract_exports(_walk(root_node), path)
-    bindings = _extract_bindings(_walk(root_node))
-    callables = _extract_callables(_walk(root_node))
-    calls = _extract_calls(_walk(root_node))
+    nodes = tuple(_walk(root_node))
+    imports, aliases = _extract_imports(nodes)
+    exports, default_component = _extract_exports(nodes, path)
+    bindings = _extract_bindings(nodes)
+    callables = _extract_callables(nodes)
+    calls = _extract_calls(nodes)
     network_calls, network_symbols = _classify_network_calls(
         aliases=aliases,
         bindings=bindings,
@@ -347,7 +348,7 @@ def extract_source_facts(
     has_router_signal = False
 
     analyzer_state = _MutableAnalyzerState()
-    for node in _walk(root_node):
+    for node in nodes:
         _collect_semantic_node(
             node,
             alias_map=alias_map,
