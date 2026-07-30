@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from uidetox.contract_adapters import extract_backend_observations
+from uidetox.contract_adapters import (
+    backend_source_manifest,
+    extract_backend_observations,
+)
 from uidetox.contract_graph import (
     CONTRACT_GRAPH_SCHEMA_VERSION,
     ContractEdge,
@@ -74,8 +77,7 @@ def project_source_manifest(root: str | Path) -> dict[str, str]:
     """Hash every source that can contribute backend/API evidence."""
 
     root_path = Path(root).expanduser().resolve()
-    _, extraction = extract_backend_observations(root_path)
-    return dict(extraction["source_manifest"])
+    return backend_source_manifest(root_path)
 
 
 def _frontend_observations(
