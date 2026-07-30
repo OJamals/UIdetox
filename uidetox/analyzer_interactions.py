@@ -91,7 +91,6 @@ def _build_stylesheet_facts(root: Path) -> _StylesheetFacts:
     selector_lists = tuple(re.findall(r"([^{}]+)\{", stylesheet))
     selectors_by_states: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     class_states: set[tuple[str, tuple[str, ...]]] = set()
-    class_names = tuple(dict.fromkeys(re.findall(r"\.([A-Za-z_][\w-]*)", stylesheet)))
     for states in _INTERACTION_STATE_GROUPS:
         state_pattern = "|".join(re.escape(state) for state in states)
         state = rf":(?:{state_pattern})\b"
@@ -106,12 +105,16 @@ def _build_stylesheet_facts(root: Path) -> _StylesheetFacts:
                 ),
             )
         )
-        for class_name in class_names:
-            escaped = re.escape(class_name)
-            direct = rf"\.{escaped}(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
-            nested = rf"\.{escaped}\s*\{{[^{{}}]*&{state}"
-            if re.search(rf"(?:{direct}|{nested})", stylesheet, re.DOTALL):
-                class_states.add((class_name, states))
+        direct = (
+            rf"\.([A-Za-z_][\w-]*)"
+            rf"(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
+        )
+        nested = rf"\.([A-Za-z_][\w-]*)\s*\{{[^{{}}]*&{state}"
+        class_states.update(
+            (match.group(1), states)
+            for pattern in (direct, nested)
+            for match in re.finditer(pattern, stylesheet, re.DOTALL)
+        )
     return _StylesheetFacts(
         sources=tuple(identities),
         selectors_by_states=tuple(selectors_by_states),

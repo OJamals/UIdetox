@@ -199,6 +199,32 @@ def test_standalone_file_scan_builds_one_local_stylesheet_scope(
     assert inventories == 1
 
 
+def test_stylesheet_fact_build_scans_full_source_constant_times(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    source = "\n".join(
+        f".state-{index}:hover {{ color: navy; }}" for index in range(200)
+    )
+    (tmp_path / "styles.css").write_text(source, encoding="utf-8")
+    original_search = analyzer_interactions.re.search
+    full_source_searches = 0
+
+    def count_search(pattern: str, string: str, flags: int = 0):
+        nonlocal full_source_searches
+        if string == source:
+            full_source_searches += 1
+        return original_search(pattern, string, flags)
+
+    monkeypatch.setattr(analyzer_interactions.re, "search", count_search)
+
+    facts = analyzer_interactions._build_stylesheet_facts(tmp_path)
+
+    assert len(facts.class_states) == 200
+    assert full_source_searches <= 4
+
+
 def test_stylesheet_facts_preserve_selector_state_semantics(tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     component = tmp_path / "Button.tsx"
