@@ -215,7 +215,7 @@ UIdetox/
 │   ├── subagent.py               # Sub-agent session infrastructure (5-stage pipeline)
 │   ├── data/                     # Bundled assets (shipped inside the pip wheel)
 │   │   ├── SKILL.md, AGENTS.md   # Design skill + agent entry point
-│   │   ├── commands/*.md          # 19 slash command definitions
+│   │   ├── commands/*.md          # Slash command definition assets
 │   │   ├── reference/*.md         # 10 deep-dive design reference files
 │   │   └── docs/*.md              # 6 provider integration guides
 │   └── commands/                 # Command implementations

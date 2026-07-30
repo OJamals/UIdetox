@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "fd1c0608d3ce7a420eed496ec173afb711db833b",
-    "indexed_at": "2026-07-30T08:44:05Z",
-    "project": "UIdetox-plan053-final-20260730",
-    "nodes": 6025,
-    "edges": 25269,
-    "original_size": 22282240,
-    "compressed_size": 4240895,
-    "compression_level": 3
+    "commit": "ab867cc1b855bd145f69362de5fbd4eae4d8101b",
+    "indexed_at": "2026-07-30T21:53:50Z",
+    "project": "UIdetox-plan053-postreview-20260730",
+    "nodes": 6062,
+    "edges": 26470,
+    "original_size": 15204352,
+    "compressed_size": 3311674,
+    "compression_level": 9
 }

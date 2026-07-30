@@ -17,7 +17,7 @@ def _dispatch_result(monkeypatch: pytest.MonkeyPatch, result: object) -> None:
     cli.main()
 
 
-@pytest.mark.parametrize("result", [None, True])
+@pytest.mark.parametrize("result", [None, True, 0])
 def test_cli_main_accepts_success_results(
     monkeypatch: pytest.MonkeyPatch,
     result: object,
