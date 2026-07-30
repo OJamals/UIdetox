@@ -41,7 +41,11 @@ The loop repeatedly triggers `uidetox next`. The CLI batches all pending issues 
 (The loop auto-saves progress to memory, so `uidetox loop` can resume anywhere if interrupted).
 
 ### Phase 3: Subjective Review
-Run `uidetox review` to perform an LLM-driven subjective quality assessment across 4 dimensions (Consistency, Cohesion, Craft, Identity), then `uidetox review --score <N>` to record it.
+Run `uidetox review` to inspect the subjective quality contract, then record complete structured evidence:
+
+```bash
+uidetox review --dimension-a 36 --dimension-b 27 --dimension-c 18 --dimension-d 9 --rationale "Validated hierarchy, consistency, craft, and identity." --reviewer "agent-name" --finding-link "finding-1" --region-link "region-1" --route "/checkout" --state "error" --viewport "mobile"
+```
 
 ### Phase 4: Verification & Status
 The loop triggers `uidetox status` to view your blended Design Score (60% objective static analysis + 40% subjective LLM review). If the score is below 95, the loop continues.
@@ -106,7 +110,7 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox rescan` | Clear queue, run 217-rule static analyzer, re-audit from scratch |
 | `uidetox finish` | Squash merges the autonomous session branch cleanly |
 | `uidetox exclude <path>` | Skip a directory during scanning |
-| `uidetox review` | LLM subjective UX quality review (use `--score N` to record assessment) |
+| `uidetox review` | Inspect or record structured A/B/C/D UX evidence with rationale, reviewer, finding/region links, and route/state/viewport coverage |
 | `uidetox update-skill <agent>` | Install SKILL.md, AGENTS.md, commands/, reference/ for claude/cursor/gemini/codex/windsurf/copilot |
 | `uidetox viz` | Generate an HTML heatmap of codebase issues |
 | `uidetox tree` | Print a terminal tree of codebase issue density |
@@ -192,7 +196,7 @@ UIdetox/
 ├── SKILL.md                      # Combined design skill (all source repos)
 ├── README.md                     # User documentation + quick-start prompt
 ├── uidetox/                      # Python CLI package
-│   ├── cli.py                    # Argparse router (52 commands, dynamic slash-command loading)
+│   ├── cli.py                    # Argparse router with dynamic slash-command loading
 │   ├── state.py                  # Issue queue + config in .uidetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
 │   ├── analyzer.py               # 217-rule static slop detector (deterministic anti-pattern scan)

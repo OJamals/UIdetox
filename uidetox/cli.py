@@ -110,7 +110,7 @@ def _iter_dynamic_skill_names() -> list[str]:
     skills: set[str] = set()
     for cmd_dir in _get_commands_dirs():
         for md_file in cmd_dir.glob("*.md"):
-            if md_file.stem not in {"scan", "setup", "fix"}:
+            if md_file.stem not in {"scan", "setup"}:
                 skills.add(md_file.stem)
     return sorted(skills)
 
@@ -431,11 +431,6 @@ def parse_args(args_list=None):
     # Command: review
     review_parser = subparsers.add_parser(
         "review", help="Subjective UX review of the latest changes"
-    )
-    review_parser.add_argument(
-        "--score",
-        type=int,
-        help="Store legacy scalar input (incomplete; cannot satisfy finalization)",
     )
     for key, cap in (("a", 40), ("b", 30), ("c", 20), ("d", 10)):
         review_parser.add_argument(
@@ -808,10 +803,6 @@ def parse_args(args_list=None):
     tsc_parser = subparsers.add_parser(
         "tsc", help="Run TypeScript compiler and queue errors"
     )
-    tsc_parser.add_argument(
-        "--fix", action="store_true", help="(reserved for future use)"
-    )
-
     # Command: lint
     lint_parser = subparsers.add_parser(
         "lint", help="Run detected linter and queue errors"
@@ -898,8 +889,23 @@ def main():
         module = import_module(f"uidetox.commands.{command_name}")
 
         if hasattr(module, "run"):
-            # Pass args to the command runner
-            module.run(args)
+            result = module.run(args)
+            if result is None or result is True:
+                return
+            if result is False:
+                raise SystemExit(1)
+            if isinstance(result, int):
+                if result == 0:
+                    return
+                raise SystemExit(result)
+            print(
+                (
+                    f"Error: Command '{args.command}' returned unsupported result type "
+                    f"{type(result).__name__}."
+                ),
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         else:
             print(
                 f"Error: Command module for '{args.command}' lacks a run() function.",

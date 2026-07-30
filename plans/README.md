@@ -65,11 +65,11 @@ non-security application correctness and performance audit. Security issues
 | 049 | Capped memory-entry persistence consolidation | P1 | S | 047, 048 | DONE — 1,466 tests; production -3 LOC; lifecycle sites 4→1; multi-writer loss fixed; graph 6,059/26,447 |
 | 050 | Emit JSON-safe canonical evidence projections | P1 | M | — | DONE — reviewed at `2c61550`; 1,471 tests pass; production +14 LOC |
 | 051 | Bound and consolidate mechanical command execution | P1 | S | — | DONE — independently reviewed; 1,480 tests pass; production +7 LOC; duplicate fix runners 2→0 |
-| 052 | Finalize session branches outside the user worktree | P1 | M | — | TODO |
-| 053 | Fail closed and delete dead CLI paths | P1 | M | 051 | TODO — wait for current workflow-owner changes to land |
-| 054 | Consolidate atomic artifact replacement | P1 | M | 050 | TODO — wait for current state-owner changes to land |
-| 055 | Separate backend source discovery from extraction | P1 | M | — | TODO |
-| 056 | Precompute static-scan semantic facts | P1 | L | — | TODO |
+| 052 | Finalize session branches outside the user worktree | P1 | M | — | DONE — independently reviewed at `29ad66c`; 1,480 tests pass; production +321 LOC; destructive original-worktree finalize path removed |
+| 053 | Fail closed and delete dead CLI paths | P1 | M | 051 | DONE — independently reviewed; 1,500 tests pass; production plus shipped assets -52 LOC; dead CLI flags and paths removed |
+| 054 | Consolidate atomic artifact replacement | P1 | M | 050 | TODO |
+| 055 | Separate backend source discovery from extraction | P1 | M | — | DONE — independently reviewed at `aa4210e`; 1,474 tests pass; 3.49x manifest speedup; route extractors 65→0 |
+| 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed at `e5a64ac`; 1,476 tests pass; 2.32x/2.43x speedup; nested-selector parity preserved |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 

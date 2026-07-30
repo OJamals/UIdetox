@@ -39,7 +39,7 @@ uidetox next
 | `uidetox batch-resolve ID1 ID2 --note "..."` | Resolve batch with single coherent commit |
 | `uidetox check --fix` | Pre-commit quality gate (tsc → lint → format) |
 | `uidetox review` | LLM subjective quality review |
-| `uidetox review --score N` | Record subjective score (0-100) |
+| `uidetox review --dimension-a 36 --dimension-b 27 --dimension-c 18 --dimension-d 9 --rationale "Validated hierarchy, consistency, craft, and identity." --reviewer "agent-name" --finding-link "finding-1" --region-link "region-1" --route "/checkout" --state "error" --viewport "mobile"` | Record complete structured subjective evidence |
 | `uidetox status` | Blended Design Score (60% static + 40% LLM review) |
 | `uidetox capture` | Capture before/after screenshots and amplified visual diffs. Start your dev server first. |
 | `uidetox diff` | Compare fresh analysis against stored baseline (NEW / FIXED / UNCHANGED). |

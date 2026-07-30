@@ -9759,35 +9759,6 @@ class TestStateAndMemoryChaosResilience:
             {"score": 88, "timestamp": "", "source": "agent", "notes": {"keep": True}}
         ]
 
-    def test_store_subjective_score_recovers_from_non_dict_subjective_state(
-        self, tmp_path, monkeypatch
-    ):
-        import json
-
-        from uidetox.commands import review as review_cmd
-        from uidetox.state import load_state
-
-        monkeypatch.chdir(tmp_path)
-        uidetox_dir = tmp_path / ".uidetox"
-        uidetox_dir.mkdir()
-        (uidetox_dir / "state.json").write_text(
-            json.dumps(
-                {
-                    "subjective": [],
-                    "issues": [],
-                    "resolved": [],
-                    "stats": {"total_found": 0, "total_resolved": 0, "scans_run": 0},
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        review_cmd._store_subjective_score(87)
-        state = load_state()
-
-        assert state["subjective"]["score"] == 87
-        assert state["subjective"]["history"][-1]["score"] == 87
-
     def test_status_run_tolerates_corrupted_subjective_state(
         self, tmp_path, monkeypatch, capsys
     ):

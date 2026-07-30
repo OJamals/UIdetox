@@ -57,7 +57,7 @@ def _validated_review_map(
     )
 
 
-def test_review_score_gate_requires_fresh_visual_evidence(
+def test_review_gate_requires_fresh_visual_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,16 +73,9 @@ def test_review_score_gate_requires_fresh_visual_evidence(
             reasons=("visual evidence manifest is missing",),
         ),
     )
-    monkeypatch.setattr(
-        review,
-        "_store_subjective_score",
-        lambda _score: pytest.fail("stale evidence must block scoring"),
-    )
-
     with pytest.raises(SystemExit) as exc_info:
         review.run(
             argparse.Namespace(
-                score=90,
                 require_visual_evidence=True,
                 visual_evidence_file=None,
             )
@@ -382,12 +375,3 @@ def test_structured_review_requires_citations_and_coverage(
     assert "--route is required" in error
     assert "--state is required" in error
     assert "--viewport is required" in error
-
-
-def test_legacy_scalar_review_is_explicitly_incomplete(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    review._store_subjective_score(87)
-    stored = load_state()["subjective"]
-    assert stored["legacy"] is True
-    assert stored["stale"] is True
-    assert "dimensions" not in stored
