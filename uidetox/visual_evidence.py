@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from uidetox.capabilities import visual_install_guidance
+from uidetox.persistence import atomic_replace_text
 from uidetox.utils import canonical_sha256, now_iso
 
 VISUAL_EVIDENCE_SCHEMA_VERSION = 1
@@ -367,16 +368,8 @@ def _pillow_version() -> str:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    atomic_replace_text(path, content)
 
 
 def _atomic_save_png(

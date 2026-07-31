@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from uidetox.design_context import DesignIntent
+from uidetox.persistence import atomic_replace_text
 from uidetox.prompt_safety import render_untrusted_data
 from uidetox.state import get_project_root, get_uidetox_dir
 from uidetox.utils import now_iso
@@ -531,27 +532,6 @@ def render_agent_handoff(event: dict[str, Any]) -> str:
     )
 
 
-def _atomic_replace_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, path)
-    except BaseException:
-        try:
-            os.unlink(temporary_name)
-        except OSError:
-            pass
-        raise
-
-
 def _write_latest_reference(
     uidetox_dir: Path,
     event: dict[str, Any],
@@ -566,7 +546,7 @@ def _write_latest_reference(
             "updated_at": now_iso(),
         }
     )
-    _atomic_replace_text(
+    atomic_replace_text(
         uidetox_dir / INTENT_LATEST_REFERENCE,
         json.dumps(reference, indent=2, sort_keys=True) + "\n",
     )
@@ -589,7 +569,7 @@ def record_intent_artifacts(
     event_path = _append_event(state_dir, event)
     prompt = render_agent_handoff(event)
     handoff_path = state_dir / AGENT_HANDOFF_FILE
-    _atomic_replace_text(handoff_path, prompt)
+    atomic_replace_text(handoff_path, prompt)
     _write_latest_reference(state_dir, event, prompt)
     return IntentArtifactResult(
         event=event,

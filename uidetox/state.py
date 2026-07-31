@@ -3,7 +3,6 @@
 import contextlib
 import json
 import os
-import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from uidetox.findings import (
     VerificationResult,
     coerce_finding,
 )
+from uidetox.persistence import atomic_replace_text
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import _normalize_dict_entries, now_iso
 
@@ -251,18 +251,9 @@ def load_config(root: str | Path | None = None) -> dict:
 
 
 def _save_json(data: dict, filename: str, temp_prefix: str) -> None:
+    content = json.dumps(data, indent=2)
     d = ensure_uidetox_dir()
-    target = d / filename
-    fd, tmp_path = tempfile.mkstemp(dir=d, prefix=temp_prefix, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, target)
-    finally:
-        with contextlib.suppress(OSError):
-            Path(tmp_path).unlink()
+    atomic_replace_text(d / filename, content, temp_prefix=temp_prefix)
 
 
 def save_config(config: dict):

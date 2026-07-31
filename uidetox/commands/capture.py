@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from uidetox.capabilities import capture_install_guidance
 from uidetox.frontend_map import FRONTEND_MAP_FILE
+from uidetox.persistence import atomic_replace_text
 from uidetox.runtime_observer import (
     RuntimeObservation,
     RuntimePage,
@@ -200,15 +201,8 @@ def _capture_named_stage(
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    atomic_replace_text(path, content)
 
 
 def _atomic_copy(source: Path, destination: Path) -> None:
