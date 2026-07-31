@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from uidetox import runtime_observer
+from uidetox.findings import Finding
 from uidetox.runtime_observer import (
     DEFAULT_VIEWPORTS,
     RuntimeElement,
@@ -782,6 +783,48 @@ def test_runtime_payload_normalizes_computed_paint_and_round_trips_semantics() -
         pages=(page,),
     )
     assert RuntimeObservation.from_dict(observation.to_dict()) == observation
+
+
+def test_runtime_observation_projects_nested_findings_as_json_safe_dicts() -> None:
+    first_finding = Finding.create(
+        detector_id="runtime-json",
+        category="layout",
+        severity="warning",
+        confidence=0.9,
+        message="Rendered layout needs review.",
+        provenance="runtime",
+        evidence={"metrics": {"overflow": {"pixels": 8}}},
+        runtime_anchor={"selector": "#save", "viewport": "desktop"},
+        suppression_key="runtime-json",
+        verifier={"kind": "runtime", "detector_id": "runtime-json"},
+    )
+    second_finding = Finding.create(
+        detector_id="runtime-json-second",
+        category="typography",
+        severity="error",
+        confidence=0.8,
+        message="Rendered typography needs review.",
+        provenance="runtime",
+        evidence={"metrics": {"line_height": {"pixels": 12}}},
+        runtime_anchor={"selector": "#save", "viewport": "desktop"},
+        suppression_key="runtime-json-second",
+        verifier={"kind": "runtime", "detector_id": "runtime-json-second"},
+    )
+    page = _design_page(
+        replace(_measured_element(), findings=(first_finding, second_finding))
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-07-30T00:00:00Z",
+        requested_urls=(page.url,),
+        pages=(page,),
+    )
+
+    payload = observation.to_dict()
+
+    json.dumps(payload)
+    assert RuntimeObservation.from_dict(payload) == observation
+    projected = payload["pages"][0]["elements"][0]["findings"]
+    assert projected == [first_finding.to_dict(), second_finding.to_dict()]
 
 
 def test_default_viewports_are_canonical_registry_members() -> None:

@@ -10,7 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from uidetox.commands import capture
+from uidetox.findings import Finding
 from uidetox.runtime_observer import (
+    RuntimeElement,
     RuntimeObservation,
     RuntimePage,
     RuntimeViewport,
@@ -185,12 +187,35 @@ def test_responsive_capture_uses_source_boundary_discovery(
     ) -> RuntimeObservation:
         observed["destinations"] = destinations
         observed["discovery"] = viewport_discovery
+        finding = Finding.create(
+            detector_id="capture-json",
+            category="layout",
+            severity="warning",
+            confidence=0.9,
+            message="Captured layout needs review.",
+            provenance="runtime",
+            evidence={"metrics": {"overflow": {"pixels": 8}}},
+            runtime_anchor={"selector": "main", "viewport": "desktop"},
+            suppression_key="capture-json",
+            verifier={"kind": "runtime", "detector_id": "capture-json"},
+        )
+        element = RuntimeElement(
+            kind="region",
+            tag="main",
+            role="main",
+            name="",
+            selector="main",
+            order=0,
+            bounds={"x": 0, "y": 0, "width": 1280, "height": 800},
+            styles={},
+            findings=(finding,),
+        )
         pages = tuple(
             RuntimePage(
                 url=url,
                 title=viewport.name,
                 viewport=viewport,
-                elements=(),
+                elements=(element,),
                 screenshot=str(path.resolve()),
             )
             for viewport, path in destinations
@@ -221,7 +246,8 @@ def test_responsive_capture_uses_source_boundary_discovery(
     ]
     assert {viewport.boundary_px for viewport in probes} == {640}
     assert len(captured) == len(observed["destinations"])
-    assert (snapshots / "runtime_before.json").is_file()
+    metadata = json.loads((snapshots / "runtime_before.json").read_text())
+    assert metadata["pages"][0]["elements"][0]["findings"][0]["fingerprint"]
 
 
 @pytest.mark.parametrize(

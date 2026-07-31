@@ -526,7 +526,15 @@ class RuntimeObservation:
         object.__setattr__(self, "status", status)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        for page_payload, page in zip(payload["pages"], self.pages, strict=True):
+            for element_payload, element in zip(
+                page_payload["elements"], page.elements, strict=True
+            ):
+                element_payload["findings"] = [
+                    finding.to_dict() for finding in element.findings
+                ]
+        return payload
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RuntimeObservation":

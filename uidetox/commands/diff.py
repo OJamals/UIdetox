@@ -15,14 +15,17 @@ Usage:
 
 import argparse
 from collections import defaultdict
+from collections.abc import Mapping
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from uidetox.analyzer import analyze_directory, analyze_file
 from uidetox.commands.add_issue import _is_suppressed
 from uidetox.fileset import ProjectFileSet, find_project_root
+from uidetox.findings import Finding
 from uidetox.state import get_project_root, load_config, load_state, save_state
 
 
@@ -69,11 +72,14 @@ def _resolve_issue_file(file_path: str, project_root: Path) -> str:
     return str(path.resolve())
 
 
-def _normalize_issue_file(issue: dict, project_root: Path) -> dict:
-    resolved_file = _resolve_issue_file(issue.get("file", ""), project_root)
-    if resolved_file and issue.get("file") != resolved_file:
-        return {**issue, "file": resolved_file}
-    return issue
+def _normalize_issue_file(
+    issue: Finding | Mapping[str, Any], project_root: Path
+) -> dict[str, Any]:
+    normalized = issue.to_dict() if isinstance(issue, Finding) else dict(issue)
+    resolved_file = _resolve_issue_file(str(normalized.get("file", "")), project_root)
+    if resolved_file and normalized.get("file") != resolved_file:
+        normalized["file"] = resolved_file
+    return normalized
 
 
 def _group_issues_by_fingerprint(issues: list[dict]) -> dict[str, list[dict]]:
@@ -98,7 +104,7 @@ def _analyze_target(
     path: str,
     config: dict,
     target_files: list[str | Path] | set[str] | None = None,
-) -> list[dict]:
+) -> list[Finding | Mapping[str, Any]]:
     """Run fresh static analysis on `path`, respecting config excludes/zones."""
     exclude_paths = config.get("exclude", [])
     zone_overrides = config.get("zone_overrides", {})
