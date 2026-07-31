@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
+import uidetox.contract_adapters as contract_adapters
 from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.project_map import (
     ContractEdge,
@@ -13,6 +16,7 @@ from uidetox.project_map import (
     SourceAnchor,
     build_project_map,
     normalize_route_path,
+    project_source_manifest,
     reconcile_contract_graph,
 )
 from uidetox.prototype import build_prototype_brief
@@ -46,6 +50,274 @@ def _operation_nodes(project: ProjectMap, side: str) -> tuple[ContractNode, ...]
     return tuple(
         node for node in project.nodes if node.side == side and node.kind == kind
     )
+
+
+def _write_backend_discovery_fixture(root: Path) -> None:
+    files = {
+        "backend/fastapi.py": """
+from fastapi import FastAPI
+app = FastAPI()
+@app.get("/fastapi")
+def read_fastapi(): ...
+""",
+        "backend/router.py": """
+from fastapi import APIRouter
+router = APIRouter(prefix="/api")
+@router.put("/router/{item_id}")
+def update_router(): ...
+""",
+        "backend/flask.py": """
+from flask import Blueprint, Flask
+app = Flask(__name__)
+bp = Blueprint("items", __name__, url_prefix="/bp")
+@app.get("/flask")
+def read_flask(): ...
+@bp.route("/items", methods=["POST"])
+def create_item(): ...
+""",
+        "backend/express.ts": """
+import express from "express";
+const router = express.Router();
+app.use("/express", router);
+router.post("/items/:itemId", handler);
+""",
+        "backend/fastify.ts": """
+import Fastify from "fastify";
+const app = Fastify();
+app.route({ method: "PATCH", url: "/fastify/:itemId", handler });
+""",
+        "backend/controller.ts": """
+@Controller("orders")
+export class OrdersController {
+  @Delete(":orderId")
+  remove() {}
+}
+""",
+        "backend/chained.ts": """
+import express from "express";
+const app = express();
+app.route("/chain").get(read).post(write);
+""",
+        "backend/wrapper.py": """
+from fastapi import FastAPI
+def wrap(factory):
+    return factory()
+api = wrap(FastAPI)
+@api.get("/wrapped")
+def wrapped(): ...
+""",
+        "openapi.json": json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/openapi": {
+                        "delete": {"responses": {"204": {"description": "gone"}}}
+                    }
+                },
+            }
+        ),
+        "swagger.yaml": """
+openapi: 3.0.0
+paths:
+  /swagger:
+    get:
+      responses:
+        "200":
+          description: ok
+""",
+        "frontend/view.tsx": "export const View = () => <main>fast interface</main>;",
+        "frontend/comment.ts": '// app.get("/comment-only", handler)',
+        "frontend/string.py": 'example = "@router.post(\\"/string-only\\")"',
+        "tests/test_api.py": """
+from fastapi import FastAPI
+app = FastAPI()
+@app.get("/test-only")
+def test_only(): ...
+""",
+        "node_modules/vendor.ts": """
+import express from "express";
+const app = express();
+app.get("/vendor", handler);
+""",
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.strip(), encoding="utf-8")
+    (root / "backend" / "invalid.py").write_bytes(b"\xff\xfe@app.get(")
+
+
+def test_project_source_manifest_performs_no_route_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/items')\ndef items(): ..."
+    (tmp_path / "api.py").write_text(source, encoding="utf-8")
+
+    def fail_route_extraction(*_args: object) -> None:
+        raise AssertionError("manifest-only discovery performed route extraction")
+
+    monkeypatch.setattr(
+        contract_adapters,
+        "_extract_python_routes",
+        fail_route_extraction,
+    )
+
+    manifest = project_source_manifest(tmp_path)
+
+    assert tuple(manifest) == ("api.py",)
+
+
+def test_backend_discovery_preserves_exact_manifest_and_observation_parity(
+    tmp_path: Path,
+) -> None:
+    _write_backend_discovery_fixture(tmp_path)
+
+    observations, extraction = contract_adapters.extract_backend_observations(
+        tmp_path
+    )
+    manifest = project_source_manifest(tmp_path)
+
+    assert tuple(manifest) == (
+        "backend/chained.ts",
+        "backend/controller.ts",
+        "backend/express.ts",
+        "backend/fastapi.py",
+        "backend/fastify.ts",
+        "backend/flask.py",
+        "backend/router.py",
+        "backend/wrapper.py",
+        "openapi.json",
+        "swagger.yaml",
+    )
+    assert manifest == extraction["source_manifest"]
+    assert manifest == {
+        relative: hashlib.sha256(
+            (tmp_path / relative).read_text(encoding="utf-8").encode("utf-8")
+        ).hexdigest()
+        for relative in manifest
+    }
+    projection = json.dumps(
+        [asdict(observation) for observation in observations],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert hashlib.sha256(projection).hexdigest() == (
+        "011a7050e505c54bdf3b2dd23c78ed354b48090f1a31c6d29f5ebd06fe495442"
+    )
+    assert extraction["adapters"] == {
+        "express",
+        "fastapi",
+        "fastify",
+        "flask",
+        "nest",
+        "openapi",
+    }
+    assert extraction["files_scanned"] == len(manifest)
+    assert extraction["unknown"] == 2
+
+
+def test_backend_manifest_add_change_delete_and_unrelated_edit_invalidation(
+    tmp_path: Path,
+) -> None:
+    unrelated = tmp_path / "view.tsx"
+    unrelated.write_text("export const View = () => <main />;", encoding="utf-8")
+    assert project_source_manifest(tmp_path) == {}
+
+    backend = tmp_path / "api.py"
+    backend.write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/items')\ndef items(): ...",
+        encoding="utf-8",
+    )
+    added = project_source_manifest(tmp_path)
+    assert tuple(added) == ("api.py",)
+
+    backend.write_text(
+        backend.read_text(encoding="utf-8").replace("@app.get", "@app.post"),
+        encoding="utf-8",
+    )
+    changed = project_source_manifest(tmp_path)
+    assert changed.keys() == added.keys()
+    assert changed["api.py"] != added["api.py"]
+
+    unrelated.write_text("export const View = () => <section />;", encoding="utf-8")
+    assert project_source_manifest(tmp_path) == changed
+
+    backend.unlink()
+    assert project_source_manifest(tmp_path) == {}
+
+
+def test_manifest_prefilter_skips_heavy_semantics_for_unrelated_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(20):
+        (tmp_path / f"view-{index}.py").write_text(
+            f"VALUE_{index} = {index}",
+            encoding="utf-8",
+        )
+    (tmp_path / "api.py").write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/items')\ndef items(): ...",
+        encoding="utf-8",
+    )
+    counts = {"ast": 0, "positions": 0, "routes": 0}
+    original_parse = contract_adapters.ast.parse
+    original_positions = contract_adapters._python_code_positions
+
+    def count_parse(*args: object, **kwargs: object):
+        counts["ast"] += 1
+        return original_parse(*args, **kwargs)
+
+    def count_positions(content: str):
+        counts["positions"] += 1
+        return original_positions(content)
+
+    def count_routes(*_args: object):
+        counts["routes"] += 1
+        raise AssertionError("manifest-only discovery performed route extraction")
+
+    monkeypatch.setattr(contract_adapters.ast, "parse", count_parse)
+    monkeypatch.setattr(
+        contract_adapters,
+        "_python_code_positions",
+        count_positions,
+    )
+    monkeypatch.setattr(contract_adapters, "_extract_python_routes", count_routes)
+
+    assert tuple(project_source_manifest(tmp_path)) == ("api.py",)
+    assert counts == {"ast": 1, "positions": 1, "routes": 0}
+
+
+def test_full_backend_extraction_reads_each_candidate_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "api.py").write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/items')\ndef items(): ...",
+        encoding="utf-8",
+    )
+    (tmp_path / "view.tsx").write_text(
+        "export const View = () => <main />;",
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.json").write_text(
+        json.dumps({"openapi": "3.1.0", "paths": {}}),
+        encoding="utf-8",
+    )
+    path_type = type(tmp_path)
+    original_read_text = path_type.read_text
+    reads: dict[str, int] = {}
+
+    def count_read(path: Path, *args: object, **kwargs: object) -> str:
+        relative = path.relative_to(tmp_path).as_posix()
+        reads[relative] = reads.get(relative, 0) + 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "read_text", count_read)
+
+    contract_adapters.extract_backend_observations(tmp_path)
+
+    assert reads == {"api.py": 1, "openapi.json": 1, "view.tsx": 1}
 
 
 def test_route_normalization_preserves_identity_but_compares_shapes() -> None:

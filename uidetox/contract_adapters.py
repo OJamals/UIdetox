@@ -37,6 +37,16 @@ class _PythonProvenance:
     security_bindings: frozenset[str]
 
 
+@dataclass(frozen=True)
+class _BackendSource:
+    path: Path
+    relative: str
+    suffix: str
+    content: str
+    digest: str
+    openapi: bool
+
+
 _CODE_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"}
 
 
@@ -103,68 +113,133 @@ _NEST_METHOD = re.compile(
 )
 
 
-def extract_backend_observations(
-    root: Path,
-) -> tuple[list[ContractObservation], dict[str, Any]]:
-    operations: list[ContractObservation] = []
-    adapters: set[str] = set()
-    source_manifest: dict[str, str] = {}
-    files_scanned = 0
-    unknown = 0
+_QUALIFIED_BACKEND_MARKERS = (
+    "@controller",
+    "@app.",
+    "@router.",
+    "@bp.",
+    "fastapi(",
+    "apirouter(",
+    "flask(",
+    "blueprint(",
+    "express(",
+    "fastify",
+    ".route(",
+    "app.get(",
+    "app.post(",
+    "app.put(",
+    "app.patch(",
+    "app.delete(",
+    "router.get(",
+    "router.post(",
+    "router.put(",
+    "router.patch(",
+    "router.delete(",
+)
+
+
+_FACTORY_IMPORT_MARKERS = ("fastapi", "flask", "express")
+_CONSERVATIVE_BACKEND_MARKERS = (
+    *_QUALIFIED_BACKEND_MARKERS,
+    *_FACTORY_IMPORT_MARKERS,
+)
+
+
+def _discover_backend_sources(root: Path) -> tuple[_BackendSource, ...]:
+    sources: list[_BackendSource] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or any(part in _IGNORED_DIRS for part in path.parts):
             continue
         relative = path.relative_to(root).as_posix()
         if _is_test_source(relative):
             continue
-        lower_name = path.name.lower()
-        if path.suffix.lower() in {".json", ".yaml", ".yml"} and (
-            lower_name.startswith(("openapi", "swagger"))
-        ):
-            try:
-                content = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            source_manifest[relative] = hashlib.sha256(
-                content.encode("utf-8")
-            ).hexdigest()
-            files_scanned += 1
-            extracted = _extract_openapi(path, relative)
-            if extracted:
-                adapters.add("openapi")
-                operations.extend(extracted)
-            else:
-                operations.append(_unknown_backend(relative, "openapi", "openapi"))
-                unknown += 1
-            continue
-        if path.suffix.lower() not in _CODE_EXTENSIONS:
+        suffix = path.suffix.lower()
+        openapi = suffix in {".json", ".yaml", ".yml"} and path.name.lower().startswith(
+            ("openapi", "swagger")
+        )
+        if not openapi and suffix not in _CODE_EXTENSIONS:
             continue
         try:
             content = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        suffix = path.suffix.lower()
-        if not _looks_like_backend_source(content, suffix):
+        if not openapi and (
+            not _could_be_backend_source(content)
+            or not _looks_like_backend_source(content, suffix)
+        ):
             continue
-        source_manifest[relative] = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        files_scanned += 1
+        sources.append(
+            _BackendSource(
+                path=path,
+                relative=relative,
+                suffix=suffix,
+                content=content,
+                digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                openapi=openapi,
+            )
+        )
+    return tuple(sources)
+
+
+def backend_source_manifest(root: Path) -> dict[str, str]:
+    """Hash every source qualified to contribute backend/API evidence."""
+    return {
+        source.relative: source.digest
+        for source in _discover_backend_sources(root)
+    }
+
+
+def extract_backend_observations(
+    root: Path,
+) -> tuple[list[ContractObservation], dict[str, Any]]:
+    operations: list[ContractObservation] = []
+    adapters: set[str] = set()
+    unknown = 0
+    sources = _discover_backend_sources(root)
+    for source in sources:
+        if source.openapi:
+            extracted = _extract_openapi(
+                source.path,
+                source.relative,
+                source.content,
+            )
+            if extracted:
+                adapters.add("openapi")
+                operations.extend(extracted)
+            else:
+                operations.append(
+                    _unknown_backend(source.relative, "openapi", "openapi")
+                )
+                unknown += 1
+            continue
         extracted: list[ContractObservation] = []
-        if suffix == ".py":
-            extracted, found_adapters = _extract_python_routes(relative, content)
+        if source.suffix == ".py":
+            extracted, found_adapters = _extract_python_routes(
+                source.relative,
+                source.content,
+            )
         else:
-            extracted, found_adapters = _extract_javascript_routes(relative, content)
+            extracted, found_adapters = _extract_javascript_routes(
+                source.relative,
+                source.content,
+            )
         if extracted:
             operations.extend(extracted)
             adapters.update(found_adapters)
             unknown += sum(item.classification == "unknown" for item in extracted)
-        elif _contains_route_syntax(content, suffix):
-            operations.append(_unknown_backend(relative, "unknown", "route-syntax"))
+        elif _contains_route_syntax(source.content, source.suffix):
+            operations.append(
+                _unknown_backend(source.relative, "unknown", "route-syntax")
+            )
             unknown += 1
     return operations, {
         "adapters": adapters,
-        "files_scanned": files_scanned,
+        "files_scanned": len(sources),
         "unknown": unknown,
-        "source_manifest": dict(sorted(source_manifest.items())),
+        "source_manifest": {
+            source.relative: source.digest
+            for source in sources
+        },
     }
 
 
@@ -181,13 +256,17 @@ def _is_test_source(relative: str) -> bool:
     )
 
 
-def _extract_openapi(path: Path, relative: str) -> list[ContractObservation]:
+def _extract_openapi(
+    path: Path,
+    relative: str,
+    content: str,
+) -> list[ContractObservation]:
     try:
         if path.suffix.lower() == ".json":
-            document = json.loads(path.read_text(encoding="utf-8"))
+            document = json.loads(content)
         else:
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, yaml.YAMLError):
+            document = yaml.safe_load(content)
+    except (json.JSONDecodeError, yaml.YAMLError):
         return []
     if not isinstance(document, Mapping) or not isinstance(
         document.get("paths"), Mapping
@@ -871,6 +950,11 @@ def _join_routes(prefix: str, suffix: str) -> str:
     return f"/{joined}" if joined else "/"
 
 
+def _could_be_backend_source(content: str) -> bool:
+    lowered = content.lower()
+    return any(marker in lowered for marker in _CONSERVATIVE_BACKEND_MARKERS)
+
+
 def _looks_like_backend_source(content: str, suffix: str) -> bool:
     code_positions = (
         _python_code_positions(content)
@@ -885,30 +969,7 @@ def _looks_like_backend_source(content: str, suffix: str) -> bool:
         character if code_positions[index] else " "
         for index, character in enumerate(content)
     ).lower()
-    markers = (
-        "@controller",
-        "@app.",
-        "@router.",
-        "@bp.",
-        "fastapi(",
-        "apirouter(",
-        "flask(",
-        "blueprint(",
-        "express(",
-        "fastify",
-        ".route(",
-        "app.get(",
-        "app.post(",
-        "app.put(",
-        "app.patch(",
-        "app.delete(",
-        "router.get(",
-        "router.post(",
-        "router.put(",
-        "router.patch(",
-        "router.delete(",
-    )
-    return any(marker in lowered for marker in markers)
+    return any(marker in lowered for marker in _QUALIFIED_BACKEND_MARKERS)
 
 
 def _contains_route_syntax(content: str, suffix: str) -> bool:
