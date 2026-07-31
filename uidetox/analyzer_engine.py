@@ -6,6 +6,11 @@ from pathlib import Path
 
 from uidetox.analyzer_ast import _analyze_ast, has_ast_for
 from uidetox.analyzer_custom import _CUSTOM_CHECK_HANDLERS, _analyze_component_layout
+from uidetox.analyzer_interactions import (
+    _activate_stylesheet_context,
+    _stylesheet_context_for_files,
+    _stylesheet_scope,
+)
 from uidetox.analyzer_project import reconcile_project_issues
 from uidetox.fileset import ProjectFileSet, find_project_root
 from uidetox.findings import Finding
@@ -170,16 +175,17 @@ def analyze_file(
     except (UnicodeDecodeError, OSError):
         return issues  # Skip binary or unreadable files
 
-    if has_ast_for(ext):
-        ast_issues = _analyze_ast(filepath, content, ext, facts=facts)
-        issues.extend(ast_issues)
+    with _stylesheet_scope(filepath):
+        if has_ast_for(ext):
+            ast_issues = _analyze_ast(filepath, content, ext, facts=facts)
+            issues.extend(ast_issues)
 
-    # Component-level layout heuristics (runs regardless of AST)
-    layout_issues = _analyze_component_layout(filepath, content, ext)
-    issues.extend(layout_issues)
+        # Component-level layout heuristics (runs regardless of AST)
+        layout_issues = _analyze_component_layout(filepath, content, ext)
+        issues.extend(layout_issues)
 
-    for rule in applicable_rules:
-        issues.extend(_analyze_rule(rule, filepath, content, ext, design_variance))
+        for rule in applicable_rules:
+            issues.extend(_analyze_rule(rule, filepath, content, ext, design_variance))
 
     return [
         item if isinstance(item, Finding) else _static_finding(item, filepath, content)
@@ -216,13 +222,15 @@ def analyze_directory(
         scope_root=root,
     )
     analysis_targets = file_set.discover()
+    stylesheet_context = _stylesheet_context_for_files(analysis_targets)
 
     from concurrent.futures import ThreadPoolExecutor
 
     file_analyzer = _analyze_file or analyze_file
 
     def _analyze_wrapper(fp: Path) -> list:
-        return file_analyzer(fp, design_variance=design_variance)  # type: ignore
+        with _activate_stylesheet_context(stylesheet_context):
+            return file_analyzer(fp, design_variance=design_variance)  # type: ignore
 
     futures = []
     with ThreadPoolExecutor() as executor:

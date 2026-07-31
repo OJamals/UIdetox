@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
-from functools import lru_cache
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 _IGNORED_STYLE_DIRS = {
     ".git",
@@ -35,6 +40,25 @@ _DEV_SERVER_CONFIG_NAMES = {
     "webpack.config.js",
     "webpack.config.ts",
 }
+_INTERACTION_STATE_GROUPS = (
+    ("hover",),
+    ("focus", "focus-visible"),
+)
+
+
+@dataclass(frozen=True)
+class _StylesheetFacts:
+    sources: tuple[tuple[str, str], ...]
+    selectors_by_states: tuple[
+        tuple[tuple[str, ...], tuple[str, ...]],
+        ...,
+    ]
+    class_states: frozenset[tuple[str, tuple[str, ...]]]
+
+
+_STYLESHEET_CONTEXT: ContextVar[Mapping[Path, _StylesheetFacts] | None] = ContextVar(
+    "uidetox_stylesheet_context", default=None
+)
 
 
 def _uses_utility_classes(classes: str) -> bool:
@@ -48,28 +72,93 @@ def _project_root(filepath: Path) -> Path:
     return filepath.parent
 
 
-def _stylesheet_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
-    entries: list[tuple[str, int, int]] = []
-    for stylesheet in root.rglob("*.css"):
+def _build_stylesheet_facts(root: Path) -> _StylesheetFacts:
+    identities: list[tuple[str, str]] = []
+    sources: list[str] = []
+    for stylesheet in sorted(root.rglob("*.css")):
         if not _IGNORED_STYLE_DIRS.isdisjoint(stylesheet.relative_to(root).parts):
             continue
         try:
-            stat = stylesheet.stat()
-        except OSError:
-            continue
-        entries.append((str(stylesheet), stat.st_mtime_ns, stat.st_size))
-    return tuple(sorted(entries))
-
-
-@lru_cache(maxsize=64)
-def _stylesheet_text(signature: tuple[tuple[str, int, int], ...]) -> str:
-    sources: list[str] = []
-    for path, _, _ in signature:
-        try:
-            sources.append(Path(path).read_text(encoding="utf-8"))
+            source = stylesheet.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             continue
-    return "\n".join(sources)
+        relative = stylesheet.relative_to(root).as_posix()
+        identities.append(
+            (relative, hashlib.sha256(source.encode("utf-8")).hexdigest())
+        )
+        sources.append(source)
+    stylesheet = "\n".join(sources)
+    selector_lists = tuple(re.findall(r"([^{}]+)\{", stylesheet))
+    selectors_by_states: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    class_states: set[tuple[str, tuple[str, ...]]] = set()
+    for states in _INTERACTION_STATE_GROUPS:
+        state_pattern = "|".join(re.escape(state) for state in states)
+        state = rf":(?:{state_pattern})\b"
+        selectors_by_states.append(
+            (
+                states,
+                tuple(
+                    selector
+                    for selector_list in selector_lists
+                    for selector in _split_selector_list(selector_list)
+                    if re.search(state, selector)
+                ),
+            )
+        )
+        class_state = (
+            rf"(?=\.([A-Za-z_][\w-]*)(?:"
+            rf"(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
+            rf"|\s*\{{[^{{}}]*&{state}"
+            rf"))"
+        )
+        class_states.update(
+            (match.group(1), states)
+            for match in re.finditer(class_state, stylesheet, re.DOTALL)
+        )
+    return _StylesheetFacts(
+        sources=tuple(identities),
+        selectors_by_states=tuple(selectors_by_states),
+        class_states=frozenset(class_states),
+    )
+
+
+def _stylesheet_context_for_files(
+    files: Iterable[Path],
+) -> Mapping[Path, _StylesheetFacts]:
+    roots = sorted({_project_root(path) for path in files}, key=str)
+    return MappingProxyType({root: _build_stylesheet_facts(root) for root in roots})
+
+
+@contextmanager
+def _activate_stylesheet_context(
+    context: Mapping[Path, _StylesheetFacts],
+) -> Iterator[None]:
+    token = _STYLESHEET_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _STYLESHEET_CONTEXT.reset(token)
+
+
+@contextmanager
+def _stylesheet_scope(filepath: Path) -> Iterator[None]:
+    root = _project_root(filepath)
+    context = _STYLESHEET_CONTEXT.get()
+    if context is not None and root in context:
+        yield
+        return
+    with _activate_stylesheet_context(
+        MappingProxyType({root: _build_stylesheet_facts(root)})
+    ):
+        yield
+
+
+def _stylesheet_facts(filepath: Path) -> _StylesheetFacts:
+    root = _project_root(filepath)
+    context = _STYLESHEET_CONTEXT.get()
+    if context is not None and root in context:
+        return context[root]
+    return _build_stylesheet_facts(root)
 
 
 def _split_selector_list(selector_list: str) -> tuple[str, ...]:
@@ -89,19 +178,13 @@ def _split_selector_list(selector_list: str) -> tuple[str, ...]:
 
 
 def _tag_has_state(
-    stylesheet: str,
+    facts: _StylesheetFacts,
     tag: str,
     states: tuple[str, ...],
 ) -> bool:
-    state_pattern = "|".join(re.escape(state) for state in states)
     tag_pattern = re.compile(rf"(?<![\w-]){re.escape(tag)}(?![\w-])")
-    for selector_list in re.findall(r"([^{}]+)\{", stylesheet):
-        for selector in _split_selector_list(selector_list):
-            if re.search(rf":(?:{state_pattern})\b", selector) and tag_pattern.search(
-                selector
-            ):
-                return True
-    return False
+    selectors = dict(facts.selectors_by_states).get(states, ())
+    return any(tag_pattern.search(selector) for selector in selectors)
 
 
 def _semantic_class_has_state(
@@ -110,23 +193,16 @@ def _semantic_class_has_state(
     states: tuple[str, ...],
     tag: str,
 ) -> bool:
-    stylesheet = _stylesheet_text(_stylesheet_signature(_project_root(filepath)))
-    if not stylesheet:
+    facts = _stylesheet_facts(filepath)
+    if not facts.sources:
         return False
-    if _tag_has_state(stylesheet, tag, states):
+    if _tag_has_state(facts, tag, states):
         return True
-
-    state_pattern = "|".join(re.escape(state) for state in states)
-    state = rf":(?:{state_pattern})\b"
-    for token in classes.split():
-        escaped = re.escape(token)
-        direct = rf"\.{escaped}(?:\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*{state}"
-        nested = rf"\.{escaped}\s*\{{[^{{}}]*&{state}"
-        if re.fullmatch(r"[A-Za-z_][\w-]*", token) and re.search(
-            rf"(?:{direct}|{nested})", stylesheet, re.DOTALL
-        ):
-            return True
-    return False
+    return any(
+        re.fullmatch(r"[A-Za-z_][\w-]*", token)
+        and (token, states) in facts.class_states
+        for token in classes.split()
+    )
 
 
 def class_list_has_interaction_state(

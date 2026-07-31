@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import uidetox.source_facts as source_facts_module
 from uidetox.analyzer import analyze_file
 from uidetox.analyzer_ast import _analyze_ast
 from uidetox.frontend_semantics import extract_script_semantics
@@ -286,6 +287,57 @@ def test_analyzer_and_semantic_consumers_reuse_one_source_fact_parse(tmp_path):
     assert ast_issues[0]["issue"] == canonical["issue"]
     assert ast_issues[0]["file"] == canonical["file"]
     assert parse_calls == 1
+
+
+def test_extract_source_facts_materializes_root_walk_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not has_ast_for(".tsx"):
+        pytest.skip("TSX grammar unavailable")
+    path = Path("Shell.tsx")
+    content = (
+        "import { useState } from 'react';\n"
+        "export function Shell() {\n"
+        "  const [ready, setReady] = useState(false);\n"
+        "  return <main onClick={() => setReady(true)} />;\n"
+        "}\n"
+    )
+    expected = extract_source_facts(path, content)
+    original_walk = source_facts_module._walk
+    root_node: object | None = None
+    root_walks = 0
+
+    def count_walk(node: object):
+        nonlocal root_node, root_walks
+        if root_node is None:
+            root_node = node
+        if node is root_node:
+            root_walks += 1
+        yield from original_walk(node)
+
+    received_nodes: list[object] = []
+    for name in (
+        "_extract_imports",
+        "_extract_exports",
+        "_extract_bindings",
+        "_extract_callables",
+        "_extract_calls",
+    ):
+        original = getattr(source_facts_module, name)
+
+        def receive(nodes: object, *args: object, _original=original):
+            received_nodes.append(nodes)
+            return _original(nodes, *args)
+
+        monkeypatch.setattr(source_facts_module, name, receive)
+    monkeypatch.setattr(source_facts_module, "_walk", count_walk)
+
+    actual = extract_source_facts(path, content)
+
+    assert actual == expected
+    assert root_walks == 1
+    assert len(received_nodes) == 5
+    assert all(nodes is received_nodes[0] for nodes in received_nodes)
 
 
 def test_semantic_consumer_does_not_retry_a_failed_shared_parse():
