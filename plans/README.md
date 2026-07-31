@@ -185,6 +185,6 @@ Current limits:
   requalified in this audit.
 - Live qualification ran on macOS; existing release automation owns
   cross-platform/wheel gates.
-- Plan 055 and Plan 056 speedups came from controlled runtime prototypes.
-  Their committed benchmark scripts and parity gates are implementation work,
-  not yet repository guarantees.
+- Plan 055 and Plan 056 benchmark scripts and parity gates are committed
+  repository guarantees for their controlled fixtures; they do not guarantee
+  equivalent speedups on arbitrary external projects or production hardware.
