@@ -73,19 +73,33 @@ def resolve_tool(
     }
 
 
-def run_diagnostics(
-    tool: str, command: str, root: Path
-) -> tuple[MechanicalRun, tuple[MechanicalDiagnostic, ...]]:
+def run_mechanical_command(
+    command: str,
+    root: Path,
+    *,
+    timeout: float = 120,
+) -> MechanicalRun:
     try:
         argv, env = prepare_subprocess_cmd(command)
         result = subprocess.run(
-            argv, capture_output=True, text=True, cwd=root, timeout=120, env=env
+            argv,
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout,
+            env=env,
         )
-        run = MechanicalRun(result.returncode, result.stdout + result.stderr)
+        return MechanicalRun(result.returncode, result.stdout + result.stderr)
     except FileNotFoundError:
-        run = MechanicalRun(-1, "", "command_not_found")
+        return MechanicalRun(-1, "", "command_not_found")
     except subprocess.TimeoutExpired:
-        run = MechanicalRun(-1, "", "timeout")
+        return MechanicalRun(-1, "", "timeout")
+
+
+def run_diagnostics(
+    tool: str, command: str, root: Path
+) -> tuple[MechanicalRun, tuple[MechanicalDiagnostic, ...]]:
+    run = run_mechanical_command(command, root)
     return run, parse_diagnostics(tool, run.output)
 
 

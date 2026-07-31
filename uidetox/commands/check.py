@@ -5,9 +5,10 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from uidetox.mechanical import run_mechanical_command
 from uidetox.tooling import detect_all
 from uidetox.state import get_project_root, load_config, save_config
-from uidetox.utils import prepare_subprocess_cmd, tracked_changed_files
+from uidetox.utils import tracked_changed_files
 from uidetox.commands import tsc as tsc_cmd
 from uidetox.commands import lint as lint_cmd
 from uidetox.commands import format_cmd
@@ -108,6 +109,7 @@ def run(args: argparse.Namespace):
     fix = getattr(args, "fix", False)
     steps_run = 0
     checks_passed = True
+    fix_phase_failed = False
     pre_existing_changes: set[str] = set()
 
     if fix and config.get("auto_commit", False):
@@ -115,58 +117,49 @@ def run(args: argparse.Namespace):
 
     if fix and (tooling.get("linter") or tooling.get("formatter")):
         print("━━━ Phase 1: Iterative Auto-Fix ━━━")
+        fix_commands = []
+        if tooling.get("formatter") and tooling["formatter"].get("fix_cmd"):
+            fix_commands.append(
+                ("Formatter", tooling["formatter"]["fix_cmd"], ("fixed", "formatted"))
+            )
+        if tooling.get("linter") and tooling["linter"].get("fix_cmd"):
+            fix_commands.append(("Linter", tooling["linter"]["fix_cmd"], ("fixed",)))
+
         for iteration in range(1, 4):
             print(f"Iteration {iteration}...")
             changed = False
+            retryable_commands = []
 
-            if tooling.get("formatter"):
-                cmd = tooling["formatter"].get("fix_cmd")
-                if cmd:
-                    try:
-                        argv, env = prepare_subprocess_cmd(cmd)
-                        res = subprocess.run(
-                            argv,
-                            capture_output=True,
-                            text=True,
-                            cwd=project_root,
-                            env=env,
+            for label, cmd, convergence_signals in fix_commands:
+                result = run_mechanical_command(cmd, project_root)
+                if result.returncode != 0:
+                    fix_phase_failed = True
+                    checks_passed = False
+                    if result.error == "command_not_found":
+                        print(f"Warning: {label} command not found ({cmd})")
+                    elif result.error == "timeout":
+                        print(f"Warning: {label} command timed out ({cmd})")
+                    else:
+                        print(
+                            f"Warning: {label} command failed "
+                            f"(exit {result.returncode}) ({cmd})"
                         )
-                        if (
-                            "fixed" in res.stdout.lower()
-                            or "formatted" in res.stdout.lower()
-                        ):
-                            changed = True
-                    except FileNotFoundError:
-                        print(f"Warning: Formatter command not found ({cmd})")
+                    continue
 
-            if tooling.get("linter"):
-                cmd = tooling["linter"].get("fix_cmd")
-                if cmd:
-                    try:
-                        argv, env = prepare_subprocess_cmd(cmd)
-                        res = subprocess.run(
-                            argv,
-                            capture_output=True,
-                            text=True,
-                            cwd=project_root,
-                            env=env,
-                        )
-                        # If linter fixed files, it might still have exit code 1 if some remain
-                        # We assume it changed things if the output mentions fixes, or just run max 3 times anyway
-                        if (
-                            "fixed" in res.stdout.lower()
-                            or "fixed" in res.stderr.lower()
-                        ):
-                            changed = True
-                    except FileNotFoundError:
-                        print(f"Warning: Linter command not found ({cmd})")
+                retryable_commands.append((label, cmd, convergence_signals))
+                output = result.output.lower()
+                if any(signal in output for signal in convergence_signals):
+                    changed = True
+
+            fix_commands = retryable_commands
 
             if not changed:
-                print("Code is clean or no more auto-fixes available.\n")
+                if not fix_phase_failed:
+                    print("Code is clean or no more auto-fixes available.\n")
                 break
         print("Auto-fix phase complete.\n")
 
-        if config.get("auto_commit", False):
+        if config.get("auto_commit", False) and not fix_phase_failed:
             try:
                 post_fix_changes = _tracked_changed_files()
                 if pre_existing_changes:
