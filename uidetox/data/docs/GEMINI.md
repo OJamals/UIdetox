@@ -23,7 +23,8 @@ The loop bootstraps with auto-detected tooling, continuation context from memory
 1. Run `uidetox check --fix` to clear mechanical issues
 2. Run `uidetox scan --path .` then systematically read every frontend file
 3. Fix issues by component using `uidetox next` → fix all → `uidetox batch-resolve ID1 ID2 ... --note "..."`
-4. Run `uidetox review` + `uidetox review --score N` for subjective quality assessment
+4. Run `uidetox review`, then record complete structured evidence:
+   `uidetox review --dimension-a 36 --dimension-b 27 --dimension-c 18 --dimension-d 9 --rationale "Validated hierarchy, consistency, craft, and identity." --reviewer "agent-name" --finding-link "finding-1" --region-link "region-1" --route "/checkout" --state "error" --viewport "mobile"`
 5. Check `uidetox status` for blended Design Score (60% static + 40% LLM review)
 6. Run `uidetox finish` to squash-merge the session branch
 

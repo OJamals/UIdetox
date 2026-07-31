@@ -30,7 +30,7 @@ The loop will guide you through:
 1. Mechanical fixes (`uidetox check --fix`)
 2. LLM-dynamic codebase exploration and design audit (`uidetox scan`)
 3. Component-level batch fixes (`uidetox next` → fix → `uidetox batch-resolve ID1 ID2 ... --note "..."`)
-4. Subjective review (`uidetox review` → `uidetox review --score N`)
+4. Subjective review (`uidetox review` → `uidetox review --dimension-a 36 --dimension-b 27 --dimension-c 18 --dimension-d 9 --rationale "Validated hierarchy, consistency, craft, and identity." --reviewer "agent-name" --finding-link "finding-1" --region-link "region-1" --route "/checkout" --state "error" --viewport "mobile"`)
 5. Status check with blended Design Score (`uidetox status`)
 6. Finalize (`uidetox finish`)
 

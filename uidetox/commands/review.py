@@ -35,9 +35,6 @@ def run(args: argparse.Namespace) -> None:
     if any(value is not None for value in dimensions.values()):
         _store_structured_review(args, dimensions)
         return
-    if (score := getattr(args, "score", None)) is not None:
-        _store_subjective_score(score)
-        return
     _print_review_brief(visual, _load_review_map())
 
 
@@ -228,22 +225,6 @@ def _validate_review_scope(
         "required_matrix_digest": review_capture_matrix_digest(capture_matrix),
         "errors": errors,
     }
-
-
-def _store_subjective_score(score: int) -> None:
-    """Persist legacy scalar input as incomplete, non-qualifying review evidence."""
-    if not isinstance(score, int) or not 0 <= score <= 100:
-        print(f"Error: score must be between 0 and 100, got {score}.", file=sys.stderr)
-        raise SystemExit(1)
-    _save_review(
-        {
-            "score": score,
-            "legacy": True,
-            "stale": True,
-            "timestamp": now_iso(),
-        }
-    )
-    print(f"⚠️  Legacy score recorded: {score}/100; structured A/B/C/D review required.")
 
 
 def _save_review(record: dict[str, Any]) -> None:

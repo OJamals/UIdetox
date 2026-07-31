@@ -14,6 +14,7 @@ Flow (from desloppify architecture):
 
 import argparse
 import subprocess
+import sys
 import uuid
 
 from ..fileset import ProjectFileSet
@@ -31,7 +32,35 @@ from ..tooling import detect_all
 from ..workflow import run_executable_workflow
 
 
+def _validate_mode(args: argparse.Namespace) -> None:
+    execute = getattr(args, "execute", False)
+    if execute and getattr(args, "orchestrator", False):
+        print(
+            "Error: --orchestrator is preview-only and cannot be combined with --execute.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    if execute:
+        return
+
+    execute_only = []
+    if getattr(args, "proposal_id", None) is not None:
+        execute_only.append("--proposal-id")
+    if getattr(args, "require_visual_evidence", False):
+        execute_only.append("--require-visual-evidence")
+    if getattr(args, "visual_evidence_file", None) is not None:
+        execute_only.append("--visual-evidence-file")
+    if execute_only:
+        print(
+            f"Error: {', '.join(execute_only)} require --execute.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 def run(args: argparse.Namespace):
+    _validate_mode(args)
     target = getattr(args, "target", 95)
     ensure_uidetox_dir()
     project_root = get_project_root()

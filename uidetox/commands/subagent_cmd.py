@@ -13,25 +13,24 @@ from uidetox.subagent import (
 )
 
 
-def run(args: argparse.Namespace):
+def run(args: argparse.Namespace) -> bool:
     stage_prompt = getattr(args, "stage_prompt", None)
     list_all = getattr(args, "list", False)
     show_id = getattr(args, "show", None)
     record_id = getattr(args, "record", None)
 
     if stage_prompt:
-        _handle_stage_prompt(stage_prompt, getattr(args, "parallel", 1))
-    elif list_all:
-        _handle_list()
-    elif show_id:
-        _handle_show(show_id)
-    elif record_id:
-        _handle_record(record_id, args)
-    else:
-        _handle_default()
+        return _handle_stage_prompt(stage_prompt, getattr(args, "parallel", 1))
+    if list_all:
+        return _handle_list()
+    if show_id:
+        return _handle_show(show_id)
+    if record_id:
+        return _handle_record(record_id, args)
+    return _handle_default()
 
 
-def _handle_stage_prompt(stage: str, parallel: int):
+def _handle_stage_prompt(stage: str, parallel: int) -> bool:
     if stage not in STAGES:
         print(f"Unknown stage '{stage}'. Valid stages: {', '.join(STAGES)}")
         sys.exit(1)
@@ -72,13 +71,14 @@ def _handle_stage_prompt(stage: str, parallel: int):
         print("When all agents are done, record them sequentially:")
         for sid in session_ids:
             print(f"  uidetox subagent --record {sid}")
+    return True
 
 
-def _handle_list():
+def _handle_list() -> bool:
     sessions = list_sessions()
     if not sessions:
         print("No sub-agent sessions found.")
-        return
+        return True
 
     print("╔══════════════════════════════════════╗")
     print("║       Sub-Agent Sessions             ║")
@@ -89,13 +89,14 @@ def _handle_list():
             f"  {status_icon} {s.get('session_id', '?'):8s} | {s.get('stage', '?'):12s} | {s.get('status', '?')}"
         )
     print(f"\n  Total: {len(sessions)} session(s)")
+    return True
 
 
-def _handle_show(session_id: str):
+def _handle_show(session_id: str) -> bool:
     session = get_session(session_id)
     if not session:
         print(f"Session '{session_id}' not found.")
-        return
+        return False
 
     meta = session.get("meta", {})
     print(f"Session: {meta.get('session_id')}")
@@ -107,9 +108,10 @@ def _handle_show(session_id: str):
     if "result" in session:
         print("\nResult:")
         print(json.dumps(session["result"], indent=2)[:2000])
+    return True
 
 
-def _handle_record(session_id: str, args: argparse.Namespace):
+def _handle_record(session_id: str, args: argparse.Namespace) -> bool:
     note = getattr(args, "note", "") or "completed"
     result = {
         "status": "completed",
@@ -122,9 +124,10 @@ def _handle_record(session_id: str, args: argparse.Namespace):
         print("Run `uidetox status` to check progress, or proceed to the next stage.")
     else:
         print(f"❌ Session {session_id} not found.")
+    return success
 
 
-def _handle_default():
+def _handle_default() -> bool:
     print("UIdetox Sub-Agent Manager")
     print()
     print("Usage:")
@@ -136,3 +139,4 @@ def _handle_default():
     print("  uidetox subagent --record <session_id>   Mark a session as completed")
     print()
     print(f"Available stages: {', '.join(STAGES)}")
+    return True
