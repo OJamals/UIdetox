@@ -200,37 +200,37 @@ def init_database() -> None:
             [
                 (
                     "Website Redesign",
-                    "Transform our digital presence with a magical new experience.",
+                    "Rebuild the public site around clearer evaluation and quote-request paths.",
                     "active",
                     72,
                     48000,
                     "2026-08-30",
-                    "Jane Doe",
+                    "Mara Voss",
                     json.dumps(["design", "growth", "urgent"]),
                 ),
                 (
                     "AI Content Engine",
-                    "Unleash next-generation content workflows at scale.",
+                    "Add reviewable drafting and approval steps to the publishing workflow.",
                     "at-risk",
                     43,
                     92000,
                     "2026-09-12",
-                    "John Smith",
+                    "Imani Cole",
                     json.dumps(["ai", "platform"]),
                 ),
                 (
                     "Mobile Experience",
-                    "Seamlessly empower customers wherever they are.",
+                    "Bring account review and time-sensitive approvals to small screens.",
                     "planning",
                     18,
                     65000,
                     "2026-10-01",
-                    "Sarah Johnson",
+                    "Theo Rami",
                     json.dumps(["mobile", "customer"]),
                 ),
                 (
                     "Data Migration",
-                    "Move legacy accounts into the innovative cloud platform.",
+                    "Reconcile legacy account records before the production cutover.",
                     "completed",
                     100,
                     31000,
@@ -247,9 +247,9 @@ def init_database() -> None:
             VALUES (?, ?, ?, ?, ?)
             """,
             [
-                ("Jane Doe", "jane@example.com", "Admin", "JD", 1),
-                ("John Smith", "john@example.com", "Developer", "JS", 1),
-                ("Sarah Johnson", "sarah@example.com", "Designer", "SJ", 0),
+                ("Mara Voss", "mara.voss@example.test", "Admin", "MV", 1),
+                ("Imani Cole", "imani.cole@example.test", "Developer", "IC", 1),
+                ("Theo Rami", "theo.rami@example.test", "Designer", "TR", 0),
                 ("Mike Wilson", "mike@example.com", "Analyst", "MW", 0),
             ],
         )
@@ -260,9 +260,9 @@ def init_database() -> None:
             VALUES (?, ?, ?, ?)
             """,
             [
-                (1, "Jane Doe", "updated", "Changed project progress to 72%"),
-                (2, "John Smith", "commented", "Added a note about API latency"),
-                (3, "Sarah Johnson", "uploaded", "Added 12 new mobile mockups"),
+                (1, "Mara Voss", "updated", "Changed project progress to 72%"),
+                (2, "Imani Cole", "commented", "Added a note about API latency"),
+                (3, "Theo Rami", "uploaded", "Added 12 new mobile mockups"),
                 (1, "Mike Wilson", "completed", "Closed the analytics milestone"),
             ],
         )
@@ -489,6 +489,9 @@ def init_database() -> None:
         VALUES (1, 'NexusFlow Labs', 1, 0, 'dashboard')
         """
     )
+    from backend.extended.database import init_extended_database
+
+    init_extended_database(connection)
     connection.commit()
     connection.close()
 

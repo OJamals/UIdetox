@@ -4,7 +4,7 @@ Runnable synthetic qualification fixture for UIdetox. It retains a reproducible
 record of its deliberately poor baseline and contains no production customer data.
 
 The app combines a React/Vite frontend, FastAPI backend, REST API, OpenAPI document,
-and SQLite database. Fifteen product route patterns and reusable components create enough
+and SQLite database. Thirty-four product route patterns and reusable components create enough
 structure for AST parsing, import/ownership mapping, runtime observation, intent
 provenance, full-stack operation reconciliation, source-aware redesign planning,
 proposal comparison, and disposable prototype briefs.

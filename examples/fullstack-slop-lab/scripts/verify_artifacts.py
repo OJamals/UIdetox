@@ -80,7 +80,10 @@ def main() -> None:
 
     proposals = redesigns.get("proposals", [])
     oracle = expectations["redesign_oracle"]
-    require(len(proposals) == oracle["variants"], "unexpected redesign proposal count")
+    require(
+        oracle["minimum_variants"] <= len(proposals) <= oracle["maximum_variants"],
+        "unexpected redesign proposal count",
+    )
     distances = [
         pair.get("score", 0) for pair in redesigns.get("pairwise_distances", [])
     ]
@@ -123,8 +126,15 @@ def main() -> None:
         )
 
     prototype_path = STATE / "prototype-brief.md"
+    prototype_bytes: int | None = None
     if prototype_path.exists():
         prototype = prototype_path.read_text()
+        prototype_bytes = len(prototype.encode("utf-8"))
+        require(
+            prototype_bytes <= oracle["maximum_prototype_bytes"],
+            "prototype brief exceeds the configured byte budget: "
+            f"{prototype_bytes} > {oracle['maximum_prototype_bytes']}",
+        )
         for heading in (
             "## Migration sequence",
             "## Prototype operating rules",
@@ -141,6 +151,7 @@ def main() -> None:
         "nodes": len(frontend_map.get("nodes", [])),
         "contract_lineage": actual_contracts,
         "proposals": len(proposals),
+        "prototype_bytes": prototype_bytes,
         "routes": sorted(expected_routes),
         "runtime_pages": evidence.get("runtime_pages"),
         "runtime_status": evidence.get("runtime_status"),

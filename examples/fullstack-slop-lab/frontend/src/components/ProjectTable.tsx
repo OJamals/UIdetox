@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { Project } from "../types";
 
 type Props = {
@@ -28,7 +28,7 @@ export function ProjectTable({ projects, onDelete }: Props) {
           {projects.map((project) => (
             <tr key={project.id}>
               <td>
-                <Link to={`/projects/${project.id}`}>
+                <Link className="project-cell-link" to={`/projects/${project.id}`}>
                   <b>{project.name}</b>
                   <small>{project.description}</small>
                 </Link>

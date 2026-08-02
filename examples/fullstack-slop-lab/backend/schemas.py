@@ -21,7 +21,7 @@ class ProjectCreate(StrictRequestModel):
     progress: int = Field(default=0, ge=0, le=100)
     budget: float = Field(default=0, ge=0)
     due_date: str | None = None
-    owner_name: str = "Jane Doe"
+    owner_name: str = "Mara Voss"
     tags: list[str] = Field(default_factory=list)
 
 
@@ -116,6 +116,7 @@ class WorkspaceSettingsResponse(SettingsUpdate):
 
 
 class RecommendationResponse(BaseModel):
+    project_id: int
     title: str
     score: int
 

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 
 export function TopBar() {
   const [query, setQuery] = useState("");
@@ -22,7 +22,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <form className="global-search" role="search" onSubmit={search}>
-        <label htmlFor="global-search">Search projects</label>
+        <label htmlFor="global-search">Search portfolio</label>
         <input
           id="global-search"
           type="search"

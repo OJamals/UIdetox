@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { ModalDialog } from "../components/ModalDialog";
 import { Spinner } from "../components/Spinner";
 import { Toast } from "../components/Toast";
 import type { TeamMember } from "../types";
@@ -82,8 +83,12 @@ export function TeamPage() {
         ))}
       </div>
 
-      {showInvite ? (
-        <dialog aria-labelledby="invite-member-title" className="modal-card create-form" open>
+      <ModalDialog
+        open={showInvite}
+        labelledBy="invite-member-title"
+        className="create-form"
+        onClose={() => setShowInvite(false)}
+      >
           <form onSubmit={invite}>
             <h2 id="invite-member-title">Invite team member</h2>
             <p>The backend records this invitation as a synthetic roster entry.</p>
@@ -103,8 +108,7 @@ export function TeamPage() {
               <button type="submit" className="primary-button">Send invitation</button>
             </div>
           </form>
-        </dialog>
-      ) : null}
+      </ModalDialog>
 
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
     </div>

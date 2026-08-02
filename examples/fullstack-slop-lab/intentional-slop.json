@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "purpose": "Historical UIdetox capability stress-fixture record",
+  "contains_security_vulnerabilities": false,
+  "contains_external_side_effects": false,
+  "canary_records_are_historical": true,
+  "remediation": {
+    "completed_at": "2026-07-31",
+    "before_evidence": ".uidetox/snapshots/before_*.png",
+    "remediated_canaries": [
+      "css-distributed-spectrum",
+      "css-translucent-material",
+      "css-pill-saturation",
+      "motion-perpetual-celebration",
+      "runtime-mobile-width-pressure",
+      "runtime-clipped-definition",
+      "runtime-wide-campaign-board",
+      "a11y-macro-pointer-only",
+      "a11y-equal-status-color",
+      "api-campaign-method-mismatch",
+      "api-frontend-only-narratives",
+      "api-frontend-only-segment-delete",
+      "api-usage-dto-guard"
+    ],
+    "retained_observations": {
+      "component-domain-bundles": "Mapped route ownership retained; splitting cohesive domain files would add indirection without improving behavior.",
+      "component-operational-section-monoculture": "Shared semantic shell retained; page-specific topology now comes from layout and native controls.",
+      "openapi-backend-only-operations": "Valid typed secondary operations remain API-tested; absence from primary navigation is not a contract mismatch.",
+      "db-mixed-numeric-storage": "Storage-to-DTO normalization remains intentionally verified at the boundary.",
+      "db-state-vocabulary-translation": "Closed response vocabularies remain intentionally verified at the boundary."
+    }
+  },
+  "layers": {
+    "static_css": "Distributed visual anti-patterns and arbitrary composition choices.",
+    "runtime_layout": "Rendered overflow, truncation, edge-contact, and density canaries.",
+    "semantic_accessibility": "Bounded keyboard, semantics, hierarchy, and naming canaries.",
+    "component_architecture": "Shallow repeated composition and oversized domain modules.",
+    "frontend_api": "Named route, method, and runtime guard canaries.",
+    "backend_openapi": "Imported routers plus operations without frontend consumers.",
+    "database_lineage": "Mixed storage encodings normalized into typed DTOs."
+  },
+  "canaries": [
+    {
+      "id": "css-distributed-spectrum",
+      "layer": "static_css",
+      "target": ".context-glow-band",
+      "technique": "Layered purple-blue gradients are spread across custom properties, radial layers, and a pseudo-element.",
+      "expected_detector": "gradient and generic AI palette analysis",
+      "functional_boundary": "decorative only"
+    },
+    {
+      "id": "css-translucent-material",
+      "layer": "static_css",
+      "target": ".context-glow-band",
+      "technique": "Translucent surface, blur, saturation, inset highlight, and large shadow compose a glass-like material without a glass class name.",
+      "expected_detector": "glassmorphism and oversized shadow analysis",
+      "functional_boundary": "decorative only"
+    },
+    {
+      "id": "css-pill-saturation",
+      "layer": "static_css",
+      "target": ".celebration-trigger, .live-orbit, .queue-priority",
+      "technique": "Multiple unrelated controls use fully rounded geometry.",
+      "expected_detector": "excessive pill and rounded-everything analysis",
+      "functional_boundary": "controls remain clickable"
+    },
+    {
+      "id": "motion-perpetual-celebration",
+      "layer": "static_css",
+      "target": ".celebration-trigger, .confidence-orbit, .live-orbit",
+      "technique": "Three semantic contexts run perpetual transform or pulse animations.",
+      "expected_detector": "infinite and purposeless motion analysis",
+      "functional_boundary": "prefers-reduced-motion override retained"
+    },
+    {
+      "id": "runtime-mobile-width-pressure",
+      "layer": "runtime_layout",
+      "target": ".slop-context-zone .context-panel:nth-child(odd)",
+      "technique": "Odd panels retain a 23rem minimum width below a 42em viewport.",
+      "expected_detector": "horizontal overflow and edge-contact runtime findings",
+      "functional_boundary": "primary navigation stays reachable"
+    },
+    {
+      "id": "runtime-clipped-definition",
+      "layer": "runtime_layout",
+      "target": ".clipped-definition",
+      "technique": "Long operational definitions are line-clamped without a disclosure affordance.",
+      "expected_detector": "clipping and truncation runtime findings",
+      "functional_boundary": "underlying record remains available through API"
+    },
+    {
+      "id": "runtime-wide-campaign-board",
+      "layer": "runtime_layout",
+      "target": ".campaign-board",
+      "technique": "Three fixed minimum columns force horizontal inspection.",
+      "expected_detector": "responsive density and horizontal layout findings",
+      "functional_boundary": "container remains scrollable"
+    },
+    {
+      "id": "a11y-macro-pointer-only",
+      "layer": "semantic_accessibility",
+      "target": ".macro-row",
+      "technique": "Macro selection uses a clickable div without keyboard semantics.",
+      "expected_detector": "non-semantic interactive element analysis",
+      "functional_boundary": "selection is optional preview behavior"
+    },
+    {
+      "id": "a11y-equal-status-color",
+      "layer": "semantic_accessibility",
+      "target": ".context-panel small",
+      "technique": "Muted gray helper text is reused across colored and translucent surfaces.",
+      "expected_detector": "contrast and color-context analysis",
+      "functional_boundary": "primary labels remain visible"
+    },
+    {
+      "id": "component-domain-bundles",
+      "layer": "component_architecture",
+      "target": "frontend/src/pages/*Pages.tsx",
+      "technique": "Each domain file exports several route components with repeated data-state patterns.",
+      "expected_detector": "component size, repetition, and extraction opportunities",
+      "functional_boundary": "route components remain independently addressable"
+    },
+    {
+      "id": "component-operational-section-monoculture",
+      "layer": "component_architecture",
+      "target": "OperationalSection consumers",
+      "technique": "Semantically distinct features reuse one generic section shell.",
+      "expected_detector": "stock card-grid and shallow component analysis",
+      "functional_boundary": "section headings and content remain rendered"
+    },
+    {
+      "id": "api-campaign-method-mismatch",
+      "layer": "frontend_api",
+      "target": "api.launchCampaign",
+      "technique": "Frontend sends PATCH while OpenAPI exposes POST.",
+      "expected_detector": "method_mismatch contract finding",
+      "functional_boundary": "campaign page renders the explicit 405 error"
+    },
+    {
+      "id": "api-frontend-only-narratives",
+      "layer": "frontend_api",
+      "target": "api.getExecutiveNarrativesCanary",
+      "technique": "Dormant typed client operation has no backend route.",
+      "expected_detector": "frontend_only contract finding",
+      "functional_boundary": "not invoked by visible UI"
+    },
+    {
+      "id": "api-frontend-only-segment-delete",
+      "layer": "frontend_api",
+      "target": "api.deleteSegmentCanary",
+      "technique": "Dormant DELETE operation has no OpenAPI operation.",
+      "expected_detector": "frontend_only contract finding",
+      "functional_boundary": "not invoked by visible UI"
+    },
+    {
+      "id": "api-usage-dto-guard",
+      "layer": "frontend_api",
+      "target": "api.getUsageSummaryCanary",
+      "technique": "Dormant usage operation validates an array endpoint with a forecast object guard.",
+      "expected_detector": "DTO and response-shape mismatch analysis",
+      "functional_boundary": "correct getPlatformUsage operation powers visible UI"
+    },
+    {
+      "id": "openapi-backend-only-operations",
+      "layer": "backend_openapi",
+      "target": "resolve incident, audit detail, survey results, complete work item",
+      "technique": "Selected typed operations have no primary navigation action or only secondary consumers.",
+      "expected_detector": "backend_only operation coverage findings",
+      "functional_boundary": "operations are safe and API-tested"
+    },
+    {
+      "id": "db-mixed-numeric-storage",
+      "layer": "database_lineage",
+      "target": "amount_text, quantity_text, rollout_text, priority_text",
+      "technique": "Currency, quantities, percentages, and priorities use inconsistent text encodings normalized by route payload functions.",
+      "expected_detector": "database-to-DTO type and normalization lineage findings",
+      "functional_boundary": "response models emit stable numeric fields"
+    },
+    {
+      "id": "db-state-vocabulary-translation",
+      "layer": "database_lineage",
+      "target": "state_code and status payload functions",
+      "technique": "Storage enums use inconsistent vocabularies mapped into closed response literals.",
+      "expected_detector": "schema vocabulary and mapping divergence findings",
+      "functional_boundary": "Pydantic and frontend guards keep rendered values closed"
+    }
+  ]
+}

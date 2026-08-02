@@ -4,6 +4,964 @@ info:
   description: Intentionally awkward beta fixture for UIdetox.
   version: 0.1.0
 paths:
+  /api/revenue/opportunities:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: List Opportunities
+      operationId: list_opportunities_api_revenue_opportunities_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/OpportunityResponse'
+                type: array
+                title: Response List Opportunities Api Revenue Opportunities Get
+  /api/revenue/opportunities/{opportunity_id}:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: Get Opportunity
+      operationId: get_opportunity_api_revenue_opportunities__opportunity_id__get
+      parameters:
+      - name: opportunity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Opportunity Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpportunityDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - extended-revenue-support
+      summary: Update Opportunity
+      operationId: update_opportunity_api_revenue_opportunities__opportunity_id__patch
+      parameters:
+      - name: opportunity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Opportunity Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpportunityUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpportunityResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/revenue/forecast:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: Get Revenue Forecast
+      operationId: get_revenue_forecast_api_revenue_forecast_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastResponse'
+  /api/revenue/targets:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: List Revenue Targets
+      operationId: list_revenue_targets_api_revenue_targets_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/RevenueTargetResponse'
+                type: array
+                title: Response List Revenue Targets Api Revenue Targets Get
+  /api/support/cases:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: List Support Cases
+      operationId: list_support_cases_api_support_cases_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SupportCaseResponse'
+                type: array
+                title: Response List Support Cases Api Support Cases Get
+  /api/support/cases/{case_id}:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: Get Support Case
+      operationId: get_support_case_api_support_cases__case_id__get
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportCaseDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/support/cases/{case_id}/assign:
+    post:
+      tags:
+      - extended-revenue-support
+      summary: Assign Support Case
+      operationId: assign_support_case_api_support_cases__case_id__assign_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportAssignment'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportCaseResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/support/cases/{case_id}/close:
+    post:
+      tags:
+      - extended-revenue-support
+      summary: Close Support Case
+      operationId: close_support_case_api_support_cases__case_id__close_post
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportCaseResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/support/sla-policies:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: List Sla Policies
+      operationId: list_sla_policies_api_support_sla_policies_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SlaPolicyResponse'
+                type: array
+                title: Response List Sla Policies Api Support Sla Policies Get
+  /api/support/macros:
+    get:
+      tags:
+      - extended-revenue-support
+      summary: List Support Macros
+      operationId: list_support_macros_api_support_macros_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SupportMacroResponse'
+                type: array
+                title: Response List Support Macros Api Support Macros Get
+  /api/catalog/items:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Catalog Items
+      operationId: list_catalog_items_api_catalog_items_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CatalogItemResponse'
+                type: array
+                title: Response List Catalog Items Api Catalog Items Get
+  /api/catalog/categories:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Catalog Categories
+      operationId: list_catalog_categories_api_catalog_categories_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CatalogCategoryResponse'
+                type: array
+                title: Response List Catalog Categories Api Catalog Categories Get
+  /api/catalog/items/{item_id}/archive:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Archive Catalog Item
+      operationId: archive_catalog_item_api_catalog_items__item_id__archive_post
+      parameters:
+      - name: item_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Item Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogItemResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/orders:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Orders
+      operationId: list_orders_api_orders_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/OrderResponse'
+                type: array
+                title: Response List Orders Api Orders Get
+  /api/orders/{order_id}:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: Get Order
+      operationId: get_order_api_orders__order_id__get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Order Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/orders/{order_id}/advance:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Advance Order
+      operationId: advance_order_api_orders__order_id__advance_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Order Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/inventory:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Inventory
+      operationId: list_inventory_api_inventory_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/InventoryItemResponse'
+                type: array
+                title: Response List Inventory Api Inventory Get
+  /api/inventory/locations:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Inventory Locations
+      operationId: list_inventory_locations_api_inventory_locations_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/InventoryLocationResponse'
+                type: array
+                title: Response List Inventory Locations Api Inventory Locations Get
+  /api/inventory/{stock_id}/recount:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Recount Inventory
+      operationId: recount_inventory_api_inventory__stock_id__recount_post
+      parameters:
+      - name: stock_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Stock Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItemResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/shipments:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Shipments
+      operationId: list_shipments_api_shipments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ShipmentResponse'
+                type: array
+                title: Response List Shipments Api Shipments Get
+  /api/shipments/{shipment_id}/hold:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Hold Shipment
+      operationId: hold_shipment_api_shipments__shipment_id__hold_post
+      parameters:
+      - name: shipment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shipment Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShipmentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/growth/campaigns:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Campaigns
+      operationId: list_campaigns_api_growth_campaigns_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CampaignResponse'
+                type: array
+                title: Response List Campaigns Api Growth Campaigns Get
+  /api/growth/campaigns/{campaign_id}/launch:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Launch Campaign
+      operationId: launch_campaign_api_growth_campaigns__campaign_id__launch_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/growth/campaigns/{campaign_id}/pause:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Pause Campaign
+      operationId: pause_campaign_api_growth_campaigns__campaign_id__pause_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/growth/segments:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Segments
+      operationId: list_segments_api_growth_segments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SegmentResponse'
+                type: array
+                title: Response List Segments Api Growth Segments Get
+  /api/growth/attribution:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Attribution Models
+      operationId: list_attribution_models_api_growth_attribution_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/AttributionResponse'
+                type: array
+                title: Response List Attribution Models Api Growth Attribution Get
+  /api/content/assets:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Content Assets
+      operationId: list_content_assets_api_content_assets_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ContentAssetResponse'
+                type: array
+                title: Response List Content Assets Api Content Assets Get
+  /api/content/assets/{asset_id}/publish:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Publish Content Asset
+      operationId: publish_content_asset_api_content_assets__asset_id__publish_post
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Asset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAssetResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/surveys:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: List Surveys
+      operationId: list_surveys_api_surveys_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SurveyResponse'
+                type: array
+                title: Response List Surveys Api Surveys Get
+  /api/surveys/{survey_id}/close:
+    post:
+      tags:
+      - extended-fulfillment-growth
+      summary: Close Survey
+      operationId: close_survey_api_surveys__survey_id__close_post
+      parameters:
+      - name: survey_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Survey Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurveyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/surveys/{survey_id}/results:
+    get:
+      tags:
+      - extended-fulfillment-growth
+      summary: Get Survey Results
+      operationId: get_survey_results_api_surveys__survey_id__results_get
+      parameters:
+      - name: survey_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Survey Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SurveyResultResponse'
+                title: Response Get Survey Results Api Surveys  Survey Id  Results
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/audit/events:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Audit Events
+      operationId: list_audit_events_api_audit_events_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/AuditEventResponse'
+                type: array
+                title: Response List Audit Events Api Audit Events Get
+  /api/audit/events/{event_id}:
+    get:
+      tags:
+      - extended-control-plane
+      summary: Get Audit Event
+      operationId: get_audit_event_api_audit_events__event_id__get
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Event Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/platform/feature-flags:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Feature Flags
+      operationId: list_feature_flags_api_platform_feature_flags_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/FeatureFlagResponse'
+                type: array
+                title: Response List Feature Flags Api Platform Feature Flags Get
+  /api/platform/feature-flags/{flag_key}:
+    put:
+      tags:
+      - extended-control-plane
+      summary: Update Feature Flag
+      operationId: update_feature_flag_api_platform_feature_flags__flag_key__put
+      parameters:
+      - name: flag_key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Flag Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureFlagUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureFlagResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/platform/incidents:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Incidents
+      operationId: list_incidents_api_platform_incidents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/IncidentResponse'
+                type: array
+                title: Response List Incidents Api Platform Incidents Get
+  /api/platform/incidents/{incident_id}/acknowledge:
+    post:
+      tags:
+      - extended-control-plane
+      summary: Acknowledge Incident
+      operationId: acknowledge_incident_api_platform_incidents__incident_id__acknowledge_post
+      parameters:
+      - name: incident_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Incident Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/platform/incidents/{incident_id}/resolve:
+    post:
+      tags:
+      - extended-control-plane
+      summary: Resolve Incident
+      operationId: resolve_incident_api_platform_incidents__incident_id__resolve_post
+      parameters:
+      - name: incident_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Incident Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/platform/usage:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Platform Usage
+      operationId: list_platform_usage_api_platform_usage_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/UsageMetricResponse'
+                type: array
+                title: Response List Platform Usage Api Platform Usage Get
+  /api/marketplace/apps:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Marketplace Apps
+      operationId: list_marketplace_apps_api_marketplace_apps_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/MarketplaceAppResponse'
+                type: array
+                title: Response List Marketplace Apps Api Marketplace Apps Get
+  /api/marketplace/apps/{app_id}/install:
+    post:
+      tags:
+      - extended-control-plane
+      summary: Install Marketplace App
+      operationId: install_marketplace_app_api_marketplace_apps__app_id__install_post
+      parameters:
+      - name: app_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: App Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceAppResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/work-queue:
+    get:
+      tags:
+      - extended-control-plane
+      summary: List Work Items
+      operationId: list_work_items_api_work_queue_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorkItemResponse'
+                type: array
+                title: Response List Work Items Api Work Queue Get
+  /api/work-queue/{work_item_id}/claim:
+    post:
+      tags:
+      - extended-control-plane
+      summary: Claim Work Item
+      operationId: claim_work_item_api_work_queue__work_item_id__claim_post
+      parameters:
+      - name: work_item_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Work Item Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/work-queue/{work_item_id}/complete:
+    post:
+      tags:
+      - extended-control-plane
+      summary: Complete Work Item
+      operationId: complete_work_item_api_work_queue__work_item_id__complete_post
+      parameters:
+      - name: work_item_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Work Item Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -666,6 +1624,60 @@ components:
       - submittedAt
       - context
       title: ApprovalResponse
+    AttributionResponse:
+      properties:
+        model:
+          type: string
+          title: Model
+        influencedPipelineCents:
+          type: integer
+          title: Influencedpipelinecents
+        confidence:
+          type: integer
+          title: Confidence
+        windowDays:
+          type: integer
+          title: Windowdays
+      type: object
+      required:
+      - model
+      - influencedPipelineCents
+      - confidence
+      - windowDays
+      title: AttributionResponse
+    AuditEventResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        actor:
+          type: string
+          title: Actor
+        action:
+          type: string
+          title: Action
+        resource:
+          type: string
+          title: Resource
+        detail:
+          type: string
+          title: Detail
+        createdAt:
+          type: string
+          title: Createdat
+        ipHint:
+          type: string
+          title: Iphint
+      type: object
+      required:
+      - id
+      - actor
+      - action
+      - resource
+      - detail
+      - createdAt
+      - ipHint
+      title: AuditEventResponse
     AutomationResponse:
       properties:
         id:
@@ -701,6 +1713,109 @@ components:
       - lastRun
       - destination
       title: AutomationResponse
+    CampaignResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        channel:
+          type: string
+          title: Channel
+        status:
+          type: string
+          enum:
+          - draft
+          - scheduled
+          - running
+          - paused
+          - complete
+          title: Status
+        audienceSize:
+          type: integer
+          title: Audiencesize
+        budgetCents:
+          type: integer
+          title: Budgetcents
+        owner:
+          type: string
+          title: Owner
+        scheduledAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scheduledat
+      type: object
+      required:
+      - id
+      - name
+      - channel
+      - status
+      - audienceSize
+      - budgetCents
+      - owner
+      - scheduledAt
+      title: CampaignResponse
+    CatalogCategoryResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        itemCount:
+          type: integer
+          title: Itemcount
+        activeCount:
+          type: integer
+          title: Activecount
+      type: object
+      required:
+      - name
+      - itemCount
+      - activeCount
+      title: CatalogCategoryResponse
+    CatalogItemResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        sku:
+          type: string
+          title: Sku
+        name:
+          type: string
+          title: Name
+        category:
+          type: string
+          title: Category
+        priceCents:
+          type: integer
+          title: Pricecents
+        status:
+          type: string
+          enum:
+          - active
+          - draft
+          - archived
+          title: Status
+        stockPolicy:
+          type: string
+          title: Stockpolicy
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - id
+      - sku
+      - name
+      - category
+      - priceCents
+      - status
+      - stockPolicy
+      - description
+      title: CatalogItemResponse
     ContactResponse:
       properties:
         name:
@@ -714,6 +1829,44 @@ components:
       - name
       - email
       title: ContactResponse
+    ContentAssetResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        kind:
+          type: string
+          title: Kind
+        status:
+          type: string
+          enum:
+          - draft
+          - review
+          - published
+          - archived
+          title: Status
+        owner:
+          type: string
+          title: Owner
+        updatedAt:
+          type: string
+          title: Updatedat
+        usageCount:
+          type: integer
+          title: Usagecount
+      type: object
+      required:
+      - id
+      - title
+      - kind
+      - status
+      - owner
+      - updatedAt
+      - usageCount
+      title: ContentAssetResponse
     CredentialResponse:
       properties:
         mode:
@@ -897,6 +2050,70 @@ components:
       - enabled
       - audience
       title: ExperimentUpdate
+    FeatureFlagResponse:
+      properties:
+        key:
+          type: string
+          title: Key
+        title:
+          type: string
+          title: Title
+        enabled:
+          type: boolean
+          title: Enabled
+        rolloutPercent:
+          type: integer
+          title: Rolloutpercent
+        audience:
+          type: string
+          title: Audience
+        owner:
+          type: string
+          title: Owner
+      type: object
+      required:
+      - key
+      - title
+      - enabled
+      - rolloutPercent
+      - audience
+      - owner
+      title: FeatureFlagResponse
+    FeatureFlagUpdate:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+      additionalProperties: false
+      type: object
+      required:
+      - enabled
+      title: FeatureFlagUpdate
+    ForecastResponse:
+      properties:
+        quarter:
+          type: string
+          title: Quarter
+        pipelineCents:
+          type: integer
+          title: Pipelinecents
+        weightedCents:
+          type: integer
+          title: Weightedcents
+        commitCents:
+          type: integer
+          title: Commitcents
+        atRiskCents:
+          type: integer
+          title: Atriskcents
+      type: object
+      required:
+      - quarter
+      - pipelineCents
+      - weightedCents
+      - commitCents
+      - atRiskCents
+      title: ForecastResponse
     HTTPValidationError:
       properties:
         detail:
@@ -916,6 +2133,114 @@ components:
       required:
       - status
       title: HealthResponse
+    IncidentResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        severity:
+          type: string
+          enum:
+          - sev-1
+          - sev-2
+          - sev-3
+          title: Severity
+        status:
+          type: string
+          enum:
+          - investigating
+          - monitoring
+          - resolved
+          title: Status
+        affectedService:
+          type: string
+          title: Affectedservice
+        startedAt:
+          type: string
+          title: Startedat
+        acknowledged:
+          type: boolean
+          title: Acknowledged
+      type: object
+      required:
+      - id
+      - title
+      - severity
+      - status
+      - affectedService
+      - startedAt
+      - acknowledged
+      title: IncidentResponse
+    InventoryItemResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        sku:
+          type: string
+          title: Sku
+        name:
+          type: string
+          title: Name
+        location:
+          type: string
+          title: Location
+        onHand:
+          type: integer
+          title: Onhand
+        reserved:
+          type: integer
+          title: Reserved
+        available:
+          type: integer
+          title: Available
+        reorderPoint:
+          type: integer
+          title: Reorderpoint
+        status:
+          type: string
+          enum:
+          - healthy
+          - low
+          - stockout
+          - overstock
+          title: Status
+      type: object
+      required:
+      - id
+      - sku
+      - name
+      - location
+      - onHand
+      - reserved
+      - available
+      - reorderPoint
+      - status
+      title: InventoryItemResponse
+    InventoryLocationResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        itemCount:
+          type: integer
+          title: Itemcount
+        availableUnits:
+          type: integer
+          title: Availableunits
+        attentionCount:
+          type: integer
+          title: Attentioncount
+      type: object
+      required:
+      - name
+      - itemCount
+      - availableUnits
+      - attentionCount
+      title: InventoryLocationResponse
     InvoiceResponse:
       properties:
         id:
@@ -1010,6 +2335,37 @@ components:
       - publishedAt
       - owner
       title: JourneyResponse
+    MarketplaceAppResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        category:
+          type: string
+          title: Category
+        installed:
+          type: boolean
+          title: Installed
+        permissions:
+          items:
+            type: string
+          type: array
+          title: Permissions
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - id
+      - name
+      - category
+      - installed
+      - permissions
+      - description
+      title: MarketplaceAppResponse
     MetricsResponse:
       properties:
         activeProjects:
@@ -1080,6 +2436,273 @@ components:
       - id
       - displayName
       title: NotificationSenderResponse
+    OpportunityDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        accountName:
+          type: string
+          title: Accountname
+        stage:
+          type: string
+          enum:
+          - discovery
+          - qualification
+          - proposal
+          - negotiation
+          - closed-won
+          - closed-lost
+          title: Stage
+        amountCents:
+          type: integer
+          title: Amountcents
+        probability:
+          type: integer
+          title: Probability
+        owner:
+          type: string
+          title: Owner
+        closeAt:
+          type: string
+          title: Closeat
+        nextStep:
+          type: string
+          title: Nextstep
+        history:
+          items:
+            $ref: '#/components/schemas/OpportunityHistoryResponse'
+          type: array
+          title: History
+      type: object
+      required:
+      - id
+      - name
+      - accountName
+      - stage
+      - amountCents
+      - probability
+      - owner
+      - closeAt
+      - nextStep
+      - history
+      title: OpportunityDetailResponse
+    OpportunityHistoryResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        action:
+          type: string
+          title: Action
+        detail:
+          type: string
+          title: Detail
+        actor:
+          type: string
+          title: Actor
+        createdAt:
+          type: string
+          title: Createdat
+      type: object
+      required:
+      - id
+      - action
+      - detail
+      - actor
+      - createdAt
+      title: OpportunityHistoryResponse
+    OpportunityResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        accountName:
+          type: string
+          title: Accountname
+        stage:
+          type: string
+          enum:
+          - discovery
+          - qualification
+          - proposal
+          - negotiation
+          - closed-won
+          - closed-lost
+          title: Stage
+        amountCents:
+          type: integer
+          title: Amountcents
+        probability:
+          type: integer
+          title: Probability
+        owner:
+          type: string
+          title: Owner
+        closeAt:
+          type: string
+          title: Closeat
+        nextStep:
+          type: string
+          title: Nextstep
+      type: object
+      required:
+      - id
+      - name
+      - accountName
+      - stage
+      - amountCents
+      - probability
+      - owner
+      - closeAt
+      - nextStep
+      title: OpportunityResponse
+    OpportunityUpdate:
+      properties:
+        stage:
+          type: string
+          enum:
+          - discovery
+          - qualification
+          - proposal
+          - negotiation
+          - closed-won
+          - closed-lost
+          title: Stage
+        probability:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Probability
+      additionalProperties: false
+      type: object
+      required:
+      - stage
+      - probability
+      title: OpportunityUpdate
+    OrderDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        orderNo:
+          type: string
+          title: Orderno
+        accountName:
+          type: string
+          title: Accountname
+        status:
+          type: string
+          enum:
+          - draft
+          - confirmed
+          - packing
+          - shipped
+          - delivered
+          title: Status
+        totalCents:
+          type: integer
+          title: Totalcents
+        createdAt:
+          type: string
+          title: Createdat
+        promisedAt:
+          type: string
+          title: Promisedat
+        channel:
+          type: string
+          title: Channel
+        lines:
+          items:
+            $ref: '#/components/schemas/OrderLineResponse'
+          type: array
+          title: Lines
+      type: object
+      required:
+      - id
+      - orderNo
+      - accountName
+      - status
+      - totalCents
+      - createdAt
+      - promisedAt
+      - channel
+      - lines
+      title: OrderDetailResponse
+    OrderLineResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        sku:
+          type: string
+          title: Sku
+        name:
+          type: string
+          title: Name
+        quantity:
+          type: integer
+          title: Quantity
+        unitPriceCents:
+          type: integer
+          title: Unitpricecents
+      type: object
+      required:
+      - id
+      - sku
+      - name
+      - quantity
+      - unitPriceCents
+      title: OrderLineResponse
+    OrderResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        orderNo:
+          type: string
+          title: Orderno
+        accountName:
+          type: string
+          title: Accountname
+        status:
+          type: string
+          enum:
+          - draft
+          - confirmed
+          - packing
+          - shipped
+          - delivered
+          title: Status
+        totalCents:
+          type: integer
+          title: Totalcents
+        createdAt:
+          type: string
+          title: Createdat
+        promisedAt:
+          type: string
+          title: Promisedat
+        channel:
+          type: string
+          title: Channel
+      type: object
+      required:
+      - id
+      - orderNo
+      - accountName
+      - status
+      - totalCents
+      - createdAt
+      - promisedAt
+      - channel
+      title: OrderResponse
     OwnerResponse:
       properties:
         id:
@@ -1131,7 +2754,7 @@ components:
         owner_name:
           type: string
           title: Owner Name
-          default: Jane Doe
+          default: Mara Voss
         tags:
           items:
             type: string
@@ -1301,6 +2924,9 @@ components:
       title: ProjectUpdate
     RecommendationResponse:
       properties:
+        project_id:
+          type: integer
+          title: Project Id
         title:
           type: string
           title: Title
@@ -1309,6 +2935,7 @@ components:
           title: Score
       type: object
       required:
+      - project_id
       - title
       - score
       title: RecommendationResponse
@@ -1329,6 +2956,27 @@ components:
       - name
       - department
       title: RequestorResponse
+    RevenueTargetResponse:
+      properties:
+        team:
+          type: string
+          title: Team
+        targetCents:
+          type: integer
+          title: Targetcents
+        attainedCents:
+          type: integer
+          title: Attainedcents
+        confidence:
+          type: integer
+          title: Confidence
+      type: object
+      required:
+      - team
+      - targetCents
+      - attainedCents
+      - confidence
+      title: RevenueTargetResponse
     ReviewerResponse:
       properties:
         id:
@@ -1342,6 +2990,35 @@ components:
       - id
       - name
       title: ReviewerResponse
+    SegmentResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        definition:
+          type: string
+          title: Definition
+        memberCount:
+          type: integer
+          title: Membercount
+        refreshStatus:
+          type: string
+          title: Refreshstatus
+        owner:
+          type: string
+          title: Owner
+      type: object
+      required:
+      - id
+      - name
+      - definition
+      - memberCount
+      - refreshStatus
+      - owner
+      title: SegmentResponse
     SettingsUpdate:
       properties:
         workspace_name:
@@ -1368,6 +3045,300 @@ components:
       - dark_mode
       - default_view
       title: SettingsUpdate
+    ShipmentResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        orderNo:
+          type: string
+          title: Orderno
+        carrier:
+          type: string
+          title: Carrier
+        trackingNo:
+          type: string
+          title: Trackingno
+        status:
+          type: string
+          enum:
+          - label-created
+          - in-transit
+          - exception
+          - delivered
+          - held
+          title: Status
+        etaAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Etaat
+        holdReason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Holdreason
+      type: object
+      required:
+      - id
+      - orderNo
+      - carrier
+      - trackingNo
+      - status
+      - etaAt
+      - holdReason
+      title: ShipmentResponse
+    SlaPolicyResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        priority:
+          type: string
+          title: Priority
+        firstResponseMinutes:
+          type: integer
+          title: Firstresponseminutes
+        resolutionMinutes:
+          type: integer
+          title: Resolutionminutes
+        coverage:
+          type: string
+          title: Coverage
+      type: object
+      required:
+      - id
+      - name
+      - priority
+      - firstResponseMinutes
+      - resolutionMinutes
+      - coverage
+      title: SlaPolicyResponse
+    SupportAssignment:
+      properties:
+        assignee:
+          type: string
+          maxLength: 80
+          minLength: 2
+          title: Assignee
+      additionalProperties: false
+      type: object
+      required:
+      - assignee
+      title: SupportAssignment
+    SupportCaseDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        accountName:
+          type: string
+          title: Accountname
+        priority:
+          type: string
+          enum:
+          - low
+          - normal
+          - high
+          - urgent
+          title: Priority
+        status:
+          type: string
+          enum:
+          - open
+          - waiting
+          - resolved
+          title: Status
+        assignee:
+          type: string
+          title: Assignee
+        openedAt:
+          type: string
+          title: Openedat
+        lastReplyAt:
+          type: string
+          title: Lastreplyat
+        slaMinutes:
+          type: integer
+          title: Slaminutes
+        messages:
+          items:
+            $ref: '#/components/schemas/SupportMessageResponse'
+          type: array
+          title: Messages
+      type: object
+      required:
+      - id
+      - title
+      - accountName
+      - priority
+      - status
+      - assignee
+      - openedAt
+      - lastReplyAt
+      - slaMinutes
+      - messages
+      title: SupportCaseDetailResponse
+    SupportCaseResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        accountName:
+          type: string
+          title: Accountname
+        priority:
+          type: string
+          enum:
+          - low
+          - normal
+          - high
+          - urgent
+          title: Priority
+        status:
+          type: string
+          enum:
+          - open
+          - waiting
+          - resolved
+          title: Status
+        assignee:
+          type: string
+          title: Assignee
+        openedAt:
+          type: string
+          title: Openedat
+        lastReplyAt:
+          type: string
+          title: Lastreplyat
+        slaMinutes:
+          type: integer
+          title: Slaminutes
+      type: object
+      required:
+      - id
+      - title
+      - accountName
+      - priority
+      - status
+      - assignee
+      - openedAt
+      - lastReplyAt
+      - slaMinutes
+      title: SupportCaseResponse
+    SupportMacroResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        bodyPreview:
+          type: string
+          title: Bodypreview
+        usageCount:
+          type: integer
+          title: Usagecount
+        owner:
+          type: string
+          title: Owner
+      type: object
+      required:
+      - id
+      - title
+      - bodyPreview
+      - usageCount
+      - owner
+      title: SupportMacroResponse
+    SupportMessageResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        author:
+          type: string
+          title: Author
+        body:
+          type: string
+          title: Body
+        channel:
+          type: string
+          title: Channel
+        createdAt:
+          type: string
+          title: Createdat
+      type: object
+      required:
+      - id
+      - author
+      - body
+      - channel
+      - createdAt
+      title: SupportMessageResponse
+    SurveyResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        status:
+          type: string
+          enum:
+          - draft
+          - open
+          - closed
+          title: Status
+        responseCount:
+          type: integer
+          title: Responsecount
+        completionRate:
+          type: integer
+          title: Completionrate
+        owner:
+          type: string
+          title: Owner
+      type: object
+      required:
+      - id
+      - title
+      - status
+      - responseCount
+      - completionRate
+      - owner
+      title: SurveyResponse
+    SurveyResultResponse:
+      properties:
+        surveyId:
+          type: integer
+          title: Surveyid
+        label:
+          type: string
+          title: Label
+        count:
+          type: integer
+          title: Count
+        percent:
+          type: integer
+          title: Percent
+      type: object
+      required:
+      - surveyId
+      - label
+      - count
+      - percent
+      title: SurveyResultResponse
     TeamInvite:
       properties:
         email:
@@ -1415,6 +3386,31 @@ components:
       - avatar
       - online
       title: TeamMemberResponse
+    UsageMetricResponse:
+      properties:
+        metric:
+          type: string
+          title: Metric
+        value:
+          type: integer
+          title: Value
+        limit:
+          type: integer
+          title: Limit
+        unit:
+          type: string
+          title: Unit
+        trend:
+          type: integer
+          title: Trend
+      type: object
+      required:
+      - metric
+      - value
+      - limit
+      - unit
+      - trend
+      title: UsageMetricResponse
     ValidationError:
       properties:
         loc:
@@ -1441,6 +3437,50 @@ components:
       - msg
       - type
       title: ValidationError
+    WorkItemResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        kind:
+          type: string
+          title: Kind
+        status:
+          type: string
+          enum:
+          - unclaimed
+          - claimed
+          - blocked
+          - done
+          title: Status
+        owner:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner
+        dueAt:
+          type: string
+          title: Dueat
+        priority:
+          type: integer
+          title: Priority
+        source:
+          type: string
+          title: Source
+      type: object
+      required:
+      - id
+      - title
+      - kind
+      - status
+      - owner
+      - dueAt
+      - priority
+      - source
+      title: WorkItemResponse
     WorkspaceSettingsResponse:
       properties:
         workspace_name:

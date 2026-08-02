@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { api } from "../api/client";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { OperationalSection } from "../components/MagicCard";
@@ -13,7 +13,7 @@ const monthlyThroughput = [
 export function DashboardPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
-  const [recommendations, setRecommendations] = useState<Array<{ title: string; score: number }>>([]);
+  const [recommendations, setRecommendations] = useState<Array<{ project_id: number; title: string; score: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -79,7 +79,10 @@ export function DashboardPage() {
         {recommendations.length ? (
           <ol>
             {recommendations.map((item) => (
-              <li key={item.title}><span>{item.title}</span><b>{item.score}% confidence</b></li>
+              <li key={item.project_id}>
+                <Link to={`/projects/${item.project_id}`}>{item.title}</Link>
+                <b>{item.score}% confidence</b>
+              </li>
             ))}
           </ol>
         ) : <p>No recommendations are currently available.</p>}

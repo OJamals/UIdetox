@@ -12,11 +12,9 @@ os.environ["NEXUSFLOW_DB_PATH"] = str(
     Path(tempfile.mkdtemp(prefix="nexusflow-tests-")) / "test.db"
 )
 
-from fastapi.testclient import TestClient
-
-from backend.app import app
 from backend import database
-
+from backend.app import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -47,6 +45,9 @@ def test_project_create_update_and_delete() -> None:
     )
     assert updated.status_code == 200
     assert updated.json()["progress"] == 61
+    activity = client.get(f"/api/projects/{project_id}").json()["activity"]
+    assert activity[0]["actor"] == "Northstar Operator"
+    assert activity[0]["detail"] == "Changed project progress to 61% and status to active"
 
     deleted = client.delete(f"/api/projects/{project_id}")
     assert deleted.status_code == 204
@@ -69,7 +70,7 @@ def test_metrics_activity_settings_and_recommendations() -> None:
     recommendations = client.get("/api/recommendations")
     assert recommendations.status_code == 200
     assert recommendations.json()
-    assert {"title", "score"} <= set(recommendations.json()[0])
+    assert {"project_id", "title", "score"} <= set(recommendations.json()[0])
 
 
 def test_team_invite_and_delete_are_persistent() -> None:
@@ -168,6 +169,153 @@ def test_governance_and_journey_contracts_and_actions() -> None:
     assert published.json()["publishedAt"]
 
 
+def test_expanded_surface_reaches_declared_full_stack_scale() -> None:
+    document = client.get("/openapi.json").json()
+    operation_count = sum(
+        method in {"get", "post", "put", "patch", "delete"}
+        for path_item in document["paths"].values()
+        for method in path_item
+    )
+    tables = {
+        item["name"]
+        for item in database.rows(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+    assert operation_count >= 60
+    assert len(tables) >= 26
+    assert {
+        "opportunities",
+        "support_cases",
+        "catalog_items",
+        "orders",
+        "inventory_stock",
+        "shipments",
+        "campaigns",
+        "segments",
+        "content_assets",
+        "surveys",
+        "audit_events",
+        "feature_flags",
+        "incidents",
+        "marketplace_apps",
+        "work_items",
+    } <= tables
+
+
+def test_revenue_support_and_fulfillment_contracts_and_actions() -> None:
+    opportunities = client.get("/api/revenue/opportunities")
+    assert opportunities.status_code == 200
+    opportunity = opportunities.json()[0]
+    assert {
+        "id",
+        "name",
+        "accountName",
+        "stage",
+        "amountCents",
+        "probability",
+        "owner",
+        "closeAt",
+        "nextStep",
+    } == set(opportunity)
+
+    detail = client.get(f"/api/revenue/opportunities/{opportunity['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["history"]
+    moved = client.patch(
+        f"/api/revenue/opportunities/{opportunity['id']}",
+        json={"stage": "proposal", "probability": 74},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["stage"] == "proposal"
+    assert client.get("/api/revenue/forecast").status_code == 200
+    assert client.get("/api/revenue/targets").status_code == 200
+
+    cases = client.get("/api/support/cases")
+    assert cases.status_code == 200
+    support_case = cases.json()[0]
+    case_detail = client.get(f"/api/support/cases/{support_case['id']}")
+    assert case_detail.status_code == 200
+    assert case_detail.json()["messages"]
+    assigned = client.post(
+        f"/api/support/cases/{support_case['id']}/assign",
+        json={"assignee": "Mara Voss"},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["assignee"] == "Mara Voss"
+    assert client.get("/api/support/sla-policies").status_code == 200
+    assert client.get("/api/support/macros").status_code == 200
+
+    items = client.get("/api/catalog/items")
+    assert items.status_code == 200
+    assert client.get("/api/catalog/categories").status_code == 200
+    orders = client.get("/api/orders")
+    assert orders.status_code == 200
+    order = orders.json()[0]
+    order_detail = client.get(f"/api/orders/{order['id']}")
+    assert order_detail.status_code == 200
+    assert order_detail.json()["lines"]
+    advanced = client.post(f"/api/orders/{order['id']}/advance")
+    assert advanced.status_code == 200
+    assert advanced.json()["status"] != order["status"]
+    assert client.get("/api/inventory").status_code == 200
+    assert client.get("/api/inventory/locations").status_code == 200
+    assert client.get("/api/shipments").status_code == 200
+
+
+def test_growth_and_control_plane_contracts_and_actions() -> None:
+    campaigns = client.get("/api/growth/campaigns")
+    assert campaigns.status_code == 200
+    campaign = campaigns.json()[0]
+    launched = client.post(f"/api/growth/campaigns/{campaign['id']}/launch")
+    assert launched.status_code == 200
+    assert launched.json()["status"] == "running"
+
+    assert client.get("/api/growth/segments").status_code == 200
+    assert client.get("/api/growth/attribution").status_code == 200
+    assets = client.get("/api/content/assets")
+    assert assets.status_code == 200
+    published = client.post(f"/api/content/assets/{assets.json()[0]['id']}/publish")
+    assert published.status_code == 200
+    assert published.json()["status"] == "published"
+    surveys = client.get("/api/surveys")
+    assert surveys.status_code == 200
+    closed = client.post(f"/api/surveys/{surveys.json()[0]['id']}/close")
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+
+    assert client.get("/api/audit/events").status_code == 200
+    flags = client.get("/api/platform/feature-flags")
+    assert flags.status_code == 200
+    flag = flags.json()[0]
+    toggled = client.put(
+        f"/api/platform/feature-flags/{flag['key']}",
+        json={"enabled": not flag["enabled"]},
+    )
+    assert toggled.status_code == 200
+    assert toggled.json()["enabled"] is not flag["enabled"]
+    incidents = client.get("/api/platform/incidents")
+    assert incidents.status_code == 200
+    acknowledged = client.post(
+        f"/api/platform/incidents/{incidents.json()[0]['id']}/acknowledge"
+    )
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["acknowledged"] is True
+    assert client.get("/api/platform/usage").status_code == 200
+
+    apps = client.get("/api/marketplace/apps")
+    assert apps.status_code == 200
+    installed = client.post(f"/api/marketplace/apps/{apps.json()[0]['id']}/install")
+    assert installed.status_code == 200
+    assert installed.json()["installed"] is True
+    work_items = client.get("/api/work-queue")
+    assert work_items.status_code == 200
+    claimed = client.post(f"/api/work-queue/{work_items.json()[0]['id']}/claim")
+    assert claimed.status_code == 200
+    assert claimed.json()["status"] == "claimed"
+
+
 def test_invalid_action_payloads_and_missing_records_are_rejected() -> None:
     assert client.patch("/api/accounts/1", json={"healthScore": 101}).status_code == 422
     assert client.post("/api/governance/approvals/1/decision", json={"decision": "maybe"}).status_code == 422
@@ -188,6 +336,15 @@ def test_invalid_action_payloads_and_missing_records_are_rejected() -> None:
     ).status_code == 422
     assert client.post("/api/workflows/99999/pause").status_code == 404
     assert client.delete("/api/team/99999").status_code == 404
+    assert client.patch(
+        "/api/revenue/opportunities/1",
+        json={"stage": "teleported", "probability": 180},
+    ).status_code == 422
+    assert client.post(
+        "/api/support/cases/1/assign", json={"assignee": ""}
+    ).status_code == 422
+    assert client.get("/api/orders/99999").status_code == 404
+    assert client.post("/api/work-queue/99999/claim").status_code == 404
 
 
 def test_request_contracts_reject_unknown_fields() -> None:

@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
-
+from pathlib import Path
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -12,7 +11,7 @@ FIXTURE_ROOT = Path(__file__).resolve().parents[1]
 def test_fixture_intent_records_reproducible_provenance() -> None:
     manifest = json.loads((FIXTURE_ROOT / "fixture-intent.json").read_text())
 
-    assert manifest["product_goal"].startswith("Provide a runnable B2B operations fixture")
+    assert manifest["product_goal"].startswith("Provide a runnable B2B operations stress fixture")
     assert manifest["remediation_evidence"]["baseline_static_issues"] == 212
     assert set(manifest["remediation_evidence"]["target_operation_parity"].values()) == {0}
     assert manifest["provenance"]["origin"] == "synthetic test fixture"
@@ -20,6 +19,7 @@ def test_fixture_intent_records_reproducible_provenance() -> None:
     assert manifest["provenance"]["sources_of_truth"] == [
         "fixture-intent.json",
         "beta-expectations.json",
+        "intentional-slop.json",
         "openapi.yaml",
     ]
     assert {
@@ -27,10 +27,68 @@ def test_fixture_intent_records_reproducible_provenance() -> None:
         "/data-hub",
         "/approvals",
         "/journeys",
+        "/pipeline",
+        "/pipeline/:opportunityId",
+        "/forecast",
+        "/support",
+        "/support/:caseId",
+        "/service-levels",
+        "/catalog",
+        "/orders",
+        "/orders/:orderId",
+        "/inventory",
+        "/shipments",
+        "/campaigns",
+        "/segments",
+        "/content-library",
+        "/surveys",
+        "/audit-log",
+        "/feature-flags",
+        "/service-health",
+        "/marketplace",
+        "/work-queue",
         "/fixture-provenance",
     } <= set(
         manifest["expected_frontend_routes"]
     )
+    assert len(manifest["expected_frontend_routes"]) >= 34
+    assert manifest["provenance"]["expanded_on"] == "2026-07-31"
+
+
+def test_intentional_slop_manifest_is_bounded_and_multilayer() -> None:
+    manifest = json.loads((FIXTURE_ROOT / "intentional-slop.json").read_text())
+
+    assert manifest["purpose"] == "Historical UIdetox capability stress-fixture record"
+    assert manifest["contains_security_vulnerabilities"] is False
+    assert manifest["contains_external_side_effects"] is False
+    assert set(manifest["layers"]) == {
+        "static_css",
+        "runtime_layout",
+        "semantic_accessibility",
+        "component_architecture",
+        "frontend_api",
+        "backend_openapi",
+        "database_lineage",
+    }
+    assert len(manifest["canaries"]) >= 12
+    assert all(item["expected_detector"] for item in manifest["canaries"])
+
+
+def test_post_detox_expectations_separate_history_from_current_findings() -> None:
+    manifest = json.loads((FIXTURE_ROOT / "intentional-slop.json").read_text())
+    expectations = json.loads((FIXTURE_ROOT / "beta-expectations.json").read_text())
+
+    assert manifest["canary_records_are_historical"] is True
+    historical_ids = {item["id"] for item in manifest["canaries"]}
+    remediated_ids = set(manifest["remediation"]["remediated_canaries"])
+    retained_ids = set(manifest["remediation"]["retained_observations"])
+    assert historical_ids == remediated_ids | retained_ids
+    assert remediated_ids.isdisjoint(retained_ids)
+    assert all(
+        not findings
+        for findings in expectations["deliberate_operation_findings"].values()
+    )
+    assert expectations["expected_contract_counts"]["contract_mismatch"] == 0
 
 
 def test_prepare_script_passes_canonical_intent_to_uidetox(tmp_path: Path) -> None:

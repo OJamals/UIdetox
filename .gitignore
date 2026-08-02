@@ -35,6 +35,7 @@ Thumbs.db
 # Generated
 treemap.html
 /.codebase-memory/
+/reports/
 /examples/*
 !/examples/fullstack-slop-lab/
 

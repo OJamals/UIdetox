@@ -1,12 +1,12 @@
 {
   "fixture": "NexusFlow",
-  "purpose": "Qualify UIdetox against a remediated full-stack fixture with retained baseline evidence.",
+  "purpose": "Qualify UIdetox against a remediated full-stack stress fixture with retained baseline evidence and historical named canaries.",
   "intent": {
-    "product_goal": "Provide a runnable B2B operations fixture that demonstrates UIdetox baseline-to-remediation work while preserving verified frontend, API, and database behavior.",
+    "product_goal": "Provide a runnable B2B operations stress fixture in its remediated state, retaining historical multi-layer slop evidence while preserving verified frontend, API, and database behavior.",
     "audience": "UIdetox maintainers, beta testers, and agent-harness evaluators",
-    "primary_job": "Verify that UIdetox can map intent, correct structural and visual defects, preserve routes, and keep frontend operations aligned with API and database contracts.",
+    "primary_job": "Verify that UIdetox can map and validate a remediated full-stack result against explicit historical slop provenance without regressing routes, interactions, or contracts.",
     "tone": "Calm, precise operational confidence",
-    "genre": "Dense editorial operations ledger",
+    "genre": "Dense editorial operations command center",
     "page_kind": "application",
     "brand": "NexusFlow"
   },
@@ -14,7 +14,12 @@
   "expected_frontend_routes": [
     "/", "/projects", "/projects/:projectId", "/analytics", "/automations",
     "/inbox", "/billing", "/experiments", "/customers", "/data-hub",
-    "/approvals", "/journeys", "/team", "/settings", "/fixture-provenance"
+    "/approvals", "/journeys", "/pipeline", "/pipeline/:opportunityId",
+    "/forecast", "/support", "/support/:caseId", "/service-levels",
+    "/catalog", "/orders", "/orders/:orderId", "/inventory", "/shipments",
+    "/campaigns", "/segments", "/content-library", "/surveys", "/audit-log",
+    "/feature-flags", "/service-health", "/marketplace", "/work-queue",
+    "/team", "/settings", "/fixture-provenance"
   ],
   "deliberate_operation_findings": {
     "frontend_only": [],
@@ -23,8 +28,8 @@
     "unresolved": []
   },
   "expected_contract_counts": {
-    "contract_mismatch": 2,
-    "coverage_gap": 26
+    "contract_mismatch": 0,
+    "coverage_gap": 146
   },
   "baseline_parity_counts": {
     "frontend_only": 10,
@@ -34,8 +39,10 @@
   },
   "operation_evidence": "Literal frontend/src/api/client.ts wrapper calls resolved by UIdetox source facts",
   "redesign_oracle": {
-    "variants": 3,
-    "minimum_pairwise_distance": 60
+    "minimum_variants": 1,
+    "maximum_variants": 5,
+    "minimum_pairwise_distance": 60,
+    "maximum_prototype_bytes": 65536
   },
   "baseline_slop_families": [
     "purple-blue-pink gradients",
@@ -48,7 +55,7 @@
   ],
   "remediation_targets": [
     "typed contract mismatches and coverage gaps explicitly accounted for",
-    "zero deterministic analyzer findings",
+    "all named deterministic and runtime canaries detected or explicitly classified",
     "all visible actions verified against persisted API state",
     "responsive and accessible route coverage",
     "canonical intent and baseline evidence retained"

@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { api } from "../api/client";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { OperationalSection } from "../components/MagicCard";
@@ -88,6 +88,10 @@ export function ProjectsPage() {
     }
   }
 
+  function openCreateDialog() {
+    setShowCreate(true);
+  }
+
   if (loading) return <Spinner />;
 
   return (
@@ -98,7 +102,7 @@ export function ProjectsPage() {
           <h1>Projects</h1>
           <p>Review ownership, delivery progress, and budget from one auditable list.</p>
         </div>
-        <button type="button" className="primary-button" onClick={() => setShowCreate(true)}>
+        <button type="button" className="primary-button" onClick={openCreateDialog}>
           Create project
         </button>
       </header>
@@ -108,7 +112,7 @@ export function ProjectsPage() {
       <OperationalSection>
         <div className="toolbar">
           <label>
-            Search projects
+            Filter projects
             <input
               type="search"
               value={search}
@@ -133,7 +137,29 @@ export function ProjectsPage() {
             </select>
           </label>
         </div>
-        <ProjectTable projects={filtered} onDelete={setDeleting} />
+        {projects.length === 0 ? (
+          <div className="empty-state">
+            <h2>Start your project register</h2>
+            <p>Create the first project to track ownership, delivery, and budget.</p>
+            <button type="button" className="primary-button" onClick={openCreateDialog}>
+              Create first project
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            <h2>No projects found</h2>
+            <p>No project matches the current search and status filters.</p>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => { setSearch(""); setStatus("all"); }}
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <ProjectTable projects={filtered} onDelete={setDeleting} />
+        )}
       </OperationalSection>
 
       <ModalDialog

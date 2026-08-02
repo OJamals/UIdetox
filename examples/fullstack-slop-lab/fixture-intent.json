@@ -1,21 +1,21 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "fixture": "NexusFlow full-stack remediation lab",
-  "product_goal": "Provide a runnable B2B operations fixture that demonstrates UIdetox baseline-to-remediation work while preserving verified frontend, API, and database behavior.",
+  "product_goal": "Provide a runnable B2B operations stress fixture in its remediated state, retaining historical multi-layer slop evidence while preserving verified frontend, API, and database behavior.",
   "audience": "UIdetox maintainers, beta testers, and agent-harness evaluators",
-  "primary_job": "Verify that UIdetox can map intent, correct structural and visual defects, preserve routes, and keep frontend operations aligned with API and database contracts.",
+  "primary_job": "Verify that UIdetox can map and validate a remediated full-stack result against explicit historical slop provenance without regressing routes, interactions, or contracts.",
   "tone": "Calm, precise operational confidence",
-  "genre": "Dense editorial operations ledger",
+  "genre": "Dense editorial operations command center",
   "page_kind": "application",
   "brand": "NexusFlow",
   "design_dials": {
-    "design_variance": 6,
-    "motion_intensity": 3,
-    "visual_density": 7
+    "design_variance": 8,
+    "motion_intensity": 6,
+    "visual_density": 8
   },
   "preserve": [
-    "React route paths and navigation destinations",
-    "FastAPI endpoint paths and typed response contracts",
+    "React route paths, navigation destinations, and historical contract-canary provenance",
+    "FastAPI endpoint paths, typed response contracts, and imported APIRouter topology",
     "SQLite seed behavior and synthetic record lineage",
     "Recorded pre-remediation issue and parity evidence",
     "Synthetic provenance and the no-production-data guarantee"
@@ -23,13 +23,13 @@
   "constraints": [
     "The fixture must install, typecheck, build, and run locally",
     "Every visible action must work or state its local-only boundary",
-    "Frontend operations must remain aligned with backend methods and DTOs",
-    "Responsive layouts must avoid clipping, accidental overflow, and inaccessible controls",
+    "Frontend operations must remain aligned with backend methods and DTOs; historical mismatch canaries stay provenance-only",
+    "Responsive layouts must remain navigable without clipping, accidental overflow, or inaccessible controls",
     "No production customer records, credentials, or third-party copyrighted UI assets"
   ],
   "anti_goals": [
     "Do not treat NexusFlow as a production product or source of real business metrics",
-    "Do not reintroduce unsupported controls, fabricated claims, or optimistic mutation drift",
+    "Do not hide intentional defects outside intentional-slop.json or let them create external side effects",
     "Do not erase the evidence lineage that makes before-and-after qualification reproducible"
   ],
   "expected_frontend_routes": [
@@ -45,6 +45,26 @@
     "/data-hub",
     "/approvals",
     "/journeys",
+    "/pipeline",
+    "/pipeline/:opportunityId",
+    "/forecast",
+    "/support",
+    "/support/:caseId",
+    "/service-levels",
+    "/catalog",
+    "/orders",
+    "/orders/:orderId",
+    "/inventory",
+    "/shipments",
+    "/campaigns",
+    "/segments",
+    "/content-library",
+    "/surveys",
+    "/audit-log",
+    "/feature-flags",
+    "/service-health",
+    "/marketplace",
+    "/work-queue",
     "/team",
     "/settings",
     "/fixture-provenance"
@@ -62,13 +82,20 @@
       "backend_only": 0,
       "method_mismatch": 0,
       "unresolved": 0
+    },
+    "expansion_target": {
+      "frontend_routes": 34,
+      "backend_operations": 60,
+      "database_tables": 26,
+      "runtime_guards": 35,
+      "browser_flows": 8
     }
   },
   "provenance": {
     "origin": "synthetic test fixture",
     "created_for": "UIdetox scan-map-redesign-verification development",
     "created_on": "2026-07-17",
-    "expanded_on": "2026-07-22",
+    "expanded_on": "2026-07-31",
     "remediated_on": "2026-07-22",
     "lineage": [
       "desloppify-inspired scan and remediation workflow",
@@ -82,6 +109,7 @@
     "sources_of_truth": [
       "fixture-intent.json",
       "beta-expectations.json",
+      "intentional-slop.json",
       "openapi.yaml"
     ]
   }

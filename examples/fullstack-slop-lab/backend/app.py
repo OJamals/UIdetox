@@ -8,6 +8,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import database
+from backend.extended.control_plane import router as control_plane_router
+from backend.extended.fulfillment_growth import router as fulfillment_growth_router
+from backend.extended.revenue_support import router as revenue_support_router
 from backend.schemas import (
     AccountHealthUpdate,
     ActivityResponse,
@@ -46,6 +49,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(revenue_support_router)
+app.include_router(fulfillment_growth_router)
+app.include_router(control_plane_router)
 
 
 def project_payload(project: dict[str, Any]) -> dict[str, Any]:
@@ -267,7 +273,7 @@ def get_project(project_id: int) -> dict[str, Any]:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     project["activity"] = database.rows(
-        "SELECT * FROM activity WHERE project_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM activity WHERE project_id = ? ORDER BY created_at DESC, id DESC",
         (project_id,),
     )
     return project_payload(project)
@@ -284,9 +290,17 @@ def update_project(project_id: int, payload: ProjectUpdate) -> dict[str, Any]:
         f"UPDATE projects SET {fields} WHERE id = ?",
         (*updates.values(), project_id),
     )
+    changes = []
+    if "progress" in updates:
+        changes.append(f"project progress to {updates['progress']}%")
+    changes.extend(
+        f"{field.replace('_', ' ')} to {value}"
+        for field, value in updates.items()
+        if field != "progress"
+    )
     database.execute(
         "INSERT INTO activity (project_id, actor, action, detail) VALUES (?, ?, ?, ?)",
-        (project_id, "Jane Doe", "updated", f"Updated {', '.join(updates)}"),
+        (project_id, "Northstar Operator", "updated", f"Changed {' and '.join(changes)}"),
     )
     return get_project(project_id)
 
@@ -378,10 +392,14 @@ def save_settings(payload: SettingsUpdate) -> dict[str, Any]:
 @app.get("/api/recommendations", response_model=list[RecommendationResponse])
 def list_recommendations() -> list[dict[str, Any]]:
     projects = database.rows(
-        "SELECT name, progress FROM projects WHERE status != 'completed' ORDER BY progress"
+        "SELECT id, name, progress FROM projects WHERE status != 'completed' ORDER BY progress"
     )
     return [
-        {"title": f"Review {project['name']}", "score": max(0, 100 - project["progress"])}
+        {
+            "project_id": project["id"],
+            "title": f"Review {project['name']}",
+            "score": max(0, 100 - project["progress"]),
+        }
         for project in projects[:3]
     ]
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useParams } from "react-router";
 import { api } from "../api/client";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { OperationalSection } from "../components/MagicCard";
@@ -14,21 +14,29 @@ export function ProjectDetailPage() {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const loadProject = useCallback(async () => {
     setError("");
-    api.getProject(projectId).then((nextProject) => {
+    setProject(null);
+    try {
+      const nextProject = await api.getProject(projectId);
       setProject(nextProject);
       setProgress(nextProject.progress);
-    }).catch((reason) => {
+    } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Project could not be loaded.");
-    });
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   async function save() {
     if (!project) return;
     try {
-      const updated = await api.updateProject(project.id, { progress });
+      await api.updateProject(project.id, { progress });
+      const updated = await api.getProject(String(project.id));
       setProject(updated);
+      setProgress(updated.progress);
       setToast("Project progress saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Project progress could not be saved.");
@@ -36,9 +44,31 @@ export function ProjectDetailPage() {
   }
 
   if (!project && !error) return <Spinner label="Loading project…" />;
-  if (!project) return <div className="error-banner" role="alert">{error}</div>;
+  if (!project) {
+    return (
+      <section className="error-banner project-error" role="alert">
+        <h1>Project unavailable</h1>
+        <p>We could not load the project record. Check the connection, then try again.</p>
+        <div className="modal-actions">
+          <button type="button" className="primary-button" onClick={() => void loadProject()}>Try again</button>
+          <Link className="secondary-button" to="/projects">Back to projects</Link>
+        </div>
+      </section>
+    );
+  }
 
-  const health = progress >= 75 ? "On track" : progress >= 40 ? "Monitor" : "Needs attention";
+  const needsReview = project.status === "at-risk";
+  let health = "Needs attention";
+  let healthDetail = `Progress is ${progress}%. Confirm the next delivery checkpoint with the owner.`;
+  if (needsReview) {
+    health = "Needs review";
+    healthDetail = `Progress is ${progress}%. Confirm the next delivery checkpoint with ${project.owner_name} before ${project.due_date || "the next review"}.`;
+  } else if (progress >= 75) {
+    health = "On track";
+    healthDetail = `Progress is ${progress}%. Delivery remains on track.`;
+  } else if (progress >= 40) {
+    health = "Monitor";
+  }
 
   return (
     <div className="page">
@@ -83,7 +113,7 @@ export function ProjectDetailPage() {
         <aside className="health-summary">
           <span className="eyebrow">03 / Health</span>
           <h2>{health}</h2>
-          <p>Health is derived transparently from recorded completion in this fixture.</p>
+          <p>{healthDetail}</p>
         </aside>
       </div>
 

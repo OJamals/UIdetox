@@ -1,16 +1,46 @@
 import type {
   Activity,
   ApprovalRequest,
+  Attribution,
+  AuditEvent,
   Automation,
+  Campaign,
+  CatalogCategory,
+  CatalogItem,
+  ContentAsset,
   CustomerJourney,
   CustomerProfile,
   DataConnector,
   Experiment,
+  FeatureFlag,
+  Forecast,
+  Incident,
+  InventoryItem,
+  InventoryLocation,
   Invoice,
+  MarketplaceApp,
   Metrics,
   Notification,
+  Opportunity,
+  OpportunityDetail,
+  OpportunityHistory,
+  Order,
+  OrderDetail,
+  OrderLine,
   Project,
+  RevenueTarget,
+  Segment,
+  Shipment,
+  SlaPolicy,
+  SupportCase,
+  SupportCaseDetail,
+  SupportMacro,
+  SupportMessage,
+  Survey,
+  SurveyResult,
   TeamMember,
+  UsageMetric,
+  WorkItem,
   WorkspaceSettings,
 } from "../types";
 
@@ -111,8 +141,13 @@ export function isWorkspaceSettings(value: unknown): value is WorkspaceSettings 
 
 export function isRecommendation(
   value: unknown,
-): value is { title: string; score: number } {
-  return isRecord(value) && isString(value.title) && isNumber(value.score);
+): value is { project_id: number; title: string; score: number } {
+  return (
+    isRecord(value) &&
+    isNumber(value.project_id) &&
+    isString(value.title) &&
+    isNumber(value.score)
+  );
 }
 
 export function isAutomation(value: unknown): value is Automation {
@@ -278,5 +313,351 @@ export function isCustomerJourney(value: unknown): value is CustomerJourney {
     isStringArray(value.audienceSegments) &&
     isNullableString(value.publishedAt) &&
     isJourneyOwner(value.owner)
+  );
+}
+
+export function isOpportunity(value: unknown): value is Opportunity {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.name) &&
+    isString(value.accountName) &&
+    ["discovery", "qualification", "proposal", "negotiation", "closed-won", "closed-lost"].includes(String(value.stage)) &&
+    isNumber(value.amountCents) &&
+    isNumber(value.probability) &&
+    isString(value.owner) &&
+    isString(value.closeAt) &&
+    isString(value.nextStep)
+  );
+}
+
+export function isOpportunityHistory(value: unknown): value is OpportunityHistory {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.action) &&
+    isString(value.detail) &&
+    isString(value.actor) &&
+    isString(value.createdAt)
+  );
+}
+
+export function isOpportunityDetail(value: unknown): value is OpportunityDetail {
+  if (!isRecord(value)) return false;
+  const history = value.history;
+  return isOpportunity(value) && arrayOf(isOpportunityHistory)(history);
+}
+
+export function isForecast(value: unknown): value is Forecast {
+  return (
+    isRecord(value) &&
+    isString(value.quarter) &&
+    isNumber(value.pipelineCents) &&
+    isNumber(value.weightedCents) &&
+    isNumber(value.commitCents) &&
+    isNumber(value.atRiskCents)
+  );
+}
+
+export function isRevenueTarget(value: unknown): value is RevenueTarget {
+  return (
+    isRecord(value) &&
+    isString(value.team) &&
+    isNumber(value.targetCents) &&
+    isNumber(value.attainedCents) &&
+    isNumber(value.confidence)
+  );
+}
+
+export function isSupportCase(value: unknown): value is SupportCase {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.title) &&
+    isString(value.accountName) &&
+    ["low", "normal", "high", "urgent"].includes(String(value.priority)) &&
+    ["open", "waiting", "resolved"].includes(String(value.status)) &&
+    isString(value.assignee) &&
+    isString(value.openedAt) &&
+    isString(value.lastReplyAt) &&
+    isNumber(value.slaMinutes)
+  );
+}
+
+export function isSupportMessage(value: unknown): value is SupportMessage {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.author) &&
+    isString(value.body) &&
+    isString(value.channel) &&
+    isString(value.createdAt)
+  );
+}
+
+export function isSupportCaseDetail(value: unknown): value is SupportCaseDetail {
+  if (!isRecord(value)) return false;
+  const messages = value.messages;
+  return isSupportCase(value) && arrayOf(isSupportMessage)(messages);
+}
+
+export function isSlaPolicy(value: unknown): value is SlaPolicy {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.name) &&
+    isString(value.priority) &&
+    isNumber(value.firstResponseMinutes) &&
+    isNumber(value.resolutionMinutes) &&
+    isString(value.coverage)
+  );
+}
+
+export function isSupportMacro(value: unknown): value is SupportMacro {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.title) &&
+    isString(value.bodyPreview) &&
+    isNumber(value.usageCount) &&
+    isString(value.owner)
+  );
+}
+
+export function isCatalogItem(value: unknown): value is CatalogItem {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.sku) &&
+    isString(value.name) &&
+    isString(value.category) &&
+    isNumber(value.priceCents) &&
+    ["active", "draft", "archived"].includes(String(value.status)) &&
+    isString(value.stockPolicy) &&
+    isString(value.description)
+  );
+}
+
+export function isCatalogCategory(value: unknown): value is CatalogCategory {
+  return (
+    isRecord(value) &&
+    isString(value.name) &&
+    isNumber(value.itemCount) &&
+    isNumber(value.activeCount)
+  );
+}
+
+export function isOrder(value: unknown): value is Order {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.orderNo) &&
+    isString(value.accountName) &&
+    ["draft", "confirmed", "packing", "shipped", "delivered"].includes(String(value.status)) &&
+    isNumber(value.totalCents) &&
+    isString(value.createdAt) &&
+    isString(value.promisedAt) &&
+    isString(value.channel)
+  );
+}
+
+export function isOrderLine(value: unknown): value is OrderLine {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.sku) &&
+    isString(value.name) &&
+    isNumber(value.quantity) &&
+    isNumber(value.unitPriceCents)
+  );
+}
+
+export function isOrderDetail(value: unknown): value is OrderDetail {
+  if (!isRecord(value)) return false;
+  const lines = value.lines;
+  return isOrder(value) && arrayOf(isOrderLine)(lines);
+}
+
+export function isInventoryItem(value: unknown): value is InventoryItem {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.sku) &&
+    isString(value.name) &&
+    isString(value.location) &&
+    isNumber(value.onHand) &&
+    isNumber(value.reserved) &&
+    isNumber(value.available) &&
+    isNumber(value.reorderPoint) &&
+    ["healthy", "low", "stockout", "overstock"].includes(String(value.status))
+  );
+}
+
+export function isInventoryLocation(value: unknown): value is InventoryLocation {
+  return (
+    isRecord(value) &&
+    isString(value.name) &&
+    isNumber(value.itemCount) &&
+    isNumber(value.availableUnits) &&
+    isNumber(value.attentionCount)
+  );
+}
+
+export function isShipment(value: unknown): value is Shipment {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.orderNo) &&
+    isString(value.carrier) &&
+    isString(value.trackingNo) &&
+    ["label-created", "in-transit", "exception", "delivered", "held"].includes(String(value.status)) &&
+    isNullableString(value.etaAt) &&
+    isNullableString(value.holdReason)
+  );
+}
+
+export function isCampaign(value: unknown): value is Campaign {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.name) &&
+    isString(value.channel) &&
+    ["draft", "scheduled", "running", "paused", "complete"].includes(String(value.status)) &&
+    isNumber(value.audienceSize) &&
+    isNumber(value.budgetCents) &&
+    isString(value.owner) &&
+    isNullableString(value.scheduledAt)
+  );
+}
+
+export function isSegment(value: unknown): value is Segment {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.name) &&
+    isString(value.definition) &&
+    isNumber(value.memberCount) &&
+    isString(value.refreshStatus) &&
+    isString(value.owner)
+  );
+}
+
+export function isAttribution(value: unknown): value is Attribution {
+  return (
+    isRecord(value) &&
+    isString(value.model) &&
+    isNumber(value.influencedPipelineCents) &&
+    isNumber(value.confidence) &&
+    isNumber(value.windowDays)
+  );
+}
+
+export function isContentAsset(value: unknown): value is ContentAsset {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.title) &&
+    isString(value.kind) &&
+    ["draft", "review", "published", "archived"].includes(String(value.status)) &&
+    isString(value.owner) &&
+    isString(value.updatedAt) &&
+    isNumber(value.usageCount)
+  );
+}
+
+export function isSurvey(value: unknown): value is Survey {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.title) &&
+    ["draft", "open", "closed"].includes(String(value.status)) &&
+    isNumber(value.responseCount) &&
+    isNumber(value.completionRate) &&
+    isString(value.owner)
+  );
+}
+
+export function isSurveyResult(value: unknown): value is SurveyResult {
+  return (
+    isRecord(value) &&
+    isNumber(value.surveyId) &&
+    isString(value.label) &&
+    isNumber(value.count) &&
+    isNumber(value.percent)
+  );
+}
+
+export function isAuditEvent(value: unknown): value is AuditEvent {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.actor) &&
+    isString(value.action) &&
+    isString(value.resource) &&
+    isString(value.detail) &&
+    isString(value.createdAt) &&
+    isString(value.ipHint)
+  );
+}
+
+export function isFeatureFlag(value: unknown): value is FeatureFlag {
+  return (
+    isRecord(value) &&
+    isString(value.key) &&
+    isString(value.title) &&
+    isBoolean(value.enabled) &&
+    isNumber(value.rolloutPercent) &&
+    isString(value.audience) &&
+    isString(value.owner)
+  );
+}
+
+export function isIncident(value: unknown): value is Incident {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.title) &&
+    ["sev-1", "sev-2", "sev-3"].includes(String(value.severity)) &&
+    ["investigating", "monitoring", "resolved"].includes(String(value.status)) &&
+    isString(value.affectedService) &&
+    isString(value.startedAt) &&
+    isBoolean(value.acknowledged)
+  );
+}
+
+export function isUsageMetric(value: unknown): value is UsageMetric {
+  return (
+    isRecord(value) &&
+    isString(value.metric) &&
+    isNumber(value.value) &&
+    isNumber(value.limit) &&
+    isString(value.unit) &&
+    isNumber(value.trend)
+  );
+}
+
+export function isMarketplaceApp(value: unknown): value is MarketplaceApp {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.name) &&
+    isString(value.category) &&
+    isBoolean(value.installed) &&
+    isStringArray(value.permissions) &&
+    isString(value.description)
+  );
+}
+
+export function isWorkItem(value: unknown): value is WorkItem {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.title) &&
+    isString(value.kind) &&
+    ["unclaimed", "claimed", "blocked", "done"].includes(String(value.status)) &&
+    isNullableString(value.owner) &&
+    isString(value.dueAt) &&
+    isNumber(value.priority) &&
+    isString(value.source)
   );
 }

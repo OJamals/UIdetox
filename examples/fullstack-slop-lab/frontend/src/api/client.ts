@@ -1,5 +1,6 @@
 import type {
   Experiment,
+  OpportunityStage,
   ProjectCreateInput,
   ProjectUpdateInput,
   WorkspaceSettingsInput,
@@ -8,17 +9,44 @@ import {
   arrayOf,
   isActivity,
   isApprovalRequest,
+  isAttribution,
+  isAuditEvent,
   isAutomation,
+  isCampaign,
+  isCatalogCategory,
+  isCatalogItem,
+  isContentAsset,
   isCustomer,
   isCustomerJourney,
   isDataConnector,
   isExperiment,
+  isFeatureFlag,
+  isForecast,
+  isIncident,
+  isInventoryItem,
+  isInventoryLocation,
   isInvoice,
+  isMarketplaceApp,
   isMetrics,
   isNotification,
+  isOpportunity,
+  isOpportunityDetail,
+  isOrder,
+  isOrderDetail,
   isProject,
   isRecommendation,
+  isRevenueTarget,
+  isSegment,
+  isShipment,
+  isSlaPolicy,
+  isSupportCase,
+  isSupportCaseDetail,
+  isSupportMacro,
+  isSurvey,
+  isSurveyResult,
   isTeamMember,
+  isUsageMetric,
+  isWorkItem,
   isWorkspaceSettings,
   type JsonGuard,
 } from "./contracts";
@@ -136,6 +164,127 @@ export const api = {
   getJourneys: () => request("/api/journeys", arrayOf(isCustomerJourney)),
   activateJourney: (journeyId: number) =>
     request(`/api/journeys/${journeyId}/publish`, isCustomerJourney, {
+      method: "POST",
+    }),
+  getOpportunities: () =>
+    request("/api/revenue/opportunities", arrayOf(isOpportunity)),
+  getOpportunity: (opportunityId: string) =>
+    request(`/api/revenue/opportunities/${opportunityId}`, isOpportunityDetail),
+  updateOpportunity: (
+    opportunityId: number,
+    stage: OpportunityStage,
+    probability: number,
+  ) =>
+    request(`/api/revenue/opportunities/${opportunityId}`, isOpportunity, {
+      method: "PATCH",
+      body: JSON.stringify({ stage, probability }),
+    }),
+  getForecast: () => request("/api/revenue/forecast", isForecast),
+  getRevenueTargets: () =>
+    request("/api/revenue/targets", arrayOf(isRevenueTarget)),
+  getSupportCases: () =>
+    request("/api/support/cases", arrayOf(isSupportCase)),
+  getSupportCase: (caseId: string) =>
+    request(`/api/support/cases/${caseId}`, isSupportCaseDetail),
+  assignSupportCase: (caseId: number, assignee: string) =>
+    request(`/api/support/cases/${caseId}/assign`, isSupportCase, {
+      method: "POST",
+      body: JSON.stringify({ assignee }),
+    }),
+  closeSupportCase: (caseId: number) =>
+    request(`/api/support/cases/${caseId}/close`, isSupportCase, {
+      method: "POST",
+    }),
+  getSlaPolicies: () =>
+    request("/api/support/sla-policies", arrayOf(isSlaPolicy)),
+  getSupportMacros: () =>
+    request("/api/support/macros", arrayOf(isSupportMacro)),
+  getCatalogItems: () =>
+    request("/api/catalog/items", arrayOf(isCatalogItem)),
+  getCatalogCategories: () =>
+    request("/api/catalog/categories", arrayOf(isCatalogCategory)),
+  archiveCatalogItem: (itemId: number) =>
+    request(`/api/catalog/items/${itemId}/archive`, isCatalogItem, {
+      method: "POST",
+    }),
+  getOrders: () => request("/api/orders", arrayOf(isOrder)),
+  getOrder: (orderId: string) =>
+    request(`/api/orders/${orderId}`, isOrderDetail),
+  advanceOrder: (orderId: number) =>
+    request(`/api/orders/${orderId}/advance`, isOrder, { method: "POST" }),
+  getInventory: () => request("/api/inventory", arrayOf(isInventoryItem)),
+  getInventoryLocations: () =>
+    request("/api/inventory/locations", arrayOf(isInventoryLocation)),
+  recountInventory: (stockId: number) =>
+    request(`/api/inventory/${stockId}/recount`, isInventoryItem, {
+      method: "POST",
+    }),
+  getShipments: () => request("/api/shipments", arrayOf(isShipment)),
+  holdShipment: (shipmentId: number) =>
+    request(`/api/shipments/${shipmentId}/hold`, isShipment, {
+      method: "POST",
+    }),
+  getCampaigns: () =>
+    request("/api/growth/campaigns", arrayOf(isCampaign)),
+  launchCampaign: (campaignId: number) =>
+    request(`/api/growth/campaigns/${campaignId}/launch`, isCampaign, {
+      method: "POST",
+    }),
+  pauseCampaign: (campaignId: number) =>
+    request(`/api/growth/campaigns/${campaignId}/pause`, isCampaign, {
+      method: "POST",
+    }),
+  getSegments: () => request("/api/growth/segments", arrayOf(isSegment)),
+  getAttribution: () =>
+    request("/api/growth/attribution", arrayOf(isAttribution)),
+  getContentAssets: () =>
+    request("/api/content/assets", arrayOf(isContentAsset)),
+  publishContentAsset: (assetId: number) =>
+    request(`/api/content/assets/${assetId}/publish`, isContentAsset, {
+      method: "POST",
+    }),
+  getSurveys: () => request("/api/surveys", arrayOf(isSurvey)),
+  closeSurvey: (surveyId: number) =>
+    request(`/api/surveys/${surveyId}/close`, isSurvey, { method: "POST" }),
+  getSurveyResults: (surveyId: number) =>
+    request(`/api/surveys/${surveyId}/results`, arrayOf(isSurveyResult)),
+  getAuditEvents: () => request("/api/audit/events", arrayOf(isAuditEvent)),
+  getAuditEvent: (eventId: number) =>
+    request(`/api/audit/events/${eventId}`, isAuditEvent),
+  getFeatureFlags: () =>
+    request("/api/platform/feature-flags", arrayOf(isFeatureFlag)),
+  updateFeatureFlag: (flagKey: string, enabled: boolean) =>
+    request(`/api/platform/feature-flags/${flagKey}`, isFeatureFlag, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+  getIncidents: () =>
+    request("/api/platform/incidents", arrayOf(isIncident)),
+  acknowledgeIncident: (incidentId: number) =>
+    request(
+      `/api/platform/incidents/${incidentId}/acknowledge`,
+      isIncident,
+      { method: "POST" },
+    ),
+  resolveIncident: (incidentId: number) =>
+    request(`/api/platform/incidents/${incidentId}/resolve`, isIncident, {
+      method: "POST",
+    }),
+  getPlatformUsage: () =>
+    request("/api/platform/usage", arrayOf(isUsageMetric)),
+  getMarketplaceApps: () =>
+    request("/api/marketplace/apps", arrayOf(isMarketplaceApp)),
+  installMarketplaceApp: (appId: number) =>
+    request(`/api/marketplace/apps/${appId}/install`, isMarketplaceApp, {
+      method: "POST",
+    }),
+  getWorkQueue: () => request("/api/work-queue", arrayOf(isWorkItem)),
+  claimWorkItem: (workItemId: number) =>
+    request(`/api/work-queue/${workItemId}/claim`, isWorkItem, {
+      method: "POST",
+    }),
+  completeWorkItem: (workItemId: number) =>
+    request(`/api/work-queue/${workItemId}/complete`, isWorkItem, {
       method: "POST",
     }),
 };

@@ -1,4 +1,7 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink } from "react-router";
+
+const desktopNavigation = "(min-width: 72em)";
 
 const sections = [
   {
@@ -9,6 +12,8 @@ const sections = [
       { to: "/automations", marker: "03", label: "Automations" },
       { to: "/inbox", marker: "04", label: "Inbox" },
       { to: "/journeys", marker: "05", label: "Journeys" },
+      { to: "/work-queue", marker: "14", label: "Work queue" },
+      { to: "/support", marker: "15", label: "Support" },
     ],
   },
   {
@@ -18,6 +23,29 @@ const sections = [
       { to: "/customers", marker: "07", label: "Customers" },
       { to: "/experiments", marker: "08", label: "Experiments" },
       { to: "/data-hub", marker: "09", label: "Data sources" },
+      { to: "/pipeline", marker: "16", label: "Pipeline" },
+      { to: "/forecast", marker: "17", label: "Forecast" },
+      { to: "/segments", marker: "18", label: "Segments" },
+      { to: "/audit-log", marker: "19", label: "Audit log" },
+    ],
+  },
+  {
+    label: "Deliver",
+    items: [
+      { to: "/catalog", marker: "20", label: "Catalog" },
+      { to: "/orders", marker: "21", label: "Orders" },
+      { to: "/inventory", marker: "22", label: "Inventory" },
+      { to: "/shipments", marker: "23", label: "Shipments" },
+      { to: "/service-levels", marker: "24", label: "Service levels" },
+    ],
+  },
+  {
+    label: "Grow",
+    items: [
+      { to: "/campaigns", marker: "25", label: "Campaigns" },
+      { to: "/content-library", marker: "26", label: "Content" },
+      { to: "/surveys", marker: "27", label: "Surveys" },
+      { to: "/marketplace", marker: "28", label: "Marketplace" },
     ],
   },
   {
@@ -27,37 +55,57 @@ const sections = [
       { to: "/billing", marker: "11", label: "Billing" },
       { to: "/team", marker: "12", label: "Team" },
       { to: "/settings", marker: "13", label: "Settings" },
+      { to: "/feature-flags", marker: "29", label: "Feature flags" },
+      { to: "/service-health", marker: "30", label: "Service health" },
     ],
   },
 ];
 
 export function Sidebar() {
+  const [navigationOpen, setNavigationOpen] = useState(() =>
+    window.matchMedia(desktopNavigation).matches
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(desktopNavigation);
+    const sync = () => setNavigationOpen(media.matches);
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
   return (
     <aside className="sidebar" aria-label="Primary navigation">
       <NavLink className="wordmark" to="/" aria-label="NexusFlow overview">
         <span className="wordmark-mark" aria-hidden="true">NF</span>
         <span>NexusFlow</span>
       </NavLink>
-      <nav>
-        {sections.map((section) => (
-          <section className="nav-section" key={section.label}>
-            <h2>{section.label}</h2>
-            {section.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  isActive ? "nav-item active" : "nav-item"
-                }
-              >
-                <span className="nav-marker" aria-hidden="true">{item.marker}</span>
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
-          </section>
-        ))}
-      </nav>
+      <details
+        className="nav-disclosure"
+        open={navigationOpen}
+        onToggle={(event) => setNavigationOpen(event.currentTarget.open)}
+      >
+        <summary>Navigate workspace</summary>
+        <nav>
+          {sections.map((section) => (
+            <section className="nav-section" key={section.label}>
+              <h2>{section.label}</h2>
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  className={({ isActive }) =>
+                    isActive ? "nav-item active" : "nav-item"
+                  }
+                >
+                  <span className="nav-marker" aria-hidden="true">{item.marker}</span>
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </section>
+          ))}
+        </nav>
+      </details>
       <NavLink className="fixture-link" to="/fixture-provenance">
         Fixture provenance
       </NavLink>
