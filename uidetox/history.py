@@ -6,7 +6,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .findings import current_evidence_hashes, score_current_snapshot
+from .findings import (
+    current_evidence_hashes,
+    requires_resolution,
+    score_current_snapshot,
+)
 from .state import get_uidetox_dir, load_config, load_state
 from .visual_semantics import project_visual_evidence_status
 
@@ -44,13 +48,16 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
     visual_status = project_visual_evidence_status(load_config())
     stamp = _stamp()
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
+    issues = state.get("issues", [])
+    pending_issues = sum(requires_resolution(issue) for issue in issues)
     snapshot = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "trigger": trigger,
         "design_score": scores["blended_score"],
         "objective_score": scores["objective_score"],
         "subjective_score": scores["subjective_score"],
-        "pending_issues": len(state.get("issues", [])),
+        "pending_issues": pending_issues,
+        "investigative_findings": len(issues) - pending_issues,
         "resolved_issues": len(state.get("resolved", [])),
         "total_found": state.get("stats", {}).get("total_found", 0),
         "scans_run": state.get("stats", {}).get("scans_run", 0),

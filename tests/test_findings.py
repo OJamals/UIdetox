@@ -8,6 +8,7 @@ import pytest
 
 from uidetox.analyzer_engine import _analyze_rule, analyze_file
 from uidetox.findings import (
+    STRUCTURED_REVIEW_POLICY_VERSION,
     EligibilityContext,
     Finding,
     VerificationResult,
@@ -455,6 +456,31 @@ def test_investigative_findings_remain_visible_without_becoming_defects(
     assert "pending_findings" not in {blocker.code for blocker in result.blockers}
 
 
+def test_requires_resolution_uses_canonical_finding_status() -> None:
+    from uidetox.findings import requires_resolution
+
+    pending = Finding.create(
+        detector_id="runtime-overlap",
+        category="layout",
+        severity="warning",
+        confidence=1,
+        message="Controls overlap.",
+        provenance="runtime",
+    )
+    investigative = Finding.create(
+        detector_id="contract-response-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Response evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+
+    assert requires_resolution(pending)
+    assert not requires_resolution(investigative.to_dict())
+
+
 def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> None:
     critical = Finding.create(
         detector_id="runtime-sticky-occlusion",
@@ -484,6 +510,7 @@ def test_pending_critical_deterministic_finding_caps_blend_at_objective() -> Non
             "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
+                "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
                 "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
                 "finding_links": [critical.fingerprint],
                 "region_links": ["runtime-primary-action"],
@@ -526,6 +553,53 @@ def test_incomplete_structured_review_cannot_inflate_score_or_eligibility() -> N
     assert "missing_structured_review" in {blocker.code for blocker in result.blockers}
 
 
+def test_legacy_structured_review_policy_cannot_remain_current() -> None:
+    finding = Finding.create(
+        detector_id="runtime-review-anchor",
+        category="quality",
+        severity="info",
+        confidence=1.0,
+        message="Review anchor.",
+        provenance="runtime",
+        status="informational",
+    )
+    matrix = [{"route": "/", "state": "initial", "viewport": "desktop"}]
+    matrix_digest = review_capture_matrix_digest(matrix)
+    state = {
+        "issues": [finding.to_dict()],
+        "current_snapshot": {"qualified_coverage": 1.0},
+        "subjective": {
+            "dimensions": {"A": 40, "B": 30, "C": 20, "D": 10},
+            "score": 100,
+            "rationale": "Legacy evidence predates current review policy.",
+            "reviewer": "qa-agent",
+            "finding_links": [finding.fingerprint],
+            "region_links": ["runtime-region-1"],
+            "routes": ["/"],
+            "states": ["initial"],
+            "viewports": ["desktop"],
+            "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+            "required_matrix_digest": matrix_digest,
+            "scope_validation": {
+                "status": "validated",
+                "evidence_hashes": {"source": "s", "map": "m", "runtime": "r"},
+                "finding_links": [finding.fingerprint],
+                "region_links": ["runtime-region-1"],
+                "capture_matrix": matrix,
+                "required_matrix_digest": matrix_digest,
+            },
+        },
+    }
+
+    scores = score_current_snapshot(state)
+    eligibility = evaluate_eligibility(state, EligibilityContext())
+
+    assert scores["subjective_score"] is None
+    assert "missing_structured_review" in {
+        blocker.code for blocker in eligibility.blockers
+    }
+
+
 def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() -> None:
     matrix = [{"route": "/", "state": "default", "viewport": "desktop"}]
     matrix_digest = review_capture_matrix_digest(matrix)
@@ -543,6 +617,7 @@ def test_review_hash_drift_removes_subjective_score_and_blocks_finalization() ->
         "required_matrix_digest": matrix_digest,
         "scope_validation": {
             "status": "validated",
+            "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
             "evidence_hashes": {"source": "old", "map": "m", "runtime": "r"},
             "finding_links": ["finding-1"],
             "region_links": ["runtime-region-1"],
@@ -592,6 +667,7 @@ def test_review_matrix_digest_drift_removes_score_and_blocks_finalization() -> N
             "required_matrix_digest": "0" * 64,
             "scope_validation": {
                 "status": "validated",
+                "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
                 "evidence_hashes": hashes,
                 "finding_links": [finding.fingerprint],
                 "region_links": ["runtime-region-1"],

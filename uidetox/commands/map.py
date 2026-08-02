@@ -42,6 +42,7 @@ def run(args: argparse.Namespace) -> None:
             "screenshots_dir": screenshot_dir,
             "timeout_ms": getattr(args, "timeout", 15_000),
             "source_root": root,
+            "full_page": False,
         }
         if scenarios is not None:
             observation_options["scenarios"] = scenarios

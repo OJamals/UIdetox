@@ -1497,11 +1497,12 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     monkeypatch.chdir(tmp_path)
     captured = {}
 
-    def fake_observe(urls, *, screenshots_dir, timeout_ms, source_root):
+    def fake_observe(urls, *, screenshots_dir, timeout_ms, source_root, full_page):
         captured["urls"] = urls
         captured["screenshots_dir"] = screenshots_dir
         captured["timeout_ms"] = timeout_ms
         captured["source_root"] = source_root
+        captured["full_page"] = full_page
         return _runtime_observation()
 
     monkeypatch.setattr(map_command, "observe_frontend", fake_observe)
@@ -1526,6 +1527,7 @@ def test_map_command_collects_runtime_observation(tmp_path, monkeypatch, capsys)
     assert captured["screenshots_dir"] == tmp_path / ".uidetox" / "runtime-screenshots"
     assert captured["timeout_ms"] == 2500
     assert captured["source_root"] == tmp_path
+    assert captured["full_page"] is False
     output = capsys.readouterr().out
     assert "Runtime     : 2 page/view(s) (desktop, mobile)" in output
     assert "Findings    : 2 rendered layout issue(s)" in output

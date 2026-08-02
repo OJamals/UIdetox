@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from uidetox.fileset import ProjectFileSet
+from uidetox.findings import requires_resolution
 from uidetox.prompt_safety import render_untrusted_data
 from uidetox.state import (  # type: ignore
     get_project_root,
@@ -368,6 +369,7 @@ def generate_stage_prompt(stage: str, parallel: int = 1) -> list[str]:
     state = load_state()
     config = load_config()
     issues = state.get("issues", [])
+    actionable_issues = [issue for issue in issues if requires_resolution(issue)]
     resolved = state.get("resolved", [])
     tooling = config.get("tooling", {})
 
@@ -413,9 +415,10 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         return [_diagnose_prompt(issues, dials_block)]
 
     elif stage == "prioritize":
-        return [_prioritize_prompt(issues)]
+        return [_prioritize_prompt(actionable_issues)]
 
     elif stage == "fix":
+        issues = actionable_issues
         if not issues:
             return [_fix_prompt([], dials_block, 0, 1)]
 
@@ -461,7 +464,7 @@ Use these dials to calibrate your decisions. Higher variance = more asymmetry re
         ]
 
     elif stage == "verify":
-        return [_verify_prompt(issues, resolved)]
+        return [_verify_prompt(actionable_issues, resolved)]
 
     return [f"Unknown stage: {stage}"]
 

@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from uidetox.findings import (
+    STRUCTURED_REVIEW_POLICY_VERSION,
     coerce_finding,
     current_evidence_hashes,
     review_capture_matrix_digest,
@@ -118,6 +119,7 @@ def _validate_review_scope(
     if frontend_map is None:
         return {
             "status": "invalid",
+            "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
             "errors": ["a current frontend map is required"],
         }
     evidence = frontend_map.evidence
@@ -140,6 +142,15 @@ def _validate_review_scope(
     runtime_findings = evidence.get("runtime_findings", [])
     if isinstance(runtime_findings, list):
         for value in runtime_findings:
+            if not isinstance(value, dict):
+                continue
+            for key in ("fingerprint", "id"):
+                finding_id = str(value.get(key, "")).strip()
+                if finding_id:
+                    finding_ids.add(finding_id)
+    contract_findings = frontend_map.project_map.get("findings", [])
+    if isinstance(contract_findings, list):
+        for value in contract_findings:
             if not isinstance(value, dict):
                 continue
             for key in ("fingerprint", "id"):
@@ -184,6 +195,18 @@ def _validate_review_scope(
                     viewport_name,
                 )
             )
+    requires_interactive_state = any(
+        item.startswith("User-visible state remains represented:")
+        for item in frontend_map.contracts.must_preserve
+    )
+    initial_state_unknown = any(
+        item.startswith("Only initial runtime state was observed;")
+        for item in frontend_map.contracts.unknown
+    )
+    if requires_interactive_state and initial_state_unknown:
+        errors.append(
+            "interactive review requires at least one non-initial runtime scenario state"
+        )
     capture_list_lengths = {
         len(required_lists[key]) for key in ("route", "state", "viewport")
     }
@@ -218,6 +241,7 @@ def _validate_review_scope(
     ]
     return {
         "status": "validated" if not errors else "invalid",
+        "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
         "evidence_hashes": dict(hashes),
         "finding_links": sorted(required_lists["finding_link"]),
         "region_links": sorted(required_lists["region_link"]),

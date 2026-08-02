@@ -15,6 +15,7 @@ from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
 
 FINDING_SCHEMA_VERSION = 2
+STRUCTURED_REVIEW_POLICY_VERSION = 2
 _VOLATILE = frozenset(
     "checked_at created_at generated_at source_hash timestamp".split()
 )
@@ -458,6 +459,11 @@ def coerce_finding(value: Finding | Mapping[str, Any]) -> Finding:
     return value if isinstance(value, Finding) else Finding.from_dict(value)
 
 
+def requires_resolution(value: Finding | Mapping[str, Any]) -> bool:
+    """Return whether a finding belongs in the remediation queue."""
+    return coerce_finding(value).status not in _NON_DEFECT
+
+
 def review_capture_matrix_digest(captures: object) -> str:
     """Return a stable digest for the exact canonical review capture tuples."""
 
@@ -522,7 +528,7 @@ def score_current_snapshot(
         sum(
             _WEIGHTS.get(item.severity, 10) * item.confidence
             for item in findings
-            if item.status not in _NON_DEFECT
+            if requires_resolution(item)
         ),
         2,
     )
@@ -538,7 +544,7 @@ def score_current_snapshot(
         else None
     )
     critical_deterministic_pending = any(
-        item.status not in _NON_DEFECT
+        requires_resolution(item)
         and item.severity == "critical"
         and (
             item.provenance in {"contract", "runtime", "static"}
@@ -668,6 +674,7 @@ def _structured_review_complete(review: Mapping[str, Any]) -> bool:
         and all(str(hashes[key]).strip() for key in hashes)
         and isinstance(scope, Mapping)
         and scope.get("status") == "validated"
+        and scope.get("policy_version") == STRUCTURED_REVIEW_POLICY_VERSION
         and _mapping(scope.get("evidence_hashes")) == hashes
         and isinstance(scope.get("finding_links"), (list, tuple))
         and sorted(scope.get("finding_links", ()))
@@ -719,7 +726,7 @@ def evaluate_eligibility(
             blockers.append(EligibilityBlocker(code, message, details))
 
     pending = sum(
-        coerce_finding(item).status not in _NON_DEFECT
+        requires_resolution(item)
         for item in state.get("issues", [])
         if isinstance(item, (Finding, Mapping))
     )

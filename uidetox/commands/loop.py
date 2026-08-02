@@ -18,7 +18,11 @@ import sys
 import uuid
 
 from ..fileset import ProjectFileSet
-from ..findings import current_evidence_hashes, score_current_snapshot
+from ..findings import (
+    current_evidence_hashes,
+    requires_resolution,
+    score_current_snapshot,
+)
 from ..memory import get_last_scan, get_notes, get_patterns, get_session, log_progress
 from ..prompt_safety import render_untrusted_data
 from ..state import (
@@ -105,7 +109,9 @@ def run(args: argparse.Namespace):
     save_config(config)
 
     state = load_state()
-    issues = state.get("issues", [])
+    all_issues = state.get("issues", [])
+    issues = [issue for issue in all_issues if requires_resolution(issue)]
+    investigative_count = len(all_issues) - len(issues)
     resolved = len(state.get("resolved", []))
     tooling = config.get("tooling", {})
     has_mechanical = (
@@ -134,7 +140,10 @@ def run(args: argparse.Namespace):
     print("=" * 60)
     print("  UIdetox Autonomous Loop")
     print("=" * 60)
-    print(f"  Target: {target}  |  Queue: {len(issues)}  |  Resolved: {resolved}")
+    print(
+        f"  Target: {target}  |  Queue: {len(issues)} actionable"
+        f"  |  Investigate: {investigative_count}  |  Resolved: {resolved}"
+    )
     print(
         f"  Files: {frontend_count}  |  Orchestrator: {'yes' if is_orchestrator else 'no'}"
     )
@@ -142,7 +151,7 @@ def run(args: argparse.Namespace):
 
     # ---- Autonomous directive ----
     print("  SYSTEM DIRECTIVE: You are in FULL AUTONOMOUS LOOP MODE.")
-    print(f"  Iterate until Score >= {target} and Queue is empty.")
+    print(f"  Iterate until Score >= {target} and actionable queue is empty.")
     print("  DO NOT stop to ask permission. DO NOT summarize between fixes.")
     print()
 

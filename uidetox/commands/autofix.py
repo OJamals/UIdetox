@@ -5,9 +5,9 @@ import subprocess
 from itertools import chain
 from pathlib import Path
 
-from uidetox.state import get_project_root, load_state, load_config
+from uidetox.findings import requires_resolution
+from uidetox.state import get_project_root, load_config, load_state
 from uidetox.utils import tracked_changed_files
-
 
 # Category classification + specific replacement guidance
 # NOTE: order matters — earlier entries win on keyword collision.
@@ -548,7 +548,7 @@ def run(args: argparse.Namespace):
     project_root = get_project_root()
     issues = state.get("issues", [])
 
-    t1_issues = [i for i in issues if i.get("tier") == "T1"]
+    t1_issues = [i for i in issues if i.get("tier") == "T1" and requires_resolution(i)]
 
     if not t1_issues:
         print("No T1 (quick fix) issues found. Nothing to autofix.")

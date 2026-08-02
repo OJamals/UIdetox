@@ -9,6 +9,7 @@ from uidetox.findings import (
     current_evidence_hashes,
     current_verification_fresh,
     evaluate_eligibility,
+    requires_resolution,
 )
 from uidetox.state import load_config, load_state
 from uidetox.visual_semantics import project_visual_evidence_status
@@ -46,7 +47,9 @@ def eligibility_status(
     context = EligibilityContext(
         target_score=int(config.get("target_score", 95)),
         current_branch=branch,
-        session_branch=(branch if branch.startswith("uidetox-session-") else "uidetox-session-*"),
+        session_branch=(
+            branch if branch.startswith("uidetox-session-") else "uidetox-session-*"
+        ),
         dirty=dirty,
         verification_fresh=current_verification_fresh() and visual_ready,
         require_session_branch=True,
@@ -69,6 +72,8 @@ def run(args: argparse.Namespace) -> None:
     )
     scores = eligibility["score"]
     issues, resolved = state.get("issues", []), state.get("resolved", [])
+    actionable_count = sum(requires_resolution(issue) for issue in issues)
+    investigative_count = len(issues) - actionable_count
     stats = state.get("stats", {})
     payload = {
         "design_score": scores["blended_score"],
@@ -76,6 +81,8 @@ def run(args: argparse.Namespace) -> None:
         "subjective_score": scores["subjective_score"],
         "qualified_coverage": scores["qualified_coverage"],
         "total_issues": len(issues),
+        "actionable_issues": actionable_count,
+        "investigative_findings": investigative_count,
         "total_resolved": len(resolved),
         "total_found": stats.get("total_found", len(issues) + len(resolved)),
         "scans_run": stats.get("scans_run", 0),
@@ -89,7 +96,8 @@ def run(args: argparse.Namespace) -> None:
         print("UIdetox health")
         print(f"  Design score : {scores['blended_score']}/100")
         print(f"  Coverage     : {scores['qualified_coverage']:.0%}")
-        print(f"  Pending      : {len(issues)}")
+        print(f"  Actionable   : {actionable_count}")
+        print(f"  Investigate  : {investigative_count}")
         print(f"  Resolved     : {len(resolved)}")
         print(f"  Visual       : {visual.state}")
         print(f"  Finalizable  : {'yes' if eligibility['eligible'] else 'no'}")

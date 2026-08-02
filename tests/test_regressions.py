@@ -1361,6 +1361,39 @@ def test_get_project_root_uses_manifest_marker_when_git_and_uidetox_are_missing(
     assert get_project_root() == project_root.resolve()
 
 
+def test_get_project_root_ignores_ancestor_state_for_current_manifest_root(
+    tmp_path, monkeypatch
+):
+    ancestor_root = tmp_path / "shared"
+    project_root = ancestor_root / "project"
+    (ancestor_root / ".uidetox").mkdir(parents=True)
+    project_root.mkdir()
+    (project_root / "package.json").write_text('{"name":"demo"}\n', encoding="utf-8")
+
+    monkeypatch.chdir(project_root)
+
+    from uidetox.state import get_project_root
+
+    assert get_project_root() == project_root.resolve()
+
+
+def test_get_project_root_ignores_ancestor_state_for_nested_git_root(
+    tmp_path, monkeypatch
+):
+    ancestor_root = tmp_path / "shared"
+    project_root = ancestor_root / "project"
+    nested_dir = project_root / "src"
+    (ancestor_root / ".uidetox").mkdir(parents=True)
+    nested_dir.mkdir(parents=True)
+    (project_root / ".git").mkdir()
+
+    monkeypatch.chdir(nested_dir)
+
+    from uidetox.state import get_project_root
+
+    assert get_project_root() == project_root.resolve()
+
+
 def test_get_project_root_prefers_git_root_over_nested_manifest_on_cold_start(
     tmp_path, monkeypatch
 ):
@@ -3153,6 +3186,11 @@ def test_oversized_border_radius_slop_fires_for_3rem():
     assert _rule_fired(code, "OVERSIZED_BORDER_RADIUS_SLOP", ".css")
 
 
+def test_oversized_border_radius_slop_fires_for_large_radius_token():
+    code = ":root { --context-radius: 1.35rem; } .card { border-radius: var(--context-radius); }"
+    assert _rule_fired(code, "OVERSIZED_BORDER_RADIUS_SLOP", ".css")
+
+
 def test_oversized_border_radius_slop_skips_small_radius():
     code = ".card { border-radius: 8px; }"
     assert not _rule_fired(code, "OVERSIZED_BORDER_RADIUS_SLOP", ".css")
@@ -4325,6 +4363,14 @@ def test_glassmorphism_slop_fires_in_css():
     )
 
 
+def test_glassmorphism_slop_fires_for_native_backdrop_filter():
+    assert _rule_fired(
+        ".card { backdrop-filter: blur(1rem) saturate(142%); }",
+        "GLASSMORPHISM_SLOP",
+        ".css",
+    )
+
+
 def test_glassmorphism_slop_skips_solid_card():
     assert not _rule_fired(
         '<div className="bg-zinc-900 border border-zinc-800">card</div>',
@@ -4375,6 +4421,11 @@ def test_bounce_animation_slop_fires_for_animate_pulse():
     )
 
 
+def test_bounce_animation_slop_fires_for_perpetual_css_animation():
+    code = ".celebration { animation: ambientLift 2.7s ease-in-out infinite; }"
+    assert _rule_fired(code, "BOUNCE_ANIMATION_SLOP", ".css")
+
+
 def test_bounce_animation_slop_skips_no_animation():
     assert not _rule_fired(
         '<div className="bg-white p-4">No animation</div>', "BOUNCE_ANIMATION_SLOP"
@@ -4415,6 +4466,11 @@ def test_css_gradient_slop_fires_for_purple_to_blue():
 
 def test_css_gradient_slop_fires_for_indigo_to_cyan():
     code = ".btn { background: linear-gradient(135deg, indigo, cyan); }"
+    assert _rule_fired(code, "CSS_GRADIENT_SLOP", ".css")
+
+
+def test_css_gradient_slop_fires_for_hex_violet_to_blue():
+    code = ".cta { background: linear-gradient(105deg, #7c3aed, #2563eb); }"
     assert _rule_fired(code, "CSS_GRADIENT_SLOP", ".css")
 
 
@@ -4772,6 +4828,11 @@ def test_exclamation_ux_slop_skips_neutral_message():
     assert not _rule_fired(
         "<p>Your changes have been saved.</p>", "EXCLAMATION_UX_SLOP"
     )
+
+
+def test_exclamation_ux_slop_does_not_cross_lines_from_created_at_identifier():
+    code = "isString(value.createdAt)\nif (!isRecord(value)) return false;"
+    assert not _rule_fired(code, "EXCLAMATION_UX_SLOP", ".ts")
 
 
 def test_oops_error_slop_fires_for_oops():
@@ -8428,7 +8489,7 @@ def test_rescan_batches_all_current_findings_without_history_credit(
         "src/Second.tsx",
     ]
     output = capsys.readouterr().out
-    assert "Queued 4 mechanical anti-pattern issues" in output
+    assert "Queued 4 actionable anti-pattern issue(s)" in output
 
 
 def test_rescan_requeues_current_runtime_and_contract_findings(tmp_path, monkeypatch):
@@ -8494,6 +8555,155 @@ def test_rescan_requeues_current_runtime_and_contract_findings(tmp_path, monkeyp
         "contract",
     }
     assert captured["qualified_complete"] is True
+
+
+def test_rescan_keeps_investigative_findings_out_of_fix_loop(
+    tmp_path, monkeypatch, capsys
+):
+    from uidetox.commands import rescan as rescan_cmd
+    from uidetox.findings import Finding
+    from uidetox.state import load_state
+
+    investigative = Finding.create(
+        detector_id="contract-response-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Response evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
+    monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        rescan_cmd,
+        "current_map_findings",
+        lambda _root: ((investigative,), True),
+    )
+    monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(rescan_cmd, "log_progress", lambda *args, **kwargs: None)
+
+    rescan_cmd.run(argparse.Namespace(path="."))
+
+    assert load_state()["issues"][0]["status"] == "investigate"
+    output = capsys.readouterr().out
+    assert "No actionable anti-patterns detected" in output
+    assert "Recorded 1 investigative finding" in output
+    assert "Queue: 0 actionable | 1 investigative" in output
+    assert "TARGET REACHED" in output
+    assert "uidetox next" not in output
+
+
+def test_next_does_not_batch_investigative_findings(monkeypatch, capsys):
+    from uidetox.commands import next as next_cmd
+    from uidetox.findings import Finding
+
+    investigative = Finding.create(
+        detector_id="contract-request-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Request evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+    monkeypatch.setattr(
+        next_cmd,
+        "load_state",
+        lambda: {"issues": [investigative.to_dict()], "resolved": []},
+    )
+    monkeypatch.setattr(next_cmd, "load_config", lambda: {})
+
+    with pytest.raises(SystemExit) as exc_info:
+        next_cmd.run(argparse.Namespace())
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "No findings require resolution" in output
+    assert "1 investigative finding" in output
+    assert "Fix ALL" not in output
+
+
+def test_autofix_ignores_investigative_t1_findings(tmp_path, monkeypatch, capsys):
+    from uidetox.commands import autofix as autofix_cmd
+    from uidetox.findings import Finding
+
+    investigative = Finding.create(
+        detector_id="contract-response-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Response evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+    monkeypatch.setattr(
+        autofix_cmd,
+        "load_state",
+        lambda: {"issues": [investigative.to_dict()]},
+    )
+    monkeypatch.setattr(autofix_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+
+    autofix_cmd.run(argparse.Namespace(dry_run=True))
+
+    assert "Nothing to autofix" in capsys.readouterr().out
+
+
+def test_plan_does_not_schedule_investigative_findings(monkeypatch, capsys):
+    from uidetox.commands import plan as plan_cmd
+    from uidetox.findings import Finding
+
+    investigative = Finding.create(
+        detector_id="contract-response-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Response evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+    monkeypatch.setattr(
+        plan_cmd,
+        "load_state",
+        lambda: {"issues": [investigative.to_dict()], "resolved": []},
+    )
+    monkeypatch.setattr(plan_cmd, "load_config", lambda: {})
+
+    plan_cmd.run(argparse.Namespace())
+
+    output = capsys.readouterr().out
+    assert "No findings require resolution" in output
+    assert "1 investigative finding" in output
+    assert "Attack Order" not in output
+
+
+def test_subagent_fix_stage_does_not_assign_investigative_findings(monkeypatch):
+    from uidetox import subagent
+    from uidetox.findings import Finding
+
+    investigative = Finding.create(
+        detector_id="contract-request-evidence-unknown",
+        category="contract",
+        severity="info",
+        confidence=0.5,
+        message="Request evidence is unknown.",
+        provenance="contract",
+        status="investigate",
+    )
+    monkeypatch.setattr(
+        subagent,
+        "load_state",
+        lambda: {"issues": [investigative.to_dict()], "resolved": []},
+    )
+    monkeypatch.setattr(subagent, "load_config", lambda: {})
+
+    prompts = subagent.generate_stage_prompt("fix")
+
+    assert len(prompts) == 1
+    assert "Request evidence is unknown" not in prompts[0]
 
 
 def test_stale_map_findings_cannot_qualify_rescan(tmp_path, monkeypatch):
@@ -10606,7 +10816,7 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
         "FLEXBOX_PERCENTAGE_MATH_SLOP",
     ]
     assert _analyzer_catalog_fingerprint(RULES) == (
-        "4c244846908ef670c6e13f2f1f14e69e298484714659e1a7af065497dbd445af"
+        "ee410ecb3691d6afc535fdcaad1bcb320703df65540e8a0779b1366f401f1d69"
     )
 
 

@@ -53,6 +53,47 @@ def test_visual_evidence_command_builds_manifest(
     assert (output / "manifest.json").is_file()
 
 
+def test_visual_evidence_command_captures_project_context(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before, after = _images(tmp_path)
+    monkeypatch.setattr(
+        visual_evidence_cmd,
+        "load_project_visual_context",
+        lambda *_args: (
+            None,
+            None,
+            {"frontend_map": "map-hash", "design_intent": "intent-hash"},
+            {"frontend_map": {"target": "."}, "design_intent": {"tone": "calm"}},
+        ),
+        raising=False,
+    )
+
+    visual_evidence_cmd.run(
+        parse_args(
+            [
+                "visual-evidence",
+                "--before",
+                str(before),
+                "--after",
+                str(after),
+                "--output-dir",
+                str(tmp_path / "evidence"),
+                "--json",
+            ]
+        )
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["freshness"]["context_sha256s"] == {
+        "design_intent": "intent-hash",
+        "frontend_map": "map-hash",
+    }
+    assert payload["context"]["frontend_map"]["target"] == "."
+
+
 def test_visual_evidence_command_reports_invalid_viewport(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

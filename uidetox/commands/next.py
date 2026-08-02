@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from uidetox.design_context import DesignSettings
+from uidetox.findings import requires_resolution
 from uidetox.prompt_safety import render_untrusted_data
 from uidetox.rule_registry import get_rule
 from uidetox.state import load_config, load_state
@@ -766,11 +767,17 @@ def run(args: argparse.Namespace):
     config = load_config()
     settings = DesignSettings.from_config(config)
     config = {**config, **settings.dials.to_config()}
-    issues = state.get("issues", [])
+    all_issues = state.get("issues", [])
+    issues = [issue for issue in all_issues if requires_resolution(issue)]
+    investigative_count = len(all_issues) - len(issues)
     resolved_count = len(state.get("resolved", []))
 
     if not issues:
-        print("Queue is empty. No pending issues.")
+        if investigative_count:
+            print("No findings require resolution.")
+            print(f"{investigative_count} investigative finding(s) remain visible.")
+        else:
+            print("Queue is empty. No pending issues.")
         print("\n[AGENT LOOP SIGNAL]")
         print("Run 'uidetox status' to check if target score is reached.")
         print("If score < target, run 'uidetox rescan' to find more issues.")

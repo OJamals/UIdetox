@@ -7,13 +7,15 @@ import json
 import sys
 from pathlib import Path
 
-from uidetox.state import get_project_root, get_uidetox_dir
+from uidetox.frontend_map import FRONTEND_MAP_FILE
+from uidetox.state import get_project_root, get_uidetox_dir, load_config
 from uidetox.visual_evidence import (
     VisualEvidenceCase,
     VisualEvidenceError,
     VisualEvidenceRequest,
     build_visual_evidence,
 )
+from uidetox.visual_semantics import load_project_visual_context
 from uidetox.visual_worker_client import build_visual_evidence_isolated
 from uidetox.visual_worker_protocol import VisualWorkerPolicy
 
@@ -99,6 +101,10 @@ def run(args: argparse.Namespace) -> None:
         else output_dir / "manifest.json"
     )
     try:
+        _, _, context_hashes, context = load_project_visual_context(
+            load_config(),
+            get_uidetox_dir() / FRONTEND_MAP_FILE,
+        )
         request = VisualEvidenceRequest(
             comparisons=(
                 VisualEvidenceCase(
@@ -117,6 +123,8 @@ def run(args: argparse.Namespace) -> None:
             crop_padding=args.crop_padding,
             png_compress_level=args.png_compress_level,
             png_optimize=args.png_optimize,
+            context_sha256s=context_hashes,
+            context=context,
         )
         manifest = (
             build_visual_evidence_isolated(

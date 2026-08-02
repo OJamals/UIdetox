@@ -1336,6 +1336,7 @@ async () => {
   const structuralCandidates = allElements.filter(
     element => element.matches(structuralSelector)
   );
+  const activeModal = document.querySelector("dialog:modal");
   const round = value => Math.round(value * 100) / 100;
   const pixels = value => {
     const parsed = Number.parseFloat(value);
@@ -1391,6 +1392,12 @@ async () => {
   };
 
   const geometryCache = new WeakMap();
+  const hiddenByClosedDetails = element => {
+    const details = element.closest("details:not([open])");
+    if (!details) return false;
+    const summary = details.querySelector(":scope > summary");
+    return element !== summary && !summary?.contains(element);
+  };
   const geometryFor = element => {
     if (geometryCache.has(element)) return geometryCache.get(element);
     const style = getComputedStyle(element);
@@ -1403,6 +1410,7 @@ async () => {
         style.display === "none"
         || style.visibility === "hidden"
         || Number(style.opacity) === 0
+        || hiddenByClosedDetails(element)
         || rect.width <= 0
         || rect.height <= 0
       ),
@@ -1502,6 +1510,32 @@ async () => {
   ]);
 
   const isVisible = element => geometryFor(element).visible;
+  const isVisibleInScrollport = element => {
+    if (!isVisible(element)) return false;
+    const rect = geometryFor(element).rect;
+    let ancestor = element.parentElement;
+    while (ancestor) {
+      const {style, rect: ancestorRect} = geometryFor(ancestor);
+      const clipsX = ["auto", "scroll", "hidden", "clip"].includes(
+        style.overflowX
+      );
+      const clipsY = ["auto", "scroll", "hidden", "clip"].includes(
+        style.overflowY
+      );
+      if (
+        (clipsX && (
+          rect.right <= ancestorRect.left + 1
+          || rect.left >= ancestorRect.right - 1
+        ))
+        || (clipsY && (
+          rect.bottom <= ancestorRect.top + 1
+          || rect.top >= ancestorRect.bottom - 1
+        ))
+      ) return false;
+      ancestor = ancestor.parentElement;
+    }
+    return true;
+  };
 
   const canvasContext = document.createElement("canvas").getContext("2d");
   const fontMetrics = (style, text) => {
@@ -1601,6 +1635,7 @@ async () => {
     return {
       text,
       bounds: {left, right, top, bottom},
+      lines,
       lineCount: lines.length,
       minimumLineGap: lineGaps.length ? Math.min(...lineGaps) : null,
       fontSize,
@@ -1781,6 +1816,21 @@ async () => {
     "borderLeftColor", "borderLeftWidth",
     "backgroundColor", "color"
   ]);
+  const shadowSpreadArea = (shadow, rect) => Math.max(
+    0,
+    ...String(shadow || "")
+      .split(/,(?![^(]*\))/)
+      .filter(layer => !/\binset\b/.test(layer))
+      .map(layer => {
+        const lengths = [...layer.matchAll(/-?(?:\d+(?:\.\d+)?|\.\d+)px/g)]
+          .map(match => Number(match[0].slice(0, -2)));
+        const spread = Math.max(0, lengths[3] || 0);
+        return (
+          (rect.width + spread * 2) * (rect.height + spread * 2)
+          - rect.width * rect.height
+        );
+      })
+  );
   const focusIndicator = (element, style, rect) => {
     const focused = document.activeElement === element;
     const current = focusVisualSnapshot(style);
@@ -1820,9 +1870,7 @@ async () => {
       + pixels(current.borderBottomWidth) * rect.width
       + pixels(current.borderLeftWidth) * rect.height
     );
-    const shadowArea = (
-      (rect.width + 2) * (rect.height + 2) - rect.width * rect.height
-    );
+    const shadowArea = shadowSpreadArea(current.boxShadow, rect);
     const changed = changedProperties.some(
       property => focusIndicatorProperties.has(property)
     );
@@ -1934,6 +1982,18 @@ async () => {
   const isScrollRegion = element => {
     const axes = scrollAxesFor(element);
     return axes.x || axes.y;
+  };
+
+  const scrollAncestorAxesFor = element => {
+    const axes = {x: false, y: false};
+    let ancestor = element.parentElement;
+    while (ancestor) {
+      const ancestorAxes = scrollAxesFor(ancestor);
+      axes.x ||= ancestorAxes.x;
+      axes.y ||= ancestorAxes.y;
+      ancestor = ancestor.parentElement;
+    }
+    return axes;
   };
 
   const clippingCache = new WeakMap();
@@ -2064,6 +2124,19 @@ async () => {
     const text = textGeometry(element, style, rect);
     const control = isControl(element, role);
     const tag = element.tagName.toLowerCase();
+    const openDialog = tag === "dialog" && element.open;
+    const modalDialog = openDialog && element.matches(":modal");
+    const dialogModalIntent = openDialog && (
+      element.getAttribute("aria-modal") === "true"
+      || /(?:modal|sheet|overlay)/i.test(
+        `${element.id} ${element.className || ""}`
+      )
+    );
+    const dialogFocusContained = openDialog
+      && element.contains(document.activeElement);
+    const obscuredByModal = Boolean(
+      activeModal && !activeModal.contains(element)
+    );
     const directText = Array.from(element.childNodes).some(node => (
       node.nodeType === Node.TEXT_NODE && (node.textContent || "").trim()
     ));
@@ -2076,9 +2149,36 @@ async () => {
     );
     const paintedText = Boolean(directText || controlText);
     const visualContainer = isVisualContainer(element, style);
+    const surface = paintedSurface(element, style);
     const boxControl = isBoxControl(element, role, style);
     const paletteRole = paletteRoleFor(element, role, visualContainer);
     const scrollAxes = scrollAxesFor(element);
+    const scrollAncestorAxes = scrollAncestorAxesFor(element);
+    const horizontalScrollRegion = (
+      scrollAxes.x && element.scrollWidth > element.clientWidth + 1
+    );
+    const concealedInteractiveDescendantCount = horizontalScrollRegion
+      ? Array.from(element.querySelectorAll(
+          "button,a[href],input,select,textarea,[role='button'],[role='link']"
+        )).filter(descendant => {
+          if (!isVisible(descendant)) return false;
+          const descendantRect = geometryFor(descendant).rect;
+          return (
+            descendantRect.left < rect.left - 1
+            || descendantRect.right > rect.right + 1
+          );
+        }).length
+      : 0;
+    const navigationLinkCount = role === "navigation"
+      ? Array.from(element.querySelectorAll("a[href]")).filter(isVisible).length
+      : 0;
+    const navigationGroupCount = role === "navigation"
+      ? Array.from(element.querySelectorAll(
+          ":scope > section, :scope > [role='group'], :scope > ul, :scope > ol"
+        )).filter(group => (
+          Array.from(group.querySelectorAll("a[href]")).filter(isVisible).length >= 2
+        )).length
+      : 0;
     const descendantSummary = descendantCache.get(element);
     const containsScrollRegionX = Boolean(
       descendantSummary?.containsScrollRegionX
@@ -2122,6 +2222,12 @@ async () => {
     const measurements = {
       hasText: Boolean(text),
       paintedText,
+      hasVisualSurface: surface.hasBorder || surface.hasDistinctBackground,
+      openDialog,
+      dialogModalIntent,
+      modalDialog,
+      dialogFocusContained,
+      obscuredByModal,
       isMultiline: Boolean(text && text.lineCount > 1),
       isTextFlow: Boolean(text && isSingleTextFlow(element)),
       lineCount: text?.lineCount || 0,
@@ -2160,9 +2266,14 @@ async () => {
       isScrollRegion: scrollAxes.x || scrollAxes.y,
       isScrollRegionX: scrollAxes.x,
       isScrollRegionY: scrollAxes.y,
+      insideScrollRegionX: scrollAncestorAxes.x,
+      insideScrollRegionY: scrollAncestorAxes.y,
       containsScrollRegion: containsScrollRegionX || containsScrollRegionY,
       containsScrollRegionX,
       containsScrollRegionY,
+      concealedInteractiveDescendantCount,
+      navigationLinkCount,
+      navigationGroupCount,
       writingMode: style.writingMode,
       direction: style.direction,
       paddingTop: round(pixels(style.paddingTop)),
@@ -2401,6 +2512,126 @@ async () => {
     }
   };
 
+  const chartBarsCache = new WeakMap();
+  const chartBarsFor = element => {
+    if (chartBarsCache.has(element)) return chartBarsCache.get(element);
+    const descriptor = [
+      element.id,
+      element.getAttribute("class") || "",
+      element.getAttribute("aria-label") || "",
+      element.getAttribute("role") || ""
+    ].join(" ");
+    const bars = /(?:chart|graph|plot)/i.test(descriptor)
+      ? Array.from(element.querySelectorAll("*"))
+      .filter(candidate => {
+        if (!isVisible(candidate)) return false;
+        const candidateDescriptor = [
+          candidate.id,
+          candidate.getAttribute("class") || "",
+          candidate.getAttribute("role") || ""
+        ].join(" ");
+        return (
+          /(?:^|[-_\s])bar(?:$|[-_\s])/i.test(candidateDescriptor)
+          || candidate.getAttribute("role") === "graphics-symbol"
+          || candidate.hasAttribute("data-value")
+        );
+      })
+      : [];
+    chartBarsCache.set(element, bars);
+    return bars;
+  };
+
+  const chartEvidence = element => {
+    const bars = chartBarsFor(element);
+    if (bars.length < 3) return null;
+    const measured = bars.map(bar => ({
+      bar,
+      rect: geometryFor(bar).rect
+    })).filter(item => item.rect.width > 1 && item.rect.height > 4);
+    if (measured.length < 3) return null;
+    const ordered = [...measured].sort(
+      (first, second) => first.rect.left - second.rect.left
+    );
+    const horizontal = ordered.every((item, index) => (
+      index === 0 || item.rect.left >= ordered[index - 1].rect.right - 1
+    ));
+    const widths = measured.map(item => item.rect.width);
+    const widthSpread = Math.max(...widths) - Math.min(...widths);
+    const heightSpread = Math.max(...measured.map(item => item.rect.height))
+      - Math.min(...measured.map(item => item.rect.height));
+    if (
+      !horizontal
+      || widthSpread > Math.max(4, Math.min(...widths) * 0.5)
+      || heightSpread <= 4
+    ) return null;
+    const bottoms = measured.map(item => item.rect.bottom);
+    return {
+      barCount: measured.length,
+      baselineSpread: Math.max(...bottoms) - Math.min(...bottoms),
+      heightSpread,
+      selectors: measured.slice(0, 20).map(item => selectorFor(item.bar))
+    };
+  };
+
+  const adjacentTextEvidence = element => {
+    const fragmentFor = node => {
+      const raw = node.textContent || "";
+      if (!raw.trim()) {
+        return /\s/.test(raw) ? {raw, whitespace: true} : null;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE && !isVisible(node)) return null;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = Array.from(range.getClientRects()).filter(
+        rect => rect.width > 0 && rect.height > 0
+      );
+      if (!rects.length) return null;
+      return {
+        raw,
+        whitespace: false,
+        start: rects[0],
+        end: rects[rects.length - 1]
+      };
+    };
+    let previous = null;
+    let separated = false;
+    let count = 0;
+    let minimumGap = Infinity;
+    for (const node of element.childNodes) {
+      const fragment = fragmentFor(node);
+      if (!fragment) continue;
+      if (fragment.whitespace) {
+        separated = true;
+        continue;
+      }
+      const sourceSeparated = (
+        separated
+        || /^\s/.test(fragment.raw)
+        || (previous && /\s$/.test(previous.raw))
+      );
+      if (previous && !sourceSeparated) {
+        const overlap = Math.min(previous.end.bottom, fragment.start.bottom)
+          - Math.max(previous.end.top, fragment.start.top);
+        const gap = fragment.start.left - previous.end.right;
+        const previousCharacter = previous.raw.trim().slice(-1);
+        const nextCharacter = fragment.raw.trim().slice(0, 1);
+        if (
+          overlap >= Math.min(previous.end.height, fragment.start.height) * 0.5
+          && gap >= -0.5
+          && gap <= 1
+          && /[\p{L}\p{N}%]/u.test(previousCharacter)
+          && /[\p{L}\p{N}]/u.test(nextCharacter)
+        ) {
+          count += 1;
+          minimumGap = Math.min(minimumGap, gap);
+        }
+      }
+      previous = fragment;
+      separated = false;
+    }
+    return count ? {count, minimumGap} : null;
+  };
+
   const candidateSet = new Set(structuralCandidates);
   const textElementPattern = /^(?:h[1-6]|p|li|label|legend|blockquote|figcaption|td|th|dt|dd|span|small|strong|em)$/;
   for (const element of allElements) {
@@ -2414,6 +2645,8 @@ async () => {
     if (
       isControl(element, role) ||
       isVisualContainer(element, style) ||
+      isScrollRegion(element) ||
+      chartBarsFor(element).length >= 3 ||
       (hasText && (textElementPattern.test(tag) || element.children.length === 0)) ||
       ["flex", "grid", "inline-grid"].includes(parentDisplay)
     ) {
@@ -2438,18 +2671,19 @@ async () => {
       || measured.measurements.isVisualContainer
       || measured.measurements.clippedByAncestor
       || measured.measurements.isScrollRegion
+      || chartBarsFor(element).length >= 3
     ) return 2;
     return 3;
   };
   const eligible = Array.from(candidateSet)
-    .filter(isVisible)
+    .filter(isVisibleInScrollport)
     .sort((first, second) => (
       priority(first) - priority(second)
       || (documentOrder.get(first) ?? 0) - (documentOrder.get(second) ?? 0)
     ));
   const selected = eligible.slice(0, __UIDETOX_CANDIDATES__);
   const visibleTargets = allElements.filter(element => {
-    if (!isVisible(element)) return false;
+    if (!isVisibleInScrollport(element)) return false;
     const measured = baseMeasurement(element);
     return isControl(element, measured.role);
   });
@@ -2499,6 +2733,74 @@ async () => {
     return {byCell, overflow};
   };
   const targetSpatialIndex = buildSpatialIndex(targetRecords);
+  const selectedSet = new Set(selected);
+  const textRecords = allElements
+    .filter(element => {
+      if (
+        !isVisible(element)
+        || !isVisibleInScrollport(element)
+        || element.closest("[aria-hidden='true']")
+        || (activeModal && !activeModal.contains(element))
+      ) return false;
+      const measured = baseMeasurement(element);
+      return measured.measurements.paintedText && measured.text?.bounds;
+    })
+    .flatMap(element => baseMeasurement(element).text.lines.map(line => ({
+      element,
+      selector: selectorFor(element),
+      rect: {
+        ...line,
+        width: line.right - line.left,
+        height: line.bottom - line.top
+      }
+    })));
+  const textSpatialIndex = buildSpatialIndex(textRecords);
+  const textCollisionEvidence = element => {
+    const measured = baseMeasurement(element);
+    if (!measured.measurements.paintedText || !measured.text?.lines) return null;
+    const ownRects = measured.text.lines.map(line => ({
+      ...line,
+      width: line.right - line.left,
+      height: line.bottom - line.top
+    }));
+    const candidates = new Set(textSpatialIndex.overflow);
+    for (const rect of ownRects) {
+      const cells = targetCells(rect);
+      if (cells === null) {
+        textRecords.forEach(candidate => candidates.add(candidate));
+      } else {
+        for (const cell of cells) {
+          for (const candidate of textSpatialIndex.byCell.get(cell) || []) {
+            candidates.add(candidate);
+          }
+        }
+      }
+    }
+    let collision = null;
+    for (const candidate of candidates) {
+      if (
+        candidate.element === element
+        || candidate.element.contains(element)
+        || element.contains(candidate.element)
+        || (
+          (documentOrder.get(candidate.element) ?? 0)
+            < (documentOrder.get(element) ?? 0)
+          && selectedSet.has(candidate.element)
+        )
+      ) continue;
+      const area = Math.max(...ownRects.map(rect => {
+        const width = Math.min(rect.right, candidate.rect.right)
+          - Math.max(rect.left, candidate.rect.left);
+        const height = Math.min(rect.bottom, candidate.rect.bottom)
+          - Math.max(rect.top, candidate.rect.top);
+        return width > 1 && height > 1 ? width * height : 0;
+      }));
+      if (area > 4 && (!collision || area > collision.area)) {
+        collision = {area, selector: candidate.selector};
+      }
+    }
+    return collision;
+  };
   const targetSpacingEvidence = element => {
     if (targetGeometryTruncated) {
       return {
@@ -2579,7 +2881,7 @@ async () => {
   };
   const potentialOccluderRecords = allElements
     .filter(element => {
-      if (!isVisible(element)) return false;
+      if (!isVisibleInScrollport(element)) return false;
       const {style} = geometryFor(element);
       const position = style.position;
       return (
@@ -2719,6 +3021,26 @@ async () => {
       measurements.focusIndicator = focusIndicator(element, style, rect);
     }
     enrichPeerMeasurements(element, measurements);
+    const chart = chartEvidence(element);
+    if (chart) {
+      measurements.chartBarCount = chart.barCount;
+      measurements.chartBarBaselineSpread = round(chart.baselineSpread);
+      measurements.chartBarHeightSpread = round(chart.heightSpread);
+      measurements.chartBarSelectors = chart.selectors;
+    }
+    const collision = measurements.obscuredByModal
+      ? null
+      : textCollisionEvidence(element);
+    if (collision) {
+      measurements.textCollisionCount = 1;
+      measurements.maxTextCollisionArea = round(collision.area);
+      measurements.collidingTextSelector = collision.selector;
+    }
+    const adjacentText = adjacentTextEvidence(element);
+    if (adjacentText) {
+      measurements.unseparatedTextBoundaryCount = adjacentText.count;
+      measurements.minimumAdjacentTextGap = round(adjacentText.minimumGap);
+    }
     const equivalence = semanticSiblingEvidence(element);
     if (equivalence) {
       measurements.equivalenceGroup = equivalence.group;
@@ -2730,7 +3052,9 @@ async () => {
       measurements.targetSpacing = targetSpacingEvidence(element);
       measurements.targetException = targetException(element, role, style);
     }
-    const occlusion = occlusionEvidence(element, rect);
+    const occlusion = measurements.obscuredByModal
+      ? {selector: "", fraction: 0}
+      : occlusionEvidence(element, rect);
     measurements.occludedBy = occlusion.selector;
     measurements.occludedFraction = round(occlusion.fraction);
 

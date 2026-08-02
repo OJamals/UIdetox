@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from uidetox.findings import (
+    STRUCTURED_REVIEW_POLICY_VERSION,
     EligibilityContext,
     Finding,
     VerificationResult,
@@ -338,6 +339,7 @@ def test_manual_verifier_requires_linked_structured_review(tmp_path):
             "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
+                "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
                 "evidence_hashes": dict(hashes),
                 "finding_links": [finding.fingerprint],
                 "region_links": ["runtime-hierarchy"],
@@ -417,6 +419,7 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
             "required_matrix_digest": matrix_digest,
             "scope_validation": {
                 "status": "validated",
+                "policy_version": STRUCTURED_REVIEW_POLICY_VERSION,
                 "evidence_hashes": hashes,
                 "finding_links": [queue_id],
                 "region_links": ["runtime-hierarchy"],

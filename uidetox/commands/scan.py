@@ -17,6 +17,7 @@ from uidetox.findings import (
     Finding,
     coerce_finding,
     current_evidence_hashes,
+    requires_resolution,
     score_current_snapshot,
 )
 from uidetox.frontend_map import (
@@ -549,10 +550,14 @@ def run(args: argparse.Namespace):
     queued_count = add_issues(
         pending_issues, qualified_complete=since_targets is None and map_qualified
     )
-    if queued_count > 0:
-        print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
+    actionable_detected = sum(requires_resolution(issue) for issue in pending_issues)
+    investigative_detected = len(pending_issues) - actionable_detected
+    if actionable_detected:
+        print(f"  -> Queued {actionable_detected} actionable anti-pattern issue(s).")
     else:
-        print("  -> No mechanical anti-patterns detected.")
+        print("  -> No actionable anti-patterns detected.")
+    if investigative_detected:
+        print(f"  -> Recorded {investigative_detected} investigative finding(s).")
     # Category coverage (compact)
     print()
     auto_hits = []
@@ -602,22 +607,29 @@ def run(args: argparse.Namespace):
     state = load_state()
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
-    queue_size = len(state.get("issues", []))
+    current_issues = state.get("issues", [])
+    queue_size = sum(requires_resolution(issue) for issue in current_issues)
+    investigative_count = len(current_issues) - queue_size
     print("=" * 58)
     print(" TARGET SCORE CHECK")
     print("=" * 58)
     filled = score // 5
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score : [{bar}] {score}/100  (target: {target})")
-    print(f"  Queue        : {queue_size} issue(s)")
+    print(
+        f"  Queue        : {queue_size} actionable | "
+        f"{investigative_count} investigative"
+    )
     if score >= target and queue_size == 0:
         print()
-        print(f"  TARGET REACHED -- Score >= {target} and queue is empty.")
+        print(f"  TARGET REACHED -- Score >= {target}; no actionable findings.")
         print("  -> Run `uidetox finish` to finalize.")
     else:
         print()
         if queue_size > 0:
-            print(f"  Score < {target} or queue non-empty -> enter Fix Loop.")
+            print(
+                f"  Score < {target} or actionable queue non-empty -> enter Fix Loop."
+            )
             print("  -> Run `uidetox next` to start fixing.")
         else:
             print(f"  Queue empty but score < {target} -> subjective review needed.")

@@ -169,15 +169,15 @@ def test_fullstack_fixture_client_is_canonical_operation_evidence():
     )
     facts = extract_source_facts(client, client.read_text(encoding="utf-8"))
     assert facts is not None
-    assert len(facts.endpoints) == 28
+    assert len(facts.endpoints) == 73
     assert all(endpoint.method is not None for endpoint in facts.endpoints)
     assert (
-        EndpointFact("/api/projects/${projectId}", 70, "GET", True) in facts.endpoints
+        EndpointFact("/api/projects/${projectId}", 98, "GET", True) in facts.endpoints
     )
     assert (
         EndpointFact(
             "/api/governance/approvals/${approvalId}/decision",
-            132,
+            160,
             "POST",
             True,
         )

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from uidetox.redesign import RedesignProposal, RedesignSet
@@ -78,13 +79,45 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
     )
     contract_counts = dict(redesign_set.contract_lineage.get("counts", {}))
     contract_findings = list(redesign_set.contract_lineage.get("findings", []))
-    source_evidence = [
-        (
-            f"- {item.get('file', 'unknown')}: "
-            + "; ".join(str(reason) for reason in item.get("reasons", []))
-        )
-        for item in proposal.source_evidence
-    ]
+    source_evidence = (
+        ["- Detailed module provenance remains in the redesign artifact."]
+        if proposal.source_evidence
+        else []
+    )
+    contract_finding_counts = Counter(
+        str(item.get("kind", "unresolved")) for item in contract_findings
+    )
+    contract_finding_evidence: list[str] = []
+    for kind, count in sorted(contract_finding_counts.items()):
+        matching = [
+            item
+            for item in contract_findings
+            if str(item.get("kind", "unresolved")) == kind
+        ]
+        if count <= 10:
+            contract_finding_evidence.extend(
+                f"- {kind}: {item.get('normalized_path') or 'unknown path'}"
+                for item in matching
+            )
+        else:
+            contract_finding_evidence.append(
+                f"- {kind}: {count} finding(s); full details remain in the redesign artifact."
+            )
+    observable_checks: list[str] = []
+    observable_check_summaries: Counter[str] = Counter()
+    for check in proposal.observable_checks:
+        if check.startswith(("Contract lineage check:", "Evidence gap:")):
+            observable_check_summaries[check.partition(":")[0]] += 1
+        elif check.startswith("Source check: ") and " remains represented in " in check:
+            observable_checks.append(
+                check.partition(" remains represented in ")[0] + " mapped."
+            )
+        else:
+            observable_checks.append(check)
+    observable_checks.extend(
+        f"{kind}: {count} check(s); full details remain in the redesign artifact."
+        for kind, count in sorted(observable_check_summaries.items())
+    )
     migration_evidence = [
         (
             f"{item.get('order', '?')}. [{item.get('kind', 'step')}] "
@@ -213,20 +246,9 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
                 or ["- None recorded."]
             ),
             "Full-stack contract lineage findings:",
-            *(
-                [
-                    "- "
-                    + str(item.get("kind", "unresolved"))
-                    + ": "
-                    + str(item.get("normalized_path") or "unknown path")
-                    + " — "
-                    + str(item.get("detail", ""))
-                    for item in contract_findings
-                ]
-                or ["- None recorded."]
-            ),
+            *(contract_finding_evidence or ["- None recorded."]),
             "Observable acceptance checks:",
-            *_bullets(proposal.observable_checks),
+            *_bullets(tuple(observable_checks)),
             "END_UIDETOX_EVIDENCE",
             *_QUALIFICATION_CONTRACT_V1,
             "",

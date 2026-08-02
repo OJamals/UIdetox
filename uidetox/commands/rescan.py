@@ -3,6 +3,7 @@ This is the 'outer loop' in the desloppify flow -- after the fix loop drains the
 queue, rescan re-evaluates from scratch to discover deeper issues and check if
 the target score has been reached.
 """
+
 import argparse
 import os
 import sys
@@ -13,6 +14,7 @@ from uidetox.commands.scan import current_map_findings
 from uidetox.findings import (
     coerce_finding,
     current_evidence_hashes,
+    requires_resolution,
     score_current_snapshot,
 )
 from uidetox.history import save_run_snapshot
@@ -79,13 +81,15 @@ def run(args: argparse.Namespace):
             for finding in [*pending_issues, *mapped_findings]
         }.values()
     )
-    queued_count = add_issues(
-        pending_issues, qualified_complete=map_qualified
-    )
-    if queued_count > 0:
-        print(f"  -> Queued {queued_count} mechanical anti-pattern issues.")
+    queued_count = add_issues(pending_issues, qualified_complete=map_qualified)
+    actionable_detected = sum(requires_resolution(issue) for issue in pending_issues)
+    investigative_detected = len(pending_issues) - actionable_detected
+    if actionable_detected:
+        print(f"  -> Queued {actionable_detected} actionable anti-pattern issue(s).")
     else:
-        print("  -> No mechanical anti-patterns detected.")
+        print("  -> No actionable anti-patterns detected.")
+    if investigative_detected:
+        print(f"  -> Recorded {investigative_detected} investigative finding(s).")
     # ---- SUBJECTIVE REVIEW PROMPT ----
     print()
     print("  SUBJECTIVE REVIEW (complete during this rescan):")
@@ -114,13 +118,15 @@ def run(args: argparse.Namespace):
     state = load_state()
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     score = scores["blended_score"]
-    queue_size = len(state.get("issues", []))
+    current_issues = state.get("issues", [])
+    queue_size = sum(requires_resolution(issue) for issue in current_issues)
+    investigative_count = len(current_issues) - queue_size
     print()
     print("-" * 58)
     filled = score // 5
     bar = "#" * filled + "." * (20 - filled)
     print(f"  Design Score: [{bar}] {score}/100  (target: {target})")
-    print(f"  Queue: {queue_size} issue(s)")
+    print(f"  Queue: {queue_size} actionable | {investigative_count} investigative")
     if score >= target and queue_size == 0:
         print("  TARGET REACHED -> Run `uidetox finish`")
     elif queue_size > 0:

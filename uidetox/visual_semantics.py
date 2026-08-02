@@ -241,12 +241,15 @@ def project_visual_evidence_status(
     is_required = (
         bool(visual_config.get("required", False)) if required is None else required
     )
+    uidetox_dir = get_uidetox_dir()
     configured_path = manifest_path or visual_config.get("manifest_path")
-    resolved_manifest = (
-        Path(str(configured_path)).expanduser().resolve()
-        if configured_path
-        else (get_uidetox_dir() / "snapshots" / "visual-evidence.json")
-    )
+    if configured_path:
+        resolved_manifest = Path(str(configured_path)).expanduser().resolve()
+    else:
+        resolved_manifest = uidetox_dir / "visual-evidence" / "manifest.json"
+        legacy_manifest = uidetox_dir / "snapshots" / "visual-evidence.json"
+        if not resolved_manifest.is_file() and legacy_manifest.is_file():
+            resolved_manifest = legacy_manifest
     try:
         expected_parameters = {
             "threshold": int(visual_config.get("threshold", DEFAULT_PIXEL_THRESHOLD)),
@@ -263,7 +266,7 @@ def project_visual_evidence_status(
             reasons=(f"visual evidence configuration is invalid: {error}",),
         )
 
-    frontend_map_path = get_uidetox_dir() / FRONTEND_MAP_FILE
+    frontend_map_path = uidetox_dir / FRONTEND_MAP_FILE
     _, _, context_hashes, _ = load_project_visual_context(
         config,
         frontend_map_path,

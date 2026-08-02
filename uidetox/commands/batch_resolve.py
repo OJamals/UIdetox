@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from uidetox.findings import VerificationResult, verify_finding
+from uidetox.findings import VerificationResult, requires_resolution, verify_finding
 from uidetox.memory import log_progress, save_session
 from uidetox.prompt_safety import render_untrusted_data, sanitize_untrusted_data
 from uidetox.state import (
@@ -208,7 +208,7 @@ def run(args: argparse.Namespace):
     affected_files = list(set(r.get("file", "") for r in removed if r.get("file")))
     component = _derive_component_name(affected_files)
     state = load_state()
-    remaining = len(state.get("issues", []))
+    remaining = sum(requires_resolution(issue) for issue in state.get("issues", []))
     resolved_total = len(state.get("resolved", []))
     if single:
         print(f"✅ Resolved {removed[0]['id']}: [{removed[0]['tier']}] {removed[0]['issue']}")
@@ -231,7 +231,8 @@ def run(args: argparse.Namespace):
     remaining_in_component = [
         i
         for i in state.get("issues", [])
-        if _derive_component_name([i.get("file", "")]) == component
+        if requires_resolution(i)
+        and _derive_component_name([i.get("file", "")]) == component
     ]
     if remaining_in_component:
         print(f"\n   ⚡ {len(remaining_in_component)} more issue(s) in {component}:")

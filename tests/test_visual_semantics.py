@@ -473,3 +473,31 @@ def test_corrupt_or_deleted_map_invalidates_captured_context(
         manifest_path=manifest_path,
     )
     assert deleted_status.state == "stale"
+
+
+def test_default_visual_manifest_matches_visual_evidence_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uidetox_dir = tmp_path / ".uidetox"
+    uidetox_dir.mkdir()
+    monkeypatch.setattr(visual_semantics, "get_uidetox_dir", lambda: uidetox_dir)
+
+    status = project_visual_evidence_status({})
+
+    assert status.manifest_path == uidetox_dir / "visual-evidence" / "manifest.json"
+
+
+def test_default_visual_manifest_falls_back_to_legacy_capture_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uidetox_dir = tmp_path / ".uidetox"
+    legacy_manifest = uidetox_dir / "snapshots" / "visual-evidence.json"
+    legacy_manifest.parent.mkdir(parents=True)
+    legacy_manifest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(visual_semantics, "get_uidetox_dir", lambda: uidetox_dir)
+
+    status = project_visual_evidence_status({})
+
+    assert status.manifest_path == legacy_manifest

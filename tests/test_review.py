@@ -19,6 +19,8 @@ def _validated_review_map(
     tmp_path: Path,
     *,
     capture_matrix: list[dict] | None = None,
+    project_findings: list[dict] | None = None,
+    contracts: ExperienceContract | None = None,
 ) -> FrontendMap:
     return FrontendMap(
         schema_version=SCHEMA_VERSION,
@@ -36,7 +38,7 @@ def _validated_review_map(
             ),
         ),
         edges=(),
-        contracts=ExperienceContract((), (), ()),
+        contracts=contracts or ExperienceContract((), (), ()),
         fingerprint={},
         evidence={
             "source_status": "current",
@@ -54,6 +56,7 @@ def _validated_review_map(
                 }
             ],
         },
+        project_map={"findings": project_findings or []},
     )
 
 
@@ -236,6 +239,10 @@ def test_review_stores_structured_dimensions_and_current_evidence_hashes(
     assert stored["evidence_hashes"] == {"source": "s", "map": "m", "runtime": "r"}
     assert stored["region_links"] == ["runtime-card"]
     assert stored["scope_validation"]["status"] == "validated"
+    assert (
+        stored["scope_validation"]["policy_version"]
+        == review.STRUCTURED_REVIEW_POLICY_VERSION
+    )
     assert stored["scope_validation"]["capture_matrix"] == [
         {"route": "/checkout", "state": "error", "viewport": "mobile"}
     ]
@@ -349,6 +356,78 @@ def test_structured_review_rejects_stale_links_and_incomplete_capture_matrix(
     assert "stale-finding" in error
     assert "stale-region" in error
     assert "/checkout/success/mobile" in error
+
+
+def test_structured_review_accepts_current_contract_finding_links(
+    tmp_path: Path,
+) -> None:
+    frontend_map = _validated_review_map(
+        tmp_path,
+        project_findings=[
+            {"fingerprint": "contract-finding", "id": "contract-finding"}
+        ],
+    )
+
+    validation = review._validate_review_scope(
+        frontend_map,
+        {"issues": []},
+        {"source": "s", "map": "m", "runtime": "r"},
+        {
+            "finding_link": ["contract-finding"],
+            "region_link": ["runtime-card"],
+            "route": ["/checkout"],
+            "state": ["error"],
+            "viewport": ["mobile"],
+        },
+    )
+
+    assert validation["status"] == "validated"
+    assert validation["errors"] == []
+
+
+def test_structured_review_rejects_initial_only_interactive_state_evidence(
+    tmp_path: Path,
+) -> None:
+    frontend_map = _validated_review_map(
+        tmp_path,
+        capture_matrix=[
+            {
+                "scenario": "default",
+                "state": "initial",
+                "url": "http://localhost:3000/projects",
+                "viewport": {"name": "mobile"},
+                "status": "completed",
+            }
+        ],
+        contracts=ExperienceContract(
+            must_preserve=("User-visible state remains represented: error",),
+            may_change=(),
+            unknown=(
+                (
+                    "Only initial runtime state was observed; triggered, authenticated, "
+                    "and failure states remain unknown."
+                ),
+            ),
+        ),
+    )
+
+    validation = review._validate_review_scope(
+        frontend_map,
+        {"issues": []},
+        {"source": "s", "map": "m", "runtime": "r"},
+        {
+            "finding_link": ["finding-1"],
+            "region_link": ["runtime-card"],
+            "route": ["/projects"],
+            "state": ["initial"],
+            "viewport": ["mobile"],
+        },
+    )
+
+    assert validation["status"] == "invalid"
+    assert validation["errors"] == [
+        "interactive review requires at least one non-initial runtime scenario state"
+    ]
 
 
 def test_structured_review_requires_citations_and_coverage(

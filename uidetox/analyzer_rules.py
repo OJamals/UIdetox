@@ -66,7 +66,7 @@ RULES = [
     {
         "id": "GLASSMORPHISM_SLOP",
         "pattern": re.compile(
-            r"\b(backdrop-blur|glass-?morphism|bg-white/\d|bg-opacity-)\b",
+            r"\b(backdrop-(?:blur|filter)|glass-?morphism|bg-white/\d|bg-opacity-)\b",
             re.IGNORECASE,
         ),
         "tier": "T2",
@@ -98,7 +98,9 @@ RULES = [
     {
         "id": "BOUNCE_ANIMATION_SLOP",
         "pattern": re.compile(
-            r"\b(animate-bounce|animate-pulse|animate-spin)\b", re.IGNORECASE
+            r"\b(?:animate-bounce|animate-pulse|animate-spin)\b|"
+            r"\banimation(?:-name)?\s*:[^;{}]*\binfinite\b",
+            re.IGNORECASE,
         ),
         "tier": "T1",
         "exts": {".css", ".scss", ".tsx", ".jsx", ".html", ".svelte", ".vue"},
@@ -137,7 +139,11 @@ RULES = [
     {
         "id": "CSS_GRADIENT_SLOP",
         "pattern": re.compile(
-            r"linear-gradient\s*\([^)]*(?:purple|indigo|violet).*?(?:blue|cyan|sky)",
+            r"linear-gradient\s*\("
+            r"(?=[^)]*(?:purple|indigo|violet|#(?:6d28d9|7c3aed|8b5cf6|"
+            r"ede9fe|f5f3ff|c4b5fd)))"
+            r"(?=[^)]*(?:blue|cyan|sky|#(?:2563eb|3b82f6|60a5fa|dbeafe)))"
+            r"[^)]*\)",
             re.IGNORECASE,
         ),
         "tier": "T1",
@@ -498,7 +504,7 @@ RULES = [
     {
         "id": "EXCLAMATION_UX_SLOP",
         "pattern": re.compile(
-            r"(?:Success|Saved|Done|Created|Updated|Deleted|Welcome)[^.]*!",
+            r"(?:Success|Saved|Done|Created|Updated|Deleted|Welcome)\b[^.\n<]*!",
             re.IGNORECASE,
         ),
         "tier": "T2",
@@ -930,7 +936,9 @@ RULES = [
     {
         "id": "OVERSIZED_BORDER_RADIUS_SLOP",
         "pattern": re.compile(
-            r"border-radius:\s*(?:(?!9999)(?:[2-9]\d|[1-9]\d{2,3})px|[3-9]rem)",
+            r"(?:border-radius|--[a-z0-9-]*radius)\s*:\s*"
+            r"(?:(?!9999)(?:[2-9]\d|[1-9]\d{2,3})px|"
+            r"(?:1\.[3-9]\d*|[2-9]\d*(?:\.\d+)?)rem)",
             re.IGNORECASE,
         ),
         "tier": "T2",

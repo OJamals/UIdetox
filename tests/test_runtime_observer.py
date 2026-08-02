@@ -1176,6 +1176,33 @@ def test_detect_runtime_findings_reports_layout_and_font_misalignment() -> None:
     assert "runtime-font-misalignment" in codes
 
 
+def test_detect_runtime_findings_reports_visual_content_collisions() -> None:
+    element = _measured_element(
+        chartBarCount=6,
+        chartBarBaselineSpread=16.7,
+        textCollisionCount=1,
+        maxTextCollisionArea=120.0,
+        collidingTextSelector="#neighbor",
+        unseparatedTextBoundaryCount=1,
+        minimumAdjacentTextGap=0.0,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-chart-baseline-misalignment" in codes
+    assert "runtime-text-collision" in codes
+    assert "runtime-text-separation" in codes
+
+
+def test_detect_runtime_findings_ignores_baseline_for_multi_flow_container() -> None:
+    element = _measured_element(
+        isTextFlow=False,
+        fontBaselineDeviation=5.0,
+    )
+
+    assert "runtime-font-misalignment" not in _finding_codes(element)
+
+
 def test_detect_runtime_findings_reports_text_and_component_clipping() -> None:
     element = _measured_element(
         hasText=True,
@@ -1192,6 +1219,81 @@ def test_detect_runtime_findings_reports_text_and_component_clipping() -> None:
 
     assert "runtime-text-clipped" in codes
     assert "runtime-component-clipped" in codes
+
+
+def test_detect_runtime_findings_ignores_descendant_scroll_region_clipping() -> None:
+    element = _measured_element(
+        hasText=True,
+        clientWidth=200.0,
+        scrollWidth=200.0,
+        clientHeight=300.0,
+        scrollHeight=900.0,
+        overflowX="hidden",
+        overflowY="hidden",
+        descendantClipped=True,
+        containsScrollRegionX=False,
+        containsScrollRegionY=True,
+        clippedByAncestor=True,
+        insideScrollRegionY=True,
+        ancestorClipOverflowBlockEnd=600.0,
+    )
+
+    codes = _finding_codes(element)
+
+    assert "runtime-text-clipped" not in codes
+    assert "runtime-component-clipped" not in codes
+
+
+def test_detect_runtime_findings_reports_scroll_concealed_actions() -> None:
+    element = _measured_element(
+        isScrollRegionX=True,
+        clientWidth=324.0,
+        scrollWidth=720.0,
+        concealedInteractiveDescendantCount=4,
+    )
+
+    findings = detect_runtime_findings(element)
+
+    assert _finding_codes(element) == {"runtime-interactive-scroll-concealment"}
+    assert findings[0].metrics == {
+        "concealed_action_count": 4.0,
+        "client_width_px": 324.0,
+        "scroll_width_px": 720.0,
+        "scroll_width_ratio": pytest.approx(2.22, abs=0.01),
+    }
+
+
+def test_detect_runtime_findings_reports_navigation_choice_overload() -> None:
+    element = replace(
+        _measured_element(
+            navigationLinkCount=30,
+            isScrollRegionY=True,
+            clientHeight=750.0,
+            scrollHeight=2130.0,
+        ),
+        kind="region",
+        tag="nav",
+        role="navigation",
+        selector="#primary-navigation",
+    )
+
+    findings = detect_runtime_findings(element)
+
+    assert _finding_codes(element) == {"runtime-navigation-choice-overload"}
+    assert findings[0].metrics["link_count"] == 30.0
+    assert findings[0].metrics["scroll_height_ratio"] == pytest.approx(2.84, abs=0.01)
+
+
+def test_detect_runtime_findings_ignores_grouped_navigation_choices() -> None:
+    element = _measured_element(
+        navigationLinkCount=30,
+        navigationGroupCount=3,
+        isScrollRegionY=True,
+        clientHeight=750.0,
+        scrollHeight=2130.0,
+    )
+
+    assert "runtime-navigation-choice-overload" not in _finding_codes(element)
 
 
 def test_detect_runtime_findings_reports_text_clipped_by_ancestor() -> None:
@@ -1297,7 +1399,7 @@ def test_detect_runtime_findings_reports_overlapping_lines_as_error() -> None:
         isMultiline=True,
         isTextFlow=True,
         fontSize=16.0,
-        lineHeight=24.0,
+        lineHeight=15.0,
         minimumLineGap=-2.0,
     )
 
@@ -1768,6 +1870,21 @@ def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> 
     healthy = _design_findings(_design_page(heading_one, healthy_h2, *healthy_rhythm))
     assert "runtime-type-hierarchy" not in healthy["#h2"]
     assert all("runtime-spatial-rhythm" not in codes for codes in healthy.values())
+
+    overlapping = tuple(
+        replace(
+            item,
+            bounds={**item.bounds, "y": 120 if index < 3 else 161},
+        )
+        for index, item in enumerate(rhythm)
+    )
+    overlap_findings = _design_findings(
+        _design_page(heading_one, healthy_h2, *overlapping)
+    )
+    assert all(
+        "runtime-spatial-rhythm" not in codes
+        for codes in overlap_findings.values()
+    )
 
 
 def test_occlusion_offscreen_sticky_target_and_focus_are_causal_and_state_bound() -> (
@@ -2541,7 +2658,7 @@ def test_browser_focus_evidence_requires_perceptible_computed_delta(
   #border:focus { border-color: black; }
   #faint-shadow:focus { box-shadow: 0 0 0 2px rgb(0 0 0 / 1%); }
   #outline:focus { outline: 2px solid black; }
-  #visible-shadow:focus { box-shadow: 0 0 0 2px black; }
+  #visible-shadow:focus { box-shadow: 0 0 0 5px black; }
   #permanent-shadow { box-shadow: 0 0 0 2px black; }
 </style>
 <main>
@@ -2600,6 +2717,8 @@ def test_browser_focus_evidence_requires_perceptible_computed_delta(
         else:
             assert "runtime-focus-visible" not in codes
             assert element.measurements["focusIndicator"]["perceptibleProperties"]
+        if state == "visible-shadow":
+            assert "runtime-focus-appearance-guidance" not in codes
 
 
 @pytest.mark.browser
@@ -2635,6 +2754,20 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     width: 100px;
   }
   #badge { background: #eee; }
+  #bar-chart { display: flex; align-items: end; gap: 8px; width: 300px; }
+  .chart-column { display: grid; align-items: end; gap: 8px; height: 160px; }
+  .chart-bar { width: 24px; background: black; }
+  #collision-grid { display: grid; grid-template-columns: 100px 100px; }
+  #overflow-text { margin: 0; white-space: nowrap; font-size: 40px; }
+  #sibling-collision { position: relative; height: 32px; }
+  #sibling-overflow, #sibling-peer {
+    position: absolute;
+    top: 0;
+    white-space: nowrap;
+    font-size: 20px;
+  }
+  #sibling-overflow { left: 0; }
+  #sibling-peer { left: 32px; }
 </style>
 <main>
   <div class="row">
@@ -2661,6 +2794,20 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     <span id="ancestor-clipped-text">Clipped by ancestor</span>
   </div>
   <span id="badge">New</span>
+  <div id="bar-chart" aria-label="Fixture bar chart">
+    <div class="chart-column"><span>20</span><span class="chart-bar" style="height: 20px"></span><small>A</small></div>
+    <div class="chart-column"><span>60</span><span class="chart-bar" style="height: 60px"></span><small>B</small></div>
+    <div class="chart-column"><span>100</span><span class="chart-bar" style="height: 100px"></span><small>C</small></div>
+  </div>
+  <div id="collision-grid">
+    <div><h2 id="overflow-text">$123456789</h2></div>
+    <div><span id="collision-peer">Next metric</span></div>
+  </div>
+  <div id="sibling-collision">
+    <span id="sibling-overflow">Overlapping metric</span>
+    <span id="sibling-peer">Direct sibling</span>
+  </div>
+  <label id="glued-label">Rollout<span>50%</span></label>
 </main>
 """.strip(),
         encoding="utf-8",
@@ -2701,6 +2848,10 @@ def test_observer_detects_rendered_layout_and_typography_defects(
     assert "runtime-line-spacing" in findings_by_selector["#tight"]
     assert "runtime-component-clipped" in findings_by_selector["#clip"]
     assert "runtime-text-clipped" in findings_by_selector["#ancestor-clipped-text"]
+    assert "runtime-chart-baseline-misalignment" in findings_by_selector["#bar-chart"]
+    assert "runtime-text-collision" in findings_by_selector["#overflow-text"]
+    assert "runtime-text-collision" in findings_by_selector["#sibling-overflow"]
+    assert "runtime-text-separation" in findings_by_selector["#glued-label"]
     assert "#badge" not in findings_by_selector
     assert elements_by_selector["#tight"].measurements["fontStatus"] == "loaded"
     assert elements_by_selector["#tight"].measurements["fontReady"] is True
@@ -2728,6 +2879,75 @@ def test_observer_detects_rendered_layout_and_typography_defects(
         ]
         == "#ancestor-clip"
     )
+
+
+@pytest.mark.browser
+def test_observer_reports_navigation_overload_and_scroll_concealed_actions(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "responsive-ux-defects.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  #primary-navigation { width: 180px; height: 120px; overflow-y: auto; }
+  #primary-navigation a { display: block; height: 24px; }
+  #grouped-navigation { width: 180px; height: 120px; overflow-y: auto; }
+  #grouped-navigation a { display: block; height: 24px; }
+  #action-table { width: 300px; overflow-x: auto; }
+  #action-row { width: 720px; height: 80px; position: relative; }
+  #concealed-action { position: absolute; left: 640px; top: 12px; }
+</style>
+<nav id="primary-navigation">
+  <a href="#1">One</a><a href="#2">Two</a><a href="#3">Three</a>
+  <a href="#4">Four</a><a href="#5">Five</a><a href="#6">Six</a>
+  <a href="#7">Seven</a><a href="#8">Eight</a><a href="#9">Nine</a>
+  <a href="#10">Ten</a><a href="#11">Eleven</a><a href="#12">Twelve</a>
+  <a href="#13">Thirteen</a>
+</nav>
+<nav id="grouped-navigation">
+  <section><h2>Work</h2>
+    <a href="#g1">One</a><a href="#g2">Two</a><a href="#g3">Three</a>
+    <a href="#g4">Four</a><a href="#g5">Five</a><a href="#g6">Six</a>
+    <a href="#g7">Seven</a>
+  </section>
+  <section><h2>Review</h2>
+    <a href="#g8">Eight</a><a href="#g9">Nine</a><a href="#g10">Ten</a>
+    <a href="#g11">Eleven</a><a href="#g12">Twelve</a><a href="#g13">Thirteen</a>
+  </section>
+</nav>
+<main>
+  <section id="action-table">
+    <div id="action-row"><button id="concealed-action">Delete</button></div>
+  </section>
+</main>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    origin = local_http_server(tmp_path)
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("mobile", 390, 844),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    elements = {element.selector: element for element in observation.pages[0].elements}
+
+    assert _finding_codes(elements["#primary-navigation"]) == {
+        "runtime-navigation-choice-overload"
+    }
+    assert "runtime-navigation-choice-overload" not in _finding_codes(
+        elements["#grouped-navigation"]
+    )
+    assert _finding_codes(elements["#action-table"]) == {
+        "runtime-interactive-scroll-concealment"
+    }
 
 
 @pytest.mark.browser
@@ -2775,6 +2995,59 @@ def test_observer_excludes_framework_dev_ui(
             "#astro-dev-action",
         }
     )
+
+
+@pytest.mark.browser
+def test_observer_excludes_descendants_of_closed_details(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "details-visibility.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<details>
+  <summary id="closed-summary">Closed navigation</summary>
+  <a id="closed-link" href="/hidden">Hidden destination</a>
+</details>
+<details open>
+  <summary id="open-summary">Open navigation</summary>
+  <a id="open-link" href="/visible">Visible destination</a>
+</details>
+<div style="width: 200px; overflow-x: auto">
+  <button id="wide" style="width: 1800px">Wide scroll content</button>
+</div>
+<button id="mixed" style="line-height: 24px">
+  <span style="font-family: monospace">NO</span> Northstar Operator
+</button>
+<h2 id="wrapped" style="width: 200px; font-size: 24px; line-height: 1.1">
+  Normal wrapped heading remains readable
+</h2>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    origin = local_http_server(tmp_path)
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("desktop", 1280, 800),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    selectors = {element.selector for element in observation.pages[0].elements}
+    assert {"#closed-summary", "#open-summary", "#open-link"} <= selectors
+    assert "#closed-link" not in selectors
+    by_selector = {
+        element.selector: {finding.code for finding in element.findings}
+        for element in observation.pages[0].elements
+    }
+    assert "runtime-offscreen" not in by_selector["#wide"]
+    assert "runtime-line-spacing" not in by_selector["#mixed"]
+    assert "runtime-line-spacing" not in by_selector["#wrapped"]
 
 
 @pytest.mark.browser
@@ -3205,3 +3478,240 @@ def test_capture_then_failure_finalizes_exact_semantic_state_diagnostic(
     assert finding["runtime_anchor"]["capture_id"] == capture.capture_id
     assert finding["runtime_anchor"]["scenario"] == scenario.name
     assert finding["runtime_anchor"]["state"] == capture.state
+
+
+def test_dialog_modality_requires_top_layer_and_contained_focus() -> None:
+    proper = _design_element(
+        "#proper-dialog",
+        kind="region",
+        tag="dialog",
+        measurements={
+            "openDialog": True,
+            "dialogModalIntent": True,
+            "modalDialog": True,
+            "dialogFocusContained": True,
+        },
+    )
+    broken = _design_element(
+        "#broken-dialog",
+        kind="region",
+        tag="dialog",
+        measurements={
+            "openDialog": True,
+            "dialogModalIntent": True,
+            "modalDialog": False,
+            "dialogFocusContained": False,
+        },
+    )
+
+    findings = _design_findings(_design_page(proper, broken))
+
+    assert "runtime-dialog-modality" not in findings["#proper-dialog"]
+    assert findings["#broken-dialog"] == {"runtime-dialog-modality"}
+
+
+def test_parent_owned_surface_does_not_require_child_padding() -> None:
+    element = _measured_element(
+        hasText=True,
+        isVisualContainer=True,
+        isBoxControl=False,
+        isTextFlow=True,
+        hasVisualSurface=False,
+        textInsetInlineStart=0,
+        textInsetInlineEnd=0,
+        textInsetBlockStart=0,
+        textInsetBlockEnd=0,
+        paddingInlineStart=0,
+        paddingInlineEnd=0,
+        paddingBlockStart=0,
+        paddingBlockEnd=0,
+    )
+
+    assert "runtime-horizontal-padding" not in _finding_codes(element)
+    assert "runtime-vertical-padding" not in _finding_codes(element)
+
+
+def test_pathological_text_wrap_reports_narrow_reading_column() -> None:
+    element = replace(
+        _measured_element(
+            hasText=True,
+            paintedText=True,
+            lineCount=12,
+            fontSize=16,
+            lineHeight=24,
+        ),
+        tag="strong",
+        name="Acme Global Transformation Holdings and Associated Operating Companies",
+    )
+
+    finding = next(
+        item
+        for item in detect_runtime_findings(element)
+        if item.code == "runtime-pathological-text-wrap"
+    )
+
+    assert finding.metrics == {
+        "character_count": 63,
+        "line_count": 12,
+        "characters_per_line": 5.25,
+    }
+
+
+def test_modal_obscured_background_has_no_runtime_layout_findings() -> None:
+    element = _measured_element(
+        obscuredByModal=True,
+        isScrollRegionX=True,
+        concealedInteractiveDescendantCount=4,
+        clientWidth=320,
+        scrollWidth=720,
+    )
+
+    assert detect_runtime_findings(element) == ()
+
+
+@pytest.mark.browser
+def test_browser_modal_context_suppresses_backdrop_noise_and_flags_fake_modal(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    proper = tmp_path / "proper-modal.html"
+    proper.write_text(
+        """
+<!doctype html>
+<style>
+  #behind { position: fixed; left: calc(50% - 60px); top: calc(50% - 20px); }
+  #proper-dialog { width: 240px; height: 120px; }
+</style>
+<button id="behind">Background action</button>
+<dialog id="proper-dialog" class="modal-card" aria-labelledby="proper-title">
+  <h1 id="proper-title">Create project</h1>
+  <button id="inside" autofocus>Continue</button>
+</dialog>
+<script>document.querySelector('#proper-dialog').showModal()</script>
+""".strip(),
+        encoding="utf-8",
+    )
+    broken = tmp_path / "broken-modal.html"
+    broken.write_text(
+        """
+<!doctype html>
+<button id="trigger" autofocus>Invite member</button>
+<dialog id="broken-dialog" class="modal-card" open aria-labelledby="broken-title">
+  <h1 id="broken-title">Invite team member</h1>
+  <input aria-label="Email address">
+</dialog>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    try:
+        observation = observe_frontend(
+            (f"{origin}/{proper.name}", f"{origin}/{broken.name}"),
+            viewports=(RuntimeViewport("mobile", 390, 844),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    pages = {Path(page.url).name: page for page in observation.pages}
+    proper_elements = {
+        element.selector: element for element in pages[proper.name].elements
+    }
+    broken_elements = {
+        element.selector: element for element in pages[broken.name].elements
+    }
+    def finding_codes(element: RuntimeElement) -> set[str]:
+        return {finding.code for finding in element.findings}
+
+    assert "runtime-element-occluded" not in finding_codes(
+        proper_elements["#behind"]
+    )
+    assert "runtime-dialog-modality" not in finding_codes(
+        proper_elements["#proper-dialog"]
+    )
+    assert finding_codes(broken_elements["#broken-dialog"]) == {
+        "runtime-dialog-modality"
+    }
+
+
+@pytest.mark.browser
+def test_browser_ignores_content_outside_visible_scrollport(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "scrollport.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  #scrollport { width: 240px; height: 40px; overflow-y: auto; }
+  #spacer { height: 80px; }
+  #hidden-link { display: block; }
+  #underlay { position: fixed; top: 88px; left: 8px; }
+</style>
+<div id="scrollport">
+  <div id="spacer"></div>
+  <a id="hidden-link" href="#hidden">Hidden navigation item</a>
+</div>
+<p id="underlay">Visible page content</p>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("mobile", 390, 844),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    selectors = {element.selector for element in observation.pages[0].elements}
+
+    assert "#hidden-link" not in selectors
+
+
+@pytest.mark.browser
+def test_browser_reports_pathologically_short_text_lines(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "pathological-wrap.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  strong { display: block; line-height: 24px; overflow-wrap: anywhere; }
+  #narrow { width: 78px; }
+  #healthy { width: 360px; }
+</style>
+<strong id="narrow">Acme Global Transformation Holdings and Associated Operating Companies</strong>
+<strong id="healthy">Acme Global Transformation Holdings and Associated Operating Companies</strong>
+""".strip(),
+        encoding="utf-8",
+    )
+    origin = local_http_server(tmp_path)
+
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("mobile", 390, 844),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    elements = {element.selector: element for element in observation.pages[0].elements}
+    codes = {
+        selector: {finding.code for finding in element.findings}
+        for selector, element in elements.items()
+    }
+
+    assert "runtime-pathological-text-wrap" in codes["#narrow"]
+    assert "runtime-pathological-text-wrap" not in codes["#healthy"]

@@ -73,15 +73,27 @@ def _find_ancestor_with_markers(start: Path, markers: tuple[str, ...]) -> Path |
 def get_project_root() -> Path:
     """Find the project root from the current working directory.
     Preference order:
-    1. Existing `.uidetox` ancestor (persisted project state already established)
-    2. Nearest git/project root marker ancestor for cold starts from subdirectories
-    3. Current working directory as a last resort
+    1. A git root nested below unrelated ancestor state
+    2. A current working directory with an explicit project marker
+    3. Existing `.uidetox` ancestor (persisted project state already established)
+    4. Nearest git/project root marker ancestor for cold starts from subdirectories
+    5. Current working directory as a last resort
     """
     cwd = Path.cwd().resolve()
     uidetox_root = _find_ancestor_with_markers(cwd, (UIDETOX_DIR,))
+    git_root = _find_ancestor_with_markers(cwd, (".git",))
+    if (
+        uidetox_root is not None
+        and git_root is not None
+        and uidetox_root in git_root.parents
+    ):
+        return git_root
+    if uidetox_root != cwd and any(
+        (cwd / marker).exists() for marker in _PROJECT_ROOT_MARKERS
+    ):
+        return cwd
     if uidetox_root is not None:
         return uidetox_root
-    git_root = _find_ancestor_with_markers(cwd, (".git",))
     if git_root is not None:
         return git_root
     project_root = _find_ancestor_with_markers(cwd, _PROJECT_ROOT_MARKERS)

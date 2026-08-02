@@ -513,6 +513,8 @@ def _rhythm_findings(elements: Sequence[DesignElement]) -> dict[int, list[Findin
             for previous, current in pairwise(ordered)
         ]
         median = statistics.median(gaps)
+        if median <= 0:
+            continue
         tolerance = max(4.0, abs(median) * 0.25)
         for gap_index, gap in enumerate(gaps):
             if abs(gap - median) <= tolerance:
@@ -602,11 +604,14 @@ def _geometry_findings(
             )
         position = element.styles.get("position", "")
         offscreen = (
-            left < -1
-            or right > page.viewport.width + 1
+            (
+                (left < -1 or right > page.viewport.width + 1)
+                and not element.measurements.get("insideScrollRegionX")
+            )
             or (
                 position in {"fixed", "sticky"}
                 and (top < -1 or top + height > page.viewport.height + 1)
+                and not element.measurements.get("insideScrollRegionY")
             )
         )
         if offscreen and not element.measurements.get("isScrollRegion"):
@@ -659,6 +664,41 @@ def _interaction_findings(
 ) -> dict[int, list[Finding]]:
     findings: dict[int, list[Finding]] = defaultdict(list)
     for index, element in enumerate(elements):
+        if (
+            element.measurements.get("openDialog") is True
+            and element.measurements.get("dialogModalIntent") is True
+            and (
+                element.measurements.get("modalDialog") is not True
+                or element.measurements.get("dialogFocusContained") is not True
+            )
+        ):
+            findings[index].append(
+                _finding(
+                    code="runtime-dialog-modality",
+                    category="interaction",
+                    severity="error",
+                    confidence=0.99,
+                    message=(
+                        "Modal-intent dialog is outside the top layer or does not "
+                        "contain keyboard focus."
+                    ),
+                    metrics=_metrics(
+                        {
+                            "top_layer_modal": (
+                                element.measurements.get("modalDialog") is True
+                            ),
+                            "focus_contained": (
+                                element.measurements.get("dialogFocusContained")
+                                is True
+                            ),
+                        },
+                        constraints=(
+                            "Use native showModal() semantics.",
+                            "Keep focus inside the open modal dialog.",
+                        ),
+                    ),
+                )
+            )
         interactive = element.kind == "action" or element.role in _INTERACTIVE_ROLES
         if not interactive or element.states.get("disabled") is True:
             continue

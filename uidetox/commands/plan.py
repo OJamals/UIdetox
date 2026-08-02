@@ -8,7 +8,11 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 
-from uidetox.findings import current_evidence_hashes, score_current_snapshot
+from uidetox.findings import (
+    current_evidence_hashes,
+    requires_resolution,
+    score_current_snapshot,
+)
 from uidetox.state import load_config, load_state
 
 # Effort estimate per tier (minutes)
@@ -126,11 +130,15 @@ def _categorize_issue(desc: str) -> str:
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
-    issues = state.get("issues", [])
+    all_issues = state.get("issues", [])
+    issues = [issue for issue in all_issues if requires_resolution(issue)]
+    investigative_count = len(all_issues) - len(issues)
     resolved = state.get("resolved", [])
 
     if not issues:
-        print("No issues in queue. Run 'uidetox scan' to find slop.")
+        print("No findings require resolution.")
+        if investigative_count:
+            print(f"{investigative_count} investigative finding(s) remain visible.")
         return
 
     print("╔══════════════════════════════════════════════════════╗")
