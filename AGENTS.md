@@ -82,9 +82,9 @@ Reference files in `reference/` provide deep-dive guidance for each design domai
 | `uidetox intent` | Inspect effective field-level intent provenance, evidence, confidence, and confirmation state (`--json`, `--require-confirmed`) |
 | `uidetox scan` | Full audit: auto-detect tooling → static analyzer → full-stack contract lineage → design review |
 | `uidetox map [target]` | Build `.uidetox/frontend-map.json` with shared AST source facts, frontend ownership/import semantics, typed full-stack contract lineage, provenance/confidence, source hashes, plus optional rendered DOM/a11y evidence and deterministic misalignment, clipping, padding, edge-contact, and line-spacing findings (`--runtime`, repeatable `--url`, `--screenshots`, `--timeout`, `--output`, `--json`) |
-| `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
+| `uidetox redesign [target]` | Generate 1–5 source-aware, topology-first redesign plans with dependency-ordered migration steps, fail-closed experience-state coverage, freshness/blocker evidence, and pairwise structural-distance checks (`--variants`, `--refresh-map`, `--map-file`, `--output`, `--json`) |
 | `uidetox compare` | Compare redesigns across seven structural dimensions and pairwise distance (`--file`, `--json`) |
-| `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, and acceptance checks (`--file`, `--output`, `--stdout`) |
+| `uidetox prototype <proposal-id>` | Write a disposable agent brief with evidence isolation, preserved contracts, migration steps, representative experience-state evidence, and acceptance checks (`--file`, `--output`, `--stdout`) |
 | `uidetox detect` | Auto-discover linters, formatters, tsc, backend, database, API |
 | `uidetox check` | Run tsc → lint → format in sequence, queue errors as T1 (use `--fix` to auto-solve) |
 | `uidetox tsc` | Run TypeScript compiler, parse and queue errors |
@@ -201,6 +201,7 @@ UIdetox/
 │   ├── tooling.py                # Auto-detection (tsc, biome, eslint, NestJS, etc.)
 │   ├── analyzer.py               # 217-rule static slop detector (deterministic anti-pattern scan)
 │   ├── source_facts.py           # Shared AST parse lifecycle + immutable source facts
+│   ├── experience_states.py      # Canonical UI lifecycle vocabulary + requirements
 │   ├── frontend_map.py           # Semantic frontend graph + artifact persistence
 │   ├── project_map.py            # Stable full-stack contract facade
 │   ├── contract_graph.py         # Canonical graph, evidence lattice, reconciliation

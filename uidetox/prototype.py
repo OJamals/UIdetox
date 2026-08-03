@@ -9,9 +9,21 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
+from uidetox.experience_states import (
+    EXPERIENCE_STATE_BEHAVIOR,
+    EXPERIENCE_STATE_ORDER,
+    normalize_experience_states,
+)
 from uidetox.redesign import RedesignProposal, RedesignSet
 from uidetox.runtime_observer import RuntimeObservation
 from uidetox.state import ensure_uidetox_dir
+
+_READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+_MAX_EXPERIENCE_MODULES = 32
+_MAX_EXPERIENCE_OPERATIONS = 1_000
+_MAX_EXPERIENCE_VALUE_CHARS = 2_048
+_MAX_EXPERIENCE_ROW_CHARS = 4_096
+_MAX_SAMPLED_EXPERIENCE_OPERATIONS = 10
 
 _QUALIFICATION_CONTRACT_V1 = (
     "",
@@ -124,12 +136,100 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             f"{item.get('instruction', '')}"
         )
         for item in proposal.migration_plan
+        if item.get("kind") not in {"experience-state", "runtime-finding"}
     ]
     trusted_migration_steps = [
         str(item.get("instruction", ""))
         for item in proposal.migration_plan
         if item.get("kind") == "strategy"
     ]
+    runtime_remediation_evidence: list[str] = []
+    for item in proposal.migration_plan:
+        if item.get("kind") != "runtime-finding":
+            continue
+        anchors = item.get("anchors", [])
+        anchors = anchors if isinstance(anchors, list) else []
+        modules = item.get("modules", [])
+        modules = modules if isinstance(modules, list) else []
+        hidden_anchor_count = max(0, len(anchors) - 5)
+        overflow_note = (
+            f"; {hidden_anchor_count} additional anchor(s) remain in the redesign artifact"
+            if hidden_anchor_count
+            else ""
+        )
+        runtime_remediation_evidence.append(
+            f"- {item.get('detector_id', 'unknown')}: "
+            f"{item.get('finding_count', len(anchors))} finding(s), "
+            f"severity={item.get('severity', 'unknown')}, "
+            f"category={item.get('category', 'ui')}; "
+            f"anchors={_evidence_json(anchors[:5])}; "
+            f"source_modules={_evidence_json(modules)}{overflow_note}"
+        )
+    raw_experience_state_steps = [
+        item
+        for item in proposal.migration_plan
+        if item.get("kind") == "experience-state"
+    ]
+    experience_state_steps = tuple(
+        row
+        for item in raw_experience_state_steps
+        if (row := _normalize_experience_state_row(item)) is not None
+    )
+    invalid_experience_state_count = len(raw_experience_state_steps) - len(
+        experience_state_steps
+    )
+    sampled_experience_states = _sample_experience_state_rows(
+        experience_state_steps,
+        limit=20,
+    )
+    experience_state_evidence = [
+        "- " + _evidence_json(item) for item in sampled_experience_states
+    ]
+    if len(experience_state_steps) > len(sampled_experience_states):
+        experience_state_evidence.append(
+            f"- {len(experience_state_steps) - len(sampled_experience_states)} "
+            "additional owner(s) remain in the redesign artifact."
+        )
+    experience_state_coverage = {
+        "owner_count": len(experience_state_steps),
+        "operation_count": sum(
+            int(item.get("operation_count", len(item["operations"])))
+            for item in experience_state_steps
+        ),
+        "missing_state_counts": dict(
+            Counter(
+                state
+                for item in experience_state_steps
+                for state in item["missing_states"]
+            )
+        ),
+        "sampled_owner_count": len(sampled_experience_states),
+    }
+    missing_experience_states = tuple(
+        state
+        for state in EXPERIENCE_STATE_ORDER
+        if any(state in item["missing_states"] for item in experience_state_steps)
+    )
+    experience_behavior_section = (
+        [
+            "",
+            "## Experience-state behavior",
+            "",
+            *_bullets(
+                tuple(
+                    f"{state.replace('-', ' ').title()}: "
+                    f"{EXPERIENCE_STATE_BEHAVIOR[state]}."
+                    for state in missing_experience_states
+                )
+            ),
+        ]
+        if missing_experience_states
+        else []
+    )
+    creative_direction = proposal.creative_direction
+    structural_changes = tuple(
+        change for change in proposal.changes if change not in creative_direction
+    )
     source_freshness = proposal.evidence_freshness.get("source", {})
     runtime_freshness = proposal.evidence_freshness.get("runtime", {})
 
@@ -170,6 +270,11 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             "",
             *_bullets(proposal.component_architecture),
             "",
+            "## Creative direction",
+            "",
+            *_bullets(creative_direction),
+            *experience_behavior_section,
+            "",
             "## Interaction model",
             "",
             proposal.interaction_model,
@@ -180,7 +285,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             "",
             "## Required structural changes",
             "",
-            *_bullets(proposal.changes),
+            *_bullets(structural_changes),
             "",
             "## Migration sequence",
             "",
@@ -207,6 +312,34 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             *_bullets(proposal.source_targets),
             "Affected source modules with evidence:",
             *(source_evidence or ["- None mapped."]),
+            "Current UI remediation matrix:",
+            *(
+                runtime_remediation_evidence
+                or ["- No current runtime UI findings recorded."]
+            ),
+            "Experience-state matrix:",
+            *(
+                [
+                    "- Experience-state coverage: "
+                    + _evidence_json(experience_state_coverage)
+                ]
+                if experience_state_steps
+                else []
+            ),
+            *(
+                experience_state_evidence
+                or ["- No proven experience-state gaps recorded."]
+            ),
+            *(
+                [
+                    (
+                        f"- Invalid experience-state rows: "
+                        f"{invalid_experience_state_count}; regenerate redesign artifact."
+                    )
+                ]
+                if invalid_experience_state_count
+                else []
+            ),
             "Dependency-aware migration plan:",
             *(migration_evidence or ["- None mapped."]),
             "Preserved contracts:",
@@ -338,6 +471,120 @@ def _evidence_json(value: object) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _is_bounded_experience_text(value: object) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= _MAX_EXPERIENCE_VALUE_CHARS
+
+
+def _normalize_experience_state_row(
+    item: dict[str, object],
+) -> dict[str, object] | None:
+    modules = item.get("modules")
+    owner = item.get("owner")
+    operations = item.get("operations")
+    observed_states = normalize_experience_states(item.get("observed_states"))
+    missing_states = normalize_experience_states(item.get("missing_states"))
+    if (
+        not isinstance(modules, (list, tuple))
+        or not modules
+        or len(modules) > _MAX_EXPERIENCE_MODULES
+        or not all(_is_bounded_experience_text(module) for module in modules)
+        or not _is_bounded_experience_text(owner)
+        or not isinstance(operations, (list, tuple))
+        or not operations
+        or len(operations) > _MAX_EXPERIENCE_OPERATIONS
+        or observed_states is None
+        or not missing_states
+    ):
+        return None
+    module_names = tuple(str(module) for module in modules)
+    owner_name = str(owner)
+    text_chars = len(owner_name) + sum(len(module) for module in module_names)
+    if text_chars > _MAX_EXPERIENCE_ROW_CHARS:
+        return None
+    normalized_operations: set[tuple[str, str]] = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            return None
+        method = operation.get("method")
+        path = operation.get("path")
+        if not _is_bounded_experience_text(method) or not _is_bounded_experience_text(
+            path
+        ):
+            return None
+        method_name = str(method)
+        operation_path = str(path)
+        text_chars += len(method_name) + len(operation_path)
+        if text_chars > _MAX_EXPERIENCE_ROW_CHARS:
+            return None
+        normalized_operations.add((method_name.upper(), operation_path))
+    ordered_operations = [
+        {"method": method, "path": path}
+        for method, path in sorted(normalized_operations)
+    ]
+    selected: list[int] = []
+    for mutation in (False, True):
+        for index, operation in enumerate(ordered_operations):
+            if (operation["method"] not in _READ_METHODS) == mutation:
+                selected.append(index)
+                break
+    selected.extend(
+        index for index in range(len(ordered_operations)) if index not in selected
+    )
+    sampled_operations = [
+        ordered_operations[index]
+        for index in selected[:_MAX_SAMPLED_EXPERIENCE_OPERATIONS]
+    ]
+    row: dict[str, object] = {
+        "source_module": module_names[0],
+        "owner": owner_name,
+        "operations": sampled_operations,
+        "observed_states": list(observed_states),
+        "missing_states": list(missing_states),
+    }
+    if len(ordered_operations) > len(sampled_operations):
+        row["operation_count"] = len(ordered_operations)
+        row["additional_operation_count"] = len(ordered_operations) - len(
+            sampled_operations
+        )
+    return row
+
+
+def _sample_experience_state_rows(
+    rows: tuple[dict[str, object], ...],
+    *,
+    limit: int,
+) -> tuple[dict[str, object], ...]:
+    if limit <= 0:
+        return ()
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            str(row["source_module"]),
+            str(row["owner"]),
+            _evidence_json(row["operations"]),
+        ),
+    )
+    selected: list[int] = []
+
+    def select_first(predicate) -> None:
+        for index, row in enumerate(ordered):
+            if index not in selected and predicate(row):
+                selected.append(index)
+                return
+
+    for state in EXPERIENCE_STATE_ORDER:
+        select_first(lambda row, state=state: state in row["missing_states"])
+    for mutation in (False, True):
+        select_first(
+            lambda row, mutation=mutation: any(
+                (operation["method"] not in _READ_METHODS) == mutation
+                for operation in row["operations"]
+            )
+        )
+    selected.extend(index for index in range(len(ordered)) if index not in selected)
+    return tuple(ordered[index] for index in selected[:limit])
 
 
 def _bullets(items: tuple[str, ...]) -> list[str]:

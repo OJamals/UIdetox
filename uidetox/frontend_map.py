@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
 from uidetox.design_semantics import detect_design_findings
+from uidetox.experience_states import normalize_experience_state
 from uidetox.fileset import ProjectFileSet
 from uidetox.findings import Finding
 from uidetox.persistence import atomic_replace_text
@@ -367,7 +368,7 @@ def map_frontend(
         ui_states_by_owner: dict[str, set[str]] = defaultdict(set)
         for state in facts.states:
             ui_states_by_owner[state.owner].update(
-                filter(None, (_contract_ui_state(state.name),))
+                filter(None, (normalize_experience_state(state.name),))
             )
             state_id = _node_id("state", relative_path, state.owner, state.name)
             nodes.append(
@@ -1570,18 +1571,6 @@ def _node_id(kind: str, file_path: str, name: str, ordinal: int = 0) -> str:
 
 def _line_number(content: str, offset: int) -> int:
     return content.count("\n", 0, max(0, offset)) + 1
-
-
-def _contract_ui_state(name: str) -> str | None:
-    lowered = name.lower()
-    return next(
-        (
-            state
-            for state in ("loading", "error", "empty", "success")
-            if state in lowered
-        ),
-        None,
-    )
 
 
 def _unique(values: Iterable[str]) -> list[str]:

@@ -309,7 +309,7 @@ Run through the full audit checklist:
 - Typography (fonts, hierarchy, weights, spacing)
 - Color (palette, contrast, consistency, AI fingerprints)
 - Layout (symmetry issues, card overuse, container widths)
-- Interactivity (missing hover/focus/active/loading/error/empty states)
+- Interactivity (missing hover/focus/active/loading/empty/error/success/disabled/first-run states)
 - Content (generic names, fake data, AI copy)
 - Component patterns (card abuse, modal overuse, accordion FAQs)
 - Iconography (Lucide/Feather defaults, inconsistent stroke widths)
@@ -322,7 +322,7 @@ Run through the full audit checklist:
 3. Hover and active states — makes interface feel alive
 4. Layout and spacing — proper grid, max-width, consistent padding
 5. Replace generic components — swap cliché patterns for modern alternatives
-6. Add loading, empty, and error states — makes it feel finished
+6. Add loading, empty, error, success, disabled, and first-run states — makes it feel finished
 7. Polish typography scale and spacing — the premium final touch
 
 ### Rules
@@ -515,6 +515,7 @@ When backend, API, or database layers are detected, check these integration poin
 
 ### API Contract Consistency
 - Every API call must handle: loading state, success, error, empty data
+- UI owners must distinguish first-run from zero results and expose disabled actions with an explanation or recovery path
 - Error responses must be typed — never `catch(e: any)`
 - Pagination, sorting, and filtering params must match between frontend query and backend handler
 - API URLs should come from environment config, never hardcoded
@@ -554,7 +555,7 @@ Before outputting code, evaluate against this matrix:
 - [ ] Does the output pass the AI Slop Test?
 - [ ] Is typography intentional (not Inter/system defaults)?
 - [ ] Is the color palette cohesive and non-generic?
-- [ ] Are hover, focus, active, loading, empty, and error states provided?
+- [ ] Are hover, focus, active, loading, empty, error, success, disabled, and first-run states provided where applicable?
 - [ ] Is layout asymmetric where appropriate?
 - [ ] Is mobile layout collapse guaranteed for high-variance designs?
 - [ ] Do full-height sections safely use `min-h-[100dvh]`?

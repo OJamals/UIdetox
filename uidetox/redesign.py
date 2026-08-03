@@ -9,7 +9,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from uidetox.color_utils import normalize_rendered_color
 from uidetox.design_context import DesignDials, DesignIntent
+from uidetox.experience_states import (
+    EXPERIENCE_STATE_BEHAVIOR,
+    EXPERIENCE_STATE_ORDER,
+    normalize_experience_states,
+    required_experience_states,
+)
 from uidetox.frontend_map import (
     FrontendMap,
     frontend_map_is_fresh,
@@ -28,6 +35,12 @@ _DISTANCE_KEYS = (
     "interaction",
     "responsive",
     "density",
+)
+_CREATIVE_CHANGE_PREFIXES = (
+    "Visual language:",
+    "Typography:",
+    "Material:",
+    "Composition:",
 )
 
 
@@ -91,6 +104,16 @@ class RedesignProposal:
     feasibility_blockers: tuple[str, ...] = ()
     evidence_freshness: dict[str, Any] = field(default_factory=dict)
     observable_checks: tuple[str, ...] = ()
+
+    @property
+    def creative_direction(self) -> tuple[str, ...]:
+        """Return creative guidance stored in the schema-compatible change list."""
+
+        return tuple(
+            change
+            for change in self.changes
+            if change.startswith(_CREATIVE_CHANGE_PREFIXES)
+        )
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RedesignProposal":
@@ -216,6 +239,7 @@ class _Strategy:
     interaction_model: str
     responsive_rules: tuple[str, ...]
     migration_steps: tuple[str, ...]
+    creative_direction: tuple[str, ...]
     relevance: dict[str, int] = field(default_factory=dict)
 
 
@@ -254,6 +278,12 @@ _STRATEGIES = (
             "Introduce TaskShell while rendering existing behavior inside step modules.",
             "Move state ownership only after contract-lineage checks pass per step.",
         ),
+        creative_direction=(
+            "Visual language: Calm procedural clarity with strong step numerals, restrained chrome, and one dominant completion path.",
+            "Typography: Use existing type tokens as a functional hierarchy: compact labels, readable task copy, and tabular progress metadata.",
+            "Material: Use borders and tonal shifts, not floating card shadows, to distinguish active, complete, and blocked stages.",
+            "Composition: Counter the strict progress rail with a generous task canvas; keep help visibly subordinate.",
+        ),
         relevance={"form-flow": 8, "generic-page": 2},
     ),
     _Strategy(
@@ -289,6 +319,12 @@ _STRATEGIES = (
             "Define the domain object represented by each current route or region.",
             "Build WorkspaceShell around existing object views.",
             "Consolidate distributed actions into the contextual toolbar.",
+        ),
+        creative_direction=(
+            "Visual language: Analytical workshop with a stable object index, dominant work surface, and precise state cues.",
+            "Typography: Pair compact operational labels with readable object titles and tabular numeric data using existing type tokens.",
+            "Material: Connect panels through shared baselines and dividers; reserve elevation for transient overlays.",
+            "Composition: Hold a deliberate three-part asymmetry: narrow index, expansive workspace, concise inspector.",
         ),
         relevance={"data-workspace": 10, "generic-page": 3},
     ),
@@ -326,6 +362,12 @@ _STRATEGIES = (
             "Recompose existing content into chapters without changing contracts.",
             "Move global calls to action beside the evidence that motivates them.",
         ),
+        creative_direction=(
+            "Visual language: Authored editorial rhythm with an explicit thesis, evidence-led chapters, and decisions placed beside context.",
+            "Typography: Build contrast from the existing type system through scale, measure, and cadence, not decorative font proliferation.",
+            "Material: Prefer rules, captions, and selective media fields over repeated cards or ornamental containers.",
+            "Composition: Alternate contained reading widths with evidence moments; vary chapter length while preserving a clear narrative spine.",
+        ),
         relevance={"sectioned-landing": 10, "editorial": 9, "generic-page": 4},
     ),
     _Strategy(
@@ -356,6 +398,12 @@ _STRATEGIES = (
             "Identify content whose relationships carry meaning beyond sequence.",
             "Wrap existing views as position-independent object modules.",
             "Add linear and keyboard modes before enabling free spatial navigation.",
+        ),
+        creative_direction=(
+            "Visual language: Diagrammatic workspace where proximity and grouping communicate relationships before decoration.",
+            "Typography: Use compact object labels and zoom-stable annotations; keep detailed prose in the selection lens.",
+            "Material: Establish one quiet canvas plane, using connectors and selection halos only when they encode state or relationship.",
+            "Composition: Arrange asymmetric clusters with meaningful negative space and preserve a complete linear fallback.",
         ),
         relevance={"data-workspace": 5, "generic-page": 1},
     ),
@@ -392,6 +440,12 @@ _STRATEGIES = (
             "Inventory current actions as named capabilities with permission rules.",
             "Introduce CommandRegistry beside existing navigation.",
             "Replace duplicate action surfaces after telemetry and contract checks.",
+        ),
+        creative_direction=(
+            "Visual language: Operational console with immediate command discovery, terse feedback, and an auditable result trail.",
+            "Typography: Use concise command labels, readable result text, and the project's data or code face only where it improves scanning.",
+            "Material: Keep command, result, and ledger layers flat and explicit; avoid glass effects and decorative terminal chrome.",
+            "Composition: Lead with the command surface, let results expand toward evidence, and anchor history as a stable ledger.",
         ),
         relevance={"data-workspace": 6, "generic-page": 4, "form-flow": 2},
     ),
@@ -497,6 +551,401 @@ def load_redesign_set(path: str | Path | None = None) -> RedesignSet:
     return RedesignSet.from_dict(_load_json_object(input_path, "Redesign artifact"))
 
 
+_SEVERITY_ORDER = {"info": 0, "warning": 1, "error": 2}
+
+
+def _ground_creative_direction(
+    frontend_map: FrontendMap,
+    strategy: _Strategy,
+) -> tuple[str, ...]:
+    palette: list[str] = []
+
+    def validated_color(value: object) -> str:
+        text = str(value or "").strip().lower()
+        color = normalize_rendered_color(text) if len(text) <= 80 else None
+        return text if color is not None and color[3] > 0.05 else ""
+
+    token_colors: list[tuple[tuple[str, ...], str]] = []
+    for node in frontend_map.nodes:
+        if node.kind == "token":
+            color = validated_color(node.metadata.get("value"))
+            if color:
+                token_colors.append(
+                    (tuple(node.name.lower().strip("-").split("-")), color)
+                )
+    for role in (
+        ("paper", "background", "canvas", "surface"),
+        ("ink", "foreground", "text"),
+        ("accent", "brand", "primary"),
+    ):
+        color = next(
+            (
+                value
+                for keyword in role
+                for parts, value in token_colors
+                if keyword in parts and value not in palette
+            ),
+            "",
+        )
+        if color:
+            palette.append(color)
+    for _, color in token_colors:
+        if len(palette) >= 3:
+            break
+        if color not in palette:
+            palette.append(color)
+
+    font_models: set[str] = set()
+    radii: list[float] = []
+    for node in frontend_map.nodes:
+        if not node.kind.startswith("runtime_") or node.kind == "runtime_page":
+            continue
+        styles = node.metadata.get("styles", {})
+        if not isinstance(styles, dict):
+            continue
+        family = str(styles.get("fontFamily", "")).lower()
+        if "monospace" in family:
+            font_models.add("monospace")
+        if "sans-serif" in family:
+            font_models.add("sans-serif")
+        elif "serif" in family:
+            font_models.add("serif")
+        radius = str(styles.get("borderRadius", "")).strip().lower()
+        if radius.endswith("px"):
+            try:
+                radii.append(max(0.0, float(radius.removesuffix("px"))))
+            except ValueError:
+                pass
+        if len(palette) < 3:
+            for style_name in ("color", "backgroundColor"):
+                color = validated_color(styles.get(style_name))
+                if color and color not in palette:
+                    palette.append(color)
+
+    palette_evidence = (
+        f"Mapped palette anchors: {', '.join(palette[:3])}."
+        if palette
+        else "No validated palette anchors mapped; preserve existing color relationships until capture."
+    )
+    if {"sans-serif", "monospace"} <= font_models:
+        typography_evidence = (
+            "Mapped type split: sans-serif interface + monospace data."
+        )
+    elif {"serif", "monospace"} <= font_models:
+        typography_evidence = "Mapped type split: serif narrative + monospace data."
+    elif font_models:
+        typography_evidence = f"Mapped type model: {next(iter(sorted(font_models)))}."
+    else:
+        typography_evidence = "No reliable runtime type evidence; retain existing type tokens until capture."
+    if radii and sum(radius <= 4 for radius in radii) / len(radii) >= 0.7:
+        material_evidence = "Mapped geometry: square or low-radius surfaces dominate."
+    elif radii:
+        material_evidence = "Mapped geometry: rounded surfaces dominate; keep radius hierarchy intentional."
+    else:
+        material_evidence = "No reliable runtime surface geometry; preserve existing material cues until capture."
+
+    base = {
+        item.partition(":")[0]: item.partition(":")[2].strip()
+        for item in strategy.creative_direction
+    }
+    density = str(frontend_map.fingerprint.get("density", "unknown"))
+    return (
+        f"Visual language: {base['Visual language']} {palette_evidence}",
+        f"Typography: {base['Typography']} {typography_evidence}",
+        f"Material: {base['Material']} {material_evidence}",
+        f"Composition: {base['Composition']} Baseline density is {density}; target {strategy.fingerprint['density']} through grouping and whitespace, not smaller type.",
+    )
+
+
+def _runtime_remediation_instruction(
+    detector_id: str,
+    categories: tuple[str, ...],
+    constraints: tuple[str, ...],
+) -> str:
+    if constraints:
+        return " ".join(constraints)
+    signal = " ".join((detector_id, *categories)).lower()
+    if any(token in signal for token in ("clip", "overflow", "truncat")):
+        return (
+            "Restore intrinsic sizing and wrapping at every observed anchor; keep "
+            "truncation or scrolling only when source semantics explicitly require it."
+        )
+    if any(
+        token in signal for token in ("target-size", "target-spacing", "touch-target")
+    ):
+        return (
+            "Meet the evidenced pointer-target size or spacing rule without changing "
+            "the control's accessible role or inline behavior."
+        )
+    if "navigation-choice-overload" in signal:
+        return (
+            "Group destinations by user task, expose a clear first choice, and remove "
+            "scroll-dependent navigation discovery."
+        )
+    if "typography" in categories or any(
+        token in signal
+        for token in ("font", "line-spacing", "text-wrap", "text-separation")
+    ):
+        return (
+            "Reconcile type hierarchy, line metrics, and content measure through existing "
+            "tokens at every observed viewport."
+        )
+    if any(token in signal for token in ("align", "collision", "geometry", "overlap")):
+        return (
+            "Repair the shared layout parent so peer alignment, spacing, and collision "
+            "behavior follow one responsive rule."
+        )
+    if "spacing" in categories or any(
+        token in signal for token in ("padding", "edge-contact", "inset")
+    ):
+        return (
+            "Normalize the owning component's logical padding and content insets through "
+            "shared spacing tokens, preserving intentional scroll boundaries."
+        )
+    if any(
+        token in signal for token in ("a11y", "access", "contrast", "focus", "keyboard")
+    ):
+        return (
+            "Restore semantic, contrast, focus, and keyboard behavior at the owning "
+            "component boundary."
+        )
+    if any(token in signal for token in ("responsive", "viewport", "edge", "padding")):
+        return (
+            "Replace the viewport-specific exception with one narrow-to-wide layout rule "
+            "that preserves source order and safe edge spacing."
+        )
+    if any(token in signal for token in ("state", "action", "interact", "navigation")):
+        return (
+            "Make the intended action and every loading, empty, error, success, and "
+            "disabled state explicit without changing its contract."
+        )
+    return (
+        "Correct the owning component and shared token or layout rule, then recapture "
+        "every observed anchor to prove the detector is absent."
+    )
+
+
+def _experience_state_plan(
+    frontend_map: FrontendMap,
+    start_order: int,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    unreliable_owners: dict[tuple[str, str], str] = {}
+    problem_priority = {"unknown": 0, "invalid": 1, "contradictory": 2}
+
+    def mark_unreliable(owner_key: tuple[str, str], status: str) -> None:
+        current = unreliable_owners.get(owner_key)
+        if current is None or problem_priority[status] > problem_priority[current]:
+            unreliable_owners[owner_key] = status
+
+    for node in frontend_map.nodes:
+        metadata = node.metadata
+        if (
+            node.kind != "data"
+            or not node.file
+            or not isinstance(metadata, dict)
+            or not metadata.get("ui_required")
+        ):
+            continue
+        owner = str(metadata.get("ui_owner") or metadata.get("owner") or node.name)
+        owner_key = (node.file, owner)
+        lifecycle = metadata.get("ui_lifecycle_evidence")
+        if lifecycle in {"unknown", "contradictory"}:
+            mark_unreliable(owner_key, lifecycle)
+            continue
+        if lifecycle not in {"present", "absent"}:
+            mark_unreliable(owner_key, "invalid")
+            continue
+        observed_states = normalize_experience_states(metadata.get("ui_states", ()))
+        if observed_states is None:
+            mark_unreliable(owner_key, "invalid")
+            continue
+        if (lifecycle == "present") != bool(observed_states):
+            unreliable_owners[owner_key] = "contradictory"
+            continue
+        method = str(metadata.get("method") or "GET").strip().upper() or "GET"
+        inferred_mutation = method not in {"GET", "HEAD", "OPTIONS"}
+        mutation_evidence = metadata.get("mutation")
+        if mutation_evidence is None:
+            mutation = inferred_mutation
+        elif not isinstance(mutation_evidence, bool):
+            mark_unreliable(owner_key, "invalid")
+            continue
+        elif mutation_evidence != inferred_mutation:
+            unreliable_owners[owner_key] = "contradictory"
+            continue
+        else:
+            mutation = mutation_evidence
+        group = groups.setdefault(
+            owner_key,
+            {"observed": set(), "required": set(), "operations": set()},
+        )
+        group["observed"].update(observed_states)
+        group["required"].update(required_experience_states(mutation=mutation))
+        group["operations"].add((method, str(node.name)))
+
+    plan: list[dict[str, Any]] = []
+    for (source_module, owner), group in sorted(groups.items()):
+        if (source_module, owner) in unreliable_owners:
+            continue
+        observed_states = [
+            state for state in EXPERIENCE_STATE_ORDER if state in group["observed"]
+        ]
+        required_states = [
+            state for state in EXPERIENCE_STATE_ORDER if state in group["required"]
+        ]
+        missing_states = [
+            state for state in required_states if state not in group["observed"]
+        ]
+        if not missing_states:
+            continue
+        state_label = _experience_state_label(missing_states)
+        behavior = "; ".join(
+            f"{state}: {EXPERIENCE_STATE_BEHAVIOR[state]}" for state in missing_states
+        )
+        plan.append(
+            {
+                "order": start_order + len(plan),
+                "kind": "experience-state",
+                "modules": [source_module],
+                "owner": owner,
+                "operations": [
+                    {"method": method, "path": path}
+                    for method, path in sorted(group["operations"])
+                ],
+                "observed_states": observed_states,
+                "required_states": required_states,
+                "missing_states": missing_states,
+                "instruction": (
+                    f"Implement explicit {state_label} states at the mapped UI owner "
+                    f"without changing its data contract: {behavior}."
+                ),
+                "evidence": "proven frontend-map UI lifecycle gap",
+            }
+        )
+    blockers = tuple(
+        f"Experience-state evidence is {status} for {owner} in {source_module}; "
+        "inspect that owner before declaring states missing."
+        for (source_module, owner), status in sorted(unreliable_owners.items())
+    )
+    return tuple(plan), blockers
+
+
+def _experience_state_label(states: list[str]) -> str:
+    return (
+        states[0] if len(states) == 1 else f"{', '.join(states[:-1])} and {states[-1]}"
+    )
+
+
+def _runtime_remediation_plan(
+    frontend_map: FrontendMap,
+    start_order: int,
+) -> tuple[dict[str, Any], ...]:
+    if frontend_map.evidence.get("runtime_status") not in {
+        "current",
+        "partial",
+        "degraded",
+    }:
+        return ()
+    findings = frontend_map.evidence.get("runtime_findings", ())
+    if not isinstance(findings, (list, tuple)):
+        return ()
+
+    source_targets: dict[tuple[str, str], set[str]] = {}
+    for node in frontend_map.nodes:
+        metadata = node.metadata
+        if not isinstance(metadata, dict):
+            continue
+        capture_id = str(metadata.get("capture_id", ""))
+        selector = str(metadata.get("selector", ""))
+        targets = metadata.get("source_targets", ())
+        if capture_id and selector and isinstance(targets, (list, tuple)):
+            source_targets.setdefault((capture_id, selector), set()).update(
+                str(target) for target in targets if target
+            )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        detector_id = str(
+            finding.get("detector_id") or finding.get("code") or ""
+        ).strip()
+        selector = str(finding.get("selector", "")).strip()
+        if detector_id and selector and not detector_id.startswith("browser-"):
+            grouped.setdefault(detector_id, []).append(finding)
+
+    plan: list[dict[str, Any]] = []
+    for offset, detector_id in enumerate(sorted(grouped)):
+        rows = grouped[detector_id]
+        categories = tuple(
+            sorted(
+                {
+                    str(row.get("category", "")).strip()
+                    for row in rows
+                    if row.get("category")
+                }
+            )
+        )
+        constraints: list[str] = []
+        for row in rows:
+            metrics = row.get("metrics", {})
+            raw_constraints = (
+                metrics.get("remediation_constraints", ())
+                if isinstance(metrics, dict)
+                else ()
+            )
+            if isinstance(raw_constraints, (list, tuple)):
+                constraints.extend(
+                    str(constraint).strip()
+                    for constraint in raw_constraints
+                    if str(constraint).strip()
+                )
+        remediation_constraints = tuple(dict.fromkeys(constraints))
+        severity = max(
+            (str(row.get("severity", "info")) for row in rows),
+            key=lambda value: _SEVERITY_ORDER.get(value, -1),
+        )
+        anchors_by_key: dict[tuple[str, ...], dict[str, str]] = {}
+        modules: set[str] = set()
+        for row in rows:
+            anchor = {
+                key: str(row.get(key, ""))
+                for key in (
+                    "url",
+                    "viewport",
+                    "scenario",
+                    "state",
+                    "capture_id",
+                    "selector",
+                )
+            }
+            anchor_key = tuple(anchor.values())
+            anchors_by_key[anchor_key] = anchor
+            modules.update(
+                source_targets.get((anchor["capture_id"], anchor["selector"]), ())
+            )
+        plan.append(
+            {
+                "order": start_order + offset,
+                "kind": "runtime-finding",
+                "modules": sorted(modules),
+                "detector_id": detector_id,
+                "category": ", ".join(categories) or "ui",
+                "severity": severity,
+                "finding_count": len(rows),
+                "instruction": _runtime_remediation_instruction(
+                    detector_id,
+                    categories,
+                    remediation_constraints,
+                ),
+                "anchors": [anchors_by_key[key] for key in sorted(anchors_by_key)],
+                "evidence": "current frontend-map runtime findings",
+            }
+        )
+    return tuple(plan)
+
+
 def _build_proposal(
     frontend_map: FrontendMap,
     brief: RedesignBrief,
@@ -519,6 +968,15 @@ def _build_proposal(
         strategy.migration_steps,
     )
     evidence_freshness = _proposal_evidence_freshness(frontend_map)
+    experience_state_plan, experience_state_blockers = _experience_state_plan(
+        frontend_map,
+        len(migration_plan) + 1,
+    )
+    runtime_remediation = _runtime_remediation_plan(
+        frontend_map,
+        len(migration_plan) + len(experience_state_plan) + 1,
+    )
+    migration_plan += experience_state_plan + runtime_remediation
     contract_blockers = _contract_blockers(frontend_map)
     preserved = tuple(
         dict.fromkeys(
@@ -537,6 +995,7 @@ def _build_proposal(
         dict.fromkeys(
             dependency_blockers
             + contract_blockers
+            + experience_state_blockers
             + (
                 (
                     "Runtime evidence is stale and cannot validate this proposal."
@@ -547,11 +1006,24 @@ def _build_proposal(
         )
     )
     feasibility_blockers = tuple(item for item in feasibility_blockers if item)
-    observable_checks = _observable_acceptance_checks(
-        preserved_contract_evidence,
-        evidence_freshness,
-        contract_blockers,
-        brief,
+    observable_checks = (
+        _observable_acceptance_checks(
+            preserved_contract_evidence,
+            evidence_freshness,
+            contract_blockers,
+            brief,
+        )
+        + tuple(
+            f"Experience-state check: {_experience_state_label(item['missing_states'])} "
+            f"{'is' if len(item['missing_states']) == 1 else 'are'} represented for "
+            f"mapped UI owner {item['owner']} without contract drift."
+            for item in experience_state_plan
+        )
+        + tuple(
+            f"Runtime remediation check: {item['detector_id']} is absent from fresh "
+            f"captures across {item['finding_count']} mapped occurrence(s)."
+            for item in runtime_remediation
+        )
     )
     density_instruction = _density_instruction(brief.visual_density)
     motion_instruction = _motion_instruction(brief.motion_intensity)
@@ -567,6 +1039,31 @@ def _build_proposal(
     )
     goal_source = brief.intent.provenance.get("product_goal", "fallback")
     goal_confidence = brief.intent.confidence.get("product_goal", 0.0)
+    remediation_summary = ()
+    if runtime_remediation:
+        finding_count = sum(int(item["finding_count"]) for item in runtime_remediation)
+        family_count = len(runtime_remediation)
+        family_label = "family" if family_count == 1 else "families"
+        remediation_summary = (
+            (
+                f"Resolve {finding_count} current runtime findings across "
+                f"{family_count} detector {family_label}."
+            ),
+        )
+    experience_summary = ()
+    if experience_state_plan:
+        missing_state_count = sum(
+            len(item["missing_states"]) for item in experience_state_plan
+        )
+        owner_count = len(experience_state_plan)
+        owner_label = "owner" if owner_count == 1 else "owners"
+        experience_summary = (
+            (
+                f"Complete {missing_state_count} missing experience states across "
+                f"{owner_count} mapped UI {owner_label}."
+            ),
+        )
+    creative_direction = _ground_creative_direction(frontend_map, strategy)
 
     return RedesignProposal(
         id=f"REDESIGN-{index:02d}-{strategy.id}",
@@ -591,7 +1088,10 @@ def _build_proposal(
             f"Move primary actions from {frontend_map.fingerprint.get('primary_action', 'unknown')} placement to {strategy.fingerprint['primary_action']}.",
             density_instruction,
             motion_instruction,
-        ),
+        )
+        + experience_summary
+        + remediation_summary
+        + creative_direction,
         preserved_contracts=preserved,
         migration_steps=tuple(str(item["instruction"]) for item in migration_plan),
         acceptance_checks=observable_checks,

@@ -25,6 +25,7 @@ from uidetox.contract_graph import (
     normalize_route_path,
     reconcile_contract_graph,
 )
+from uidetox.experience_states import normalize_experience_states
 
 __all__ = [
     "CONTRACT_GRAPH_SCHEMA_VERSION",
@@ -113,13 +114,7 @@ def _frontend_observations(
             fallback="response_schema",
         )
         ui_states = tuple(
-            sorted(
-                {
-                    str(item).lower()
-                    for item in metadata.get("ui_states", [])
-                    if str(item).lower() in {"loading", "error", "empty", "success"}
-                }
-            )
+            sorted(normalize_experience_states(metadata.get("ui_states", [])) or ())
         )
         operations.append(
             ContractObservation(
