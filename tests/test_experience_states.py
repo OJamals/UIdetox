@@ -63,6 +63,13 @@ def _experience_steps(proposal):
         ("unsuccess", None),
         ("unDisabled", None),
         ("noError", None),
+        ("isNotLoading", None),
+        ("withoutError", None),
+        ("not_success", None),
+        ("is\u200bLoading", None),
+        ("loading\x00", None),
+        ("loading\nerror", None),
+        ("l\u03bfading", None),
         ("", None),
         (None, None),
     ),
@@ -447,6 +454,53 @@ def test_prototype_bounds_operations_per_owner_without_losing_mutation_evidence(
     assert reversed_brief == brief
 
 
+def test_prototype_deduplicates_and_stably_orders_read_and_mutation_operations(
+    tmp_path,
+) -> None:
+    _frontend_map, redesigns, proposal = _proposal(
+        tmp_path,
+        "export function EdgePage() { return <main />; }",
+    )
+    operations = (
+        {"method": "post", "path": "/api/items"},
+        {"method": "GET", "path": "/api/items"},
+        {"method": "POST", "path": "/api/items"},
+        {"method": "delete", "path": "/api/items/1"},
+        {"method": "GET", "path": "/api/items"},
+    )
+    row = {
+        "kind": "experience-state",
+        "modules": ["src/MixedOwner.tsx"],
+        "owner": "MixedOwner",
+        "operations": operations,
+        "observed_states": ["loading"],
+        "missing_states": ["error", "success", "disabled"],
+    }
+    mixed = replace(proposal, migration_plan=(row,))
+
+    brief = build_prototype_brief(
+        replace(redesigns, proposals=(mixed,)),
+        mixed.id,
+    )
+    reversed_brief = build_prototype_brief(
+        replace(
+            redesigns,
+            proposals=(
+                replace(
+                    mixed, migration_plan=({**row, "operations": operations[::-1]},)
+                ),
+            ),
+        ),
+        mixed.id,
+    )
+    owner_line = next(line for line in brief.splitlines() if "MixedOwner" in line)
+
+    assert brief == reversed_brief
+    assert owner_line.count('"method"') == 3
+    assert owner_line.index('"method":"GET"') < owner_line.index('"method":"DELETE"')
+    assert owner_line.index('"method":"DELETE"') < owner_line.index('"method":"POST"')
+
+
 def test_prototype_rejects_oversized_experience_rows_before_normalization(
     tmp_path,
 ) -> None:
@@ -505,3 +559,99 @@ def test_prototype_rejects_oversized_experience_rows_before_normalization(
             in evidence
         )
         assert len(brief.encode("utf-8")) < 65_536
+
+
+def test_prototype_reports_bounded_experience_rejection_reason_counts(
+    tmp_path,
+) -> None:
+    _frontend_map, redesigns, proposal = _proposal(
+        tmp_path,
+        "export function EdgePage() { return <main />; }",
+    )
+    base = {
+        "kind": "experience-state",
+        "modules": ["src/BoundedOwner.tsx"],
+        "owner": "BoundedOwner",
+        "operations": [{"method": "GET", "path": "/api/items"}],
+        "observed_states": ["loading"],
+        "missing_states": ["error"],
+    }
+    rows = (
+        {
+            **base,
+            "modules": {"HOSTILE_SHAPE_VALUE": "not-a-list"},
+        },
+        {
+            **base,
+            "operations": [
+                {"method": "GET", "path": f"/api/{index}"} for index in range(1_001)
+            ],
+        },
+        {
+            **base,
+            "owner": "HOSTILE_VALUE_OVERFLOW_" + "x" * 2_049,
+        },
+        {
+            **base,
+            "operations": [
+                {
+                    "method": "GET",
+                    "path": f"/{index}/HOSTILE_ROW_BUDGET_" + "x" * 500,
+                }
+                for index in range(9)
+            ],
+        },
+    )
+    malformed = replace(proposal, migration_plan=rows)
+
+    brief = build_prototype_brief(
+        replace(redesigns, proposals=(malformed,)),
+        malformed.id,
+    )
+
+    assert "Invalid experience-state rows: 4; regenerate redesign artifact." in brief
+    assert (
+        "- Invalid experience-state rejection counts: "
+        '{"invalid_shape":1,"operation_overflow":1,'
+        '"row_budget_overflow":1,"value_overflow":1}'
+    ) in brief
+    assert "HOSTILE_SHAPE_VALUE" not in brief
+    assert "HOSTILE_VALUE_OVERFLOW" not in brief
+    assert "HOSTILE_ROW_BUDGET" not in brief
+
+
+def test_prototype_rejects_experience_rows_beyond_aggregate_row_budget(
+    tmp_path,
+) -> None:
+    _frontend_map, redesigns, proposal = _proposal(
+        tmp_path,
+        "export function EdgePage() { return <main />; }",
+    )
+    rows = tuple(
+        {
+            "kind": "experience-state",
+            "modules": [f"src/Owner{index:04d}.tsx"],
+            "owner": f"Owner{index:04d}",
+            "operations": [{"method": "GET", "path": f"/api/{index:04d}"}],
+            "observed_states": ["loading"],
+            "missing_states": ["error"],
+        }
+        for index in range(1_001)
+    )
+    oversized = replace(proposal, migration_plan=rows)
+
+    brief = build_prototype_brief(
+        replace(redesigns, proposals=(oversized,)),
+        oversized.id,
+    )
+
+    assert (
+        '- Experience-state coverage: {"missing_state_counts":{"error":1000},'
+        '"operation_count":1000,"owner_count":1000,"sampled_owner_count":20}'
+    ) in brief
+    assert "Invalid experience-state rows: 1; regenerate redesign artifact." in brief
+    assert (
+        '- Invalid experience-state rejection counts: {"row_budget_overflow":1}'
+        in brief
+    )
+    assert "Owner1000" not in brief

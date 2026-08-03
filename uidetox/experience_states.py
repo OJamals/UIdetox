@@ -53,7 +53,7 @@ _MUTATION_STATES = ("loading", "error", "success", "disabled")
 def normalize_experience_state(value: object) -> str | None:
     """Return a canonical state for a state-like identifier, without infix guesses."""
 
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value.isascii() or not value.isprintable():
         return None
     tokenized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", value)
     tokenized = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", tokenized)
