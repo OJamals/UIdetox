@@ -173,7 +173,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             "- " + _resources.evidence_json(item)
             for item in _group_operation_obligation_evidence(proposal.migration_plan)
         ],
-        max_bytes=_resources.MAX_MIGRATION_EVIDENCE_BYTES,
+        max_bytes=_resources.MAX_OPERATION_OBLIGATION_EVIDENCE_BYTES,
         section="operation-obligation evidence",
     )
     migration_evidence = [
@@ -761,6 +761,7 @@ def _group_operation_obligation_evidence(
             {
                 "obligation": item.get("obligation"),
                 "states": item.get("states"),
+                "contract_anchor": item.get("contract_anchor"),
                 "constraints": item.get("constraints"),
                 "action": instruction.partition(": ")[2] or instruction,
             }
