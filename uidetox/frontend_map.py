@@ -50,7 +50,6 @@ _CSS_TOKEN_PATTERN = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
 
 _HTTP_LITERAL_HEADERS = (
     "Accept",
-    "Authorization",
     "Content-Type",
     "Idempotency-Key",
     "If-Match",
@@ -123,16 +122,13 @@ def _frontend_http_lineage(
             }
         )
 
-    owner_calls = tuple(
-        item for item in facts.network_calls if item.owner == call.owner
-    )
     statuses = (
         tuple(sorted(set(_HTTP_STATUS_PATTERN.findall(content))))
-        if len(owner_calls) == 1
+        if len(facts.network_calls) == 1
         else ()
     )
     accept = headers.get("Accept")
-    if accept:
+    if accept and "," not in accept:
         for status in statuses:
             lineage.append(
                 {
