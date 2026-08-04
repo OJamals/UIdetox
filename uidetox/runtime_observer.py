@@ -1018,8 +1018,26 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
 
 def _stabilize_action_viewport(locator: Any) -> None:
     locator.evaluate(
-        "element => element.scrollIntoView({block: 'center', inline: 'nearest', "
-        "behavior: 'instant'})"
+        "element => new Promise(resolve => requestAnimationFrame(() => "
+        "requestAnimationFrame(() => {"
+        "element.scrollIntoView({block: 'center', inline: 'nearest', "
+        "behavior: 'instant'});"
+        "for (let parent = element.parentElement; parent; "
+        "parent = parent.parentElement) {"
+        "if (parent.scrollHeight > parent.clientHeight) "
+        "parent.scrollTop = Math.round(parent.scrollTop);"
+        "if (parent.scrollWidth > parent.clientWidth) "
+        "parent.scrollLeft = Math.round(parent.scrollLeft);"
+        "}"
+        "const root = document.scrollingElement;"
+        "if (!root) { resolve(); return; }"
+        "const rect = element.getBoundingClientRect();"
+        "const documentTop = rect.top + root.scrollTop;"
+        "const targetTop = "
+        "Math.round(documentTop - (window.innerHeight - rect.height) / 2);"
+        "root.scrollTo({top: targetTop, behavior: 'instant'});"
+        "resolve();"
+        "})))"
     )
 
 
