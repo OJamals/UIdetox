@@ -330,13 +330,19 @@ def _responsive_findings(
     findings: list[Finding] = []
     client_width = _measurement_float(measurements, "clientWidth")
     scroll_width = _measurement_float(measurements, "scrollWidth")
-    concealed_actions = _measurement_float(
-        measurements, "concealedInteractiveDescendantCount"
+    concealed_actions_x = _measurement_float(
+        measurements,
+        (
+            "concealedInteractiveDescendantCountX"
+            if "concealedInteractiveDescendantCountX" in measurements
+            else "concealedInteractiveDescendantCount"
+        ),
     )
     if (
         measurements.get("isScrollRegionX") is True
-        and concealed_actions > 0
+        and concealed_actions_x > 0
         and client_width > 0
+        and scroll_width > client_width + 1
     ):
         findings.append(
             RuntimeFinding(
@@ -344,11 +350,11 @@ def _responsive_findings(
                 category="responsive",
                 severity="error",
                 message=(
-                    f"{int(concealed_actions)} interactive action(s) start outside "
+                    f"{int(concealed_actions_x)} interactive action(s) start outside "
                     "the visible horizontal scroll region."
                 ),
                 metrics={
-                    "concealed_action_count": concealed_actions,
+                    "concealed_action_count": concealed_actions_x,
                     "client_width_px": client_width,
                     "scroll_width_px": scroll_width,
                     "scroll_width_ratio": round(scroll_width / client_width, 2),
