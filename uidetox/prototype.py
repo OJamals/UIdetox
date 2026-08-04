@@ -746,6 +746,7 @@ def _group_operation_obligation_evidence(
                 "owner",
                 "operations",
                 "modules",
+                "source_anchor",
                 "evidence_basis",
                 "applicability",
                 "evidence",

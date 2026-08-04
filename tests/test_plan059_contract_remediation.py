@@ -327,6 +327,10 @@ export function Orders() {
     ]
     assert all(item["modules"] == ["src/Orders.tsx"] for item in obligations)
     assert all(item["owner"] == "Orders" for item in obligations)
+    assert all(
+        item["source_anchor"] == {"path": "src/Orders.tsx", "line": 2, "column": 0}
+        for item in obligations
+    )
     assert not any("idempotency" in item["instruction"] for item in obligations)
     assert not any("partial-success" in item["instruction"] for item in obligations)
     assert any(
@@ -338,6 +342,7 @@ export function Orders() {
     assert "Operation-contract remediation:" in brief
     assert '"evidence_basis":"measured"' in brief
     assert '"operations":[{"method":"POST","path":"/orders"}]' in brief
+    assert '"source_anchor":{"column":0,"line":2,"path":"src/Orders.tsx"}' in brief
     assert '"obligation":"retry"' in brief
     assert '"contract_anchor":{"field":"retry"' in brief
     assert (

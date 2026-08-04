@@ -873,6 +873,7 @@ def _operation_obligation_plan(
                 "operations": [{"method": method, "path": path}],
                 "obligation": obligation,
                 "states": list(states),
+                "source_anchor": dict(finding.source_anchor),
                 "contract_anchor": dict(finding.contract_anchor),
                 "evidence_basis": "measured",
                 "applicability": "applicable",
