@@ -54,8 +54,8 @@ def test_large_runtime_capture_projection_keeps_states_and_viewports_bounded() -
     projected = prototype_module._prototype_runtime_capture_evidence(rows)
 
     assert projected["total"] == 30
-    assert len(projected["sampled"]) == 12
-    assert projected["remaining_in_redesign_artifact"] == 18
+    assert len(projected["sampled"]) == 10
+    assert projected["remaining_in_redesign_artifact"] == 20
     assert {item["state"] for item in projected["sampled"]} == {
         f"state-{index}" for index in range(5)
     }
