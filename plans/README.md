@@ -77,7 +77,7 @@ remain TODO.
 | 055 | Separate backend source discovery from extraction | P1 | M | — | DONE — independently reviewed at `aa4210e`; 1,474 tests pass; 3.49x manifest speedup; route extractors 65→0 |
 | 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed at `e5a64ac`; 1,476 tests pass; 2.32x/2.43x speedup; nested-selector parity preserved |
 | 057 | Make canonical findings own evidence policy and remediation routing | P0 | L | — | DONE — maintainer-authorized dirty-snapshot rebaseline; 215 rules; 1,742 tests; repo-wide Ruff, cold fullstack loop, wheel, asset-parity, and diff-hygiene gates pass |
-| 058 | Expand one-pass browser evidence for page, navigation, and inclusive UX | P1 | L | 057 | DONE — one-pass bounded page/nav/focus/composition evidence; responsive calibration; real 12-capture desktop/tablet/mobile parity; native map→redesign→compare→prototype qualification |
+| 058 | Expand one-pass browser evidence for page, navigation, and inclusive UX | P1 | L | 057 | DONE — one-pass bounded page/nav/focus/composition evidence; unproven composition judgments routed to review; responsive calibration; real 36-view desktop/tablet/mobile parity; native map→redesign→compare→prototype qualification |
 | 059 | Project full-stack operation contracts into native UI remediation | P1 | L | 057 | TODO |
 | 060 | Add evidence-gated performance and resilience qualification | P1 | L | 058, 059 | TODO |
 | 061 | Decompose map and prototype orchestration without changing contracts | P2 | M | 057, 058, 059, 060 | TODO |
