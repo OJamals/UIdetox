@@ -74,6 +74,11 @@ _DESIGN_REMEDIATION_CONSTRAINTS: dict[str, tuple[str, ...]] = {
         "Preserve the same destination set and current-page semantics.",
         "Keep repeated navigation in one stable order across routes at the same viewport and state.",
     ),
+    "design-primary-content-delayed-by-chrome": (
+        "Preserve landmark semantics and the primary task's reading order.",
+        "Reduce only the measured pre-task header or navigation occupancy.",
+        "Re-capture the same route, state, and viewport before resolving.",
+    ),
 }
 
 
@@ -698,6 +703,115 @@ def _geometry_findings(
     return findings
 
 
+def _composition_geometry(
+    value: object,
+) -> tuple[float, float, float, float, str] | None:
+    if not isinstance(value, Mapping):
+        return None
+    x = _number(value.get("x"), math.nan)
+    y = _number(value.get("y"), math.nan)
+    width = _number(value.get("width"), math.nan)
+    height = _number(value.get("height"), math.nan)
+    selector = value.get("selector", "")
+    if (
+        not all(math.isfinite(number) for number in (x, y, width, height))
+        or width <= 0
+        or height <= 0
+        or not isinstance(selector, str)
+        or len(selector) > 512
+    ):
+        return None
+    return x, y, width, height, selector
+
+
+def _page_composition_findings(
+    elements: Sequence[DesignElement],
+) -> dict[int, list[Finding]]:
+    findings: dict[int, list[Finding]] = defaultdict(list)
+    for index, element in enumerate(elements):
+        if element.role != "main" and element.tag != "main":
+            continue
+        evidence = element.measurements.get("pageComposition")
+        if not isinstance(evidence, Mapping) or evidence.get("truncated") is not False:
+            continue
+        viewport = _composition_geometry(evidence.get("viewportBounds"))
+        content = _composition_geometry(evidence.get("contentBounds"))
+        task = _composition_geometry(evidence.get("firstTaskContent"))
+        landmarks = evidence.get("landmarks")
+        if (
+            viewport is None
+            or content is None
+            or task is None
+            or not task[4]
+            or not isinstance(landmarks, Mapping)
+        ):
+            continue
+        task_y = task[1]
+        viewport_y = viewport[1]
+        viewport_bottom = viewport_y + viewport[3]
+        content_bottom = content[1] + content[3]
+        if not content[1] <= task_y < content_bottom:
+            continue
+        task_start_ratio = (task_y - viewport_y) / viewport[3]
+        if task_start_ratio < 0.55:
+            continue
+
+        intervals: list[tuple[float, float]] = []
+        invalid = False
+        for key in ("headers", "navigations"):
+            raw_regions = landmarks.get(key)
+            if (
+                not isinstance(raw_regions, Sequence)
+                or isinstance(raw_regions, (str, bytes))
+                or len(raw_regions) > 8
+            ):
+                invalid = True
+                break
+            for raw_region in raw_regions:
+                region = _composition_geometry(raw_region)
+                if region is None:
+                    invalid = True
+                    break
+                start = max(viewport_y, region[1])
+                end = min(viewport_bottom, task_y, region[1] + region[3])
+                if end > start:
+                    intervals.append((start, end))
+            if invalid:
+                break
+        if invalid or not intervals:
+            continue
+        merged: list[list[float]] = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        chrome_coverage_ratio = sum(end - start for start, end in merged) / viewport[3]
+        if chrome_coverage_ratio < 0.4:
+            continue
+        findings[index].append(
+            _finding(
+                code="design-primary-content-delayed-by-chrome",
+                category="hierarchy",
+                severity="warning",
+                confidence=1.0,
+                message=(
+                    "Measured header and navigation chrome delays the first primary-task "
+                    "content beyond the initial viewport's upper half."
+                ),
+                metrics=_metrics(
+                    {
+                        "chrome_coverage_ratio": round(chrome_coverage_ratio, 4),
+                        "task_selector": task[4],
+                        "task_start_ratio": round(task_start_ratio, 4),
+                    },
+                    peers=(task[4],),
+                ),
+            )
+        )
+    return findings
+
+
 _INTERACTIVE_ROLES = frozenset(
     {
         "button",
@@ -904,6 +1018,7 @@ def detect_design_findings(
         _heading_findings(elements),
         _rhythm_findings(elements),
         _geometry_findings(page),
+        _page_composition_findings(elements),
         _interaction_findings(elements),
     ):
         for index, findings in family.items():
