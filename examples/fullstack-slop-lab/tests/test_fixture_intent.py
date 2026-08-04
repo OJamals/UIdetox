@@ -11,9 +11,13 @@ FIXTURE_ROOT = Path(__file__).resolve().parents[1]
 def test_fixture_intent_records_reproducible_provenance() -> None:
     manifest = json.loads((FIXTURE_ROOT / "fixture-intent.json").read_text())
 
-    assert manifest["product_goal"].startswith("Provide a runnable B2B operations stress fixture")
+    assert manifest["product_goal"].startswith(
+        "Provide a runnable B2B operations stress fixture"
+    )
     assert manifest["remediation_evidence"]["baseline_static_issues"] == 212
-    assert set(manifest["remediation_evidence"]["target_operation_parity"].values()) == {0}
+    assert set(
+        manifest["remediation_evidence"]["target_operation_parity"].values()
+    ) == {0}
     assert manifest["provenance"]["origin"] == "synthetic test fixture"
     assert manifest["provenance"]["contains_production_data"] is False
     assert manifest["provenance"]["sources_of_truth"] == [
@@ -48,9 +52,7 @@ def test_fixture_intent_records_reproducible_provenance() -> None:
         "/marketplace",
         "/work-queue",
         "/fixture-provenance",
-    } <= set(
-        manifest["expected_frontend_routes"]
-    )
+    } <= set(manifest["expected_frontend_routes"])
     assert len(manifest["expected_frontend_routes"]) >= 34
     assert manifest["provenance"]["expanded_on"] == "2026-07-31"
 

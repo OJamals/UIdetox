@@ -262,10 +262,34 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            (1, "stage_changed", "Moved from discovery to qualification after a broad alignment call.", "Mara Voss", "2026-07-29T14:20:00Z"),
-            (1, "note_added", "Pricing workbook contains two contradictory discount ladders.", "Finance Bot", "2026-07-30T09:11:00Z"),
-            (2, "proposal_sent", "Proposal sent to an alias that forwards to eleven stakeholders.", "Imani Cole", "2026-07-28T17:42:00Z"),
-            (3, "risk_detected", "Renewal and expansion opportunities may share the same external identifier.", "Theo Rami", "2026-07-30T21:08:00Z"),
+            (
+                1,
+                "stage_changed",
+                "Moved from discovery to qualification after a broad alignment call.",
+                "Mara Voss",
+                "2026-07-29T14:20:00Z",
+            ),
+            (
+                1,
+                "note_added",
+                "Pricing workbook contains two contradictory discount ladders.",
+                "Finance Bot",
+                "2026-07-30T09:11:00Z",
+            ),
+            (
+                2,
+                "proposal_sent",
+                "Proposal sent to an alias that forwards to eleven stakeholders.",
+                "Imani Cole",
+                "2026-07-28T17:42:00Z",
+            ),
+            (
+                3,
+                "risk_detected",
+                "Renewal and expansion opportunities may share the same external identifier.",
+                "Theo Rami",
+                "2026-07-30T21:08:00Z",
+            ),
         ],
     )
     _seed_if_empty(
@@ -278,9 +302,36 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("Export job never finishes and the progress bar keeps celebrating", "Acme Global Transformation Holdings", "urgent-purple", "OPEN_NOW", "Unassigned", "2026-07-30T08:14:00Z", "2026-07-31T12:04:00Z", "15-ish"),
-            ("Imported contacts appear twice but only in analytics", "Northstar Innovation Partnership", "highish", "waiting_customer_or_us", "Imani Cole", "2026-07-29T10:22:00Z", "2026-07-31T09:48:00Z", "60"),
-            ("Invoice PDF uses last quarter's workspace name", "Example Customer With An Impossibly Long Procurement Department Name", "normal", "resolved_maybe", "Mara Voss", "2026-07-25T18:02:00Z", "2026-07-30T16:31:00Z", "240 minutes"),
+            (
+                "Export job never finishes and the progress bar keeps celebrating",
+                "Acme Global Transformation Holdings",
+                "urgent-purple",
+                "OPEN_NOW",
+                "Unassigned",
+                "2026-07-30T08:14:00Z",
+                "2026-07-31T12:04:00Z",
+                "15-ish",
+            ),
+            (
+                "Imported contacts appear twice but only in analytics",
+                "Northstar Innovation Partnership",
+                "highish",
+                "waiting_customer_or_us",
+                "Imani Cole",
+                "2026-07-29T10:22:00Z",
+                "2026-07-31T09:48:00Z",
+                "60",
+            ),
+            (
+                "Invoice PDF uses last quarter's workspace name",
+                "Example Customer With An Impossibly Long Procurement Department Name",
+                "normal",
+                "resolved_maybe",
+                "Mara Voss",
+                "2026-07-25T18:02:00Z",
+                "2026-07-30T16:31:00Z",
+                "240 minutes",
+            ),
         ],
     )
     _seed_if_empty(
@@ -292,11 +343,41 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            (1, "procurement-ops@example.com", "The export has shown 99 percent for six hours. Refreshing creates another job.", "email", "2026-07-30T08:14:00Z"),
-            (1, "NexusFlow Support", "We are reviewing queue ownership and worker lease evidence.", "internal-reply", "2026-07-30T08:28:00Z"),
-            (1, "procurement-ops@example.com", "A third export appeared without anyone clicking the button.", "email", "2026-07-31T12:04:00Z"),
-            (2, "primary.person@example.com", "Dashboard says 9,412 people while the contacts page says 4,706.", "chat", "2026-07-29T10:22:00Z"),
-            (3, "a.very.long.shared.mailbox.address.for.buyers@example.com", "The legal entity in the PDF is no longer our workspace name.", "email", "2026-07-25T18:02:00Z"),
+            (
+                1,
+                "procurement-ops@example.com",
+                "The export has shown 99 percent for six hours. Refreshing creates another job.",
+                "email",
+                "2026-07-30T08:14:00Z",
+            ),
+            (
+                1,
+                "NexusFlow Support",
+                "We are reviewing queue ownership and worker lease evidence.",
+                "internal-reply",
+                "2026-07-30T08:28:00Z",
+            ),
+            (
+                1,
+                "procurement-ops@example.com",
+                "A third export appeared without anyone clicking the button.",
+                "email",
+                "2026-07-31T12:04:00Z",
+            ),
+            (
+                2,
+                "primary.person@example.com",
+                "Dashboard says 9,412 people while the contacts page says 4,706.",
+                "chat",
+                "2026-07-29T10:22:00Z",
+            ),
+            (
+                3,
+                "a.very.long.shared.mailbox.address.for.buyers@example.com",
+                "The legal entity in the PDF is no longer our workspace name.",
+                "email",
+                "2026-07-25T18:02:00Z",
+            ),
         ],
     )
     _seed_if_empty(
@@ -308,9 +389,27 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            ("Enterprise urgent white-glove promise", "urgent", "15", "240", "24/7 except regional holidays"),
-            ("Growth plan high-priority support", "high", "60 minutes", "480", "Business hours in account timezone"),
-            ("Everything else best effort", "normal", "four hours", "2880", "Monday through Friday maybe"),
+            (
+                "Enterprise urgent white-glove promise",
+                "urgent",
+                "15",
+                "240",
+                "24/7 except regional holidays",
+            ),
+            (
+                "Growth plan high-priority support",
+                "high",
+                "60 minutes",
+                "480",
+                "Business hours in account timezone",
+            ),
+            (
+                "Everything else best effort",
+                "normal",
+                "four hours",
+                "2880",
+                "Monday through Friday maybe",
+            ),
         ],
     )
     _seed_if_empty(
@@ -323,10 +422,42 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("NF-PLATFORM-ENT", "NexusFlow Enterprise Intelligence Platform", "Platform", "12990000", "ACTIVE_VISIBLE", "not-stocked", "Annual platform entitlement with vague unlimited language and a separately metered data layer."),
-            ("NF-ONBOARD-PLUS", "White-glove transformation onboarding accelerator", "Services", "$18,500.00", "active", "capacity-managed-ish", "A six-week implementation package described as both fixed scope and fully customized."),
-            ("NF-DATA-10M", "Additional ten million event processing bundle", "Usage", "420000", "DRAFT_INTERNAL", "virtual", "Event allowance that resets on a billing schedule not shown in this catalog."),
-            ("NF-SUCCESS-QBR", "Executive strategic alignment and quarterly value ritual", "Services", "USD 7500", "archived-but-orderable", "manual-approval", "A premium workshop with three nearly identical deliverables and no visible cancellation policy."),
+            (
+                "NF-PLATFORM-ENT",
+                "NexusFlow Enterprise Intelligence Platform",
+                "Platform",
+                "12990000",
+                "ACTIVE_VISIBLE",
+                "not-stocked",
+                "Annual platform entitlement with vague unlimited language and a separately metered data layer.",
+            ),
+            (
+                "NF-ONBOARD-PLUS",
+                "White-glove transformation onboarding accelerator",
+                "Services",
+                "$18,500.00",
+                "active",
+                "capacity-managed-ish",
+                "A six-week implementation package described as both fixed scope and fully customized.",
+            ),
+            (
+                "NF-DATA-10M",
+                "Additional ten million event processing bundle",
+                "Usage",
+                "420000",
+                "DRAFT_INTERNAL",
+                "virtual",
+                "Event allowance that resets on a billing schedule not shown in this catalog.",
+            ),
+            (
+                "NF-SUCCESS-QBR",
+                "Executive strategic alignment and quarterly value ritual",
+                "Services",
+                "USD 7500",
+                "archived-but-orderable",
+                "manual-approval",
+                "A premium workshop with three nearly identical deliverables and no visible cancellation policy.",
+            ),
         ],
     )
     _seed_if_empty(
@@ -339,9 +470,33 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("NF-ORDER-2401", "Acme Global Transformation Holdings", "CONFIRMED_PENDING_EVERYTHING", "$148,400.00", "2026-07-28", "2026-08-04", "sales-assisted"),
-            ("NF-ORDER-2400", "Northstar Innovation Partnership", "packing-ish", "USD 22,700", "2026-07-27", "2026-08-01", "self-serve-plus-human"),
-            ("NF-ORDER-2399", "Example Customer With An Impossibly Long Procurement Department Name", "shipped", "999.99", "2026-07-21", "2026-07-25", "spreadsheet-import"),
+            (
+                "NF-ORDER-2401",
+                "Acme Global Transformation Holdings",
+                "CONFIRMED_PENDING_EVERYTHING",
+                "$148,400.00",
+                "2026-07-28",
+                "2026-08-04",
+                "sales-assisted",
+            ),
+            (
+                "NF-ORDER-2400",
+                "Northstar Innovation Partnership",
+                "packing-ish",
+                "USD 22,700",
+                "2026-07-27",
+                "2026-08-01",
+                "self-serve-plus-human",
+            ),
+            (
+                "NF-ORDER-2399",
+                "Example Customer With An Impossibly Long Procurement Department Name",
+                "shipped",
+                "999.99",
+                "2026-07-21",
+                "2026-07-25",
+                "spreadsheet-import",
+            ),
         ],
     )
     _seed_if_empty(
@@ -353,11 +508,41 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            (1, "NF-PLATFORM-ENT", "NexusFlow Enterprise Intelligence Platform", "1", "12990000"),
-            (1, "NF-ONBOARD-PLUS", "White-glove transformation onboarding accelerator", "1", "1850000"),
-            (2, "NF-DATA-10M", "Additional ten million event processing bundle", "10", "420000"),
-            (2, "NF-SUCCESS-QBR", "Executive strategic alignment and quarterly value ritual", "2-ish", "750000"),
-            (3, "NF-SUCCESS-QBR", "Executive strategic alignment and quarterly value ritual", "1", "99999"),
+            (
+                1,
+                "NF-PLATFORM-ENT",
+                "NexusFlow Enterprise Intelligence Platform",
+                "1",
+                "12990000",
+            ),
+            (
+                1,
+                "NF-ONBOARD-PLUS",
+                "White-glove transformation onboarding accelerator",
+                "1",
+                "1850000",
+            ),
+            (
+                2,
+                "NF-DATA-10M",
+                "Additional ten million event processing bundle",
+                "10",
+                "420000",
+            ),
+            (
+                2,
+                "NF-SUCCESS-QBR",
+                "Executive strategic alignment and quarterly value ritual",
+                "2-ish",
+                "750000",
+            ),
+            (
+                3,
+                "NF-SUCCESS-QBR",
+                "Executive strategic alignment and quarterly value ritual",
+                "1",
+                "99999",
+            ),
         ],
     )
     _seed_if_empty(
@@ -370,10 +555,42 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("NF-SECURITY-KEY", "Branded hardware security key welcome kit", "DET-A-14", "128", "44", "30", "fine"),
-            ("NF-EXEC-BOX", "Executive value realization presentation box", "DET-B-02", "18 units", "17", "12", "almost-low"),
-            ("NF-SWAG-M", "Magical transformation hoodie medium", "REMOTE-3PL", "0", "4", "24", "negative-available"),
-            ("NF-CABLE-BUNDLE", "Universal conference room cable bundle", "DET-A-14", "902", "12", "80", "too-many"),
+            (
+                "NF-SECURITY-KEY",
+                "Branded hardware security key welcome kit",
+                "DET-A-14",
+                "128",
+                "44",
+                "30",
+                "fine",
+            ),
+            (
+                "NF-EXEC-BOX",
+                "Executive value realization presentation box",
+                "DET-B-02",
+                "18 units",
+                "17",
+                "12",
+                "almost-low",
+            ),
+            (
+                "NF-SWAG-M",
+                "Magical transformation hoodie medium",
+                "REMOTE-3PL",
+                "0",
+                "4",
+                "24",
+                "negative-available",
+            ),
+            (
+                "NF-CABLE-BUNDLE",
+                "Universal conference room cable bundle",
+                "DET-A-14",
+                "902",
+                "12",
+                "80",
+                "too-many",
+            ),
         ],
     )
     _seed_if_empty(
@@ -386,9 +603,30 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            ("NF-ORDER-2401", "ParcelCo Priority Enterprise", "PC-992810000184721", "label_only", "2026-08-04", None),
-            ("NF-ORDER-2400", "Northstar Regional Freight and Parcel", "NRF-VERY-LONG-0000441099", "exception_weather_but_not_weather", "2026-08-02", "Address normalized to a different campus after label purchase."),
-            ("NF-ORDER-2399", "Manual Courier Upload", "spreadsheet row 48", "delivered_probably", None, None),
+            (
+                "NF-ORDER-2401",
+                "ParcelCo Priority Enterprise",
+                "PC-992810000184721",
+                "label_only",
+                "2026-08-04",
+                None,
+            ),
+            (
+                "NF-ORDER-2400",
+                "Northstar Regional Freight and Parcel",
+                "NRF-VERY-LONG-0000441099",
+                "exception_weather_but_not_weather",
+                "2026-08-02",
+                "Address normalized to a different campus after label purchase.",
+            ),
+            (
+                "NF-ORDER-2399",
+                "Manual Courier Upload",
+                "spreadsheet row 48",
+                "delivered_probably",
+                None,
+                None,
+            ),
         ],
     )
     _seed_if_empty(
@@ -401,9 +639,33 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("Enterprise revival orchestration", "email-plus-ads-plus-sales-task", "DRAFT_NEEDS_EVERYONE", "18,400-ish", "$92,000", "Growth Council", "2026-08-11T13:00:00Z"),
-            ("Magical product adoption acceleration wave", "in-app", "scheduled", "42000", "1800000", "Lifecycle Team", "2026-08-03T09:00:00Z"),
-            ("Quarterly strategic alignment celebration", "all channels", "paused_for_brand", "about 6k", "USD 32,500", "Executive Programs", None),
+            (
+                "Enterprise revival orchestration",
+                "email-plus-ads-plus-sales-task",
+                "DRAFT_NEEDS_EVERYONE",
+                "18,400-ish",
+                "$92,000",
+                "Growth Council",
+                "2026-08-11T13:00:00Z",
+            ),
+            (
+                "Magical product adoption acceleration wave",
+                "in-app",
+                "scheduled",
+                "42000",
+                "1800000",
+                "Lifecycle Team",
+                "2026-08-03T09:00:00Z",
+            ),
+            (
+                "Quarterly strategic alignment celebration",
+                "all channels",
+                "paused_for_brand",
+                "about 6k",
+                "USD 32,500",
+                "Executive Programs",
+                None,
+            ),
         ],
     )
     _seed_if_empty(
@@ -415,9 +677,27 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            ("Enterprise accounts with stalled momentum and unclear champions", "arr > 50000 AND last_touch > 30 days OR health looks concerning", "18400", "fresh-ish", "Revenue Operations"),
-            ("Power users who might be admins depending on imported roles", "events_30d > 500 AND role IN ('owner','admin','workspace-admin?')", "4.7k", "refreshing forever", "Product Growth"),
-            ("Customers eligible for everything except the exclusions", "not churned OR trial OR internal_demo = false", "unknown", "warning_12", "Lifecycle Team"),
+            (
+                "Enterprise accounts with stalled momentum and unclear champions",
+                "arr > 50000 AND last_touch > 30 days OR health looks concerning",
+                "18400",
+                "fresh-ish",
+                "Revenue Operations",
+            ),
+            (
+                "Power users who might be admins depending on imported roles",
+                "events_30d > 500 AND role IN ('owner','admin','workspace-admin?')",
+                "4.7k",
+                "refreshing forever",
+                "Product Growth",
+            ),
+            (
+                "Customers eligible for everything except the exclusions",
+                "not churned OR trial OR internal_demo = false",
+                "unknown",
+                "warning_12",
+                "Lifecycle Team",
+            ),
         ],
     )
     _seed_if_empty(
@@ -430,9 +710,30 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            ("The definitive enterprise transformation readiness playbook final v12", "playbook", "review_again", "Content Council", "2026-07-31T08:00:00Z", "42 placements"),
-            ("Executive value realization calculator with benchmark magic", "calculator", "PUBLISHED_GLOBAL", "Growth Engineering", "2026-07-29T12:30:00Z", "1200"),
-            ("Customer story placeholder awaiting customer approval", "case-study", "draft", "Field Marketing", "2026-07-18T18:00:00Z", "used in 9 campaigns"),
+            (
+                "The definitive enterprise transformation readiness playbook final v12",
+                "playbook",
+                "review_again",
+                "Content Council",
+                "2026-07-31T08:00:00Z",
+                "42 placements",
+            ),
+            (
+                "Executive value realization calculator with benchmark magic",
+                "calculator",
+                "PUBLISHED_GLOBAL",
+                "Growth Engineering",
+                "2026-07-29T12:30:00Z",
+                "1200",
+            ),
+            (
+                "Customer story placeholder awaiting customer approval",
+                "case-study",
+                "draft",
+                "Field Marketing",
+                "2026-07-18T18:00:00Z",
+                "used in 9 campaigns",
+            ),
         ],
     )
     _seed_if_empty(
@@ -445,9 +746,27 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            ("How seamlessly empowered do you feel this quarter?", "OPEN_ALWAYS", "1,842", "68 percent maybe", "Customer Experience"),
-            ("Implementation kickoff retrospective pulse", "draft", "0", "0", "Onboarding Operations"),
-            ("Executive sponsor strategic alignment index", "closing_soon", "92", "104%", "Value Consulting"),
+            (
+                "How seamlessly empowered do you feel this quarter?",
+                "OPEN_ALWAYS",
+                "1,842",
+                "68 percent maybe",
+                "Customer Experience",
+            ),
+            (
+                "Implementation kickoff retrospective pulse",
+                "draft",
+                "0",
+                "0",
+                "Onboarding Operations",
+            ),
+            (
+                "Executive sponsor strategic alignment index",
+                "closing_soon",
+                "92",
+                "104%",
+                "Value Consulting",
+            ),
         ],
     )
     _seed_if_empty(
@@ -459,11 +778,46 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            ("jane@example.com", "permission.changed", "workspace:primary", "Changed export scope from selected records to all records after an approval that is not linked here.", "2026-07-31T12:01:00Z", "10.4.x.x"),
-            ("system:sync-worker-legacy", "credential.rotated", "connector:sf_prod_us_4", "Rotation completed but prior owner remains visible in the data source screen.", "2026-07-31T11:46:00Z", "internal"),
-            ("john@example.com", "campaign.published", "campaign:2", "Published adoption wave to a segment with an unresolved audience warning.", "2026-07-31T09:12:00Z", "172.16.x.x"),
-            ("unknown-service", "export.created", "export:44819", "Created a duplicate export while the previous export held the same idempotency label.", "2026-07-30T23:59:59Z", "internal"),
-            ("sarah@example.com", "flag.updated", "flag:confetti-revenue", "Set rollout to 101 percent through a retired admin screen.", "2026-07-30T20:05:00Z", "10.1.x.x"),
+            (
+                "jane@example.com",
+                "permission.changed",
+                "workspace:primary",
+                "Changed export scope from selected records to all records after an approval that is not linked here.",
+                "2026-07-31T12:01:00Z",
+                "10.4.x.x",
+            ),
+            (
+                "system:sync-worker-legacy",
+                "credential.rotated",
+                "connector:sf_prod_us_4",
+                "Rotation completed but prior owner remains visible in the data source screen.",
+                "2026-07-31T11:46:00Z",
+                "internal",
+            ),
+            (
+                "john@example.com",
+                "campaign.published",
+                "campaign:2",
+                "Published adoption wave to a segment with an unresolved audience warning.",
+                "2026-07-31T09:12:00Z",
+                "172.16.x.x",
+            ),
+            (
+                "unknown-service",
+                "export.created",
+                "export:44819",
+                "Created a duplicate export while the previous export held the same idempotency label.",
+                "2026-07-30T23:59:59Z",
+                "internal",
+            ),
+            (
+                "sarah@example.com",
+                "flag.updated",
+                "flag:confetti-revenue",
+                "Set rollout to 101 percent through a retired admin screen.",
+                "2026-07-30T20:05:00Z",
+                "10.1.x.x",
+            ),
         ],
     )
     _seed_if_empty(
@@ -475,9 +829,30 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            ("new-revenue-command-center", "New revenue command center experience", 1, "62%", "enterprise AND not_control_group", "Revenue Platform"),
-            ("confetti-revenue", "Celebrate every revenue mutation", 0, "101 maybe", "everyone-including-api-users", "Growth Council"),
-            ("autonomous-account-rescue", "Autonomous account rescue agent", 0, "5", "health < 40 OR sentiment unknown", "AI Governance"),
+            (
+                "new-revenue-command-center",
+                "New revenue command center experience",
+                1,
+                "62%",
+                "enterprise AND not_control_group",
+                "Revenue Platform",
+            ),
+            (
+                "confetti-revenue",
+                "Celebrate every revenue mutation",
+                0,
+                "101 maybe",
+                "everyone-including-api-users",
+                "Growth Council",
+            ),
+            (
+                "autonomous-account-rescue",
+                "Autonomous account rescue agent",
+                0,
+                "5",
+                "health < 40 OR sentiment unknown",
+                "AI Governance",
+            ),
         ],
     )
     _seed_if_empty(
@@ -490,9 +865,30 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            ("Bulk exports remain at 99 percent while duplicate jobs spawn", "SEV_ONE", "investigating_now", "exports-worker-primary-and-legacy", "2026-07-31T07:58:00Z", 0),
-            ("Analytics counts differ across three customer surfaces", "sev-2", "monitoring", "metrics-aggregation-v4", "2026-07-30T18:20:00Z", 1),
-            ("Marketplace install receipts delayed", "minor-purple", "resolved_maybe", "integration-install-webhook", "2026-07-29T14:00:00Z", 1),
+            (
+                "Bulk exports remain at 99 percent while duplicate jobs spawn",
+                "SEV_ONE",
+                "investigating_now",
+                "exports-worker-primary-and-legacy",
+                "2026-07-31T07:58:00Z",
+                0,
+            ),
+            (
+                "Analytics counts differ across three customer surfaces",
+                "sev-2",
+                "monitoring",
+                "metrics-aggregation-v4",
+                "2026-07-30T18:20:00Z",
+                1,
+            ),
+            (
+                "Marketplace install receipts delayed",
+                "minor-purple",
+                "resolved_maybe",
+                "integration-install-webhook",
+                "2026-07-29T14:00:00Z",
+                1,
+            ),
         ],
     )
     _seed_if_empty(
@@ -505,9 +901,27 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         [
-            ("Enterprise Spreadsheet Super Sync", "Data and absolutely everything", 0, 'read:all,write:contacts,admin:workspace?', "Synchronize every business-critical spreadsheet through a confident one-click workflow."),
-            ("Revenue Celebration Studio", "Engagement", 1, 'read:revenue,write:notifications', "Transform ordinary revenue updates into delightful multi-channel moments."),
-            ("Universal AI Meeting Intelligence Connector", "AI productivity", 0, 'read:meetings,read:calendar,read:contacts,write:tasks', "Seamlessly turn every conversation into aligned, proactive, high-impact work."),
+            (
+                "Enterprise Spreadsheet Super Sync",
+                "Data and absolutely everything",
+                0,
+                "read:all,write:contacts,admin:workspace?",
+                "Synchronize every business-critical spreadsheet through a confident one-click workflow.",
+            ),
+            (
+                "Revenue Celebration Studio",
+                "Engagement",
+                1,
+                "read:revenue,write:notifications",
+                "Transform ordinary revenue updates into delightful multi-channel moments.",
+            ),
+            (
+                "Universal AI Meeting Intelligence Connector",
+                "AI productivity",
+                0,
+                "read:meetings,read:calendar,read:contacts,write:tasks",
+                "Seamlessly turn every conversation into aligned, proactive, high-impact work.",
+            ),
         ],
     )
     _seed_if_empty(
@@ -520,9 +934,41 @@ def init_extended_database(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("Reconcile Acme pricing exception before executive alignment", "deal-task", "UNCLAIMED_NEW", None, "2026-08-01T14:00:00Z", "99", "opportunity:1"),
-            ("Respond to export job duplicate report", "support-escalation", "claimed-ish", "Imani Cole", "2026-07-31T13:00:00Z", "urgent-120", "case:1"),
-            ("Approve campaign audience with twelve warnings", "governance", "blocked_by_everyone", None, "2026-08-02T09:00:00Z", "82", "campaign:1"),
-            ("Confirm shipment exception campus address", "fulfillment", "not_started", None, "2026-08-01T10:30:00Z", "55", "shipment:2"),
+            (
+                "Reconcile Acme pricing exception before executive alignment",
+                "deal-task",
+                "UNCLAIMED_NEW",
+                None,
+                "2026-08-01T14:00:00Z",
+                "99",
+                "opportunity:1",
+            ),
+            (
+                "Respond to export job duplicate report",
+                "support-escalation",
+                "claimed-ish",
+                "Imani Cole",
+                "2026-07-31T13:00:00Z",
+                "urgent-120",
+                "case:1",
+            ),
+            (
+                "Approve campaign audience with twelve warnings",
+                "governance",
+                "blocked_by_everyone",
+                None,
+                "2026-08-02T09:00:00Z",
+                "82",
+                "campaign:1",
+            ),
+            (
+                "Confirm shipment exception campus address",
+                "fulfillment",
+                "not_started",
+                None,
+                "2026-08-01T10:30:00Z",
+                "55",
+                "shipment:2",
+            ),
         ],
     )

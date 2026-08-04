@@ -35,9 +35,8 @@ def opportunity_payload(item: dict[str, Any]) -> dict[str, Any]:
         "name": item["deal_name"],
         "accountName": item["account_label"],
         "stage": item["stage_code"],
-        "amountCents": _integer_text(item["amount_text"]) * (
-            100 if "$" in item["amount_text"] or "USD" in item["amount_text"] else 1
-        ),
+        "amountCents": _integer_text(item["amount_text"])
+        * (100 if "$" in item["amount_text"] or "USD" in item["amount_text"] else 1),
         "probability": item["probability_percent"],
         "owner": item["owner_ref"],
         "closeAt": item["expected_close_date"],
@@ -73,7 +72,9 @@ def support_case_payload(item: dict[str, Any]) -> dict[str, Any]:
 def list_opportunities() -> list[dict[str, Any]]:
     return [
         opportunity_payload(item)
-        for item in database.rows("SELECT * FROM opportunities ORDER BY amount_text DESC")
+        for item in database.rows(
+            "SELECT * FROM opportunities ORDER BY amount_text DESC"
+        )
     ]
 
 
@@ -163,9 +164,7 @@ def get_revenue_forecast() -> dict[str, Any]:
             if item["stage"] in {"proposal", "negotiation"}
         ),
         "atRiskCents": sum(
-            item["amountCents"]
-            for item in opportunities
-            if item["probability"] < 50
+            item["amountCents"] for item in opportunities if item["probability"] < 50
         ),
     }
 
@@ -233,9 +232,7 @@ def get_support_case(case_id: int) -> dict[str, Any]:
     "/api/support/cases/{case_id}/assign",
     response_model=SupportCaseResponse,
 )
-def assign_support_case(
-    case_id: int, payload: SupportAssignment
-) -> dict[str, Any]:
+def assign_support_case(case_id: int, payload: SupportAssignment) -> dict[str, Any]:
     item = database.row("SELECT * FROM support_cases WHERE id = ?", (case_id,))
     if not item:
         raise HTTPException(status_code=404, detail="Support case not found")

@@ -47,7 +47,9 @@ def test_project_create_update_and_delete() -> None:
     assert updated.json()["progress"] == 61
     activity = client.get(f"/api/projects/{project_id}").json()["activity"]
     assert activity[0]["actor"] == "Northstar Operator"
-    assert activity[0]["detail"] == "Changed project progress to 61% and status to active"
+    assert (
+        activity[0]["detail"] == "Changed project progress to 61% and status to active"
+    )
 
     deleted = client.delete(f"/api/projects/{project_id}")
     assert deleted.status_code == 204
@@ -88,7 +90,15 @@ def test_workflow_contract_and_pause_action() -> None:
     response = client.get("/api/workflows")
     assert response.status_code == 200
     workflow = response.json()[0]
-    assert {"id", "name", "trigger", "schedule", "enabled", "lastRun", "destination"} == set(workflow)
+    assert {
+        "id",
+        "name",
+        "trigger",
+        "schedule",
+        "enabled",
+        "lastRun",
+        "destination",
+    } == set(workflow)
 
     paused = client.post(f"/api/workflows/{workflow['id']}/pause")
     assert paused.status_code == 200
@@ -98,7 +108,15 @@ def test_workflow_contract_and_pause_action() -> None:
 def test_invoice_and_notification_contracts_and_seen_action() -> None:
     invoices = client.get("/api/billing/invoices")
     assert invoices.status_code == 200
-    assert {"id", "invoiceNo", "accountName", "amountCents", "status", "createdAt", "dueAt"} == set(invoices.json()[0])
+    assert {
+        "id",
+        "invoiceNo",
+        "accountName",
+        "amountCents",
+        "status",
+        "createdAt",
+        "dueAt",
+    } == set(invoices.json()[0])
 
     notifications = client.get("/api/notifications")
     assert notifications.status_code == 200
@@ -114,7 +132,14 @@ def test_experiment_contract_and_update_action() -> None:
     experiments = client.get("/api/experiments")
     assert experiments.status_code == 200
     experiment = experiments.json()[0]
-    assert {"key", "title", "description", "rolloutPercent", "enabled", "audience"} == set(experiment)
+    assert {
+        "key",
+        "title",
+        "description",
+        "rolloutPercent",
+        "enabled",
+        "audience",
+    } == set(experiment)
 
     experiment["enabled"] = not experiment["enabled"]
     saved = client.put(f"/api/experiments/{experiment['key']}", json=experiment)
@@ -126,18 +151,35 @@ def test_customer_and_data_source_contracts_and_actions() -> None:
     accounts = client.get("/api/accounts")
     assert accounts.status_code == 200
     customer = accounts.json()[0]
-    assert {"id", "displayName", "annualRevenueCents", "lifecycleStage", "healthScore", "owner", "primaryContact", "notes", "lastTouchAt"} == set(customer)
+    assert {
+        "id",
+        "displayName",
+        "annualRevenueCents",
+        "lifecycleStage",
+        "healthScore",
+        "owner",
+        "primaryContact",
+        "notes",
+        "lastTouchAt",
+    } == set(customer)
 
-    updated = client.patch(
-        f"/api/accounts/{customer['id']}", json={"healthScore": 73}
-    )
+    updated = client.patch(f"/api/accounts/{customer['id']}", json={"healthScore": 73})
     assert updated.status_code == 200
     assert updated.json()["healthScore"] == 73
 
     sources = client.get("/api/data-sources")
     assert sources.status_code == 200
     connector = sources.json()[0]
-    assert {"id", "name", "provider", "status", "recordCount", "lastSyncedAt", "credentials", "destination"} == set(connector)
+    assert {
+        "id",
+        "name",
+        "provider",
+        "status",
+        "recordCount",
+        "lastSyncedAt",
+        "credentials",
+        "destination",
+    } == set(connector)
 
     synced = client.post(f"/api/data-sources/{connector['id']}/sync")
     assert synced.status_code == 200
@@ -149,7 +191,17 @@ def test_governance_and_journey_contracts_and_actions() -> None:
     approvals = client.get("/api/governance/approvals")
     assert approvals.status_code == 200
     approval = approvals.json()[0]
-    assert {"id", "title", "kind", "status", "requestor", "reviewers", "riskScore", "submittedAt", "context"} == set(approval)
+    assert {
+        "id",
+        "title",
+        "kind",
+        "status",
+        "requestor",
+        "reviewers",
+        "riskScore",
+        "submittedAt",
+        "context",
+    } == set(approval)
 
     decided = client.post(
         f"/api/governance/approvals/{approval['id']}/decision",
@@ -161,7 +213,16 @@ def test_governance_and_journey_contracts_and_actions() -> None:
     journeys = client.get("/api/journeys")
     assert journeys.status_code == 200
     journey = journeys.json()[0]
-    assert {"id", "name", "entryTrigger", "stepCount", "active", "audienceSegments", "publishedAt", "owner"} == set(journey)
+    assert {
+        "id",
+        "name",
+        "entryTrigger",
+        "stepCount",
+        "active",
+        "audienceSegments",
+        "publishedAt",
+        "owner",
+    } == set(journey)
 
     published = client.post(f"/api/journeys/{journey['id']}/publish")
     assert published.status_code == 200
@@ -318,50 +379,74 @@ def test_growth_and_control_plane_contracts_and_actions() -> None:
 
 def test_invalid_action_payloads_and_missing_records_are_rejected() -> None:
     assert client.patch("/api/accounts/1", json={"healthScore": 101}).status_code == 422
-    assert client.post("/api/governance/approvals/1/decision", json={"decision": "maybe"}).status_code == 422
-    assert client.post(
-        "/api/team/invite", json={"email": "not-an-email", "role": "Owner"}
-    ).status_code == 422
-    assert client.post(
-        "/api/projects", json={"name": "Invalid state", "status": "almost-done"}
-    ).status_code == 422
-    assert client.put(
-        "/api/settings",
-        json={
-            "workspace_name": "Beta",
-            "weekly_digest": True,
-            "dark_mode": False,
-            "default_view": "somewhere",
-        },
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/governance/approvals/1/decision", json={"decision": "maybe"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/team/invite", json={"email": "not-an-email", "role": "Owner"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/projects", json={"name": "Invalid state", "status": "almost-done"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/settings",
+            json={
+                "workspace_name": "Beta",
+                "weekly_digest": True,
+                "dark_mode": False,
+                "default_view": "somewhere",
+            },
+        ).status_code
+        == 422
+    )
     assert client.post("/api/workflows/99999/pause").status_code == 404
     assert client.delete("/api/team/99999").status_code == 404
-    assert client.patch(
-        "/api/revenue/opportunities/1",
-        json={"stage": "teleported", "probability": 180},
-    ).status_code == 422
-    assert client.post(
-        "/api/support/cases/1/assign", json={"assignee": ""}
-    ).status_code == 422
+    assert (
+        client.patch(
+            "/api/revenue/opportunities/1",
+            json={"stage": "teleported", "probability": 180},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/api/support/cases/1/assign", json={"assignee": ""}).status_code
+        == 422
+    )
     assert client.get("/api/orders/99999").status_code == 404
     assert client.post("/api/work-queue/99999/claim").status_code == 404
 
 
 def test_request_contracts_reject_unknown_fields() -> None:
-    assert client.post(
-        "/api/projects",
-        json={"name": "Strict request", "database_only_field": True},
-    ).status_code == 422
-    assert client.put(
-        "/api/settings",
-        json={
-            "id": 1,
-            "workspace_name": "Strict workspace",
-            "weekly_digest": True,
-            "dark_mode": False,
-            "default_view": "dashboard",
-        },
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/projects",
+            json={"name": "Strict request", "database_only_field": True},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/settings",
+            json={
+                "id": 1,
+                "workspace_name": "Strict workspace",
+                "weekly_digest": True,
+                "dark_mode": False,
+                "default_view": "dashboard",
+            },
+        ).status_code
+        == 422
+    )
 
 
 def test_project_activity_foreign_key_cascades_on_delete() -> None:
@@ -376,14 +461,13 @@ def test_project_activity_foreign_key_cascades_on_delete() -> None:
     created = client.post("/api/projects", json={"name": "Cascade project"})
     assert created.status_code == 201
     project_id = created.json()["id"]
-    assert database.row(
-        "SELECT id FROM activity WHERE project_id = ?", (project_id,)
-    )
+    assert database.row("SELECT id FROM activity WHERE project_id = ?", (project_id,))
 
     assert client.delete(f"/api/projects/{project_id}").status_code == 204
-    assert database.row(
-        "SELECT id FROM activity WHERE project_id = ?", (project_id,)
-    ) is None
+    assert (
+        database.row("SELECT id FROM activity WHERE project_id = ?", (project_id,))
+        is None
+    )
 
 
 def test_activity_foreign_key_migration_preserves_valid_and_orphaned_history() -> None:
@@ -421,8 +505,7 @@ def test_activity_foreign_key_migration_preserves_valid_and_orphaned_history() -
     assert [tuple(item) for item in migrated] == [(1, 1), (2, None)]
     connection.execute("DELETE FROM projects WHERE id = 1")
     assert [
-        item["id"]
-        for item in connection.execute("SELECT id FROM activity ORDER BY id")
+        item["id"] for item in connection.execute("SELECT id FROM activity ORDER BY id")
     ] == [2]
     connection.close()
 

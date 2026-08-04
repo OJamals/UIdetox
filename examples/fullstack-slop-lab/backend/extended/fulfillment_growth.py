@@ -275,7 +275,9 @@ def advance_order(order_id: int) -> dict[str, Any]:
 def list_inventory() -> list[dict[str, Any]]:
     return [
         inventory_payload(item)
-        for item in database.rows("SELECT * FROM inventory_stock ORDER BY location_code, id")
+        for item in database.rows(
+            "SELECT * FROM inventory_stock ORDER BY location_code, id"
+        )
     ]
 
 
@@ -431,7 +433,9 @@ def list_attribution_models() -> list[dict[str, Any]]:
 def list_content_assets() -> list[dict[str, Any]]:
     return [
         content_payload(item)
-        for item in database.rows("SELECT * FROM content_assets ORDER BY updated_at DESC")
+        for item in database.rows(
+            "SELECT * FROM content_assets ORDER BY updated_at DESC"
+        )
     ]
 
 
@@ -477,7 +481,22 @@ def get_survey_results(survey_id: int) -> list[dict[str, Any]]:
     if not database.row("SELECT id FROM surveys WHERE id = ?", (survey_id,)):
         raise HTTPException(status_code=404, detail="Survey not found")
     return [
-        {"surveyId": survey_id, "label": "Seamlessly empowered", "count": 682, "percent": 37},
-        {"surveyId": survey_id, "label": "Strategically aligned", "count": 590, "percent": 32},
-        {"surveyId": survey_id, "label": "Still evaluating the question", "count": 570, "percent": 31},
+        {
+            "surveyId": survey_id,
+            "label": "Seamlessly empowered",
+            "count": 682,
+            "percent": 37,
+        },
+        {
+            "surveyId": survey_id,
+            "label": "Strategically aligned",
+            "count": 590,
+            "percent": 32,
+        },
+        {
+            "surveyId": survey_id,
+            "label": "Still evaluating the question",
+            "count": 570,
+            "percent": 31,
+        },
     ]

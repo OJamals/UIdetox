@@ -1,7 +1,6 @@
-from pathlib import Path
 import shutil
 import subprocess
-
+from pathlib import Path
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SCRIPT = FIXTURE_ROOT / "scripts" / "materialize_sandbox.sh"

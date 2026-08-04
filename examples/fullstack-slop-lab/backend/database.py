@@ -9,6 +9,7 @@ from typing import Any
 DB_PATH = Path(os.getenv("NEXUSFLOW_DB_PATH", "data/nexusflow.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+
 def connect() -> sqlite3.Connection:
     """Open an isolated request-safe connection with a bounded lock wait."""
     connection = sqlite3.connect(DB_PATH, timeout=5.0)
@@ -308,9 +309,30 @@ def init_database() -> None:
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
-                ("NF-2026-000000184", "Acme Global Transformation Holdings", "12890.40", "awaiting_wire", "2026-07-01", "2026-07-31"),
-                ("NF-2026-000000183", "Northstar Innovation Partnership", "4200", "settled", "2026-06-01", "2026-06-30"),
-                ("NF-2026-000000182", "Example Customer With An Impossibly Long Procurement Department Name", "999.99", "disputed_by_customer", "2026-05-01", "2026-05-31"),
+                (
+                    "NF-2026-000000184",
+                    "Acme Global Transformation Holdings",
+                    "12890.40",
+                    "awaiting_wire",
+                    "2026-07-01",
+                    "2026-07-31",
+                ),
+                (
+                    "NF-2026-000000183",
+                    "Northstar Innovation Partnership",
+                    "4200",
+                    "settled",
+                    "2026-06-01",
+                    "2026-06-30",
+                ),
+                (
+                    "NF-2026-000000182",
+                    "Example Customer With An Impossibly Long Procurement Department Name",
+                    "999.99",
+                    "disputed_by_customer",
+                    "2026-05-01",
+                    "2026-05-31",
+                ),
             ],
         )
     if connection.execute("SELECT COUNT(*) FROM notifications").fetchone()[0] == 0:
@@ -320,9 +342,24 @@ def init_database() -> None:
             VALUES (?, ?, ?, ?)
             """,
             [
-                ("Your workspace is approaching an unspecified limit. Upgrade immediately to continue innovating without interruption.", "urgent-purple", 0, "2026-07-21T14:03:00Z"),
-                ("The customer lifecycle automation completed with 14 warnings that are not available in this view.", "warning", 0, "2026-07-21T12:11:00Z"),
-                ("Jane mentioned everyone in Website Redesign: please review the newest thirty-seven attachments before standup.", "social", 1, "2026-07-20T22:48:00Z"),
+                (
+                    "Your workspace is approaching an unspecified limit. Upgrade immediately to continue innovating without interruption.",
+                    "urgent-purple",
+                    0,
+                    "2026-07-21T14:03:00Z",
+                ),
+                (
+                    "The customer lifecycle automation completed with 14 warnings that are not available in this view.",
+                    "warning",
+                    0,
+                    "2026-07-21T12:11:00Z",
+                ),
+                (
+                    "Jane mentioned everyone in Website Redesign: please review the newest thirty-seven attachments before standup.",
+                    "social",
+                    1,
+                    "2026-07-20T22:48:00Z",
+                ),
             ],
         )
     if connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
@@ -373,10 +410,42 @@ def init_database() -> None:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("Enterprise CRM Production Primary", "sf_prod_us_4", "mostly_healthy", "1.2M-ish", "2026-07-22T03:14:00Z", "oauth:user-who-left@example.com", "raw_salesforce_account_everything"),
-                ("Marketing Events and Behavioral Intent Lake", "segment_legacy", "backfill_blocked", "unknown over 9m", "2026-07-16T11:08:00Z", "write-key ending 7A2", "events_unified_final_v8"),
-                ("Billing Provider Plus Manual Finance Upload", "stripe-and-csv", "warning_47", "88,004", "2026-07-21T23:59:59Z", "two credentials combined", "finance_customer_revenue_current"),
-                ("Customer Success Spreadsheet maintained by everybody", "google_sheet", "connected_no_owner", "about 600", None, "shared link", "success_plan_import_temp"),
+                (
+                    "Enterprise CRM Production Primary",
+                    "sf_prod_us_4",
+                    "mostly_healthy",
+                    "1.2M-ish",
+                    "2026-07-22T03:14:00Z",
+                    "oauth:user-who-left@example.com",
+                    "raw_salesforce_account_everything",
+                ),
+                (
+                    "Marketing Events and Behavioral Intent Lake",
+                    "segment_legacy",
+                    "backfill_blocked",
+                    "unknown over 9m",
+                    "2026-07-16T11:08:00Z",
+                    "write-key ending 7A2",
+                    "events_unified_final_v8",
+                ),
+                (
+                    "Billing Provider Plus Manual Finance Upload",
+                    "stripe-and-csv",
+                    "warning_47",
+                    "88,004",
+                    "2026-07-21T23:59:59Z",
+                    "two credentials combined",
+                    "finance_customer_revenue_current",
+                ),
+                (
+                    "Customer Success Spreadsheet maintained by everybody",
+                    "google_sheet",
+                    "connected_no_owner",
+                    "about 600",
+                    None,
+                    "shared link",
+                    "success_plan_import_temp",
+                ),
             ],
         )
     if connection.execute("SELECT COUNT(*) FROM approval_requests").fetchone()[0] == 0:
@@ -412,14 +481,17 @@ def init_database() -> None:
                     "JOURNEY_PUBLISH",
                     "APPROVED_BUT_NOT_ACTIVE",
                     "42",
-                    '[]',
+                    "[]",
                     "purple-critical",
                     "2026-07-20T12:00:00Z",
                     "Reviewer list was lost during migration. The customer audience query currently includes trial, churned, and internal demo records.",
                 ),
             ],
         )
-    if connection.execute("SELECT COUNT(*) FROM journey_definitions").fetchone()[0] == 0:
+    if (
+        connection.execute("SELECT COUNT(*) FROM journey_definitions").fetchone()[0]
+        == 0
+    ):
         connection.executemany(
             """
             INSERT INTO journey_definitions

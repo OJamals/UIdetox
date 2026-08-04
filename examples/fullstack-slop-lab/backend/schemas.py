@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 ProjectStatus = Literal["planning", "active", "at-risk", "completed"]
 WorkspaceRole = Literal["Viewer", "Developer"]
 WorkspaceView = Literal["dashboard", "projects", "analytics"]

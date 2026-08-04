@@ -114,10 +114,14 @@ def account_payload(account: dict[str, Any]) -> dict[str, Any]:
     if "MRR" in account["arr_text"].upper():
         revenue *= 12
     health_match = re.search(r"\d+", account["health_code"])
-    health = int(health_match.group(0)) if health_match else {
-        "amber-but-optimistic": 58,
-        "critical-purple": 22,
-    }.get(account["health_code"], 50)
+    health = (
+        int(health_match.group(0))
+        if health_match
+        else {
+            "amber-but-optimistic": 58,
+            "critical-purple": 22,
+        }.get(account["health_code"], 50)
+    )
     owner_name = account["owner_ref"].replace("usr_001_", "").replace("_", " ")
     return {
         "id": account["id"],
@@ -127,7 +131,10 @@ def account_payload(account: dict[str, Any]) -> dict[str, Any]:
         "healthScore": health,
         "owner": {"id": account["owner_ref"], "name": owner_name.title()},
         "primaryContact": {
-            "name": account["primary_contact_email"].split("@")[0].replace(".", " ").title(),
+            "name": account["primary_contact_email"]
+            .split("@")[0]
+            .replace(".", " ")
+            .title(),
             "email": account["primary_contact_email"],
         },
         "notes": account["notes_blob"],
@@ -174,7 +181,10 @@ def approval_payload(approval: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "requestor": {
             "id": approval["requestor_ref"],
-            "name": approval["requestor_ref"].replace("usr_", "").replace("_", " ").title(),
+            "name": approval["requestor_ref"]
+            .replace("usr_", "")
+            .replace("_", " ")
+            .title(),
             "department": "Operations",
         },
         "reviewers": [
@@ -189,8 +199,10 @@ def approval_payload(approval: dict[str, Any]) -> dict[str, Any]:
 
 def journey_payload(journey: dict[str, Any]) -> dict[str, Any]:
     step_match = re.search(r"\d+", journey["step_count_text"])
-    step_count = int(step_match.group(0)) if step_match else {"eleven": 11}.get(
-        journey["step_count_text"].lower(), 0
+    step_count = (
+        int(step_match.group(0))
+        if step_match
+        else {"eleven": 11}.get(journey["step_count_text"].lower(), 0)
     )
     owner_email = journey["owner_email"]
     return {
@@ -300,7 +312,12 @@ def update_project(project_id: int, payload: ProjectUpdate) -> dict[str, Any]:
     )
     database.execute(
         "INSERT INTO activity (project_id, actor, action, detail) VALUES (?, ?, ?, ?)",
-        (project_id, "Northstar Operator", "updated", f"Changed {' and '.join(changes)}"),
+        (
+            project_id,
+            "Northstar Operator",
+            "updated",
+            f"Changed {' and '.join(changes)}",
+        ),
     )
     return get_project(project_id)
 
@@ -406,7 +423,10 @@ def list_recommendations() -> list[dict[str, Any]]:
 
 @app.get("/api/workflows", response_model=list[AutomationResponse])
 def list_workflows() -> list[dict[str, Any]]:
-    return [workflow_payload(item) for item in database.rows("SELECT * FROM workflows ORDER BY id")]
+    return [
+        workflow_payload(item)
+        for item in database.rows("SELECT * FROM workflows ORDER BY id")
+    ]
 
 
 @app.post(
@@ -423,12 +443,18 @@ def pause_workflow(workflow_id: int) -> dict[str, Any]:
 
 @app.get("/api/billing/invoices", response_model=list[InvoiceResponse])
 def list_invoices() -> list[dict[str, Any]]:
-    return [invoice_payload(item) for item in database.rows("SELECT * FROM invoices ORDER BY issued_on DESC")]
+    return [
+        invoice_payload(item)
+        for item in database.rows("SELECT * FROM invoices ORDER BY issued_on DESC")
+    ]
 
 
 @app.get("/api/notifications", response_model=list[NotificationResponse])
 def list_notifications() -> list[dict[str, Any]]:
-    return [notification_payload(item) for item in database.rows("SELECT * FROM notifications ORDER BY sent_at DESC")]
+    return [
+        notification_payload(item)
+        for item in database.rows("SELECT * FROM notifications ORDER BY sent_at DESC")
+    ]
 
 
 @app.post(
@@ -441,13 +467,18 @@ def mark_notification_seen(notification_id: int) -> dict[str, Any]:
     )
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
-    database.execute("UPDATE notifications SET is_seen = 1 WHERE id = ?", (notification_id,))
+    database.execute(
+        "UPDATE notifications SET is_seen = 1 WHERE id = ?", (notification_id,)
+    )
     return notification_payload({**notification, "is_seen": 1})
 
 
 @app.get("/api/experiments", response_model=list[ExperimentResponse])
 def list_experiments() -> list[dict[str, Any]]:
-    return [experiment_payload(item) for item in database.rows("SELECT * FROM experiments ORDER BY experiment_key")]
+    return [
+        experiment_payload(item)
+        for item in database.rows("SELECT * FROM experiments ORDER BY experiment_key")
+    ]
 
 
 @app.put(
@@ -456,7 +487,9 @@ def list_experiments() -> list[dict[str, Any]]:
 )
 def save_experiment(experiment_key: str, payload: ExperimentUpdate) -> dict[str, Any]:
     if experiment_key != payload.key:
-        raise HTTPException(status_code=409, detail="Experiment key does not match the route")
+        raise HTTPException(
+            status_code=409, detail="Experiment key does not match the route"
+        )
     database.execute(
         """
         INSERT INTO experiments (experiment_key, title, description, rollout_percent, enabled, audience_json)
@@ -477,20 +510,27 @@ def save_experiment(experiment_key: str, payload: ExperimentUpdate) -> dict[str,
             json.dumps(payload.audience),
         ),
     )
-    experiment = database.row("SELECT * FROM experiments WHERE experiment_key = ?", (experiment_key,))
+    experiment = database.row(
+        "SELECT * FROM experiments WHERE experiment_key = ?", (experiment_key,)
+    )
     return experiment_payload(experiment or {})
 
 
 @app.get("/api/accounts", response_model=list[CustomerResponse])
 def list_accounts() -> list[dict[str, Any]]:
-    return [account_payload(item) for item in database.rows("SELECT * FROM accounts ORDER BY legal_name")]
+    return [
+        account_payload(item)
+        for item in database.rows("SELECT * FROM accounts ORDER BY legal_name")
+    ]
 
 
 @app.patch(
     "/api/accounts/{account_id}",
     response_model=CustomerResponse,
 )
-def update_account_health(account_id: int, payload: AccountHealthUpdate) -> dict[str, Any]:
+def update_account_health(
+    account_id: int, payload: AccountHealthUpdate
+) -> dict[str, Any]:
     account = database.row("SELECT * FROM accounts WHERE id = ?", (account_id,))
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -503,7 +543,10 @@ def update_account_health(account_id: int, payload: AccountHealthUpdate) -> dict
 
 @app.get("/api/data-sources", response_model=list[DataSourceResponse])
 def list_data_sources() -> list[dict[str, Any]]:
-    return [data_source_payload(item) for item in database.rows("SELECT * FROM data_sources ORDER BY connector_label")]
+    return [
+        data_source_payload(item)
+        for item in database.rows("SELECT * FROM data_sources ORDER BY connector_label")
+    ]
 
 
 @app.post(
@@ -529,7 +572,9 @@ def sync_data_source(source_id: int) -> dict[str, Any]:
 def list_governance_approvals() -> list[dict[str, Any]]:
     return [
         approval_payload(item)
-        for item in database.rows("SELECT * FROM approval_requests ORDER BY submitted_at DESC")
+        for item in database.rows(
+            "SELECT * FROM approval_requests ORDER BY submitted_at DESC"
+        )
     ]
 
 
@@ -554,7 +599,10 @@ def decide_governance_approval(
 
 @app.get("/api/journeys", response_model=list[JourneyResponse])
 def list_journeys() -> list[dict[str, Any]]:
-    return [journey_payload(item) for item in database.rows("SELECT * FROM journey_definitions ORDER BY id")]
+    return [
+        journey_payload(item)
+        for item in database.rows("SELECT * FROM journey_definitions ORDER BY id")
+    ]
 
 
 @app.post(
@@ -571,5 +619,7 @@ def publish_journey(journey_id: int) -> dict[str, Any]:
         "UPDATE journey_definitions SET active_flag = 1, last_published_at = CURRENT_TIMESTAMP WHERE id = ?",
         (journey_id,),
     )
-    updated = database.row("SELECT * FROM journey_definitions WHERE id = ?", (journey_id,))
+    updated = database.row(
+        "SELECT * FROM journey_definitions WHERE id = ?", (journey_id,)
+    )
     return journey_payload(updated or {})

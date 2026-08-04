@@ -138,12 +138,8 @@ def list_feature_flags() -> list[dict[str, Any]]:
     "/api/platform/feature-flags/{flag_key}",
     response_model=FeatureFlagResponse,
 )
-def update_feature_flag(
-    flag_key: str, payload: FeatureFlagUpdate
-) -> dict[str, Any]:
-    item = database.row(
-        "SELECT * FROM feature_flags WHERE flag_key = ?", (flag_key,)
-    )
+def update_feature_flag(flag_key: str, payload: FeatureFlagUpdate) -> dict[str, Any]:
+    item = database.row("SELECT * FROM feature_flags WHERE flag_key = ?", (flag_key,))
     if not item:
         raise HTTPException(status_code=404, detail="Feature flag not found")
     database.execute(

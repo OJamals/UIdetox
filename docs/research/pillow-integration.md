@@ -70,6 +70,7 @@ class VisualEvidencePolicy:
     dimension_policy: Literal["strict", "pad_for_review"] = "strict"
     color_policy: Literal["record", "normalize_srgb"] = "record"
 
+
 @dataclass(frozen=True)
 class VisualEvidenceRequest:
     before: RuntimeObservation
@@ -78,6 +79,7 @@ class VisualEvidenceRequest:
     policy: VisualEvidencePolicy
     preserve_regions: tuple[EvidenceRegion, ...] = ()
     ignore_regions: tuple[EvidenceRegion, ...] = ()
+
 
 def build_visual_evidence(
     request: VisualEvidenceRequest,

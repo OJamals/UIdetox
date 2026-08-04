@@ -9,19 +9,18 @@ import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable
 from unittest.mock import patch
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
-import uidetox.contract_adapters as adapters  # noqa: E402
-from uidetox.project_map import project_source_manifest  # noqa: E402
-
+import uidetox.contract_adapters as adapters
+from uidetox.project_map import project_source_manifest
 
 _EXPECTED_OBSERVATION_SHA256 = (
     "82f08419380a23fda5e32e119d548418c26bd975a391cd0cd858c27d894935dc"
@@ -36,13 +35,9 @@ _COUNTER_TARGETS = (
 
 
 def _materialize_fixture(root: Path) -> None:
-    python_filler = "\n".join(
-        f"STATIC_VALUE_{line} = {line}"
-        for line in range(160)
-    )
+    python_filler = "\n".join(f"STATIC_VALUE_{line} = {line}" for line in range(160))
     javascript_filler = "\n".join(
-        f"const staticValue{line} = {line};"
-        for line in range(160)
+        f"const staticValue{line} = {line};" for line in range(160)
     )
     for index in range(32):
         python = root / "backend" / f"api_{index:02d}.py"
@@ -84,9 +79,7 @@ router.post("/orders/{index}/:orderId", handler);
             {
                 "openapi": "3.1.0",
                 "paths": {
-                    "/health": {
-                        "get": {"responses": {"200": {"description": "ok"}}}
-                    }
+                    "/health": {"get": {"responses": {"200": {"description": "ok"}}}}
                 },
             }
         ),
