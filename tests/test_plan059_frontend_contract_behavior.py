@@ -211,6 +211,27 @@ def test_absent_frontend_transport_evidence_does_not_guess() -> None:
     assert not _findings((), ((back, "accepts_media_type"),))
 
 
+def test_absent_required_parameter_evidence_fails_closed() -> None:
+    back = _lineage(
+        "back-order-id",
+        "backend",
+        "api_parameter",
+        "orderId",
+        location="path",
+        required=True,
+        style="simple",
+        explode=False,
+    )
+
+    findings = _findings((), ((back, "declares_parameter"),))
+
+    assert [finding.detector_id for finding in findings] == [
+        "contract-required-parameter-evidence-unknown"
+    ]
+    assert findings[0].status == "investigate"
+    assert findings[0].contract_anchor["field"] == "path:orderId"
+
+
 def test_missing_required_parameter_evidence_is_investigative() -> None:
     required = _lineage(
         "back-tenant",
@@ -398,3 +419,31 @@ export async function loadReport() {
         for node in project_map.nodes
         if node.side == "frontend" and node.kind == "response_media_type"
     } == {("application/json", "200"), ("text/plain", "206")}
+
+
+def test_unrelated_object_status_does_not_become_fetch_response_evidence(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function load(local: { status: number }) {
+  const response = await fetch("/orders", {
+    headers: { "Accept": "application/json" }
+  });
+  if (local.status === 409) throw new Error("local conflict");
+  if (response.status !== 200) throw new Error("request failed");
+  return response.json();
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert {
+        (node.name, node.attributes.get("status"))
+        for node in project_map.nodes
+        if node.side == "frontend" and node.kind == "response_media_type"
+    } == {("application/json", "200")}
