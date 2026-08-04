@@ -29,7 +29,7 @@
   },
   "expected_contract_counts": {
     "contract_mismatch": 0,
-    "coverage_gap": 146
+    "coverage_gap": 142
   },
   "baseline_parity_counts": {
     "frontend_only": 10,
