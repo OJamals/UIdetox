@@ -210,7 +210,12 @@ def test_scoped_frontend_map_reconciles_against_project_wide_backend(
         )
         == 2
     )
-    assert project_map.counts == {"contract_mismatch": 0, "coverage_gap": 2}
+    assert project_map.counts == {"contract_mismatch": 1, "coverage_gap": 1}
+    assert [
+        finding.detector_id
+        for finding in project_map.findings
+        if finding.status == "pending"
+    ] == ["contract-request-media-type-mismatch"]
 
 
 def test_scoped_scan_reconciles_against_project_wide_backend(
@@ -245,7 +250,7 @@ def test_scoped_scan_reconciles_against_project_wide_backend(
         if "Full-stack contract lineage:" in line
     )
     assert contract_line.startswith(
-        "Full-stack contract lineage: mismatches=0, coverage-gaps=2, "
+        "Full-stack contract lineage: mismatches=1, coverage-gaps=1, "
     )
 
 
@@ -286,7 +291,7 @@ def test_fresh_scoped_scan_detects_tooling_from_project_root(
 
     output = capsys.readouterr().out
     assert detected_paths == [tmp_path.resolve()]
-    assert "Full-stack contract lineage: mismatches=0, coverage-gaps=2" in output
+    assert "Full-stack contract lineage: mismatches=1, coverage-gaps=1" in output
 
 
 def test_html_asset_dependencies_reach_redesign_source_targets(tmp_path) -> None:
