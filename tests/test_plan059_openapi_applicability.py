@@ -201,6 +201,45 @@ def test_openapi_schema_evidence_is_bounded_recursive_and_directional(tmp_path) 
     }
 
 
+def test_openapi_all_of_overflow_is_explicitly_unknown(tmp_path) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/aggregate": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "allOf": [
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    f"field_{index}": {"type": "string"}
+                                                },
+                                            }
+                                            for index in range(40)
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    shape = _nodes(project, "response_media_type")[0].attributes["schema"]
+
+    assert len(shape["allOf"]) == 32
+    assert shape["truncated"] is True
+    assert shape["capability_status"] == "unknown"
+
+
 def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -> None:
     document = {
         "openapi": "3.1.0",
@@ -312,9 +351,12 @@ def test_reconciliation_reports_only_missing_applicable_operation_obligations() 
         finding for finding in findings if "operation-obligation" in finding.detector_id
     ]
     assert [finding.detector_id for finding in obligation_findings] == [
-        "contract-operation-obligation-missing"
+        "contract-operation-obligation-evidence-unknown",
+        "contract-operation-obligation-missing",
     ]
-    finding = obligation_findings[0]
+    unknown_finding, finding = obligation_findings
+    assert unknown_finding.status == "investigate"
+    assert unknown_finding.contract_anchor["field"] == "conflict"
     assert finding.status == "pending"
     assert finding.contract_anchor["field"] == "retry"
     assert finding.evidence["expected"] == ('{"applicable":true,"condition":"503"}')
@@ -337,6 +379,10 @@ def test_reconciliation_reports_only_missing_applicable_operation_obligations() 
             ),
         ),
     )
-    assert not [
+    matched_obligations = [
         finding for finding in matched if "operation-obligation" in finding.detector_id
     ]
+    assert [finding.detector_id for finding in matched_obligations] == [
+        "contract-operation-obligation-evidence-unknown"
+    ]
+    assert matched_obligations[0].status == "investigate"

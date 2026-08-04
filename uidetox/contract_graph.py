@@ -516,9 +516,26 @@ def _operation_obligation_findings(
         outgoing.get((backend.id, "requires_behavior"), ()),
         key=lambda node: (node.name, node.id),
     ):
+        if expected.kind != "operation_obligation":
+            continue
+        if expected.capability_status in {"unknown", "contradictory"} or not isinstance(
+            expected.attributes.get("applicable"), bool
+        ):
+            findings.append(
+                _graph_finding(
+                    "operation_obligation_evidence_unknown",
+                    frontend,
+                    backend,
+                    f"Applicability of {expected.name} cannot be established.",
+                    field=expected.name,
+                    expected="explicit applicable or inapplicable evidence",
+                    actual=expected.capability_status,
+                    status="investigate",
+                )
+            )
+            continue
         if (
-            expected.kind != "operation_obligation"
-            or expected.capability_status != "present"
+            expected.capability_status != "present"
             or expected.attributes.get("applicable") is not True
         ):
             continue
@@ -621,6 +638,28 @@ def _contract_group_contradiction(
         states = {value[axis] for value in auth_values} - {"unknown"}
         if len(states) > 1 or "contradictory" in states:
             return axis
+
+    obligation_values: dict[str, set[str]] = {}
+    for operation in operations:
+        for node in outgoing.get((operation.id, "requires_behavior"), ()):
+            if node.kind != "operation_obligation":
+                continue
+            value = json.dumps(
+                {
+                    "status": node.capability_status,
+                    "applicable": node.attributes.get("applicable"),
+                    "attributes": {
+                        key: _json_value(item)
+                        for key, item in node.attributes.items()
+                        if key not in {"capability_status", "edge", "provenance"}
+                    },
+                },
+                sort_keys=True,
+                default=str,
+            )
+            obligation_values.setdefault(node.name, set()).add(value)
+    if any(len(values) > 1 for values in obligation_values.values()):
+        return "operation_obligation"
 
     status_sets = {
         tuple(
@@ -1034,6 +1073,24 @@ def _transport_contract_difference(
         for node in outgoing.get((backend.id, "declares_parameter"), ())
         if node.kind == "api_parameter"
     }
+    required_backend_parameters = {
+        key: node
+        for key, node in back_parameters.items()
+        if node.attributes.get("required") is True
+    }
+    if not front_parameters and required_backend_parameters:
+        required = [
+            f"{location}:{name}"
+            for location, name in sorted(required_backend_parameters)
+        ]
+        return (
+            "required_parameter_evidence_unknown",
+            required[0],
+            "Frontend parameter evidence is absent for a required selected-operation parameter.",
+            required,
+            None,
+            True,
+        )
     if front_parameters:
         for key in sorted(set(front_parameters) | set(back_parameters)):
             front_parameter = front_parameters.get(key)

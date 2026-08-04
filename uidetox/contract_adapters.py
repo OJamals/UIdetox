@@ -55,13 +55,19 @@ _OPENAPI_SCHEMA_VARIANT_LIMIT = 32
 _OPENAPI_TEXT_LIMIT = 256
 _OPERATION_OBLIGATIONS = (
     "affected-reads",
+    "auth-required",
     "cancellation",
     "conflict",
     "duplicate-submit",
+    "forbidden",
     "idempotency",
     "optimistic-rollback",
     "partial-success",
+    "rate-limit",
     "retry",
+    "stale-refresh",
+    "timeout",
+    "validation",
 )
 
 
@@ -1484,7 +1490,8 @@ def _openapi_schema_shape(
         seen = (*seen, reference)
     if isinstance(schema.get("allOf"), list):
         merged: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-        variants = schema["allOf"][:_OPENAPI_SCHEMA_VARIANT_LIMIT]
+        all_of = schema["allOf"]
+        variants = all_of[:_OPENAPI_SCHEMA_VARIANT_LIMIT]
         merged["allOf"] = []
         for member in variants:
             if not isinstance(member, Mapping):
@@ -1498,6 +1505,9 @@ def _openapi_schema_shape(
         if isinstance(reference, str):
             merged["reference"] = reference
         merged["required"] = sorted(set(merged["required"]))
+        if len(all_of) > _OPENAPI_SCHEMA_VARIANT_LIMIT:
+            merged["truncated"] = True
+            merged["capability_status"] = "unknown"
         return merged
     raw_type = schema.get("type")
     nullable = bool(schema.get("nullable", False))

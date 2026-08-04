@@ -167,6 +167,33 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
         max_bytes=_resources.MAX_OBSERVABLE_CHECK_BYTES,
         overflow_label="observable checks",
     )
+    operation_obligation_evidence = _resources.required_lines(
+        [
+            "- "
+            + _resources.evidence_json(
+                {
+                    key: item.get(key)
+                    for key in (
+                        "owner",
+                        "operations",
+                        "obligation",
+                        "states",
+                        "modules",
+                        "contract_anchor",
+                        "evidence_basis",
+                        "applicability",
+                        "constraints",
+                        "instruction",
+                        "evidence",
+                    )
+                }
+            )
+            for item in proposal.migration_plan
+            if item.get("kind") == "operation-obligation"
+        ],
+        max_bytes=_resources.MAX_MIGRATION_EVIDENCE_BYTES,
+        section="operation-obligation evidence",
+    )
     migration_evidence = [
         _resources.evidence_text(
             f"{item.get('order', '?')}. [{item.get('kind', 'step')}] "
@@ -176,6 +203,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
         if item.get("kind")
         not in {
             "experience-state",
+            "operation-obligation",
             "runtime-finding",
             "runtime-review",
         }
@@ -191,7 +219,12 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
                     item
                     for item in proposal.migration_plan
                     if item.get("kind")
-                    not in {"experience-state", "runtime-finding", "runtime-review"}
+                    not in {
+                        "experience-state",
+                        "operation-obligation",
+                        "runtime-finding",
+                        "runtime-review",
+                    }
                 ),
                 migration_evidence,
                 strict=True,
@@ -619,6 +652,8 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             ),
             "Experience-state matrix:",
             *experience_matrix_evidence,
+            "Operation-contract remediation:",
+            *(operation_obligation_evidence or ["- None proven applicable."]),
             "Dependency-aware migration plan:",
             *(migration_evidence or ["- None mapped."]),
             "Preserved contracts:",

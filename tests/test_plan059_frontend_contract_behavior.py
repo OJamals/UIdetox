@@ -211,6 +211,24 @@ def test_absent_frontend_transport_evidence_does_not_guess() -> None:
     assert not _findings((), ((back, "accepts_media_type"),))
 
 
+def test_missing_required_parameter_evidence_is_investigative() -> None:
+    required = _lineage(
+        "back-tenant",
+        "backend",
+        "api_parameter",
+        "tenant",
+        location="query",
+        required=True,
+    )
+
+    findings = _findings((), ((required, "declares_parameter"),))
+
+    assert [finding.detector_id for finding in findings] == [
+        "contract-required-parameter-evidence-unknown"
+    ]
+    assert findings[0].status == "investigate"
+
+
 def test_literal_fetch_options_become_exact_operation_evidence(tmp_path) -> None:
     source = tmp_path / "src"
     source.mkdir()
@@ -348,3 +366,35 @@ export async function load() {
         for node in project_map.nodes
         if node.side == "frontend" and node.kind == "response_media_type"
     ]
+
+
+def test_response_parsers_are_scoped_to_their_fetch_binding(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function loadOrders() {
+  const orders = await fetch("/orders", {
+    headers: { "Accept": "application/json" }
+  });
+  if (orders.status !== 200) throw new Error("orders failed");
+  return orders.json();
+}
+export async function loadReport() {
+  const report = await fetch("/report", {
+    headers: { "Accept": "text/plain" }
+  });
+  if (report.status !== 206) throw new Error("report failed");
+  return report.text();
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert {
+        (node.name, node.attributes.get("status"))
+        for node in project_map.nodes
+        if node.side == "frontend" and node.kind == "response_media_type"
+    } == {("application/json", "200"), ("text/plain", "206")}

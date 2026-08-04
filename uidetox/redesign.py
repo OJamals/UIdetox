@@ -46,23 +46,35 @@ _CREATIVE_CHANGE_PREFIXES = (
 )
 _OPERATION_OBLIGATION_STATES = {
     "affected-reads": ("success",),
+    "auth-required": ("disabled", "error"),
     "cancellation": ("loading", "error"),
     "conflict": ("error",),
     "duplicate-submit": ("disabled",),
+    "forbidden": ("disabled", "error"),
     "idempotency": ("loading", "error"),
     "optimistic-rollback": ("loading", "success", "error"),
     "partial-success": ("success", "error"),
+    "rate-limit": ("error",),
     "retry": ("loading", "error"),
+    "stale-refresh": ("loading", "success", "error"),
+    "timeout": ("error",),
+    "validation": ("disabled", "error"),
 }
 _OPERATION_OBLIGATION_ACTIONS = {
     "affected-reads": "refresh only the contract-listed reads after success; do not invent a cache",
+    "auth-required": "disable the action until authentication is present and expose the documented recovery path",
     "cancellation": "offer cancellation only through the documented transport and preserve usable content",
     "conflict": "retain user input and expose a recoverable contract conflict",
     "duplicate-submit": "disable an identical mutation while it is in flight and restore it on completion",
+    "forbidden": "keep the action unavailable and explain the documented authorization boundary",
     "idempotency": "apply only the server-defined idempotency scope, retention, and replay semantics",
     "optimistic-rollback": "reconcile the optimistic result against the response and restore the prior value on failure",
     "partial-success": "separate succeeded items from operation-scoped failures",
+    "rate-limit": "show the documented retry boundary without automatic retry unless separately proven",
     "retry": "retry only under the documented condition while retaining usable success content",
+    "stale-refresh": "retain usable success content during refresh and expose refresh failure separately",
+    "timeout": "preserve user input and expose a retry or cancellation path only when separately proven",
+    "validation": "associate documented field failures with their controls and retain submitted values",
 }
 
 

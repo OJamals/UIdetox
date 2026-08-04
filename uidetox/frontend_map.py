@@ -55,8 +55,6 @@ _HTTP_LITERAL_HEADERS = (
     "If-Match",
     "If-None-Match",
 )
-_HTTP_STATUS_PATTERN = re.compile(r"\.status\s*(?:===?|!==?)\s*([1-5][0-9]{2})\b")
-
 _DIAGNOSTIC_CATEGORIES = {
     "action": "interaction",
     "console": "runtime",
@@ -73,6 +71,18 @@ def _literal_header_value(expression: str, name: str) -> str | None:
         re.IGNORECASE,
     )
     return match.group("value") if match else None
+
+
+def _fetch_response_binding(content: str, call: Any) -> str | None:
+    if call.target != "fetch" or not isinstance(call.url, str):
+        return None
+    pattern = re.compile(
+        rf"\b(?:const|let|var)\s+(?P<binding>[A-Za-z_$][\w$]*)\s*=\s*"
+        rf"(?:await\s+)?fetch\s*\(\s*([\"']){re.escape(call.url)}\2",
+        re.DOTALL,
+    )
+    bindings = {match.group("binding") for match in pattern.finditer(content)}
+    return next(iter(bindings)) if len(bindings) == 1 else None
 
 
 def _frontend_http_lineage(
@@ -122,14 +132,23 @@ def _frontend_http_lineage(
             }
         )
 
-    statuses = (
-        tuple(sorted(set(_HTTP_STATUS_PATTERN.findall(content))))
-        if len(facts.network_calls) == 1
-        else ()
-    )
+    response_binding = _fetch_response_binding(content, call)
+    statuses = ()
+    if response_binding is not None:
+        status_pattern = re.compile(
+            rf"\b{re.escape(response_binding)}\.status\s*"
+            r"(?:===?|!==?)\s*([1-5][0-9]{2})\b"
+        )
+        statuses = tuple(sorted(set(status_pattern.findall(content))))
     accept = headers.get("Accept")
     response_parsers = {
-        parser for parser in ("json", "text") if re.search(rf"\.{parser}\s*\(", content)
+        parser
+        for parser in ("json", "text")
+        if response_binding is not None
+        and re.search(
+            rf"\b{re.escape(response_binding)}\.{parser}\s*\(",
+            content,
+        )
     }
     parser_matches_accept = (
         len(response_parsers) == 1

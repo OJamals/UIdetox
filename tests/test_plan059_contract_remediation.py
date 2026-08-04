@@ -317,6 +317,8 @@ export function Orders() {
     )
 
     brief = build_prototype_brief(redesigns, proposal.id)
+    assert "Operation-contract remediation:" in brief
+    assert '"evidence_basis":"measured"' in brief
     assert (
         "For POST /orders at Orders, express conflict through existing error state"
         in brief
