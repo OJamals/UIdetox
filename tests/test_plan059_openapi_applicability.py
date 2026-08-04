@@ -199,6 +199,7 @@ def test_openapi_schema_evidence_is_bounded_recursive_and_directional(tmp_path) 
         "reference": "#/components/schemas/Node",
         "type": "recursive",
     }
+    assert _nodes(project, "request_schema")[0].capability_status == "unknown"
 
 
 def test_openapi_all_of_overflow_is_explicitly_unknown(tmp_path) -> None:
@@ -240,6 +241,40 @@ def test_openapi_all_of_overflow_is_explicitly_unknown(tmp_path) -> None:
     assert shape["capability_status"] == "unknown"
 
 
+def test_openapi_schema_scalars_are_bounded_and_fail_closed(tmp_path) -> None:
+    oversized = "x" * 1_000_000
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/oversized": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "string",
+                                        "default": oversized,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    shape = _nodes(project, "response_media_type")[0].attributes["schema"]
+
+    assert shape["default"] == ""
+    assert shape["truncated"] is True
+    assert shape["capability_status"] == "unknown"
+    assert len(json.dumps(project.to_dict())) < 100_000
+
+
 def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -> None:
     document = {
         "openapi": "3.1.0",
@@ -263,6 +298,10 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
                         },
                         "cancellation": {"applicable": True},
                         "duplicate-submit": {"applicable": True},
+                        "optimistic-rollback": {
+                            "applicable": True,
+                            "scope": "<script>alert(1)</script>",
+                        },
                         "<script>alert(1)</script>": {"applicable": True},
                     },
                     "responses": {"202": {"description": "accepted"}},
@@ -284,6 +323,7 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
         "duplicate-submit",
         "forbidden",
         "idempotency",
+        "optimistic-rollback",
         "partial-success",
         "rate-limit",
         "retry",
@@ -294,8 +334,54 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
     assert by_name["retry"].capability_status == "present"
     assert by_name["idempotency"].capability_status == "absent"
     assert by_name["conflict"].capability_status == "unknown"
+    assert by_name["optimistic-rollback"].capability_status == "unknown"
+    assert by_name["optimistic-rollback"].attributes["applicable"] is None
+    assert by_name["optimistic-rollback"].attributes["constraint_status"] == "unknown"
     assert by_name["affected-reads"].attributes["operations"] == ["GET /orders"]
     assert "<script>" not in json.dumps([node.to_dict() for node in obligations])
+
+
+def test_truncated_schema_comparison_is_investigate_not_equal() -> None:
+    from uidetox.contract_graph import _schema_difference
+
+    difference = _schema_difference(
+        {"type": "object", "properties": {}},
+        {
+            "type": "object",
+            "properties": {},
+            "truncated": True,
+            "capability_status": "unknown",
+        },
+    )
+
+    assert difference == (
+        "schema_evidence_unknown",
+        "",
+        "field <root> schema evidence is incomplete",
+        "unknown",
+        "present",
+        True,
+    )
+
+    nested = _schema_difference(
+        {"oneOf": [{"type": "object"}]},
+        {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "child": {
+                            "type": "recursive",
+                            "capability_status": "unknown",
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    assert nested is not None
+    assert nested[0] == "schema_evidence_unknown"
+    assert nested[-1] is True
 
 
 def test_reconciliation_reports_only_missing_applicable_operation_obligations() -> None:

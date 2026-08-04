@@ -982,12 +982,13 @@ def _append_schema_contract(
     status: str | None = None,
     identities: tuple[str, ...] = (),
 ) -> None:
+    capability_status = "unknown" if _schema_evidence_incomplete(schema) else "present"
     schema_node = ContractNode(
         _contract_id(kind, operation_node.id, *identities, name, status or ""),
         kind,
         name,
         operation_node.side,
-        "present",
+        capability_status,
         operation_node.source,
         {
             key: _json_value(value)
@@ -1463,6 +1464,17 @@ def _schema_difference(
     backend: Mapping[str, Any],
     prefix: str = "",
 ) -> tuple[str, str, str, Any, Any, bool] | None:
+    front_incomplete = _schema_evidence_incomplete(frontend)
+    back_incomplete = _schema_evidence_incomplete(backend)
+    if front_incomplete or back_incomplete:
+        return (
+            "schema_evidence_unknown",
+            prefix,
+            f"field {prefix or '<root>'} schema evidence is incomplete",
+            "unknown" if back_incomplete else "present",
+            "unknown" if front_incomplete else "present",
+            True,
+        )
     front_type = _schema_type(frontend)
     back_type = _schema_type(backend)
     if bool(front_type) != bool(back_type):
@@ -1575,6 +1587,29 @@ def _schema_difference(
     if isinstance(front_items, Mapping) and isinstance(back_items, Mapping):
         return _schema_difference(front_items, back_items, f"{prefix}[]")
     return None
+
+
+def _schema_evidence_incomplete(value: Any, *, depth: int = 0) -> bool:
+    """Return whether any bounded schema branch lost authoritative evidence."""
+
+    if depth >= 64:
+        return True
+    if isinstance(value, Mapping):
+        if (
+            value.get("capability_status") == "unknown"
+            or value.get("truncated") is True
+            or value.get("type") == "recursive"
+        ):
+            return True
+        return any(
+            _schema_evidence_incomplete(item, depth=depth + 1)
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(
+            _schema_evidence_incomplete(item, depth=depth + 1) for item in value
+        )
+    return False
 
 
 def _schema_variants_from_graph(

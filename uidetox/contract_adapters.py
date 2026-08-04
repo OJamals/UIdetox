@@ -1129,15 +1129,23 @@ def _openapi_operation_obligations(
         elif isinstance(value, Mapping):
             raw_applicable = value.get("applicable")
             applicable = raw_applicable if isinstance(raw_applicable, bool) else None
-            details = {
-                key: bounded
-                for raw_key, raw_value in sorted(
-                    value.items(), key=lambda item: str(item[0])
-                )
-                if raw_key != "applicable"
-                and (key := _bounded_openapi_text(raw_key))
-                and (bounded := _bounded_openapi_value(raw_value)) is not None
-            }
+            details = {}
+            constraint_unknown = False
+            for raw_key, raw_value in sorted(
+                value.items(), key=lambda item: str(item[0])
+            ):
+                if raw_key == "applicable":
+                    continue
+                key = _bounded_openapi_text(raw_key)
+                bounded = _bounded_openapi_value(raw_value)
+                if not key or bounded is None or bounded != raw_value:
+                    constraint_unknown = True
+                    continue
+                details[key] = bounded
+            if constraint_unknown:
+                applicable = None
+                details["constraint_status"] = "unknown"
+                details["truncated"] = True
         elif value is not None:
             applicable = None
             details = {}
@@ -1550,7 +1558,12 @@ def _openapi_schema_shape(
         "unevaluatedProperties",
     ):
         if key in schema:
-            result[key] = _json_value(schema[key])
+            raw_value = schema[key]
+            bounded = _bounded_openapi_value(raw_value)
+            result[key] = bounded
+            if bounded != raw_value:
+                result["truncated"] = True
+                result["capability_status"] = "unknown"
     required = schema.get("required")
     if isinstance(required, list):
         result["required"] = sorted(str(item) for item in required)
