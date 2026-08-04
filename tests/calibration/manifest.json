@@ -15,6 +15,7 @@
     "geometry-occlusion": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
     "hierarchy": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
     "interaction-states": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
+    "responsive-inclusion": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
     "target-spacing": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
     "themes": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
     "typography-rhythm-spacing": {"tp_min": 1, "fp_max": 0, "fn_max": 0},
@@ -913,6 +914,53 @@
       "state": "initial",
       "viewport": "desktop",
       "rationale": "A disabled control is excluded from actionable contrast and target-size failures.",
+      "expect": {"finding_ids": [], "exact_findings": true}
+    },
+    {
+      "id": "runtime-responsive-inclusion-positive",
+      "fixture": "runtime-design/responsive-positive.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-layout",
+      "family": "responsive-inclusion",
+      "status": "positive",
+      "expected_anchors": [
+        {"path": "runtime-design/responsive-positive.json", "contains": "\"selector\": \"#vertical-actions\""},
+        {"path": "runtime-design/responsive-positive.json", "contains": "\"selector\": \"#hidden-table\""}
+      ],
+      "severity": "error",
+      "route": "/operations",
+      "state": "initial",
+      "viewport": "mobile",
+      "rationale": "Measured overflow must expose concealed actions and a table with no visible or programmatic scroll affordance.",
+      "expect": {
+        "finding_ids": ["runtime-interactive-scroll-concealment", "runtime-responsive-table-inaccessible"],
+        "exact_findings": true,
+        "findings": [
+          {"code": "runtime-interactive-scroll-concealment", "selector": "#vertical-actions", "metrics": {"concealed_action_count": 2.0, "scroll_height_ratio": 3.0}},
+          {"code": "runtime-responsive-table-inaccessible", "selector": "#hidden-table", "metrics": {"header_count": 4.0, "row_count": 12.0}}
+        ]
+      }
+    },
+    {
+      "id": "runtime-responsive-inclusion-negative",
+      "fixture": "runtime-design/responsive-negative.json",
+      "framework": "browser-runtime",
+      "language": "json",
+      "capability": "rendered-design",
+      "detector": "runtime-layout",
+      "family": "responsive-inclusion",
+      "status": "negative",
+      "expected_anchors": [
+        {"path": "runtime-design/responsive-negative.json", "contains": "\"selector\": \"#visible-actions\""},
+        {"path": "runtime-design/responsive-negative.json", "contains": "\"selector\": \"#scrollable-table\""}
+      ],
+      "severity": "error",
+      "route": "/operations",
+      "state": "initial",
+      "viewport": "mobile",
+      "rationale": "Visible actions and an intentionally scrollable table with an affordance must remain clean.",
       "expect": {"finding_ids": [], "exact_findings": true}
     }
   ]

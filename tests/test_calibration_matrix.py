@@ -16,6 +16,7 @@ from uidetox.fileset import ProjectFileSet
 from uidetox.frontend_map import map_frontend
 from uidetox.project_map import ProjectMap
 from uidetox.rule_registry import RULE_REGISTRY
+from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.runtime_observer import RuntimePage
 from uidetox.semantic_adapters import SourceDocument, build_application_semantics
 
@@ -50,6 +51,7 @@ _RUNTIME_FAMILIES = {
     "geometry-occlusion",
     "hierarchy",
     "interaction-states",
+    "responsive-inclusion",
     "target-spacing",
     "themes",
     "typography-rhythm-spacing",
@@ -154,24 +156,36 @@ def validate_manifest(
                 errors.append(f"{label} unknown rule_id: {rule_id}")
         elif rule_id is not None:
             errors.append(f"{label}.rule_id is only valid for static-analyzer")
-        if detector == "runtime-design" and case.get("family") not in _RUNTIME_FAMILIES:
+        if (
+            detector in {"runtime-design", "runtime-layout"}
+            and case.get("family") not in _RUNTIME_FAMILIES
+        ):
             errors.append(f"{label}.family must name a runtime detector family")
-        elif detector != "runtime-design" and "family" in case:
-            errors.append(f"{label}.family is only valid for runtime-design")
+        elif detector not in {"runtime-design", "runtime-layout"} and "family" in case:
+            errors.append(
+                f"{label}.family is only valid for runtime-design or runtime-layout"
+            )
         executable_case = case.get("status") in {"positive", "negative"}
         if (
-            detector in {"semantic-adapter", "project-map", "runtime-design"}
+            detector
+            in {"semantic-adapter", "project-map", "runtime-design", "runtime-layout"}
             and executable_case
             and not isinstance(case.get("expect"), dict)
         ):
             errors.append(f"{label}.expect must be an object for {detector}")
         elif (
-            detector not in {"semantic-adapter", "project-map", "runtime-design"}
+            detector
+            not in {
+                "semantic-adapter",
+                "project-map",
+                "runtime-design",
+                "runtime-layout",
+            }
             and "expect" in case
         ):
             errors.append(
                 f"{label}.expect is only valid for semantic-adapter, "
-                "project-map, or runtime-design"
+                "project-map, runtime-design, or runtime-layout"
             )
 
         status = case["status"]
@@ -324,12 +338,12 @@ def evaluate_cases(
         detector = str(case["detector"])
         if (
             detector == "semantic-adapter"
-            or detector == "runtime-design"
+            or detector in {"runtime-design", "runtime-layout"}
             or (detector == "project-map" and status in {"positive", "negative"})
         ):
             if detector == "semantic-adapter":
                 failure = _evaluate_semantic_case(fixture_root, case)
-            elif detector == "runtime-design":
+            elif detector in {"runtime-design", "runtime-layout"}:
                 failure = _evaluate_runtime_design_case(fixture_root, case)
             else:
                 failure = _evaluate_project_map_case(fixture_root, case)
@@ -479,7 +493,11 @@ def _evaluate_runtime_design_case(
     if not isinstance(value, dict):
         return "runtime fixture must contain an object"
     page = RuntimePage.from_dict(value)
-    aligned = detect_design_findings(page)
+    aligned = (
+        tuple(detect_runtime_findings(element) for element in page.elements)
+        if case["detector"] == "runtime-layout"
+        else detect_design_findings(page)
+    )
     actual_findings = [
         (element.selector, finding)
         for element, findings in zip(page.elements, aligned, strict=True)
@@ -582,7 +600,7 @@ def test_runtime_detector_families_meet_explicit_tp_fp_fn_budgets() -> None:
     counts: dict[str, Counter[str]] = defaultdict(Counter)
     statuses: dict[str, Counter[str]] = defaultdict(Counter)
     for case in manifest["cases"]:
-        if case["detector"] != "runtime-design":
+        if case["detector"] not in {"runtime-design", "runtime-layout"}:
             continue
         family = str(case["family"])
         status = str(case["status"])

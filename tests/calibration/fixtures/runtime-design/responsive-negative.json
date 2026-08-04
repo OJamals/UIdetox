@@ -1,0 +1,47 @@
+{
+  "url": "https://example.test/operations",
+  "title": "Operations",
+  "viewport": {"name": "mobile", "width": 390, "height": 844},
+  "elements": [
+    {
+      "kind": "region",
+      "tag": "div",
+      "role": "region",
+      "name": "Actions",
+      "selector": "#visible-actions",
+      "order": 0,
+      "bounds": {"x": 0, "y": 0, "width": 320, "height": 240},
+      "styles": {},
+      "states": {},
+      "measurements": {
+        "isScrollRegionY": true,
+        "clientHeight": 240,
+        "scrollHeight": 720,
+        "concealedInteractiveDescendantCountY": 0
+      }
+    },
+    {
+      "kind": "table",
+      "tag": "table",
+      "role": "table",
+      "name": "Incidents",
+      "selector": "#scrollable-table",
+      "order": 1,
+      "bounds": {"x": 0, "y": 260, "width": 320, "height": 300},
+      "styles": {},
+      "states": {},
+      "measurements": {
+        "table": {
+          "affordance": true,
+          "headerCount": 4,
+          "rowCount": 12,
+          "scrollable": true,
+          "scrollbarVisible": false
+        }
+      }
+    }
+  ],
+  "capture_id": "runtime-responsive-negative",
+  "scenario": "quality",
+  "state": "initial"
+}
