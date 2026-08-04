@@ -247,7 +247,13 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
             "/orders": {
                 "post": {
                     "x-uidetox-operation": {
+                        "auth-required": {"applicable": True, "scheme": "OAuth"},
+                        "forbidden": {"applicable": True, "status": "403"},
+                        "rate-limit": {"applicable": True, "status": "429"},
                         "retry": {"applicable": True, "condition": "503"},
+                        "stale-refresh": {"applicable": True},
+                        "timeout": {"applicable": True, "condition": "30s"},
+                        "validation": {"applicable": True, "status": "422"},
                         "idempotency": {"applicable": False},
                         "conflict": "unknown",
                         "partial-success": {"applicable": True, "status": "207"},
@@ -272,12 +278,18 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
 
     assert set(by_name) == {
         "affected-reads",
+        "auth-required",
         "cancellation",
         "conflict",
         "duplicate-submit",
+        "forbidden",
         "idempotency",
         "partial-success",
+        "rate-limit",
         "retry",
+        "stale-refresh",
+        "timeout",
+        "validation",
     }
     assert by_name["retry"].capability_status == "present"
     assert by_name["idempotency"].capability_status == "absent"
@@ -386,3 +398,68 @@ def test_reconciliation_reports_only_missing_applicable_operation_obligations() 
         "contract-operation-obligation-evidence-unknown"
     ]
     assert matched_obligations[0].status == "investigate"
+
+
+def test_contradictory_operation_applicability_blocks_actionable_remediation() -> None:
+    source = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+    common = {
+        "method": "POST",
+        "normalized_path": "/orders",
+        "dynamic": False,
+        "status_codes": ["202"],
+        "evidence": {},
+    }
+    frontend = ContractNode(
+        "front",
+        "client_operation",
+        "POST /orders",
+        "frontend",
+        "present",
+        source,
+        common,
+    )
+    first = ContractNode(
+        "back-a", "route", "POST /orders", "backend", "present", source, common
+    )
+    second = ContractNode(
+        "back-b", "route", "POST /orders", "backend", "present", source, common
+    )
+    retry_true = ContractNode(
+        "retry-a",
+        "operation_obligation",
+        "retry",
+        "backend",
+        "present",
+        source,
+        {"applicable": True, "condition": "503"},
+    )
+    retry_false = ContractNode(
+        "retry-b",
+        "operation_obligation",
+        "retry",
+        "backend",
+        "absent",
+        source,
+        {"applicable": False},
+    )
+
+    findings = reconcile_contract_graph(
+        (frontend, first, second, retry_true, retry_false),
+        (
+            ContractEdge("back-a", "retry-a", "requires_behavior", "a", 1.0, source),
+            ContractEdge("back-b", "retry-b", "requires_behavior", "b", 1.0, source),
+        ),
+    )
+
+    contradiction = next(
+        finding
+        for finding in findings
+        if finding.detector_id == "contract-evidence-contradictory"
+    )
+    assert contradiction.status == "investigate"
+    assert contradiction.contract_anchor["field"] == "operation_obligation"
+    assert not [
+        finding
+        for finding in findings
+        if finding.detector_id == "contract-operation-obligation-missing"
+    ]
