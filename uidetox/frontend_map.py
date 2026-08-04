@@ -19,7 +19,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
-from uidetox.design_semantics import detect_design_findings
+from uidetox.design_semantics import (
+    detect_design_findings,
+    detect_navigation_continuity_findings,
+)
 from uidetox.experience_states import normalize_experience_state
 from uidetox.fileset import ProjectFileSet
 from uidetox.findings import Finding
@@ -1117,7 +1120,12 @@ def _merge_runtime_evidence(
         return ()
 
     enriched_pages: list[RuntimePage] = []
-    for page in runtime.pages:
+    navigation_findings = (
+        detect_navigation_continuity_findings(runtime.pages)
+        if runtime.status == "current"
+        else tuple(tuple(() for _element in page.elements) for page in runtime.pages)
+    )
+    for page_index, page in enumerate(runtime.pages):
         route_sources = application.route_sources(page.url)
         ownerships = tuple(
             application.source_ownership(
@@ -1173,6 +1181,7 @@ def _merge_runtime_evidence(
                         for finding in (
                             *element.findings,
                             *aligned_findings[index],
+                            *navigation_findings[page_index][index],
                         )
                     }.values()
                 ),

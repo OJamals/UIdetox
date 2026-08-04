@@ -70,6 +70,10 @@ _DESIGN_REMEDIATION_CONSTRAINTS: dict[str, tuple[str, ...]] = {
         "Preserve semantic heading levels and reading order.",
         "Create measurable type-scale or weight separation without changing content hierarchy.",
     ),
+    "design-navigation-order-inconsistent": (
+        "Preserve the same destination set and current-page semantics.",
+        "Keep repeated navigation in one stable order across routes at the same viewport and state.",
+    ),
 }
 
 
@@ -912,4 +916,106 @@ def detect_design_findings(
             )
         )
         for index in range(len(elements))
+    )
+
+
+def detect_navigation_continuity_findings(
+    pages: Sequence[DesignPage],
+) -> tuple[tuple[tuple[Finding, ...], ...], ...]:
+    """Align cross-page navigation-order findings to existing page elements."""
+
+    aligned: list[list[list[Finding]]] = [
+        [[] for _element in page.elements] for page in pages
+    ]
+    groups: defaultdict[
+        tuple[int, int, str, str, str],
+        list[tuple[int, int, tuple[str, ...], DesignElement]],
+    ] = defaultdict(list)
+    for page_index, page in enumerate(pages):
+        for element_index, element in enumerate(page.elements):
+            evidence = element.measurements.get("navigation")
+            if not isinstance(evidence, Mapping):
+                continue
+            if evidence.get("truncated") is not False:
+                continue
+            identity = evidence.get("identity")
+            raw_destinations = evidence.get("destinations")
+            if (
+                not isinstance(identity, str)
+                or not identity
+                or len(identity) > 80
+                or not isinstance(raw_destinations, Sequence)
+                or isinstance(raw_destinations, (str, bytes))
+                or not 2 <= len(raw_destinations) <= 32
+            ):
+                continue
+            destinations: list[str] = []
+            for raw_destination in raw_destinations:
+                if not isinstance(raw_destination, Mapping):
+                    destinations = []
+                    break
+                destination = raw_destination.get("identity")
+                if (
+                    not isinstance(destination, str)
+                    or not destination
+                    or len(destination) > 160
+                ):
+                    destinations = []
+                    break
+                destinations.append(destination)
+            if len(destinations) != len(raw_destinations):
+                continue
+            order = tuple(destinations)
+            if len(set(order)) != len(order):
+                continue
+            key = (
+                page.viewport.width,
+                page.viewport.height,
+                str(getattr(page, "scenario", "")),
+                str(getattr(page, "state", "")),
+                identity,
+            )
+            groups[key].append((page_index, element_index, order, element))
+
+    for records in groups.values():
+        if len(records) < 2:
+            continue
+        destination_sets = {frozenset(order) for _, _, order, _ in records}
+        if len(destination_sets) != 1:
+            continue
+        orders = sorted({order for _, _, order, _ in records})
+        if len(orders) < 2:
+            continue
+        finding = _finding(
+            code="design-navigation-order-inconsistent",
+            category="interaction",
+            severity="warning",
+            confidence=1.0,
+            message=(
+                "Repeated navigation destinations change order across routes "
+                "at the same viewport and experience state."
+            ),
+            metrics=_metrics(
+                {
+                    "orders": [list(order) for order in orders[:4]],
+                    "page_count": len(records),
+                    "truncated": len(orders) > 4,
+                },
+                peers=tuple(element.selector for _, _, _, element in records),
+            ),
+        )
+        for page_index, element_index, _order, _element in records:
+            aligned[page_index][element_index].append(finding)
+
+    return tuple(
+        tuple(
+            tuple(
+                sorted(
+                    findings,
+                    key=lambda finding: (finding.detector_id, finding.fingerprint),
+                )
+            )
+            for findings in page_findings
+        )
+        for page_findings in aligned
     )

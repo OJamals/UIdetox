@@ -10,6 +10,7 @@ import pytest
 
 from uidetox import runtime_observer
 from uidetox.frontend_map import map_frontend
+from uidetox.runtime_layout import detect_runtime_findings
 from uidetox.runtime_observer import (
     RuntimeElement,
     RuntimeObservation,
@@ -276,6 +277,53 @@ def test_plan058_freezes_map_order_with_and_without_runtime(tmp_path: Path) -> N
         )
 
 
+def test_plan058_focus_obscuration_is_measured_and_modal_background_is_suppressed() -> (
+    None
+):
+    obscured = _element(
+        role="button",
+        selector="#save",
+        measurements={
+            "focusVisibility": {
+                "fullyVisible": False,
+                "occludedBy": "#sticky-header",
+                "occludedFraction": 0.4,
+            }
+        },
+    )
+    visible = _element(
+        role="button",
+        selector="#cancel",
+        measurements={
+            "focusVisibility": {
+                "fullyVisible": True,
+                "occludedBy": "",
+                "occludedFraction": 0.0,
+            }
+        },
+    )
+    modal_background = _element(
+        role="button",
+        selector="#background",
+        measurements={
+            "obscuredByModal": True,
+            "focusVisibility": {
+                "fullyVisible": False,
+                "occludedBy": "dialog",
+                "occludedFraction": 1.0,
+            },
+        },
+    )
+
+    assert "runtime-focus-obscured" in {
+        finding.code for finding in detect_runtime_findings(obscured)
+    }
+    assert "runtime-focus-obscured" not in {
+        finding.code for finding in detect_runtime_findings(visible)
+    }
+    assert detect_runtime_findings(modal_background) == ()
+
+
 def test_plan058_browser_emits_bounded_page_composition_evidence(
     tmp_path: Path,
     local_http_server: Callable[[Path], str],
@@ -285,7 +333,10 @@ def test_plan058_browser_emits_bounded_page_composition_evidence(
     fixture.write_text(
         f"""
 <!doctype html>
-<header><nav aria-label="Primary"><a href="/home">Home</a></nav></header>
+<header><nav aria-label="Primary">
+  <a href="/home">Home</a>
+  <a href="/{hostile}">Hostile destination</a>
+</nav></header>
 <h1 id="hostile-heading">{hostile}</h1>
 <main aria-labelledby="hostile-heading" data-hostile="{hostile}">
   <button>Continue</button>
@@ -307,11 +358,18 @@ def test_plan058_browser_emits_bounded_page_composition_evidence(
     main = next(
         element for element in observation.pages[0].elements if element.role == "main"
     )
+    navigation = next(
+        element
+        for element in observation.pages[0].elements
+        if element.role == "navigation"
+    )
     evidence = main.measurements["pageComposition"]
 
     assert set(evidence) == {
+        "adaptation",
         "contentBounds",
         "documentBounds",
+        "firstTaskContent",
         "landmarks",
         "majorTracks",
         "truncated",
@@ -322,12 +380,13 @@ def test_plan058_browser_emits_bounded_page_composition_evidence(
     encoded = json.dumps(evidence, sort_keys=True)
     assert hostile not in encoded
     assert len(encoded.encode("utf-8")) <= 4096
+    assert navigation.measurements["navigation"]["truncated"] is True
+    assert navigation.measurements["navigation"]["destinations"][-1]["identity"] == ""
+    payload = json.dumps(observation.to_dict(), sort_keys=True)
+    assert hostile not in payload
+    assert len(payload.encode("utf-8")) <= 50_000
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Plan 058 cross-route semantic detector not implemented yet.",
-)
 def test_plan058_cross_route_navigation_continuity_is_reported(
     tmp_path: Path,
     local_http_server: Callable[[Path], str],
@@ -366,3 +425,88 @@ def test_plan058_cross_route_navigation_continuity_is_reported(
     codes = {finding["code"] for finding in frontend_map.evidence["runtime_findings"]}
 
     assert "design-navigation-order-inconsistent" in codes
+
+
+@pytest.mark.parametrize(
+    ("orders", "truncated"),
+    [
+        ((("/alpha", "/beta"), ("/alpha", "/beta")), False),
+        ((("/alpha", "/beta"), ("/alpha", "/help")), False),
+        ((("/alpha", "/alpha"), ("/alpha", "/alpha")), False),
+        ((("/alpha", "/beta"), ("/beta", "/alpha")), True),
+    ],
+)
+def test_plan058_navigation_continuity_fails_closed(
+    tmp_path: Path,
+    orders: tuple[tuple[str, ...], tuple[str, ...]],
+    truncated: bool,
+) -> None:
+    pages = tuple(
+        RuntimePage(
+            url=f"https://example.test/{index}",
+            title=str(index),
+            viewport=_VIEWPORT,
+            elements=(
+                _element(
+                    selector="nav",
+                    role="navigation",
+                    measurements={
+                        "navigation": {
+                            "destinations": [
+                                {"identity": destination, "order": order}
+                                for order, destination in enumerate(destinations)
+                            ],
+                            "identity": "Primary",
+                            "truncated": truncated,
+                        }
+                    },
+                ),
+            ),
+        )
+        for index, destinations in enumerate(orders)
+    )
+
+    frontend_map = map_frontend(tmp_path, runtime=_observation(*pages))
+    codes = {finding["code"] for finding in frontend_map.evidence["runtime_findings"]}
+
+    assert "design-navigation-order-inconsistent" not in codes
+
+
+def test_plan058_navigation_continuity_rejects_partial_observation(
+    tmp_path: Path,
+) -> None:
+    pages = tuple(
+        RuntimePage(
+            url=f"https://example.test/{index}",
+            title=str(index),
+            viewport=_VIEWPORT,
+            elements=(
+                _element(
+                    selector="nav",
+                    role="navigation",
+                    measurements={
+                        "navigation": {
+                            "destinations": [
+                                {"identity": destination, "order": order}
+                                for order, destination in enumerate(destinations)
+                            ],
+                            "identity": "Primary",
+                            "truncated": False,
+                        }
+                    },
+                ),
+            ),
+        )
+        for index, destinations in enumerate((("/alpha", "/beta"), ("/beta", "/alpha")))
+    )
+    observation = RuntimeObservation(
+        generated_at="2026-08-04T00:00:00+00:00",
+        requested_urls=tuple(page.url for page in pages),
+        pages=pages,
+        errors=("one route capture failed",),
+    )
+
+    assert observation.status == "partial"
+    frontend_map = map_frontend(tmp_path, runtime=observation)
+    codes = {finding["code"] for finding in frontend_map.evidence["runtime_findings"]}
+    assert "design-navigation-order-inconsistent" not in codes

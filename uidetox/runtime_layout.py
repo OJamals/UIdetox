@@ -16,6 +16,9 @@ _RUNTIME_REMEDIATION_CONSTRAINTS: dict[str, tuple[str, ...]] = {
     "runtime-font-misalignment": (
         "Reconcile the evidenced font family and baseline with equivalent peer text without changing content order.",
     ),
+    "runtime-focus-obscured": (
+        "Move or resize the authored occluder so the focused control remains fully visible without changing keyboard order.",
+    ),
     "runtime-horizontal-padding": (
         "Apply the measured logical inline padding through the owning layout rule without changing intentional scroll boundaries.",
     ),
@@ -94,6 +97,7 @@ def detect_runtime_findings(
         *_visual_content_findings(element.measurements),
         *_clipping_findings(element.measurements),
         *_responsive_findings(element.measurements),
+        *_focus_findings(element.measurements),
         *_spacing_findings(element.measurements),
         *_line_spacing_findings(element),
     )
@@ -361,6 +365,60 @@ def _responsive_findings(
                 },
             )
         )
+    else:
+        client_height = _measurement_float(measurements, "clientHeight")
+        scroll_height = _measurement_float(measurements, "scrollHeight")
+        concealed_actions_y = _measurement_float(
+            measurements, "concealedInteractiveDescendantCountY"
+        )
+        if (
+            measurements.get("isScrollRegionY") is True
+            and concealed_actions_y > 0
+            and client_height > 0
+            and scroll_height > client_height + 1
+        ):
+            findings.append(
+                RuntimeFinding(
+                    code="runtime-interactive-scroll-concealment",
+                    category="responsive",
+                    severity="error",
+                    message=(
+                        f"{int(concealed_actions_y)} interactive action(s) start "
+                        "outside the visible vertical scroll region."
+                    ),
+                    metrics={
+                        "concealed_action_count": concealed_actions_y,
+                        "client_height_px": client_height,
+                        "scroll_height_px": scroll_height,
+                        "scroll_height_ratio": round(scroll_height / client_height, 2),
+                    },
+                )
+            )
+
+    table = measurements.get("table")
+    if (
+        isinstance(table, dict)
+        and table.get("scrollable") is True
+        and table.get("scrollbarVisible") is False
+        and table.get("affordance") is False
+        and _measurement_float(table, "rowCount") >= 2
+        and _measurement_float(table, "headerCount") >= 1
+    ):
+        findings.append(
+            RuntimeFinding(
+                code="runtime-responsive-table-inaccessible",
+                category="responsive",
+                severity="error",
+                message=(
+                    "Responsive table content overflows horizontally without a "
+                    "visible or programmatic scrolling affordance."
+                ),
+                metrics={
+                    "header_count": _measurement_float(table, "headerCount"),
+                    "row_count": _measurement_float(table, "rowCount"),
+                },
+            )
+        )
 
     navigation_links = _measurement_float(measurements, "navigationLinkCount")
     navigation_groups = _measurement_float(measurements, "navigationGroupCount")
@@ -396,6 +454,32 @@ def _responsive_findings(
             )
         )
     return tuple(findings)
+
+
+def _focus_findings(measurements: dict[str, Any]) -> tuple[Finding, ...]:
+    raw_visibility = measurements.get("focusVisibility")
+    if not isinstance(raw_visibility, dict):
+        return ()
+    occluded_by = str(raw_visibility.get("occludedBy", "")).strip()
+    occluded_fraction = _measurement_float(raw_visibility, "occludedFraction")
+    if (
+        raw_visibility.get("fullyVisible") is not False
+        or not occluded_by
+        or occluded_fraction < 0.2
+    ):
+        return ()
+    return (
+        RuntimeFinding(
+            code="runtime-focus-obscured",
+            category="accessibility",
+            severity="error",
+            message="The focused control is partly or fully obscured by authored content.",
+            metrics={
+                "occluded_by": occluded_by,
+                "occluded_fraction": round(occluded_fraction, 2),
+            },
+        ),
+    )
 
 
 def _spacing_findings(

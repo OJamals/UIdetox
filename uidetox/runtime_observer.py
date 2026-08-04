@@ -1347,6 +1347,11 @@ async () => {
     const selector = String(value || "");
     return selector.length <= 240 ? selector : "";
   };
+  const boundedTokens = (value, limit = 8) => String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, limit)
+    .map(token => boundedText(token, 80));
   const pixels = value => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -2195,18 +2200,46 @@ async () => {
     const horizontalScrollRegion = (
       scrollAxes.x && element.scrollWidth > element.clientWidth + 1
     );
-    const concealedInteractiveDescendantCount = horizontalScrollRegion
-      ? Array.from(element.querySelectorAll(
-          "button,a[href],input,select,textarea,[role='button'],[role='link']"
-        )).filter(descendant => {
-          if (!isVisible(descendant)) return false;
-          const descendantRect = geometryFor(descendant).rect;
-          return (
-            descendantRect.left < rect.left - 1
-            || descendantRect.right > rect.right + 1
-          );
-        }).length
-      : 0;
+    const verticalScrollRegion = (
+      scrollAxes.y && element.scrollHeight > element.clientHeight + 1
+    );
+    const concealedTargets = (horizontalScrollRegion || verticalScrollRegion)
+      ? allElements.filter(descendant => (
+          descendant !== element
+          && element.contains(descendant)
+          && isControl(descendant, geometryFor(descendant).role)
+          && isVisible(descendant)
+        ))
+      : [];
+    const concealedInteractiveDescendantCountX = concealedTargets.filter(
+      descendant => {
+        const descendantRect = geometryFor(descendant).rect;
+        return (
+          descendantRect.left < rect.left - 1
+          || descendantRect.right > rect.right + 1
+        );
+      }
+    ).length;
+    const concealedInteractiveDescendantCountY = concealedTargets.filter(
+      descendant => {
+        const descendantRect = geometryFor(descendant).rect;
+        return (
+          descendantRect.top < rect.top - 1
+          || descendantRect.bottom > rect.bottom + 1
+        );
+      }
+    ).length;
+    const concealedInteractiveDescendantCount = new Set(
+      concealedTargets.filter(descendant => {
+        const descendantRect = geometryFor(descendant).rect;
+        return (
+          descendantRect.left < rect.left - 1
+          || descendantRect.right > rect.right + 1
+          || descendantRect.top < rect.top - 1
+          || descendantRect.bottom > rect.bottom + 1
+        );
+      })
+    ).size;
     const navigationLinkCount = role === "navigation"
       ? navigationLinksFor(element).length
       : 0;
@@ -2217,6 +2250,41 @@ async () => {
           Array.from(group.querySelectorAll("a[href]")).filter(isVisible).length >= 2
         )).length
       : 0;
+    const scrollbarStyle = getComputedStyle(element, "::-webkit-scrollbar");
+    const scrollbarAuthoredHidden = (
+      style.scrollbarWidth === "none" || scrollbarStyle.display === "none"
+    );
+    const tableEvidence = tag === "table"
+      ? {
+          affordance: Boolean(
+            !scrollbarAuthoredHidden
+            || element.parentElement?.getAttribute("aria-label")
+            || element.parentElement?.tabIndex >= 0
+          ),
+          caption: Boolean(element.caption),
+          headerCount: element.tHead?.querySelectorAll("th").length || 0,
+          rowCount: element.rows?.length || 0,
+          scrollable: horizontalScrollRegion,
+          scrollbarVisible: horizontalScrollRegion && !scrollbarAuthoredHidden
+        }
+      : null;
+    const listEvidence = ["ol", "ul"].includes(tag)
+      ? {
+          itemCount: Array.from(element.children).filter(
+            child => child.tagName.toLowerCase() === "li"
+          ).length,
+          scrollable: horizontalScrollRegion || verticalScrollRegion,
+          scrollbarVisible: (
+            (horizontalScrollRegion || verticalScrollRegion)
+            && !scrollbarAuthoredHidden
+          )
+        }
+      : null;
+    const livePoliteness = element.getAttribute("aria-live") || (
+      role === "alert" ? "assertive" : role === "status" ? "polite" : ""
+    );
+    const describedBy = boundedTokens(element.getAttribute("aria-describedby"));
+    const errorMessages = boundedTokens(element.getAttribute("aria-errormessage"));
     const descendantSummary = descendantCache.get(element);
     const containsScrollRegionX = Boolean(
       descendantSummary?.containsScrollRegionX
@@ -2310,8 +2378,20 @@ async () => {
       containsScrollRegionX,
       containsScrollRegionY,
       concealedInteractiveDescendantCount,
+      concealedInteractiveDescendantCountX,
+      concealedInteractiveDescendantCountY,
       navigationLinkCount,
       navigationGroupCount,
+      scrollbarVisibleX: horizontalScrollRegion && !scrollbarAuthoredHidden,
+      scrollbarVisibleY: verticalScrollRegion && !scrollbarAuthoredHidden,
+      table: tableEvidence,
+      list: listEvidence,
+      livePoliteness,
+      describedBy,
+      errorMessages,
+      hasControlLabel: control
+        ? Boolean(nameFor(element) || element.labels?.length)
+        : null,
       writingMode: style.writingMode,
       direction: style.direction,
       paddingTop: round(pixels(style.paddingTop)),
@@ -3077,24 +3157,68 @@ async () => {
       height: round(rect.height)
     };
   };
+  const aggregateGeometry = elements => {
+    const rects = elements.map(element => geometryFor(element).rect);
+    if (!rects.length) return null;
+    const left = Math.min(...rects.map(rect => rect.left));
+    const top = Math.min(...rects.map(rect => rect.top));
+    const right = Math.max(...rects.map(rect => rect.right));
+    const bottom = Math.max(...rects.map(rect => rect.bottom));
+    return {
+      x: round(left),
+      y: round(top),
+      width: round(right - left),
+      height: round(bottom - top)
+    };
+  };
   const pageMain = selected.find(
     element => geometryFor(element).role === "main"
   ) || null;
   const landmarkLimit = 8;
   const trackLimit = 12;
-  const visibleHeaders = Array.from(
-    document.querySelectorAll("header,[role='banner']")
-  ).filter(isVisible);
-  const visibleNavigations = Array.from(
-    document.querySelectorAll("nav,[role='navigation']")
-  ).filter(isVisible);
+  const visibleHeaders = allElements.filter(element => (
+    ["header", "banner"].includes(
+      element.tagName.toLowerCase() === "header"
+        ? "header"
+        : geometryFor(element).role
+    )
+    && isVisible(element)
+  ));
+  const visibleNavigations = allElements.filter(element => (
+    geometryFor(element).role === "navigation" && isVisible(element)
+  ));
   const trackRoot = pageMain || document.body;
   const visibleTracks = trackRoot
     ? Array.from(trackRoot.children).filter(isVisible)
     : [];
+  const occupiedContent = pageMain
+    ? allElements.filter(element => pageMain.contains(element) && isVisible(element))
+    : [];
+  const firstTaskContent = pageMain
+    ? allElements.find(element => (
+        pageMain.contains(element)
+        && isVisible(element)
+        && (
+          isControl(element, geometryFor(element).role)
+          || /^(?:h[1-6]|form|table)$/.test(element.tagName.toLowerCase())
+        )
+      )) || null
+    : null;
   const pageComposition = pageMain
     ? {
-        contentBounds: boundedGeometry(trackRoot),
+        adaptation: {
+          contrastMore: window.matchMedia("(prefers-contrast: more)").matches,
+          direction: getComputedStyle(document.documentElement).direction,
+          forcedColors: window.matchMedia("(forced-colors: active)").matches,
+          language: boundedText(document.documentElement.lang, 32),
+          reducedMotion: window.matchMedia(
+            "(prefers-reduced-motion: reduce)"
+          ).matches,
+          rootFontSize: round(
+            pixels(getComputedStyle(document.documentElement).fontSize)
+          )
+        },
+        contentBounds: aggregateGeometry(occupiedContent),
         documentBounds: {
           x: 0,
           y: 0,
@@ -3114,6 +3238,7 @@ async () => {
             .slice(0, landmarkLimit)
             .map(boundedGeometry)
         },
+        firstTaskContent: boundedGeometry(firstTaskContent),
         majorTracks: visibleTracks.slice(0, trackLimit).map(boundedGeometry),
         truncated: (
           visibleHeaders.length > landmarkLimit
@@ -3130,7 +3255,7 @@ async () => {
     : null;
   const navigationEvidenceFor = element => {
     const destinationLimit = 32;
-    const links = Array.from(element.querySelectorAll("a[href]")).filter(isVisible);
+    const links = navigationLinksFor(element);
     let invalidOrTruncated = false;
     const destinations = links.slice(0, destinationLimit).map(link => {
       const rawHref = link.getAttribute("href") || "";
@@ -3230,6 +3355,19 @@ async () => {
       : occlusionEvidence(element, rect);
     measurements.occludedBy = occlusion.selector;
     measurements.occludedFraction = round(occlusion.fraction);
+    if (isControl(element, role)) {
+      measurements.keyboardOrder = {
+        documentOrder: documentOrder.get(element) ?? candidateOrder,
+        tabIndex: element.tabIndex
+      };
+    }
+    if (document.activeElement === element) {
+      measurements.focusVisibility = {
+        fullyVisible: isVisibleInScrollport(element) && occlusion.fraction === 0,
+        occludedBy: occlusion.selector,
+        occludedFraction: round(occlusion.fraction)
+      };
+    }
 
     const tag = element.tagName.toLowerCase();
     const kind = isControl(element, role)
