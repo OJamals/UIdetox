@@ -1339,6 +1339,14 @@ async () => {
   );
   const activeModal = document.querySelector("dialog:modal");
   const round = value => Math.round(value * 100) / 100;
+  const boundedText = (value, limit = 160) => String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
+  const boundedSelector = value => {
+    const selector = String(value || "");
+    return selector.length <= 240 ? selector : "";
+  };
   const pixels = value => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -1427,12 +1435,28 @@ async () => {
   const sourceSelectorsFor = (element) => {
     const selectors = [];
     const testId = element.getAttribute("data-testid");
-    if (testId) selectors.push(`[data-testid="${testId.replaceAll('"', '\\"')}"]`);
+    if (testId) {
+      const selector = boundedSelector(
+        `[data-testid="${testId.replaceAll('"', '\\"')}"]`
+      );
+      if (selector) selectors.push(selector);
+    }
     const dataTest = element.getAttribute("data-test");
-    if (dataTest) selectors.push(`[data-test="${dataTest.replaceAll('"', '\\"')}"]`);
-    if (element.id) selectors.push(`#${CSS.escape(element.id)}`);
+    if (dataTest) {
+      const selector = boundedSelector(
+        `[data-test="${dataTest.replaceAll('"', '\\"')}"]`
+      );
+      if (selector) selectors.push(selector);
+    }
+    if (element.id) {
+      const selector = boundedSelector(`#${CSS.escape(element.id)}`);
+      if (selector) selectors.push(selector);
+    }
     for (const className of element.classList) {
-      if (/^[-_A-Za-z][-\w]*$/.test(className)) selectors.push(`.${className}`);
+      const selector = boundedSelector(`.${className}`);
+      if (/^[-_A-Za-z][-\w]*$/.test(className) && selector) {
+        selectors.push(selector);
+      }
     }
     selectors.push(element.tagName.toLowerCase());
     return Array.from(new Set(selectors));
@@ -1493,7 +1517,7 @@ async () => {
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy) {
       const value = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent || "").join(" ").trim();
-      if (value) return value;
+      if (value) return boundedText(value);
     }
     const explicit = element.getAttribute("aria-label")
       || element.getAttribute("alt")
@@ -1502,7 +1526,7 @@ async () => {
       || element.getAttribute("placeholder")
       || element.textContent
       || "";
-    return explicit.replace(/\s+/g, " ").trim().slice(0, 160);
+    return boundedText(explicit);
   };
 
   const interactiveRoles = new Set([
@@ -2118,6 +2142,19 @@ async () => {
     });
   }
 
+  const navigationLinksCache = new WeakMap();
+  const navigationLinksFor = element => {
+    if (navigationLinksCache.has(element)) {
+      return navigationLinksCache.get(element);
+    }
+    const links = allElements.filter(candidate => (
+      candidate.matches("a[href]")
+      && element.contains(candidate)
+      && isVisible(candidate)
+    ));
+    navigationLinksCache.set(element, links);
+    return links;
+  };
   const measurementCache = new Map();
   const baseMeasurement = (element) => {
     if (measurementCache.has(element)) return measurementCache.get(element);
@@ -2171,7 +2208,7 @@ async () => {
         }).length
       : 0;
     const navigationLinkCount = role === "navigation"
-      ? Array.from(element.querySelectorAll("a[href]")).filter(isVisible).length
+      ? navigationLinksFor(element).length
       : 0;
     const navigationGroupCount = role === "navigation"
       ? Array.from(element.querySelectorAll(
@@ -3029,8 +3066,126 @@ async () => {
     const evidence = {selector, fraction: count / points.length};
     return evidence;
   };
+  const boundedGeometry = element => {
+    if (!element) return null;
+    const rect = geometryFor(element).rect;
+    return {
+      selector: selectorFor(element),
+      x: round(rect.x),
+      y: round(rect.y),
+      width: round(rect.width),
+      height: round(rect.height)
+    };
+  };
+  const pageMain = selected.find(
+    element => geometryFor(element).role === "main"
+  ) || null;
+  const landmarkLimit = 8;
+  const trackLimit = 12;
+  const visibleHeaders = Array.from(
+    document.querySelectorAll("header,[role='banner']")
+  ).filter(isVisible);
+  const visibleNavigations = Array.from(
+    document.querySelectorAll("nav,[role='navigation']")
+  ).filter(isVisible);
+  const trackRoot = pageMain || document.body;
+  const visibleTracks = trackRoot
+    ? Array.from(trackRoot.children).filter(isVisible)
+    : [];
+  const pageComposition = pageMain
+    ? {
+        contentBounds: boundedGeometry(trackRoot),
+        documentBounds: {
+          x: 0,
+          y: 0,
+          width: Math.max(
+            document.documentElement?.scrollWidth || 0,
+            document.body?.scrollWidth || 0
+          ),
+          height: Math.max(
+            document.documentElement?.scrollHeight || 0,
+            document.body?.scrollHeight || 0
+          )
+        },
+        landmarks: {
+          main: boundedGeometry(pageMain),
+          headers: visibleHeaders.slice(0, landmarkLimit).map(boundedGeometry),
+          navigations: visibleNavigations
+            .slice(0, landmarkLimit)
+            .map(boundedGeometry)
+        },
+        majorTracks: visibleTracks.slice(0, trackLimit).map(boundedGeometry),
+        truncated: (
+          visibleHeaders.length > landmarkLimit
+          || visibleNavigations.length > landmarkLimit
+          || visibleTracks.length > trackLimit
+        ),
+        viewportBounds: {
+          x: round(window.visualViewport?.offsetLeft || 0),
+          y: round(window.visualViewport?.offsetTop || 0),
+          width: round(window.visualViewport?.width || window.innerWidth),
+          height: round(window.visualViewport?.height || window.innerHeight)
+        }
+      }
+    : null;
+  const navigationEvidenceFor = element => {
+    const destinationLimit = 32;
+    const links = Array.from(element.querySelectorAll("a[href]")).filter(isVisible);
+    let invalidOrTruncated = false;
+    const destinations = links.slice(0, destinationLimit).map(link => {
+      const rawHref = link.getAttribute("href") || "";
+      let destination = null;
+      try {
+        destination = new URL(rawHref, document.baseURI);
+      } catch (_error) {
+        invalidOrTruncated = true;
+      }
+      const rawIdentity = destination
+        ? (
+            destination.origin === window.location.origin
+              ? destination.pathname
+              : `${destination.host}${destination.pathname}`
+          )
+        : "";
+      const identity = rawIdentity.length <= 160 ? rawIdentity : "";
+      if (!identity) invalidOrTruncated = true;
+      const group = link.closest(
+        "section,[role='group'],ul,ol"
+      );
+      const label = nameFor(link);
+      const fragment = destination?.hash || "";
+      return {
+        bypassTargetValid: fragment
+          ? Boolean(document.getElementById(fragment.slice(1)))
+          : null,
+        current: (
+          link.getAttribute("aria-current") === "page"
+          || Boolean(
+            destination
+            && destination.origin === window.location.origin
+            && destination.pathname === window.location.pathname
+          )
+        ),
+        group: group ? selectorFor(group) : "",
+        help: /(?:help|support|contact)/i.test(`${label} ${identity}`),
+        identity,
+        order: documentOrder.get(link) ?? 0
+      };
+    });
+    return {
+      destinations,
+      identity: boundedText(nameFor(element) || selectorFor(element), 80),
+      truncated: links.length > destinationLimit || invalidOrTruncated
+    };
+  };
   const elements = selected.map((element, candidateOrder) => {
     const {style, rect, role, measurements} = baseMeasurement(element);
+    if (element === pageMain && pageComposition) {
+      measurements.pageComposition = pageComposition;
+    }
+    if (role === "navigation") {
+      measurements.navigation = navigationEvidenceFor(element);
+    }
     measurements.theme = themeEvidence(element, style);
     if (measurements.paintedText) {
       measurements.paint = paintEvidence(element, style);
