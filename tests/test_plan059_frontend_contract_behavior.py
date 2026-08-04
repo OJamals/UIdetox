@@ -301,7 +301,10 @@ export async function save(payload: unknown, signal: AbortSignal) {
                                 for status in ("200", "409")
                             },
                             "x-uidetox-operation": {
-                                "idempotency": {"applicable": True},
+                                "idempotency": {
+                                    "applicable": True,
+                                    "scope": "one order creation",
+                                },
                                 "cancellation": {"applicable": True},
                                 "conflict": {"applicable": True},
                             },
@@ -329,14 +332,31 @@ export async function save(payload: unknown, signal: AbortSignal) {
         "Idempotency-Key",
         "If-Match",
     }
+    frontend_obligations = {
+        node.name: node
+        for node in frontend_nodes
+        if node.kind == "operation_obligation"
+    }
+    assert set(frontend_obligations) == {"cancellation", "conflict", "idempotency"}
+    assert {node.capability_status for node in frontend_obligations.values()} == {
+        "unknown"
+    }
     assert {
-        node.name for node in frontend_nodes if node.kind == "operation_obligation"
-    } == {"cancellation", "conflict", "idempotency"}
-    assert not [
+        node.attributes["evidence_status"] for node in frontend_obligations.values()
+    } == {"transport-token-only"}
+    obligation_findings = [
         finding
         for finding in project_map.findings
         if finding.detector_id.startswith("contract-operation-obligation-")
     ]
+    assert {
+        (finding.contract_anchor["field"], finding.status)
+        for finding in obligation_findings
+    } == {
+        ("cancellation", "investigate"),
+        ("conflict", "investigate"),
+        ("idempotency", "investigate"),
+    }
 
 
 def test_dynamic_fetch_options_do_not_create_literal_transport_evidence(

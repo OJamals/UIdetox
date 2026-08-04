@@ -316,6 +316,95 @@ def test_openapi_schema_scalars_are_bounded_and_fail_closed(tmp_path) -> None:
     assert len(json.dumps(project.to_dict())) < 100_000
 
 
+def test_openapi_operation_aggregate_budget_bounds_hostile_evidence(tmp_path) -> None:
+    oversized = "x" * 1_000_000
+    nested: dict[str, object] = {"type": "string"}
+    for depth in range(5):
+        nested = {
+            "type": "object",
+            "properties": {f"field-{depth}-{index}": nested for index in range(8)},
+        }
+    document = {
+        "openapi": "3.1.0",
+        "jsonSchemaDialect": oversized,
+        "servers": [{"url": oversized}],
+        "paths": {
+            "/hostile": {
+                "get": {
+                    "operationId": oversized,
+                    "callbacks": {oversized: {}},
+                    "parameters": [
+                        {"in": "query", "name": oversized, "schema": nested}
+                    ],
+                    "responses": {
+                        "200": {
+                            "headers": {oversized: {"schema": nested}},
+                            "content": {oversized: {"schema": nested}},
+                        }
+                    },
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    serialized = json.dumps(project.to_dict())
+
+    assert len(serialized) < 500_000
+    assert max((len(node.name) for node in project.nodes), default=0) <= 4096
+    diagnostics = _nodes(project, "contract_evidence_limit")
+    assert diagnostics
+    assert all(node.capability_status == "unknown" for node in diagnostics)
+    assert any(
+        node.attributes.get("axis") == "operation_transport" for node in diagnostics
+    )
+    assert any(
+        node.attributes.get("axis") == "schema"
+        for node in diagnostics
+        + [node for node in project.nodes if node.capability_status == "unknown"]
+    )
+
+
+def test_boolean_only_obligations_require_operation_specific_evidence(
+    tmp_path,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/orders": {
+                "post": {
+                    "x-uidetox-operation": {
+                        "retry": True,
+                        "idempotency": True,
+                        "affected-reads": True,
+                    },
+                    "responses": {"202": {"description": "accepted"}},
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    obligations = _nodes(project, "operation_obligation")
+
+    assert {node.name for node in obligations} == {
+        "affected-reads",
+        "idempotency",
+        "retry",
+    }
+    assert {node.capability_status for node in obligations} == {"unknown"}
+    assert all(node.attributes["applicable"] is None for node in obligations)
+    assert {
+        node.name: tuple(node.attributes["missing_constraints"]) for node in obligations
+    } == {
+        "affected-reads": ("operations",),
+        "idempotency": ("scope",),
+        "retry": ("condition",),
+    }
+
+
 def test_schema_names_and_discriminator_are_bounded_and_fail_closed(tmp_path) -> None:
     oversized = "x" * 1_000_000
     document = {

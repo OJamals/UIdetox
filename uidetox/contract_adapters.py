@@ -53,6 +53,10 @@ _OPENAPI_SCHEMA_DEPTH_LIMIT = 16
 _OPENAPI_SCHEMA_PROPERTY_LIMIT = 128
 _OPENAPI_SCHEMA_VARIANT_LIMIT = 32
 _OPENAPI_TEXT_LIMIT = 256
+_OPENAPI_SCHEMA_NODE_LIMIT = 512
+_OPENAPI_SCHEMA_BYTE_LIMIT = 262_144
+_OPENAPI_LINEAGE_ITEM_LIMIT = 512
+_OPENAPI_LINEAGE_BYTE_LIMIT = 262_144
 _OPERATION_OBLIGATIONS = (
     "affected-reads",
     "auth-required",
@@ -69,6 +73,11 @@ _OPERATION_OBLIGATIONS = (
     "timeout",
     "validation",
 )
+_OPERATION_OBLIGATION_REQUIRED_DETAILS = {
+    "affected-reads": ("operations",),
+    "idempotency": ("scope",),
+    "retry": ("condition",),
+}
 
 
 _IGNORED_DIRS = {
@@ -1163,6 +1172,17 @@ def _openapi_operation_obligations(
             details = {}
         else:
             continue
+        required_details = _OPERATION_OBLIGATION_REQUIRED_DETAILS.get(name, ())
+        missing_details = [
+            key
+            for key in required_details
+            if not details.get(key)
+            or (key == "operations" and not isinstance(details.get(key), list))
+        ]
+        if applicable is True and missing_details:
+            applicable = None
+            details["constraint_status"] = "unknown"
+            details["missing_constraints"] = missing_details
         obligations.append(
             {
                 "kind": "operation_obligation",
@@ -1437,7 +1457,59 @@ def _openapi_transport_lineage(
                     )
                 lineage.append(item)
     lineage.extend(_openapi_operation_obligations(operation))
-    return tuple(lineage)
+    return _bounded_openapi_lineage(lineage)
+
+
+def _bounded_openapi_lineage(
+    values: list[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Bound one operation's graph evidence and emit one fail-closed diagnostic."""
+
+    output: list[dict[str, Any]] = []
+    used_bytes = 0
+    truncated = len(values) > _OPENAPI_LINEAGE_ITEM_LIMIT
+    for raw in values[:_OPENAPI_LINEAGE_ITEM_LIMIT]:
+        bounded = _bounded_openapi_value(raw)
+        if not isinstance(bounded, dict):
+            truncated = True
+            continue
+        if bounded != raw:
+            truncated = True
+        kind = bounded.get("kind")
+        name = bounded.get("name")
+        reference = bounded.get("ref")
+        if kind == "operation_contract" and not name:
+            bounded["name"] = "operation"
+        elif not kind or not name or not reference:
+            truncated = True
+            continue
+        encoded_bytes = len(
+            json.dumps(bounded, sort_keys=True, default=str).encode("utf-8")
+        )
+        if used_bytes + encoded_bytes > _OPENAPI_LINEAGE_BYTE_LIMIT:
+            truncated = True
+            break
+        used_bytes += encoded_bytes
+        output.append(bounded)
+    if truncated:
+        output.append(
+            {
+                "kind": "contract_evidence_limit",
+                "name": "operation_transport",
+                "ref": "contract_evidence_limit:operation_transport",
+                "axis": "operation_transport",
+                "observed_count": len(values),
+                "emitted_count": len(output),
+                "item_limit": _OPENAPI_LINEAGE_ITEM_LIMIT,
+                "byte_limit": _OPENAPI_LINEAGE_BYTE_LIMIT,
+                "emitted_bytes": used_bytes,
+                "truncated": True,
+                "capability_status": "unknown",
+                "provenance": "openapi:bounded-operation",
+                "edge": "documents",
+            }
+        )
+    return tuple(output)
 
 
 def _openapi_media_schemas(
@@ -1508,12 +1580,70 @@ def _openapi_schema_shape(
     seen: tuple[str, ...] = (),
     depth: int = 0,
 ) -> dict[str, Any]:
+    budget = {"nodes": 0, "truncated": 0}
+    result = _openapi_schema_shape_bounded(schema, document, seen, depth, budget)
+    encoded_bytes = len(json.dumps(result, sort_keys=True, default=str).encode("utf-8"))
+    if encoded_bytes > _OPENAPI_SCHEMA_BYTE_LIMIT:
+        return _openapi_schema_limit(
+            "byte_limit",
+            observed=encoded_bytes,
+            limit=_OPENAPI_SCHEMA_BYTE_LIMIT,
+        )
+    if budget["truncated"]:
+        result.update(
+            {
+                "axis": "schema",
+                "capability_status": "unknown",
+                "truncated": True,
+                "observed_nodes": budget["nodes"],
+                "node_limit": _OPENAPI_SCHEMA_NODE_LIMIT,
+            }
+        )
+    return result
+
+
+def _openapi_schema_limit(reason: str, *, observed: int, limit: int) -> dict[str, Any]:
+    return {
+        "type": "unknown",
+        "axis": "schema",
+        "capability_status": "unknown",
+        "truncated": True,
+        "limit_reason": reason,
+        "observed": observed,
+        "limit": limit,
+    }
+
+
+def _openapi_schema_shape_bounded(
+    schema: Mapping[str, Any],
+    document: Mapping[str, Any],
+    seen: tuple[str, ...],
+    depth: int,
+    budget: dict[str, int],
+) -> dict[str, Any]:
+    budget["nodes"] += 1
+    if budget["nodes"] > _OPENAPI_SCHEMA_NODE_LIMIT:
+        budget["truncated"] = 1
+        return _openapi_schema_limit(
+            "node_limit",
+            observed=budget["nodes"],
+            limit=_OPENAPI_SCHEMA_NODE_LIMIT,
+        )
     reference = schema.get("$ref")
     name = ""
     if depth >= _OPENAPI_SCHEMA_DEPTH_LIMIT:
         return {"type": "unknown", "capability_status": "unknown", "truncated": True}
     if isinstance(reference, str):
-        name = reference.rsplit("/", 1)[-1]
+        bounded_reference = _bounded_openapi_text(reference)
+        if not bounded_reference or bounded_reference != reference:
+            budget["truncated"] = 1
+            return _openapi_schema_limit(
+                "reference",
+                observed=len(reference),
+                limit=_OPENAPI_TEXT_LIMIT,
+            )
+        reference = bounded_reference
+        name = _bounded_openapi_text(reference.rsplit("/", 1)[-1])
         if reference in seen:
             return {
                 "name": name,
@@ -1531,7 +1661,9 @@ def _openapi_schema_shape(
         for member in variants:
             if not isinstance(member, Mapping):
                 continue
-            shape = _openapi_schema_shape(member, document, seen, depth + 1)
+            shape = _openapi_schema_shape_bounded(
+                member, document, seen, depth + 1, budget
+            )
             merged["allOf"].append(shape)
             merged["properties"].update(shape.get("properties", {}))
             merged["required"].extend(shape.get("required", []))
@@ -1550,12 +1682,27 @@ def _openapi_schema_shape(
     nullable = bool(schema.get("nullable", False))
     if isinstance(raw_type, list):
         nullable = nullable or "null" in raw_type
-        non_null = [str(item) for item in raw_type if item != "null"]
+        non_null = [
+            bounded
+            for item in raw_type
+            if item != "null"
+            and (bounded := _bounded_openapi_text(item))
+            and bounded == item
+        ]
+        if len(non_null) != len([item for item in raw_type if item != "null"]):
+            budget["truncated"] = 1
         normalized_type: Any = non_null[0] if len(non_null) == 1 else non_null
     else:
-        normalized_type = raw_type or (
-            "object" if isinstance(schema.get("properties"), Mapping) else "unknown"
+        normalized_type = (
+            _bounded_openapi_text(raw_type)
+            if raw_type
+            else (
+                "object" if isinstance(schema.get("properties"), Mapping) else "unknown"
+            )
         )
+        if raw_type and normalized_type != raw_type:
+            budget["truncated"] = 1
+            normalized_type = "unknown"
     result: dict[str, Any] = {"type": normalized_type}
     if name:
         result["name"] = name
@@ -1614,8 +1761,8 @@ def _openapi_schema_shape(
             ):
                 property_truncated = True
                 continue
-            result["properties"][field_name] = _openapi_schema_shape(
-                field, document, seen, depth + 1
+            result["properties"][field_name] = _openapi_schema_shape_bounded(
+                field, document, seen, depth + 1, budget
             )
         if property_truncated:
             result["property_count"] = len(property_rows)
@@ -1623,12 +1770,14 @@ def _openapi_schema_shape(
             result["capability_status"] = "unknown"
     items = schema.get("items")
     if isinstance(items, Mapping):
-        result["items"] = _openapi_schema_shape(items, document, seen, depth + 1)
+        result["items"] = _openapi_schema_shape_bounded(
+            items, document, seen, depth + 1, budget
+        )
     for composition in ("oneOf", "anyOf"):
         values = schema.get(composition)
         if isinstance(values, list):
             result[composition] = [
-                _openapi_schema_shape(value, document, seen, depth + 1)
+                _openapi_schema_shape_bounded(value, document, seen, depth + 1, budget)
                 for value in values[:_OPENAPI_SCHEMA_VARIANT_LIMIT]
                 if isinstance(value, Mapping)
             ]

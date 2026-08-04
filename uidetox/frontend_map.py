@@ -194,9 +194,10 @@ def _frontend_http_lineage(
                 "kind": "operation_obligation",
                 "name": name,
                 "ref": f"operation_obligation:{name}",
-                "applicable": True,
-                "capability_status": "present",
-                "provenance": "frontend-source:exact-operation",
+                "applicable": None,
+                "capability_status": "unknown",
+                "evidence_status": "transport-token-only",
+                "provenance": "frontend-source:transport-token",
                 "edge": "requires_behavior",
             }
         )

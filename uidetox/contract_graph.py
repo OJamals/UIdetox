@@ -504,11 +504,15 @@ def _operation_obligation_findings(
 ) -> tuple[Finding, ...]:
     """Report only explicitly applicable backend behaviors absent at the client."""
 
-    frontend_obligations = {
+    frontend_nodes = {
         node.name: node
         for node in outgoing.get((frontend.id, "requires_behavior"), ())
         if node.kind == "operation_obligation"
-        and node.capability_status == "present"
+    }
+    frontend_obligations = {
+        name: node
+        for name, node in frontend_nodes.items()
+        if node.capability_status == "present"
         and node.attributes.get("applicable") is True
     }
     findings: list[Finding] = []
@@ -548,6 +552,24 @@ def _operation_obligation_findings(
             }
         )
         if actual is None:
+            uncertain = frontend_nodes.get(expected.name)
+            if uncertain is not None and uncertain.capability_status in {
+                "unknown",
+                "contradictory",
+            }:
+                findings.append(
+                    _graph_finding(
+                        "operation_obligation_evidence_unknown",
+                        frontend,
+                        backend,
+                        f"Frontend evidence for {expected.name} is transport-only.",
+                        field=expected.name,
+                        expected=expected_attributes,
+                        actual=uncertain.capability_status,
+                        status="investigate",
+                    )
+                )
+                continue
             findings.append(
                 _graph_finding(
                     "operation_obligation_missing",
