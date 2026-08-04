@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from uidetox import prototype as prototype_module
 from uidetox import prototype_resources
 from uidetox.commands import redesign as redesign_command
 from uidetox.design_context import DesignIntent
@@ -37,6 +38,50 @@ def _proposal(tmp_path):
     frontend_map = map_frontend(tmp_path, "src")
     redesigns = propose_redesigns(frontend_map, RedesignBrief(variants=1))
     return frontend_map, redesigns, redesigns.proposals[0]
+
+
+def test_large_runtime_capture_projection_keeps_states_and_viewports_bounded() -> None:
+    rows = [
+        {
+            "capture_id": f"capture-{index}",
+            "scenario": f"scenario-{index % 5}",
+            "state": f"state-{index % 5}",
+            "viewport": {"name": ("mobile", "tablet", "desktop")[index % 3]},
+        }
+        for index in range(30)
+    ]
+
+    projected = prototype_module._prototype_runtime_capture_evidence(rows)
+
+    assert projected["total"] == 30
+    assert len(projected["sampled"]) == 12
+    assert projected["remaining_in_redesign_artifact"] == 18
+    assert {item["state"] for item in projected["sampled"]} == {
+        f"state-{index}" for index in range(5)
+    }
+    assert {item["viewport"]["name"] for item in projected["sampled"]} == {
+        "mobile",
+        "tablet",
+        "desktop",
+    }
+
+
+def test_runtime_capture_projection_fails_when_states_exceed_sample_budget() -> None:
+    rows = [
+        {
+            "capture_id": f"capture-{index}",
+            "scenario": "scenario",
+            "state": f"state-{index}",
+            "viewport": {"name": "desktop"},
+        }
+        for index in range(13)
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="cannot retain representative runtime states and viewports",
+    ):
+        prototype_module._prototype_runtime_capture_evidence(rows)
 
 
 def test_source_targets_and_migration_order_follow_import_evidence(tmp_path) -> None:

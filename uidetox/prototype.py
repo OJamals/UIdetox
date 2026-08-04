@@ -25,6 +25,7 @@ _MAX_EXPERIENCE_OPERATIONS = 1_000
 _MAX_EXPERIENCE_VALUE_CHARS = 2_048
 _MAX_EXPERIENCE_ROW_CHARS = 4_096
 _MAX_SAMPLED_EXPERIENCE_OPERATIONS = 10
+_MAX_PROTOTYPE_RUNTIME_CAPTURES = 12
 
 _QUALIFICATION_CONTRACT_V1 = (
     "",
@@ -425,7 +426,9 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             ),
             "- Runtime capture matrix: "
             + _resources.required_json(
-                runtime_freshness.get("runtime_capture_matrix", []),
+                _prototype_runtime_capture_evidence(
+                    runtime_freshness.get("runtime_capture_matrix", [])
+                ),
                 max_bytes=_resources.MAX_FRESHNESS_BYTES,
                 section="freshness evidence",
             ),
@@ -709,6 +712,63 @@ def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
             "captures": captures,
         }
     )
+
+
+def _prototype_runtime_capture_evidence(value: object) -> object:
+    """Keep every small matrix; sample large matrices by state and viewport."""
+
+    if not isinstance(value, list) or len(value) <= _MAX_PROTOTYPE_RUNTIME_CAPTURES:
+        return value
+    rows = [item for item in value if isinstance(item, dict)]
+    ordered = sorted(
+        rows,
+        key=lambda item: (
+            str(item.get("state", "")),
+            str(item.get("scenario", "")),
+            str(item.get("capture_id", "")),
+        ),
+    )
+    selected: list[dict[str, object]] = []
+    selected_ids: set[str] = set()
+
+    def add(item: dict[str, object]) -> None:
+        capture_id = str(item.get("capture_id", ""))
+        if capture_id not in selected_ids:
+            selected.append(item)
+            selected_ids.add(capture_id)
+
+    seen_states: set[str] = set()
+    for item in ordered:
+        state = str(item.get("state", ""))
+        if state not in seen_states:
+            add(item)
+            seen_states.add(state)
+    seen_viewports = {
+        str(item.get("viewport", {}).get("name", ""))
+        for item in selected
+        if isinstance(item.get("viewport"), dict)
+    }
+    for item in ordered:
+        viewport = item.get("viewport")
+        name = str(viewport.get("name", "")) if isinstance(viewport, dict) else ""
+        if name and name not in seen_viewports:
+            add(item)
+            seen_viewports.add(name)
+    if len(selected) > _MAX_PROTOTYPE_RUNTIME_CAPTURES:
+        raise ValueError(
+            "Prototype brief cannot retain representative runtime states and "
+            "viewports within the capture evidence budget."
+        )
+    for item in ordered:
+        if len(selected) >= _MAX_PROTOTYPE_RUNTIME_CAPTURES:
+            break
+        add(item)
+    selected = selected[:_MAX_PROTOTYPE_RUNTIME_CAPTURES]
+    return {
+        "total": len(value),
+        "sampled": selected,
+        "remaining_in_redesign_artifact": len(value) - len(selected),
+    }
 
 
 def _select_proposal(redesign_set: RedesignSet, proposal_id: str) -> RedesignProposal:
