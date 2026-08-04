@@ -399,6 +399,7 @@ def _extract_openapi(
                 response_map,
                 security,
                 document,
+                method=normalized_method,
             )
             operations.append(
                 ContractObservation(
@@ -1137,10 +1138,15 @@ def _bounded_openapi_names(values: list[Any]) -> tuple[list[str], bool]:
 
 def _openapi_operation_obligations(
     operation: Mapping[str, Any],
+    *,
+    method: str = "",
+    parameters: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+    responses: Mapping[str, Any] | None = None,
+    security: Any = None,
+    document: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     raw = operation.get("x-uidetox-operation")
-    if not isinstance(raw, Mapping):
-        return ()
+    raw = raw if isinstance(raw, Mapping) else {}
     obligations: list[dict[str, Any]] = []
     for name in _OPERATION_OBLIGATIONS:
         value = raw.get(name)
@@ -1201,6 +1207,82 @@ def _openapi_operation_obligations(
                 **details,
             }
         )
+    explicit_names = {item["name"] for item in obligations}
+    status_codes = {str(status) for status in (responses or {})}
+    parameter_names = {
+        (location.lower(), name.lower()) for location, name in (parameters or {})
+    }
+    response_headers: set[str] = set()
+    for response_value in (responses or {}).values():
+        if not isinstance(response_value, Mapping):
+            continue
+        response = _resolve_openapi_mapping(response_value, document or {})
+        headers = response.get("headers")
+        if isinstance(headers, Mapping):
+            response_headers.update(str(name).lower() for name in headers)
+
+    native: dict[str, dict[str, Any]] = {}
+
+    def prove(name: str, **details: Any) -> None:
+        if name not in explicit_names:
+            native[name] = details
+
+    safe_method = method.upper() in {"GET", "HEAD", "OPTIONS"}
+    idempotency_header = ("header", "idempotency-key") in parameter_names
+    precondition_header = bool(
+        parameter_names & {("header", "if-match"), ("header", "if-none-match")}
+    )
+    retry_signaled = bool(
+        status_codes & {"408", "429", "502", "503", "504"}
+        or "retry-after" in response_headers
+    )
+    if safe_method and retry_signaled:
+        prove("retry", condition="safe-method")
+    elif idempotency_header:
+        prove("retry", condition="idempotency-key")
+    if idempotency_header:
+        prove("idempotency", scope="request-header:Idempotency-Key")
+        prove("duplicate-submit", mechanism="idempotency-key")
+    if status_codes & {"409", "412"} or precondition_header:
+        prove(
+            "conflict",
+            statuses=sorted(status_codes & {"409", "412"}),
+            precondition=precondition_header,
+        )
+    if "207" in status_codes:
+        prove("partial-success", statuses=["207"])
+    if "429" in status_codes or "retry-after" in response_headers:
+        prove("rate-limit", statuses=sorted(status_codes & {"429"}))
+    if status_codes & {"408", "504"}:
+        prove("timeout", statuses=sorted(status_codes & {"408", "504"}))
+    if status_codes & {"400", "422"}:
+        prove("validation", statuses=sorted(status_codes & {"400", "422"}))
+    if "403" in status_codes:
+        prove("forbidden", statuses=["403"])
+    if safe_method and response_headers & {"etag", "last-modified"}:
+        prove(
+            "stale-refresh",
+            validators=sorted(response_headers & {"etag", "last-modified"}),
+        )
+    if isinstance(security, list):
+        requirements = [item for item in security if isinstance(item, Mapping)]
+        schemes = {str(name) for item in requirements for name in item}
+        if schemes and not any(not item for item in requirements):
+            prove("auth-required", schemes=sorted(schemes))
+
+    for name, details in sorted(native.items()):
+        obligations.append(
+            {
+                "kind": "operation_obligation",
+                "name": name,
+                "ref": f"operation_obligation:{name}",
+                "applicable": True,
+                "capability_status": "present",
+                "provenance": "openapi:native-operation",
+                "edge": "requires_behavior",
+                **details,
+            }
+        )
     return tuple(obligations)
 
 
@@ -1257,6 +1339,8 @@ def _openapi_transport_lineage(
     responses: Mapping[str, Any],
     security: Any,
     document: Mapping[str, Any],
+    *,
+    method: str = "",
 ) -> tuple[dict[str, Any], ...]:
     lineage: list[dict[str, Any]] = [
         _openapi_operation_contract(path_item, operation, document)
@@ -1290,12 +1374,17 @@ def _openapi_transport_lineage(
             "provenance": "openapi:parameter",
             "edge": "declares_parameter",
         }
+        default_style = "form" if location in {"query", "cookie"} else "simple"
+        style = parameter.get("style")
+        item["style"] = style if isinstance(style, str) else default_style
+        explode = parameter.get("explode")
+        item["explode"] = (
+            explode if isinstance(explode, bool) else item["style"] == "form"
+        )
         schema = parameter.get("schema")
         if isinstance(schema, Mapping):
             item["schema"] = _openapi_schema_shape(schema, document)
         for key in (
-            "style",
-            "explode",
             "deprecated",
             "allowEmptyValue",
             "allowReserved",
@@ -1456,7 +1545,16 @@ def _openapi_transport_lineage(
                         _resolve_openapi_mapping(definition, document)
                     )
                 lineage.append(item)
-    lineage.extend(_openapi_operation_obligations(operation))
+    lineage.extend(
+        _openapi_operation_obligations(
+            operation,
+            method=method,
+            parameters=parameters,
+            responses=responses,
+            security=security,
+            document=document,
+        )
+    )
     return _bounded_openapi_lineage(lineage)
 
 

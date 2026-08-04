@@ -806,6 +806,8 @@ def _classify_network_calls(
 
         expression = call.arguments[0] if call.arguments else None
         url = literal_text(expression) if expression is not None else None
+        if url is None and expression is not None:
+            url = literal_url_search_params(expression, ".ts")
         dynamic = expression is None or url is None or "${" in url
         unresolved = None
         if family in {"tanstack-query", "apollo", "rtk-query"} and url is None:
@@ -1355,6 +1357,100 @@ def literal_text(value: str | None) -> str | None:
         and stripped[-1] == stripped[0]
     ):
         return stripped[1:-1]
+    return None
+
+
+def literal_url_search_params(expression: str, extension: str) -> str | None:
+    """Return the literal URL prefix when URLSearchParams is fully literal."""
+
+    match = re.fullmatch(
+        r"\s*([\"'])(?P<url>[^\"']*)\1\s*\+\s*"
+        r"new\s+URLSearchParams\s*\((?P<params>\{.*\})\)\s*",
+        expression,
+        re.DOTALL,
+    )
+    if match is None or not literal_object_strings(match.group("params"), extension):
+        return None
+    return match.group("url")
+
+
+def literal_object_strings(
+    expression: str,
+    extension: str,
+    *,
+    limit: int = 64,
+) -> dict[str, str]:
+    """Extract one bounded, unambiguous literal string object via shared AST."""
+
+    parser = get_parser(extension)
+    if parser is None or not expression.strip() or limit < 1:
+        return {}
+    binding = "__uidetox_literal_object__"
+    tree = parser.parse(f"const {binding} = {expression};".encode())
+    if tree.root_node.has_error:
+        return {}
+    for node in _walk(tree.root_node):
+        if node.type != "variable_declarator":
+            continue
+        if _text(node.child_by_field_name("name")) != binding:
+            continue
+        root = node.child_by_field_name("value")
+        if root is None or root.type != "object" or len(root.named_children) > limit:
+            return {}
+        values: dict[str, str] = {}
+        for pair in root.named_children:
+            if pair.type != "pair":
+                return {}
+            key = _text(pair.child_by_field_name("key")).strip("\"'")
+            value_node = pair.child_by_field_name("value")
+            value = _literal(value_node) if value_node is not None else ""
+            if (
+                not key
+                or len(key) > 256
+                or not value
+                or len(value) > 256
+                or key in values
+            ):
+                return {}
+            values[key] = value
+        return values
+    return {}
+
+
+def literal_object_member_expression(
+    expression: str,
+    extension: str,
+    member_name: str,
+) -> str | None:
+    """Return one exact direct object-member expression or fail closed."""
+
+    parser = get_parser(extension)
+    if parser is None or not expression.strip():
+        return None
+    binding = "__uidetox_literal_object__"
+    tree = parser.parse(f"const {binding} = {expression};".encode())
+    if tree.root_node.has_error:
+        return None
+    for node in _walk(tree.root_node):
+        if node.type != "variable_declarator":
+            continue
+        if _text(node.child_by_field_name("name")) != binding:
+            continue
+        root = node.child_by_field_name("value")
+        if root is None or root.type != "object":
+            return None
+        matches = []
+        for pair in root.named_children:
+            if pair.type != "pair":
+                continue
+            key = _text(pair.child_by_field_name("key")).strip("\"'")
+            if key == member_name:
+                value = pair.child_by_field_name("value")
+                if value is not None:
+                    matches.append(_text(value).strip())
+        if len(matches) != 1 or len(matches[0]) > 4096:
+            return None
+        return matches[0]
     return None
 
 

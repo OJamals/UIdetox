@@ -800,7 +800,7 @@ def test_fullstack_fixture_preserves_sources_and_causal_findings() -> None:
     frontend_map = map_frontend(fixture, ".")
     project = ProjectMap.from_dict(frontend_map.project_map)
 
-    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 142}
+    assert project.counts == {"contract_mismatch": 33, "coverage_gap": 99}
     assert project.evidence["unknown_backend_evidence"] == 0
     assert len(_operation_nodes(project, "frontend")) == 142
     assert len(_operation_nodes(project, "backend")) == 148

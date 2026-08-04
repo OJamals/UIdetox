@@ -820,3 +820,184 @@ def test_duplicate_operation_status_subsets_are_contradictory_in_both_orders() -
 
     assert _contract_group_contradiction((narrow, broad), {}) == "status"
     assert _contract_group_contradiction((broad, narrow), {}) == "status"
+
+
+def test_native_openapi_evidence_derives_only_proven_operation_obligations(
+    tmp_path,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "components": {
+            "securitySchemes": {"OAuth": {"type": "http", "scheme": "bearer"}}
+        },
+        "paths": {
+            "/orders": {
+                "get": {
+                    "security": [{"OAuth": []}],
+                    "responses": {
+                        "200": {"headers": {"ETag": {"schema": {"type": "string"}}}},
+                        "403": {},
+                        "429": {
+                            "headers": {"Retry-After": {"schema": {"type": "integer"}}}
+                        },
+                    },
+                }
+            },
+            "/orders/{orderId}": {
+                "patch": {
+                    "parameters": [
+                        {"in": "path", "name": "orderId", "required": True},
+                        {"in": "header", "name": "If-Match", "required": True},
+                        {
+                            "in": "header",
+                            "name": "Idempotency-Key",
+                            "required": True,
+                        },
+                    ],
+                    "responses": {"207": {}, "412": {}, "422": {}},
+                }
+            },
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    obligations = {
+        (node.name, node.attributes.get("condition"), node.attributes.get("scope"))
+        for node in _nodes(project, "operation_obligation")
+        if node.capability_status == "present"
+    }
+
+    assert {
+        "auth-required",
+        "forbidden",
+        "rate-limit",
+        "retry",
+        "stale-refresh",
+    } <= {name for name, _condition, _scope in obligations}
+    assert {
+        "conflict",
+        "duplicate-submit",
+        "idempotency",
+        "partial-success",
+        "validation",
+    } <= {name for name, _condition, _scope in obligations}
+    assert ("retry", "safe-method", None) in obligations
+    assert ("retry", "idempotency-key", None) in obligations
+    assert ("idempotency", None, "request-header:Idempotency-Key") in obligations
+    assert {
+        node.attributes["provenance"]
+        for node in _nodes(project, "operation_obligation")
+    } == {"openapi:native-operation"}
+
+
+def test_duplicate_transport_evidence_is_contradictory_in_both_orders() -> None:
+    from uidetox.contract_graph import _contract_group_contradiction
+
+    source = SourceAnchor("openapi.json", 1, "test", "test", 1.0)
+
+    def operation(identifier: str) -> ContractNode:
+        return ContractNode(
+            identifier,
+            "route",
+            "GET /orders",
+            "backend",
+            "present",
+            source,
+            {
+                "method": "GET",
+                "normalized_path": "/orders",
+                "status_codes": ["200"],
+                "evidence": {"response": "present", "status": "present"},
+            },
+        )
+
+    def media(identifier: str, name: str) -> ContractNode:
+        return ContractNode(
+            identifier,
+            "response_media_type",
+            name,
+            "backend",
+            "present",
+            source,
+            {"status": "200", "schema": {"type": "object"}},
+        )
+
+    left, right = operation("left"), operation("right")
+    outgoing = {
+        ("left", "returns_media_type"): [media("json", "application/json")],
+        ("right", "returns_media_type"): [media("cbor", "application/cbor")],
+    }
+
+    assert _contract_group_contradiction((left, right), outgoing) == (
+        "response_media_type"
+    )
+    assert _contract_group_contradiction((right, left), outgoing) == (
+        "response_media_type"
+    )
+
+
+def test_richer_duplicate_backend_evidence_is_selected_order_independently() -> None:
+    source = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+
+    def operation(identifier: str, side: str) -> ContractNode:
+        return ContractNode(
+            identifier,
+            "client_operation" if side == "frontend" else "route",
+            "GET /orders",
+            side,
+            "present",
+            source,
+            {
+                "method": "GET",
+                "normalized_path": "/orders",
+                "status_codes": ["200"],
+                "evidence": {
+                    "request": "absent",
+                    "response": "absent",
+                    "error": "absent",
+                    "status": "present",
+                },
+            },
+        )
+
+    def parameter(identifier: str, side: str) -> ContractNode:
+        return ContractNode(
+            identifier,
+            "api_parameter",
+            "ids",
+            side,
+            "present",
+            source,
+            {"location": "query", "style": "form", "explode": False},
+        )
+
+    frontend = operation("frontend", "frontend")
+    coarse = operation("coarse", "backend")
+    rich = operation("rich", "backend")
+    front_parameter = parameter("front-ids", "frontend")
+    back_parameter = parameter("back-ids", "backend")
+    edges = (
+        ContractEdge(
+            frontend.id,
+            front_parameter.id,
+            "declares_parameter",
+            "test",
+            1.0,
+            source,
+        ),
+        ContractEdge(
+            rich.id,
+            back_parameter.id,
+            "declares_parameter",
+            "test",
+            1.0,
+            source,
+        ),
+    )
+
+    for backends in ((coarse, rich), (rich, coarse)):
+        findings = reconcile_contract_graph(
+            (frontend, *backends, front_parameter, back_parameter), edges
+        )
+        assert not [finding for finding in findings if finding.status == "pending"]

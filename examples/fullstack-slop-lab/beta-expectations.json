@@ -28,8 +28,8 @@
     "unresolved": []
   },
   "expected_contract_counts": {
-    "contract_mismatch": 0,
-    "coverage_gap": 142
+    "contract_mismatch": 33,
+    "coverage_gap": 99
   },
   "baseline_parity_counts": {
     "frontend_only": 10,

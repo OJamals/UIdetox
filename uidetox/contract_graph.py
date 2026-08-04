@@ -438,39 +438,62 @@ def reconcile_contract_graph(
         for method in sorted(set(front_by_method) & set(back_by_method)):
             if (path, method) in contradictory_backend:
                 continue
-            for frontend_node in front_by_method[method]:
-                for backend_node in back_by_method[method]:
-                    difference = _first_contract_difference(
-                        frontend_node, backend_node, outgoing
-                    )
-                    if difference is not None:
-                        (
-                            kind,
-                            field_name,
-                            detail,
-                            expected,
-                            actual,
-                            investigate,
-                        ) = difference
-                        findings.append(
-                            _graph_finding(
-                                kind,
-                                frontend_node,
-                                backend_node,
-                                detail,
-                                field=field_name,
-                                expected=expected,
-                                actual=actual,
-                                status="investigate" if investigate else "pending",
-                            )
+            backend_candidates = back_by_method[method]
+            backend_node = max(
+                backend_candidates,
+                key=lambda node: (
+                    sum(
+                        len(outgoing.get((node.id, relation), ()))
+                        for relation in (
+                            "accepts",
+                            "accepts_media_type",
+                            "allows",
+                            "declares_parameter",
+                            "documents",
+                            "requires_behavior",
+                            "returns",
+                            "returns_error",
+                            "returns_header",
+                            "returns_link",
+                            "returns_media_type",
                         )
-                    findings.extend(
-                        _operation_obligation_findings(
+                    ),
+                    node.source.confidence,
+                    node.id,
+                ),
+            )
+            for frontend_node in front_by_method[method]:
+                difference = _first_contract_difference(
+                    frontend_node, backend_node, outgoing
+                )
+                if difference is not None:
+                    (
+                        kind,
+                        field_name,
+                        detail,
+                        expected,
+                        actual,
+                        investigate,
+                    ) = difference
+                    findings.append(
+                        _graph_finding(
+                            kind,
                             frontend_node,
                             backend_node,
-                            outgoing,
+                            detail,
+                            field=field_name,
+                            expected=expected,
+                            actual=actual,
+                            status="investigate" if investigate else "pending",
                         )
                     )
+                findings.extend(
+                    _operation_obligation_findings(
+                        frontend_node,
+                        backend_node,
+                        outgoing,
+                    )
+                )
 
     deduped = {_semantic_finding_key(finding): finding for finding in findings}
     return tuple(
@@ -654,6 +677,95 @@ def _contract_group_contradiction(
             }
             if len(shapes) > 1:
                 return axis
+
+    transport_relations = (
+        ("request_media_type", "accepts_media_type"),
+        ("response_media_type", "returns_media_type"),
+        ("api_parameter", "declares_parameter"),
+        ("response_header", "returns_header"),
+        ("response_link", "returns_link"),
+    )
+    for kind, relation in transport_relations:
+        signatures = set()
+        for operation in operations:
+            rows = [
+                node
+                for node in outgoing.get((operation.id, relation), ())
+                if node.kind == kind
+            ]
+            if not rows:
+                continue
+            signatures.add(
+                json.dumps(
+                    sorted(
+                        [
+                            (
+                                node.name,
+                                {
+                                    key: _json_value(value)
+                                    for key, value in node.attributes.items()
+                                    if key not in {"edge", "provenance"}
+                                },
+                            )
+                            for node in rows
+                        ],
+                        key=lambda item: json.dumps(item, sort_keys=True, default=str),
+                    ),
+                    sort_keys=True,
+                    default=str,
+                )
+            )
+        if len(signatures) > 1:
+            return kind
+
+    security_signatures = set()
+    for operation in operations:
+        alternatives = [
+            node
+            for node in outgoing.get((operation.id, "allows"), ())
+            if node.kind == "auth_alternative"
+        ]
+        if not alternatives:
+            continue
+        rows = []
+        for alternative in alternatives:
+            schemes = [
+                (
+                    node.name,
+                    {
+                        key: _json_value(value)
+                        for key, value in node.attributes.items()
+                        if key not in {"edge", "parent", "provenance"}
+                    },
+                )
+                for node in outgoing.get((alternative.id, "requires"), ())
+                if node.kind == "auth_scheme_requirement"
+            ]
+            rows.append(
+                (
+                    {
+                        key: _json_value(value)
+                        for key, value in alternative.attributes.items()
+                        if key not in {"edge", "provenance"}
+                    },
+                    sorted(
+                        schemes,
+                        key=lambda item: json.dumps(item, sort_keys=True, default=str),
+                    ),
+                )
+            )
+        security_signatures.add(
+            json.dumps(
+                sorted(
+                    rows,
+                    key=lambda item: json.dumps(item, sort_keys=True, default=str),
+                ),
+                sort_keys=True,
+                default=str,
+            )
+        )
+    if len(security_signatures) > 1:
+        return "security_alternatives"
 
     auth_values = [_auth_from_graph(operation.id, outgoing) for operation in operations]
     for axis in ("auth", "authorization", "tenant"):
@@ -1092,6 +1204,21 @@ def _transport_contract_difference(
         for node in outgoing.get((backend.id, "declares_parameter"), ())
         if node.kind == "api_parameter"
     }
+    front_path_parameters = {
+        key: node for key, node in front_parameters.items() if key[0] == "path"
+    }
+    back_path_parameters = {
+        key: node for key, node in back_parameters.items() if key[0] == "path"
+    }
+    if (
+        len(front_path_parameters) == 1
+        and len(back_path_parameters) == 1
+        and set(front_path_parameters) != set(back_path_parameters)
+    ):
+        front_key, front_node = next(iter(front_path_parameters.items()))
+        back_key = next(iter(back_path_parameters))
+        front_parameters.pop(front_key)
+        front_parameters[back_key] = front_node
     required_backend_parameters = {
         key: node
         for key, node in back_parameters.items()

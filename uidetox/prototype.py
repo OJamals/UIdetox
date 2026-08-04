@@ -435,7 +435,9 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             ),
             "- Runtime screenshots: "
             + _resources.required_json(
-                runtime_freshness.get("screenshots", []),
+                _prototype_runtime_list_evidence(
+                    runtime_freshness.get("screenshots", [])
+                ),
                 max_bytes=_resources.MAX_FRESHNESS_BYTES,
                 section="freshness evidence",
             ),
@@ -449,7 +451,9 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             ),
             "- Runtime diagnostics: "
             + _resources.required_json(
-                runtime_freshness.get("runtime_diagnostics", []),
+                _prototype_runtime_list_evidence(
+                    runtime_freshness.get("runtime_diagnostics", [])
+                ),
                 max_bytes=_resources.MAX_FRESHNESS_BYTES,
                 section="freshness evidence",
             ),
@@ -824,6 +828,21 @@ def _prototype_runtime_capture_evidence(value: object) -> object:
         "total": len(value),
         "sampled": selected,
         "remaining_in_redesign_artifact": len(value) - len(selected),
+    }
+
+
+def _prototype_runtime_list_evidence(value: object, *, limit: int = 4) -> object:
+    """Retain deterministic representatives plus an exact overflow count."""
+
+    if not isinstance(value, list) or len(value) <= limit:
+        return value
+    ordered = sorted(
+        value, key=lambda item: json.dumps(item, sort_keys=True, default=str)
+    )
+    return {
+        "total": len(ordered),
+        "sampled": ordered[:limit],
+        "remaining_in_redesign_artifact": len(ordered) - limit,
     }
 
 

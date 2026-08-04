@@ -355,7 +355,9 @@ export async function save(payload: unknown, signal: AbortSignal) {
     } == {
         ("cancellation", "investigate"),
         ("conflict", "investigate"),
+        ("duplicate-submit", "pending"),
         ("idempotency", "investigate"),
+        ("retry", "pending"),
     }
 
 
@@ -381,6 +383,123 @@ export async function load() {
         for node in project_map.nodes
         if node.side == "frontend"
         and node.kind in {"api_parameter", "request_media_type", "response_media_type"}
+    ]
+
+
+def test_literal_url_serialization_becomes_exact_parameter_evidence(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function list(orderId: string) {
+  await fetch("/orders?ids=a,b&page=2&sort=name", {
+    headers: { "Cookie": "session=abc; theme=dark" }
+  });
+  return fetch(`/orders/${orderId}`, { headers: { "If-Match": "v1" } });
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+    frontend = [
+        node
+        for node in project.nodes
+        if node.side == "frontend" and node.kind == "api_parameter"
+    ]
+    values = {
+        (
+            node.attributes.get("location"),
+            node.name,
+            node.attributes.get("style"),
+            node.attributes.get("explode"),
+        )
+        for node in frontend
+    }
+
+    assert ("query", "ids", "form", False) in values
+    assert ("query", "page", "form", True) in values
+    assert ("query", "sort", "form", True) in values
+    assert ("cookie", "session", "form", True) in values
+    assert ("cookie", "theme", "form", True) in values
+    assert ("path", "orderId", "simple", False) in values
+
+
+def test_literal_url_search_params_preserve_stable_query_semantics(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function list() {
+  return fetch("/orders?" + new URLSearchParams({
+    page: "2",
+    filter: "open",
+    sort: "created_at"
+  }), {});
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+    frontend = [
+        node
+        for node in project.nodes
+        if node.side == "frontend"
+        and node.kind == "api_parameter"
+        and node.attributes.get("location") == "query"
+    ]
+
+    assert {node.name for node in frontend} == {"filter", "page", "sort"}
+    assert {
+        (node.attributes.get("style"), node.attributes.get("explode"))
+        for node in frontend
+    } == {("form", True)}
+
+
+def test_request_media_requires_matching_body_serialization(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function save(payload: unknown) {
+  return fetch("/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload
+  });
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert not [
+        node
+        for node in project.nodes
+        if node.side == "frontend" and node.kind == "request_media_type"
+    ]
+
+
+def test_dynamic_url_search_params_do_not_become_exact_evidence(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function list(page: string) {
+  return fetch("/orders?" + new URLSearchParams({ page }), {});
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert not [
+        node
+        for node in project.nodes
+        if node.side == "frontend" and node.kind == "api_parameter"
     ]
 
 

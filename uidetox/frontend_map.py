@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from uidetox.analyzer_ast import ast_capabilities
 from uidetox.design_semantics import (
@@ -36,7 +36,12 @@ from uidetox.semantic_adapters import (
     SourceDocument,
     build_application_semantics,
 )
-from uidetox.source_facts import literal_nested_object_strings
+from uidetox.source_facts import (
+    literal_nested_object_strings,
+    literal_object_member_expression,
+    literal_object_strings,
+    literal_text,
+)
 from uidetox.state import _load_json_object, ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
@@ -55,6 +60,7 @@ _HTTP_LITERAL_HEADERS = (
     "Idempotency-Key",
     "If-Match",
     "If-None-Match",
+    "Cookie",
 )
 _DIAGNOSTIC_CATEGORIES = {
     "action": "interaction",
@@ -102,21 +108,50 @@ def _frontend_http_lineage(
         for source_call in facts.calls
         if source_call.target == call.target and source_call.line == call.line
     )
-    if len(source_calls) != 1 or len(source_calls[0].arguments) < 2:
+    if len(source_calls) != 1 or not source_calls[0].arguments:
         return (), ()
-    options = source_calls[0].arguments[1]
-    if not options.lstrip().startswith("{") or not options.rstrip().endswith("}"):
-        return (), ()
+    source_call = source_calls[0]
+    url_expression = source_call.arguments[0]
+    options = source_call.arguments[1] if len(source_call.arguments) >= 2 else ""
+    literal_options = options.lstrip().startswith("{") and options.rstrip().endswith(
+        "}"
+    )
 
     lineage: list[dict[str, Any]] = []
-    headers = literal_nested_object_strings(
-        options,
-        facts.extension,
-        "headers",
-        _HTTP_LITERAL_HEADERS,
+    headers = (
+        literal_nested_object_strings(
+            options,
+            facts.extension,
+            "headers",
+            _HTTP_LITERAL_HEADERS,
+        )
+        if literal_options
+        else {}
     )
     content_type = headers.get("Content-Type")
-    if content_type:
+    body = (
+        literal_object_member_expression(options, facts.extension, "body")
+        if literal_options
+        else None
+    )
+    serialized_body = bool(
+        body
+        and (
+            (
+                "json" in (content_type or "").lower()
+                and re.match(r"JSON\.stringify\s*\(", body)
+            )
+            or (
+                (content_type or "").lower().startswith("text/")
+                and literal_text(body) is not None
+            )
+            or (
+                (content_type or "").lower() == "application/x-www-form-urlencoded"
+                and ("URLSearchParams" in body or literal_text(body) is not None)
+            )
+        )
+    )
+    if content_type and serialized_body:
         lineage.append(
             {
                 "kind": "request_media_type",
@@ -135,7 +170,77 @@ def _frontend_http_lineage(
                 "name": name,
                 "ref": f"api_parameter:header:{name}",
                 "location": "header",
+                "style": "simple",
+                "explode": False,
                 "provenance": "frontend-source:literal-header",
+                "edge": "declares_parameter",
+            }
+        )
+
+    literal_url = call.url if isinstance(call.url, str) else ""
+    query_values: dict[str, list[str]] = defaultdict(list)
+    for name, value in parse_qsl(urlsplit(literal_url).query, keep_blank_values=True):
+        query_values[name].append(value)
+    search_params = re.search(
+        r"new\s+URLSearchParams\s*\((\{.*\})\)\s*$",
+        url_expression,
+        re.DOTALL,
+    )
+    if search_params is not None:
+        for name, value in literal_object_strings(
+            search_params.group(1), facts.extension
+        ).items():
+            query_values[name].append(value)
+    for name, values in sorted(query_values.items()):
+        style = "form"
+        explode = len(values) > 1 or not any(
+            separator in values[0] for separator in (",", "|", " ")
+        )
+        if len(values) == 1 and "|" in values[0]:
+            style = "pipeDelimited"
+        elif len(values) == 1 and " " in values[0]:
+            style = "spaceDelimited"
+        lineage.append(
+            {
+                "kind": "api_parameter",
+                "name": name,
+                "ref": f"api_parameter:query:{name}",
+                "location": "query",
+                "style": style,
+                "explode": explode,
+                "provenance": "frontend-source:literal-url",
+                "edge": "declares_parameter",
+            }
+        )
+
+    for name in sorted(set(re.findall(r"\$\{([A-Za-z_$][\w$]*)\}", url_expression))):
+        lineage.append(
+            {
+                "kind": "api_parameter",
+                "name": name,
+                "ref": f"api_parameter:path:{name}",
+                "location": "path",
+                "style": "simple",
+                "explode": False,
+                "provenance": "frontend-source:template-path",
+                "edge": "declares_parameter",
+            }
+        )
+
+    cookie = headers.get("Cookie", "")
+    for item in cookie.split(";"):
+        name, separator, _value = item.strip().partition("=")
+        if not separator or not re.fullmatch(r"[-!#$%&'*+.^_`|~0-9A-Za-z]+", name):
+            continue
+        lineage.append(
+            {
+                "kind": "api_parameter",
+                "name": name,
+                "ref": f"api_parameter:cookie:{name}",
+                "location": "cookie",
+                "style": "form",
+                "explode": True,
+                "provenance": "frontend-source:literal-cookie",
                 "edge": "declares_parameter",
             }
         )

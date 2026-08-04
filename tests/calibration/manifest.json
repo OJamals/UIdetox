@@ -518,7 +518,10 @@
       "severity": "warning",
       "rationale": "A qualified backend security requirement must contradict a statically absent frontend credential.",
       "expect": {
-        "finding_ids": ["contract-auth-mismatch"],
+        "finding_ids": [
+          "contract-auth-mismatch",
+          "contract-operation-obligation-missing"
+        ],
         "exact_findings": true,
         "node_kinds": ["auth_requirement"]
       }
