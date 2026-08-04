@@ -73,7 +73,22 @@ def _literal_header_value(expression: str, name: str) -> str | None:
     return match.group("value") if match else None
 
 
-def _fetch_response_binding(content: str, call: Any) -> str | None:
+def _network_call_scope(content: str, facts: Any, call: Any) -> str:
+    lines = content.splitlines(keepends=True)
+    owner_starts = [
+        item.line
+        for item in facts.callables
+        if item.name == call.owner and item.line <= call.line
+    ]
+    if not owner_starts:
+        return ""
+    start = max(owner_starts) - 1
+    later_starts = [item.line - 1 for item in facts.callables if item.line > call.line]
+    end = min(later_starts, default=len(lines))
+    return "".join(lines[start:end])
+
+
+def _fetch_response_binding(scope: str, call: Any) -> str | None:
     if call.target != "fetch" or not isinstance(call.url, str):
         return None
     pattern = re.compile(
@@ -81,7 +96,7 @@ def _fetch_response_binding(content: str, call: Any) -> str | None:
         rf"(?:await\s+)?fetch\s*\(\s*([\"']){re.escape(call.url)}\2",
         re.DOTALL,
     )
-    bindings = {match.group("binding") for match in pattern.finditer(content)}
+    bindings = {match.group("binding") for match in pattern.finditer(scope)}
     return next(iter(bindings)) if len(bindings) == 1 else None
 
 
@@ -132,14 +147,15 @@ def _frontend_http_lineage(
             }
         )
 
-    response_binding = _fetch_response_binding(content, call)
+    response_scope = _network_call_scope(content, facts, call)
+    response_binding = _fetch_response_binding(response_scope, call)
     statuses = ()
     if response_binding is not None:
         status_pattern = re.compile(
             rf"\b{re.escape(response_binding)}\.status\s*"
             r"(?:===?|!==?)\s*([1-5][0-9]{2})\b"
         )
-        statuses = tuple(sorted(set(status_pattern.findall(content))))
+        statuses = tuple(sorted(set(status_pattern.findall(response_scope))))
     accept = headers.get("Accept")
     response_parsers = {
         parser
@@ -147,7 +163,7 @@ def _frontend_http_lineage(
         if response_binding is not None
         and re.search(
             rf"\b{re.escape(response_binding)}\.{parser}\s*\(",
-            content,
+            response_scope,
         )
     }
     parser_matches_accept = (

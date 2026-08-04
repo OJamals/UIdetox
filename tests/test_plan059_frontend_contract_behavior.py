@@ -395,18 +395,18 @@ def test_response_parsers_are_scoped_to_their_fetch_binding(tmp_path) -> None:
     (source / "client.ts").write_text(
         """
 export async function loadOrders() {
-  const orders = await fetch("/orders", {
+  const response = await fetch("/orders", {
     headers: { "Accept": "application/json" }
   });
-  if (orders.status !== 200) throw new Error("orders failed");
-  return orders.json();
+  if (response.status !== 200) throw new Error("orders failed");
+  return response.json();
 }
 export async function loadReport() {
-  const report = await fetch("/report", {
+  const response = await fetch("/report", {
     headers: { "Accept": "text/plain" }
   });
-  if (report.status !== 206) throw new Error("report failed");
-  return report.text();
+  if (response.status !== 206) throw new Error("report failed");
+  return response.text();
 }
 """.strip(),
         encoding="utf-8",

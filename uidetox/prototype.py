@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
@@ -169,27 +170,8 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
     )
     operation_obligation_evidence = _resources.required_lines(
         [
-            "- "
-            + _resources.evidence_json(
-                {
-                    key: item.get(key)
-                    for key in (
-                        "owner",
-                        "operations",
-                        "obligation",
-                        "states",
-                        "modules",
-                        "contract_anchor",
-                        "evidence_basis",
-                        "applicability",
-                        "constraints",
-                        "instruction",
-                        "evidence",
-                    )
-                }
-            )
-            for item in proposal.migration_plan
-            if item.get("kind") == "operation-obligation"
+            "- " + _resources.evidence_json(item)
+            for item in _group_operation_obligation_evidence(proposal.migration_plan)
         ],
         max_bytes=_resources.MAX_MIGRATION_EVIDENCE_BYTES,
         section="operation-obligation evidence",
@@ -747,6 +729,43 @@ def _validate_runtime_capture_identities(proposal: RedesignProposal) -> None:
             "captures": captures,
         }
     )
+
+
+def _group_operation_obligation_evidence(
+    migration_plan: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    """Deduplicate shared operation context without dropping required obligations."""
+
+    grouped: dict[str, dict[str, object]] = {}
+    for item in migration_plan:
+        if item.get("kind") != "operation-obligation":
+            continue
+        context = {
+            key: item.get(key)
+            for key in (
+                "owner",
+                "operations",
+                "modules",
+                "evidence_basis",
+                "applicability",
+                "evidence",
+            )
+        }
+        context_key = json.dumps(context, sort_keys=True, default=str)
+        group = grouped.setdefault(context_key, {**context, "obligations": []})
+        instruction = str(item.get("instruction", ""))
+        obligations = group["obligations"]
+        if not isinstance(obligations, list):
+            raise TypeError("Operation-obligation evidence must be a list.")
+        obligations.append(
+            {
+                "obligation": item.get("obligation"),
+                "states": item.get("states"),
+                "constraints": item.get("constraints"),
+                "action": instruction.partition(": ")[2] or instruction,
+            }
+        )
+    return tuple(grouped[key] for key in sorted(grouped))
 
 
 def _prototype_runtime_capture_evidence(value: object) -> object:

@@ -261,14 +261,20 @@ export function Orders() {
             "/orders": {
                 "post": {
                     "x-uidetox-operation": {
+                        "auth-required": {"applicable": True, "scheme": "OAuth"},
                         "retry": {"applicable": True, "condition": "503"},
                         "conflict": {"applicable": True, "status": "412"},
+                        "forbidden": {"applicable": True, "status": "403"},
                         "idempotency": {"applicable": False},
                         "optimistic-rollback": {
                             "applicable": True,
                             "disallowed": ["inventory"],
                         },
                         "partial-success": "unknown",
+                        "rate-limit": {"applicable": True, "status": "429"},
+                        "stale-refresh": {"applicable": True},
+                        "timeout": {"applicable": True, "condition": "30s"},
+                        "validation": {"applicable": True, "status": "422"},
                     },
                     "responses": {"202": {"description": "accepted"}},
                 }
@@ -298,14 +304,26 @@ export function Orders() {
         "first-run",
     )
     assert [item["obligation"] for item in obligations] == [
+        "auth-required",
         "conflict",
+        "forbidden",
         "optimistic-rollback",
+        "rate-limit",
         "retry",
+        "stale-refresh",
+        "timeout",
+        "validation",
     ]
     assert [item["states"] for item in obligations] == [
+        ["disabled", "error"],
         ["error"],
+        ["disabled", "error"],
         ["loading", "success", "error"],
+        ["error"],
         ["loading", "error"],
+        ["loading", "success", "error"],
+        ["error"],
+        ["disabled", "error"],
     ]
     assert all(item["modules"] == ["src/Orders.tsx"] for item in obligations)
     assert all(item["owner"] == "Orders" for item in obligations)
@@ -319,14 +337,12 @@ export function Orders() {
     brief = build_prototype_brief(redesigns, proposal.id)
     assert "Operation-contract remediation:" in brief
     assert '"evidence_basis":"measured"' in brief
+    assert '"operations":[{"method":"POST","path":"/orders"}]' in brief
+    assert '"obligation":"retry"' in brief
     assert (
-        "For POST /orders at Orders, express conflict through existing error state"
-        in brief
+        '"constraints":["{\\"applicable\\":true,\\"condition\\":\\"503\\"}"]' in brief
     )
-    assert (
-        "For POST /orders at Orders, express retry through existing loading/error"
-        in brief
-    )
+    assert '"obligation":"validation"' in brief
 
 
 def test_plan059_openapi_caps_recursive_hostile_evidence_deterministically(
