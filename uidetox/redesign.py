@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,24 @@ _CREATIVE_CHANGE_PREFIXES = (
     "Material:",
     "Composition:",
 )
+_OPERATION_OBLIGATION_STATES = {
+    "affected-reads": ("success",),
+    "cancellation": ("loading", "error"),
+    "conflict": ("error",),
+    "duplicate-submit": ("disabled",),
+    "idempotency": ("loading", "error"),
+    "partial-success": ("success", "error"),
+    "retry": ("loading", "error"),
+}
+_OPERATION_OBLIGATION_ACTIONS = {
+    "affected-reads": "refresh only the contract-listed reads after success; do not invent a cache",
+    "cancellation": "offer cancellation only through the documented transport and preserve usable content",
+    "conflict": "retain user input and expose a recoverable contract conflict",
+    "duplicate-submit": "disable an identical mutation while it is in flight and restore it on completion",
+    "idempotency": "apply only the server-defined idempotency scope, retention, and replay semantics",
+    "partial-success": "separate succeeded items from operation-scoped failures",
+    "retry": "retry only under the documented condition while retaining usable success content",
+}
 
 
 @dataclass(frozen=True)
@@ -770,6 +789,91 @@ def _experience_state_label(states: list[str]) -> str:
     )
 
 
+def _operation_obligation_plan(
+    frontend_map: FrontendMap,
+    start_order: int,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    """Project measured operation findings onto existing lifecycle states."""
+
+    project_map = ProjectMap.from_dict(frontend_map.project_map)
+    owners: dict[tuple[str, str, str], tuple[str, str]] = {}
+    for node in frontend_map.nodes:
+        metadata = node.metadata
+        if node.kind != "data" or not node.file or not isinstance(metadata, dict):
+            continue
+        method = str(metadata.get("method") or "GET").strip().upper() or "GET"
+        owner = str(metadata.get("ui_owner") or metadata.get("owner") or node.name)
+        owners[(node.file, method, str(node.name))] = (node.file, owner)
+
+    plan: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    findings = sorted(
+        project_map.findings,
+        key=lambda finding: (
+            finding.normalized_path,
+            str(finding.contract_anchor.get("method", "")),
+            str(finding.contract_anchor.get("field", "")),
+            finding.detector_id,
+        ),
+    )
+    for finding in findings:
+        if finding.detector_id not in {
+            "contract-operation-obligation-missing",
+            "contract-operation-obligation-mismatch",
+        }:
+            continue
+        applicability = finding.evidence.get("applicability", {})
+        if (
+            finding.status != "pending"
+            or finding.evidence.get("basis") != "measured"
+            or not isinstance(applicability, Mapping)
+            or applicability.get("status") != "applicable"
+        ):
+            continue
+        obligation = str(finding.contract_anchor.get("field", ""))
+        states = _OPERATION_OBLIGATION_STATES.get(obligation)
+        if not states:
+            blockers.append(
+                f"Applicable operation obligation {obligation or 'unknown'} has no "
+                "truthful canonical lifecycle projection."
+            )
+            continue
+        method = str(finding.contract_anchor.get("method", "")).upper()
+        path = finding.normalized_path
+        source_path = str(finding.source_anchor.get("path", ""))
+        source_owner = owners.get((source_path, method, path))
+        if source_owner is None:
+            blockers.append(
+                f"Applicable {obligation} obligation for {method} {path} has no exact "
+                "mapped UI owner."
+            )
+            continue
+        source_module, owner = source_owner
+        expected = finding.evidence.get("expected")
+        plan.append(
+            {
+                "order": start_order + len(plan),
+                "kind": "operation-obligation",
+                "modules": [source_module],
+                "owner": owner,
+                "operations": [{"method": method, "path": path}],
+                "obligation": obligation,
+                "states": list(states),
+                "contract_anchor": dict(finding.contract_anchor),
+                "evidence_basis": "measured",
+                "applicability": "applicable",
+                "constraints": [str(expected)] if expected is not None else [],
+                "instruction": (
+                    f"For {method} {path} at {owner}, express {obligation} through "
+                    f"existing {'/'.join(states)} state behavior: "
+                    f"{_OPERATION_OBLIGATION_ACTIONS[obligation]}."
+                ),
+                "evidence": finding.detector_id,
+            }
+        )
+    return tuple(plan), tuple(dict.fromkeys(blockers))
+
+
 def _runtime_remediation_plan(
     frontend_map: FrontendMap,
     start_order: int,
@@ -899,11 +1003,15 @@ def _build_proposal(
         frontend_map,
         len(migration_plan) + 1,
     )
-    runtime_remediation = _runtime_remediation_plan(
+    operation_plan, operation_blockers = _operation_obligation_plan(
         frontend_map,
         len(migration_plan) + len(experience_state_plan) + 1,
     )
-    migration_plan += experience_state_plan + runtime_remediation
+    runtime_remediation = _runtime_remediation_plan(
+        frontend_map,
+        len(migration_plan) + len(experience_state_plan) + len(operation_plan) + 1,
+    )
+    migration_plan += experience_state_plan + operation_plan + runtime_remediation
     contract_blockers = _contract_blockers(frontend_map)
     preserved = tuple(
         dict.fromkeys(
@@ -923,6 +1031,7 @@ def _build_proposal(
             dependency_blockers
             + contract_blockers
             + experience_state_blockers
+            + operation_blockers
             + (
                 (
                     "Runtime evidence is stale and cannot validate this proposal."
@@ -945,6 +1054,13 @@ def _build_proposal(
             f"{'is' if len(item['missing_states']) == 1 else 'are'} represented for "
             f"mapped UI owner {item['owner']} without contract drift."
             for item in experience_state_plan
+        )
+        + tuple(
+            f"Operation contract check: {item['obligation']} behavior for "
+            f"{item['operations'][0]['method']} {item['operations'][0]['path']} is "
+            f"observable through existing {'/'.join(item['states'])} states at "
+            f"{item['owner']}."
+            for item in operation_plan
         )
         + tuple(
             (
@@ -1303,6 +1419,11 @@ def _contract_blockers(frontend_map: FrontendMap) -> tuple[str, ...]:
         "unresolved": "Resolve dynamic or incomplete operation evidence",
     }
     for finding in project_map.findings:
+        if finding.detector_id in {
+            "contract-operation-obligation-missing",
+            "contract-operation-obligation-mismatch",
+        }:
+            continue
         blockers.append(
             f"{labels.get(finding.kind, 'Resolve contract lineage')}: "
             f"{finding.normalized_path or 'unknown path'}."

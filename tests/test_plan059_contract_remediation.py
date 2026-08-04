@@ -4,6 +4,7 @@ import inspect
 import json
 
 from uidetox.contract_adapters import extract_backend_observations
+from uidetox.experience_states import EXPERIENCE_STATE_ORDER
 from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.project_map import ProjectMap, build_project_map
 from uidetox.prototype import build_prototype_brief
@@ -238,6 +239,83 @@ def test_plan059_openapi_wire_evidence_remains_distinct(tmp_path) -> None:
         },
         "type": "oauth2",
     }
+
+
+def test_plan059_projects_only_proven_operation_obligations_to_native_states(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "Orders.tsx").write_text(
+        """
+export function Orders() {
+  fetch("/orders", { method: "POST" });
+  return <button>Submit</button>;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    contract = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/orders": {
+                "post": {
+                    "x-uidetox-operation": {
+                        "retry": {"applicable": True, "condition": "503"},
+                        "conflict": {"applicable": True, "status": "412"},
+                        "idempotency": {"applicable": False},
+                        "partial-success": "unknown",
+                    },
+                    "responses": {"202": {"description": "accepted"}},
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(
+        json.dumps(contract),
+        encoding="utf-8",
+    )
+
+    frontend_map = map_frontend(tmp_path, "src")
+    redesigns = propose_redesigns(frontend_map)
+    proposal = redesigns.proposals[0]
+    obligations = [
+        item
+        for item in proposal.migration_plan
+        if item["kind"] == "operation-obligation"
+    ]
+
+    assert EXPERIENCE_STATE_ORDER == (
+        "loading",
+        "empty",
+        "error",
+        "success",
+        "disabled",
+        "first-run",
+    )
+    assert [item["obligation"] for item in obligations] == ["conflict", "retry"]
+    assert [item["states"] for item in obligations] == [
+        ["error"],
+        ["loading", "error"],
+    ]
+    assert all(item["modules"] == ["src/Orders.tsx"] for item in obligations)
+    assert all(item["owner"] == "Orders" for item in obligations)
+    assert not any("idempotency" in item["instruction"] for item in obligations)
+    assert not any("partial-success" in item["instruction"] for item in obligations)
+    assert any(
+        "Operation contract check: conflict" in check
+        for check in proposal.observable_checks
+    )
+
+    brief = build_prototype_brief(redesigns, proposal.id)
+    assert (
+        "For POST /orders at Orders, express conflict through existing error state"
+        in brief
+    )
+    assert (
+        "For POST /orders at Orders, express retry through existing loading/error"
+        in brief
+    )
 
 
 def test_plan059_openapi_caps_recursive_hostile_evidence_deterministically(
