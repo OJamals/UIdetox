@@ -1606,9 +1606,7 @@ def _schema_evidence_incomplete(value: Any, *, depth: int = 0) -> bool:
             for item in value.values()
         )
     if isinstance(value, (list, tuple)):
-        return any(
-            _schema_evidence_incomplete(item, depth=depth + 1) for item in value
-        )
+        return any(_schema_evidence_incomplete(item, depth=depth + 1) for item in value)
     return False
 
 
