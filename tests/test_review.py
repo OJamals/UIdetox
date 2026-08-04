@@ -87,6 +87,40 @@ def test_review_gate_requires_fresh_visual_evidence(
     assert exc_info.value.code == 1
 
 
+def test_review_brief_routes_subjective_facets_to_existing_evidence_options(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    review._print_review_brief(
+        VisualEvidenceStatus(
+            state="missing",
+            ready=False,
+            required=False,
+            manifest_path=tmp_path / "visual-evidence.json",
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "A Visual design 0-40 | B System 0-30 | C Craft 0-20 | D Architecture 0-10"
+        in output
+    )
+    assert "typography character" in output
+    assert "emotional tone" in output
+    assert "navigation comprehension" in output
+    assert "destructive-action appropriateness" in output
+    assert "empty-state usefulness" in output
+    assert "product-specific information hierarchy" in output
+    for option in (
+        "--route",
+        "--state",
+        "--viewport",
+        "--finding-link",
+        "--region-link",
+    ):
+        assert option in output
+
+
 def test_review_reports_reviewer_artifacts_regions_and_incomplete_viewports(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

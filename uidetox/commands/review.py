@@ -275,6 +275,15 @@ def _print_review_brief(
     print("UIdetox structured subjective review")
     print("  A Visual design 0-40 | B System 0-30 | C Craft 0-20 | D Architecture 0-10")
     print("  Record scores with --dimension-a/b/c/d, --rationale, and --reviewer.")
+    print(
+        "  Review facets: typography character; emotional tone; navigation "
+        "comprehension; destructive-action appropriateness; empty-state "
+        "usefulness; product-specific information hierarchy."
+    )
+    print(
+        "  Bind judgments with --route, --state, --viewport, --finding-link, "
+        "and --region-link."
+    )
     if visual.state != "missing":
         print(f"  Visual evidence: {visual.state} ({visual.comparisons} cases)")
         if visual.incomplete_viewports:
