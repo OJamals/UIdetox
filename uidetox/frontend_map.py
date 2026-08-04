@@ -128,7 +128,19 @@ def _frontend_http_lineage(
         else ()
     )
     accept = headers.get("Accept")
-    if accept and "," not in accept:
+    response_parsers = {
+        parser for parser in ("json", "text") if re.search(rf"\.{parser}\s*\(", content)
+    }
+    parser_matches_accept = (
+        len(response_parsers) == 1
+        and accept is not None
+        and "," not in accept
+        and (
+            (response_parsers == {"json"} and "json" in accept.lower())
+            or (response_parsers == {"text"} and accept.lower().startswith("text/"))
+        )
+    )
+    if parser_matches_accept:
         for status in statuses:
             lineage.append(
                 {

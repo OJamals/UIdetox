@@ -323,3 +323,28 @@ export async function load() {
         if node.side == "frontend"
         and node.kind in {"api_parameter", "request_media_type", "response_media_type"}
     ]
+
+
+def test_accept_header_without_exact_response_parser_does_not_guess(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function load() {
+  const response = await fetch("/orders", {
+    headers: { "Accept": "application/json" }
+  });
+  if (response.status !== 200) throw new Error("request failed");
+  return response;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert not [
+        node
+        for node in project_map.nodes
+        if node.side == "frontend" and node.kind == "response_media_type"
+    ]
