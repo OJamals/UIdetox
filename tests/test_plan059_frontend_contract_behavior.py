@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
+from uidetox.frontend_map import map_frontend
 from uidetox.project_map import (
     ContractEdge,
     ContractNode,
+    ProjectMap,
     SourceAnchor,
     reconcile_contract_graph,
 )
@@ -205,3 +209,117 @@ def test_absent_frontend_transport_evidence_does_not_guess() -> None:
     )
 
     assert not _findings((), ((back, "accepts_media_type"),))
+
+
+def test_literal_fetch_options_become_exact_operation_evidence(tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function save(payload: unknown, signal: AbortSignal) {
+  const response = await fetch("/orders", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Idempotency-Key": "create-order-1",
+      "If-Match": "v1"
+    },
+    body: JSON.stringify(payload),
+    signal
+  });
+  if (response.status === 409) throw new Error("conflict");
+  if (response.status !== 200) throw new Error("request failed");
+  return response.json();
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "paths": {
+                    "/orders": {
+                        "post": {
+                            "parameters": [
+                                {"in": "header", "name": "Idempotency-Key"},
+                                {"in": "header", "name": "If-Match"},
+                            ],
+                            "requestBody": {
+                                "content": {
+                                    "application/json": {"schema": {"type": "object"}}
+                                }
+                            },
+                            "responses": {
+                                status: {
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {"type": "object"}
+                                        }
+                                    }
+                                }
+                                for status in ("200", "409")
+                            },
+                            "x-uidetox-operation": {
+                                "idempotency": {"applicable": True},
+                                "cancellation": {"applicable": True},
+                                "conflict": {"applicable": True},
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+    frontend_nodes = [node for node in project_map.nodes if node.side == "frontend"]
+
+    assert {
+        (node.kind, node.name, node.attributes.get("status"))
+        for node in frontend_nodes
+        if node.kind in {"request_media_type", "response_media_type"}
+    } == {
+        ("request_media_type", "application/json", None),
+        ("response_media_type", "application/json", "200"),
+        ("response_media_type", "application/json", "409"),
+    }
+    assert {node.name for node in frontend_nodes if node.kind == "api_parameter"} == {
+        "Idempotency-Key",
+        "If-Match",
+    }
+    assert {
+        node.name for node in frontend_nodes if node.kind == "operation_obligation"
+    } == {"cancellation", "conflict", "idempotency"}
+    assert not [
+        finding
+        for finding in project_map.findings
+        if finding.detector_id.startswith("contract-operation-obligation-")
+    ]
+
+
+def test_dynamic_fetch_options_do_not_create_literal_transport_evidence(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+const options = { headers: { "Content-Type": mediaType } };
+export async function load() {
+  return fetch("/orders", options);
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert not [
+        node
+        for node in project_map.nodes
+        if node.side == "frontend"
+        and node.kind in {"api_parameter", "request_media_type", "response_media_type"}
+    ]

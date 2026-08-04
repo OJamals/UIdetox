@@ -50,6 +50,7 @@ _OPERATION_OBLIGATION_STATES = {
     "conflict": ("error",),
     "duplicate-submit": ("disabled",),
     "idempotency": ("loading", "error"),
+    "optimistic-rollback": ("loading", "success", "error"),
     "partial-success": ("success", "error"),
     "retry": ("loading", "error"),
 }
@@ -59,6 +60,7 @@ _OPERATION_OBLIGATION_ACTIONS = {
     "conflict": "retain user input and expose a recoverable contract conflict",
     "duplicate-submit": "disable an identical mutation while it is in flight and restore it on completion",
     "idempotency": "apply only the server-defined idempotency scope, retention, and replay semantics",
+    "optimistic-rollback": "reconcile the optimistic result against the response and restore the prior value on failure",
     "partial-success": "separate succeeded items from operation-scoped failures",
     "retry": "retry only under the documented condition while retaining usable success content",
 }

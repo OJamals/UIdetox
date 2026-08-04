@@ -59,6 +59,7 @@ _OPERATION_OBLIGATIONS = (
     "conflict",
     "duplicate-submit",
     "idempotency",
+    "optimistic-rollback",
     "partial-success",
     "retry",
 )

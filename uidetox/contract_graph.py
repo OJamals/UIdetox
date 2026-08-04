@@ -523,7 +523,13 @@ def _operation_obligation_findings(
         ):
             continue
         actual = frontend_obligations.get(expected.name)
-        expected_attributes = _json_mapping(expected.attributes)
+        expected_attributes = _json_mapping(
+            {
+                key: value
+                for key, value in expected.attributes.items()
+                if key not in {"capability_status", "edge", "provenance"}
+            }
+        )
         if actual is None:
             findings.append(
                 _graph_finding(
@@ -540,7 +546,13 @@ def _operation_obligation_findings(
                 )
             )
             continue
-        actual_attributes = _json_mapping(actual.attributes)
+        actual_attributes = _json_mapping(
+            {
+                key: value
+                for key, value in actual.attributes.items()
+                if key not in {"capability_status", "edge", "provenance"}
+            }
+        )
         if actual_attributes != expected_attributes:
             findings.append(
                 _graph_finding(

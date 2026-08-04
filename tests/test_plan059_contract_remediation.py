@@ -264,6 +264,10 @@ export function Orders() {
                         "retry": {"applicable": True, "condition": "503"},
                         "conflict": {"applicable": True, "status": "412"},
                         "idempotency": {"applicable": False},
+                        "optimistic-rollback": {
+                            "applicable": True,
+                            "disallowed": ["inventory"],
+                        },
                         "partial-success": "unknown",
                     },
                     "responses": {"202": {"description": "accepted"}},
@@ -293,9 +297,14 @@ export function Orders() {
         "disabled",
         "first-run",
     )
-    assert [item["obligation"] for item in obligations] == ["conflict", "retry"]
+    assert [item["obligation"] for item in obligations] == [
+        "conflict",
+        "optimistic-rollback",
+        "retry",
+    ]
     assert [item["states"] for item in obligations] == [
         ["error"],
+        ["loading", "success", "error"],
         ["loading", "error"],
     ]
     assert all(item["modules"] == ["src/Orders.tsx"] for item in obligations)
