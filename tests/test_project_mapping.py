@@ -201,7 +201,7 @@ def test_backend_discovery_preserves_exact_manifest_and_observation_parity(
         separators=(",", ":"),
     ).encode("utf-8")
     assert hashlib.sha256(projection).hexdigest() == (
-        "011a7050e505c54bdf3b2dd23c78ed354b48090f1a31c6d29f5ebd06fe495442"
+        "c734dd2bd6a6992bfb7f3d2b2292c5a2c5a09ed8c886c933eddc3fda5abe4fe2"
     )
     assert extraction["adapters"] == {
         "express",

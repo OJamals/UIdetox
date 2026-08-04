@@ -49,6 +49,20 @@ class _BackendSource:
 
 _CODE_EXTENSIONS = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"}
 
+_OPENAPI_SCHEMA_DEPTH_LIMIT = 16
+_OPENAPI_SCHEMA_PROPERTY_LIMIT = 128
+_OPENAPI_SCHEMA_VARIANT_LIMIT = 32
+_OPENAPI_TEXT_LIMIT = 256
+_OPERATION_OBLIGATIONS = (
+    "affected-reads",
+    "cancellation",
+    "conflict",
+    "duplicate-submit",
+    "idempotency",
+    "partial-success",
+    "retry",
+)
+
 
 _IGNORED_DIRS = {
     ".git",
@@ -300,7 +314,7 @@ def _extract_openapi(
             error_statuses = sorted(
                 str(status)
                 for status in response_map
-                if str(status).startswith(("4", "5"))
+                if str(status).startswith(("4", "5")) or str(status) == "default"
             )
             response_schemas = tuple(
                 schema_observation
@@ -383,7 +397,7 @@ def _extract_openapi(
                     request_schemas=request_schemas,
                     response_schemas=response_schemas,
                     error_schemas=error_schemas,
-                    status_codes=tuple(sorted((*success_statuses, *error_statuses))),
+                    status_codes=tuple(sorted(response_map)),
                     auth=auth,
                     authorization=str(
                         operation.get(
@@ -1057,6 +1071,139 @@ def _line_number(content: str, offset: int) -> int:
     return content.count("\n", 0, offset) + 1
 
 
+def _bounded_openapi_text(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > _OPENAPI_TEXT_LIMIT:
+        return ""
+    if any(ord(character) < 32 for character in value) or "<" in value or ">" in value:
+        return ""
+    return value
+
+
+def _bounded_openapi_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= _OPENAPI_SCHEMA_DEPTH_LIMIT:
+        return {"capability_status": "unknown", "truncated": True}
+    if isinstance(value, Mapping):
+        rows = sorted(value.items(), key=lambda item: str(item[0]))
+        bounded = {
+            key: _bounded_openapi_value(raw_value, depth=depth + 1)
+            for raw_key, raw_value in rows[:_OPENAPI_SCHEMA_PROPERTY_LIMIT]
+            if (key := _bounded_openapi_text(raw_key))
+        }
+        if len(rows) > _OPENAPI_SCHEMA_PROPERTY_LIMIT:
+            bounded.update({"capability_status": "unknown", "truncated": True})
+        return bounded
+    if isinstance(value, (list, tuple)):
+        bounded = [
+            _bounded_openapi_value(item, depth=depth + 1)
+            for item in value[:_OPENAPI_SCHEMA_VARIANT_LIMIT]
+        ]
+        if len(value) > _OPENAPI_SCHEMA_VARIANT_LIMIT:
+            bounded.append({"capability_status": "unknown", "truncated": True})
+        return bounded
+    if isinstance(value, str):
+        return _bounded_openapi_text(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return None
+
+
+def _openapi_operation_obligations(
+    operation: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    raw = operation.get("x-uidetox-operation")
+    if not isinstance(raw, Mapping):
+        return ()
+    obligations: list[dict[str, Any]] = []
+    for name in _OPERATION_OBLIGATIONS:
+        value = raw.get(name)
+        if isinstance(value, bool):
+            applicable: bool | None = value
+            details: dict[str, Any] = {}
+        elif isinstance(value, Mapping):
+            raw_applicable = value.get("applicable")
+            applicable = raw_applicable if isinstance(raw_applicable, bool) else None
+            details = {
+                key: bounded
+                for raw_key, raw_value in sorted(
+                    value.items(), key=lambda item: str(item[0])
+                )
+                if raw_key != "applicable"
+                and (key := _bounded_openapi_text(raw_key))
+                and (bounded := _bounded_openapi_value(raw_value)) is not None
+            }
+        elif value is not None:
+            applicable = None
+            details = {}
+        else:
+            continue
+        obligations.append(
+            {
+                "kind": "operation_obligation",
+                "name": name,
+                "ref": f"operation_obligation:{name}",
+                "applicable": applicable,
+                "capability_status": (
+                    "present"
+                    if applicable is True
+                    else "absent"
+                    if applicable is False
+                    else "unknown"
+                ),
+                "provenance": "openapi:x-uidetox-operation",
+                "edge": "requires_behavior",
+                **details,
+            }
+        )
+    return tuple(obligations)
+
+
+def _openapi_operation_contract(
+    path_item: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    document: Mapping[str, Any],
+) -> dict[str, Any]:
+    contract: dict[str, Any] = {
+        "kind": "operation_contract",
+        "name": str(operation.get("operationId") or "operation"),
+        "ref": "operation_contract",
+    }
+    version = document.get("openapi", document.get("swagger"))
+    if isinstance(version, str):
+        contract["openapi_version"] = version
+    dialect = document.get("jsonSchemaDialect")
+    if isinstance(dialect, str):
+        contract["json_schema_dialect"] = dialect
+    operation_id = operation.get("operationId")
+    if isinstance(operation_id, str):
+        contract["operation_id"] = operation_id
+    if isinstance(operation.get("deprecated"), bool):
+        contract["deprecated"] = operation["deprecated"]
+
+    raw_servers = operation.get("servers")
+    if not isinstance(raw_servers, list):
+        raw_servers = path_item.get("servers")
+    if not isinstance(raw_servers, list):
+        raw_servers = document.get("servers")
+    if isinstance(raw_servers, list):
+        servers = []
+        for value in raw_servers[:_OPENAPI_SCHEMA_VARIANT_LIMIT]:
+            if not isinstance(value, Mapping) or not isinstance(value.get("url"), str):
+                continue
+            server = {"url": value["url"]}
+            variables = value.get("variables")
+            if isinstance(variables, Mapping):
+                server["variables"] = _json_value(variables)
+            servers.append(server)
+        if servers:
+            contract["servers"] = servers
+    callbacks = operation.get("callbacks")
+    if isinstance(callbacks, Mapping):
+        contract["callbacks"] = sorted(str(name) for name in callbacks)[
+            :_OPENAPI_SCHEMA_VARIANT_LIMIT
+        ]
+    return contract
+
+
 def _openapi_transport_lineage(
     path_item: Mapping[str, Any],
     operation: Mapping[str, Any],
@@ -1064,7 +1211,9 @@ def _openapi_transport_lineage(
     security: Any,
     document: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
-    lineage: list[dict[str, Any]] = []
+    lineage: list[dict[str, Any]] = [
+        _openapi_operation_contract(path_item, operation, document)
+    ]
     parameters: dict[tuple[str, str], Mapping[str, Any]] = {}
     for parameter_values in (
         path_item.get("parameters"),
@@ -1110,53 +1259,84 @@ def _openapi_transport_lineage(
         lineage.append(item)
 
     request_body = operation.get("requestBody")
-    for media_type in _openapi_media_types(request_body, document):
-        lineage.append(
-            {
-                "kind": "request_media_type",
-                "name": media_type,
-                "ref": f"request_media_type:{media_type}",
-                "provenance": "openapi:request-body",
-                "edge": "accepts_media_type",
-            }
-        )
+    resolved_request_body = (
+        _resolve_openapi_mapping(request_body, document)
+        if isinstance(request_body, Mapping)
+        else {}
+    )
+    request_required = resolved_request_body.get("required") is True
+    for media_type, schema in _openapi_media_schemas(request_body, document):
+        item = {
+            "kind": "request_media_type",
+            "name": media_type,
+            "ref": f"request_media_type:{media_type}",
+            "required": request_required,
+            "provenance": "openapi:request-body",
+            "edge": "accepts_media_type",
+        }
+        if schema is not None:
+            item["schema"] = schema
+        lineage.append(item)
 
     for status, response_value in sorted(responses.items()):
-        for media_type in _openapi_media_types(response_value, document):
-            lineage.append(
-                {
-                    "kind": "response_media_type",
-                    "name": media_type,
-                    "ref": f"response_media_type:{status}:{media_type}",
-                    "status": status,
-                    "provenance": "openapi:response",
-                    "edge": "returns_media_type",
-                }
-            )
+        for media_type, schema in _openapi_media_schemas(response_value, document):
+            item = {
+                "kind": "response_media_type",
+                "name": media_type,
+                "ref": f"response_media_type:{status}:{media_type}",
+                "status": status,
+                "provenance": "openapi:response",
+                "edge": "returns_media_type",
+            }
+            if schema is not None:
+                item["schema"] = schema
+            lineage.append(item)
         if not isinstance(response_value, Mapping):
             continue
         response = _resolve_openapi_mapping(response_value, document)
         headers = response.get("headers")
-        if not isinstance(headers, Mapping):
-            continue
-        for header_name, header_value in sorted(
-            headers.items(), key=lambda item: str(item[0]).lower()
-        ):
-            if not isinstance(header_value, Mapping):
-                continue
-            header = _resolve_openapi_mapping(header_value, document)
-            item = {
-                "kind": "response_header",
-                "name": str(header_name),
-                "ref": f"response_header:{status}:{header_name}",
-                "status": status,
-                "provenance": "openapi:response-header",
-                "edge": "returns_header",
-            }
-            schema = header.get("schema")
-            if isinstance(schema, Mapping):
-                item["schema"] = _openapi_schema_shape(schema, document)
-            lineage.append(item)
+        if isinstance(headers, Mapping):
+            for header_name, header_value in sorted(
+                headers.items(), key=lambda item: str(item[0]).lower()
+            ):
+                if not isinstance(header_value, Mapping):
+                    continue
+                header = _resolve_openapi_mapping(header_value, document)
+                item = {
+                    "kind": "response_header",
+                    "name": str(header_name),
+                    "ref": f"response_header:{status}:{header_name}",
+                    "status": status,
+                    "provenance": "openapi:response-header",
+                    "edge": "returns_header",
+                }
+                schema = header.get("schema")
+                if isinstance(schema, Mapping):
+                    item["schema"] = _openapi_schema_shape(schema, document)
+                lineage.append(item)
+        links = response.get("links")
+        if isinstance(links, Mapping):
+            for link_name, link_value in sorted(
+                links.items(), key=lambda item: str(item[0])
+            )[:_OPENAPI_SCHEMA_VARIANT_LIMIT]:
+                if not isinstance(link_value, Mapping):
+                    continue
+                link = _resolve_openapi_mapping(link_value, document)
+                lineage.append(
+                    {
+                        "kind": "response_link",
+                        "name": str(link_name),
+                        "ref": f"response_link:{status}:{link_name}",
+                        "status": status,
+                        "operation_id": link.get("operationId"),
+                        "operation_ref": link.get("operationRef"),
+                        "parameters": _bounded_openapi_value(
+                            link.get("parameters", {})
+                        ),
+                        "provenance": "openapi:response-link",
+                        "edge": "returns_link",
+                    }
+                )
 
     if isinstance(security, list):
         normalized_requirements = {
@@ -1189,24 +1369,39 @@ def _openapi_transport_lineage(
                 }
             )
             for scheme, scopes in requirement:
-                lineage.append(
-                    {
-                        "kind": "auth_scheme_requirement",
-                        "name": str(scheme),
-                        "ref": f"auth_scheme_requirement:{index}:{scheme}",
-                        "parent": parent,
-                        "scopes": scopes,
-                        "provenance": "openapi:security",
-                        "edge": "requires",
-                    }
+                item = {
+                    "kind": "auth_scheme_requirement",
+                    "name": str(scheme),
+                    "ref": f"auth_scheme_requirement:{index}:{scheme}",
+                    "parent": parent,
+                    "scopes": scopes,
+                    "provenance": "openapi:security",
+                    "edge": "requires",
+                }
+                components = document.get("components")
+                definitions = (
+                    components.get("securitySchemes")
+                    if isinstance(components, Mapping)
+                    else None
                 )
+                definition = (
+                    definitions.get(scheme)
+                    if isinstance(definitions, Mapping)
+                    else None
+                )
+                if isinstance(definition, Mapping):
+                    item["scheme"] = _bounded_openapi_value(
+                        _resolve_openapi_mapping(definition, document)
+                    )
+                lineage.append(item)
+    lineage.extend(_openapi_operation_obligations(operation))
     return tuple(lineage)
 
 
-def _openapi_media_types(
+def _openapi_media_schemas(
     value: Any,
     document: Mapping[str, Any],
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, dict[str, Any] | None], ...]:
     if not isinstance(value, Mapping):
         return ()
     resolved_value = _resolve_openapi_mapping(value, document)
@@ -1214,11 +1409,14 @@ def _openapi_media_types(
     if not isinstance(content, Mapping):
         return ()
     return tuple(
-        sorted(
-            str(media_type)
-            for media_type, item in content.items()
-            if isinstance(item, Mapping)
+        (
+            str(media_type),
+            _openapi_schema_shape(schema, document)
+            if isinstance((schema := item.get("schema")), Mapping)
+            else None,
         )
+        for media_type, item in sorted(content.items(), key=lambda row: str(row[0]))
+        if isinstance(item, Mapping)
     )
 
 
@@ -1266,25 +1464,38 @@ def _openapi_schema_shape(
     schema: Mapping[str, Any],
     document: Mapping[str, Any],
     seen: tuple[str, ...] = (),
+    depth: int = 0,
 ) -> dict[str, Any]:
     reference = schema.get("$ref")
     name = ""
+    if depth >= _OPENAPI_SCHEMA_DEPTH_LIMIT:
+        return {"type": "unknown", "capability_status": "unknown", "truncated": True}
     if isinstance(reference, str):
         name = reference.rsplit("/", 1)[-1]
         if reference in seen:
-            return {"name": name, "type": "recursive", "capability_status": "unknown"}
+            return {
+                "name": name,
+                "reference": reference,
+                "type": "recursive",
+                "capability_status": "unknown",
+            }
         schema = _resolve_openapi_mapping(schema, document)
         seen = (*seen, reference)
     if isinstance(schema.get("allOf"), list):
         merged: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-        for member in schema["allOf"]:
+        variants = schema["allOf"][:_OPENAPI_SCHEMA_VARIANT_LIMIT]
+        merged["allOf"] = []
+        for member in variants:
             if not isinstance(member, Mapping):
                 continue
-            shape = _openapi_schema_shape(member, document, seen)
+            shape = _openapi_schema_shape(member, document, seen, depth + 1)
+            merged["allOf"].append(shape)
             merged["properties"].update(shape.get("properties", {}))
             merged["required"].extend(shape.get("required", []))
         if name:
             merged["name"] = name
+        if isinstance(reference, str):
+            merged["reference"] = reference
         merged["required"] = sorted(set(merged["required"]))
         return merged
     raw_type = schema.get("type")
@@ -1300,6 +1511,8 @@ def _openapi_schema_shape(
     result: dict[str, Any] = {"type": normalized_type}
     if name:
         result["name"] = name
+    if isinstance(reference, str):
+        result["reference"] = reference
     if nullable:
         result["nullable"] = True
     for key in (
@@ -1307,11 +1520,23 @@ def _openapi_schema_shape(
         "format",
         "minimum",
         "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
         "minLength",
         "maxLength",
         "pattern",
         "minItems",
         "maxItems",
+        "minProperties",
+        "maxProperties",
+        "uniqueItems",
+        "default",
+        "const",
+        "readOnly",
+        "writeOnly",
+        "additionalProperties",
+        "unevaluatedProperties",
     ):
         if key in schema:
             result[key] = _json_value(schema[key])
@@ -1320,16 +1545,33 @@ def _openapi_schema_shape(
         result["required"] = sorted(str(item) for item in required)
     properties = schema.get("properties")
     if isinstance(properties, Mapping):
+        property_rows = sorted(properties.items(), key=lambda item: str(item[0]))
         result["properties"] = {
-            str(field_name): _openapi_schema_shape(field, document, seen)
-            for field_name, field in sorted(
-                properties.items(), key=lambda item: str(item[0])
-            )
+            str(field_name): _openapi_schema_shape(field, document, seen, depth + 1)
+            for field_name, field in property_rows[:_OPENAPI_SCHEMA_PROPERTY_LIMIT]
             if isinstance(field, Mapping)
         }
+        if len(property_rows) > _OPENAPI_SCHEMA_PROPERTY_LIMIT:
+            result["property_count"] = len(property_rows)
+            result["truncated"] = True
+            result["capability_status"] = "unknown"
     items = schema.get("items")
     if isinstance(items, Mapping):
-        result["items"] = _openapi_schema_shape(items, document, seen)
+        result["items"] = _openapi_schema_shape(items, document, seen, depth + 1)
+    for composition in ("oneOf", "anyOf"):
+        values = schema.get(composition)
+        if isinstance(values, list):
+            result[composition] = [
+                _openapi_schema_shape(value, document, seen, depth + 1)
+                for value in values[:_OPENAPI_SCHEMA_VARIANT_LIMIT]
+                if isinstance(value, Mapping)
+            ]
+            if len(values) > _OPENAPI_SCHEMA_VARIANT_LIMIT:
+                result["truncated"] = True
+                result["capability_status"] = "unknown"
+    discriminator = schema.get("discriminator")
+    if isinstance(discriminator, Mapping):
+        result["discriminator"] = _json_value(discriminator)
     return result
 
 

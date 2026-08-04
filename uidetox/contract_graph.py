@@ -464,6 +464,13 @@ def reconcile_contract_graph(
                                 status="investigate" if investigate else "pending",
                             )
                         )
+                    findings.extend(
+                        _operation_obligation_findings(
+                            frontend_node,
+                            backend_node,
+                            outgoing,
+                        )
+                    )
 
     deduped = {_semantic_finding_key(finding): finding for finding in findings}
     return tuple(
@@ -488,6 +495,65 @@ def _graph_operations_by_method(
         method: tuple(sorted(items, key=lambda item: item.id))
         for method, items in grouped.items()
     }
+
+
+def _operation_obligation_findings(
+    frontend: ContractNode,
+    backend: ContractNode,
+    outgoing: Mapping[tuple[str, str], list[ContractNode]],
+) -> tuple[Finding, ...]:
+    """Report only explicitly applicable backend behaviors absent at the client."""
+
+    frontend_obligations = {
+        node.name: node
+        for node in outgoing.get((frontend.id, "requires_behavior"), ())
+        if node.kind == "operation_obligation"
+        and node.capability_status == "present"
+        and node.attributes.get("applicable") is True
+    }
+    findings: list[Finding] = []
+    for expected in sorted(
+        outgoing.get((backend.id, "requires_behavior"), ()),
+        key=lambda node: (node.name, node.id),
+    ):
+        if (
+            expected.kind != "operation_obligation"
+            or expected.capability_status != "present"
+            or expected.attributes.get("applicable") is not True
+        ):
+            continue
+        actual = frontend_obligations.get(expected.name)
+        expected_attributes = _json_mapping(expected.attributes)
+        if actual is None:
+            findings.append(
+                _graph_finding(
+                    "operation_obligation_missing",
+                    frontend,
+                    backend,
+                    (
+                        f"Frontend operation does not implement the applicable "
+                        f"{expected.name} behavior."
+                    ),
+                    field=expected.name,
+                    expected=expected_attributes,
+                    actual=None,
+                )
+            )
+            continue
+        actual_attributes = _json_mapping(actual.attributes)
+        if actual_attributes != expected_attributes:
+            findings.append(
+                _graph_finding(
+                    "operation_obligation_mismatch",
+                    frontend,
+                    backend,
+                    f"Frontend {expected.name} behavior differs from its contract.",
+                    field=expected.name,
+                    expected=expected_attributes,
+                    actual=actual_attributes,
+                )
+            )
+    return tuple(findings)
 
 
 def _contract_group_contradiction(
@@ -662,6 +728,36 @@ def _operation_contract_node(operation: ContractObservation) -> ContractNode:
         anchor.file,
         anchor.line,
     )
+    attributes = {
+        "method": operation.method,
+        "path": operation.path,
+        "normalized_path": operation.normalized_path,
+        "parameters": list(operation.parameters),
+        "classification": operation.classification,
+        "dynamic": operation.dynamic,
+        "status_codes": list(operation.status_codes),
+        "handler": operation.handler,
+        "mutation": operation.mutation,
+        "ui_required": operation.ui_required,
+        "cache_invalidation": operation.cache_invalidation,
+        "evidence": evidence,
+        "identity": operation.identity,
+        "sources": [asdict(source) for source in operation.sources],
+    }
+    operation_contract = next(
+        (
+            item
+            for item in operation.lineage
+            if item.get("kind") == "operation_contract"
+        ),
+        None,
+    )
+    if operation_contract is not None:
+        attributes["contract"] = {
+            key: _json_value(value)
+            for key, value in operation_contract.items()
+            if key not in {"kind", "name", "ref"}
+        }
     return ContractNode(
         id=identifier,
         kind=kind,
@@ -669,22 +765,7 @@ def _operation_contract_node(operation: ContractObservation) -> ContractNode:
         side=operation.side,
         capability_status=capability_status,
         source=anchor,
-        attributes={
-            "method": operation.method,
-            "path": operation.path,
-            "normalized_path": operation.normalized_path,
-            "parameters": list(operation.parameters),
-            "classification": operation.classification,
-            "dynamic": operation.dynamic,
-            "status_codes": list(operation.status_codes),
-            "handler": operation.handler,
-            "mutation": operation.mutation,
-            "ui_required": operation.ui_required,
-            "cache_invalidation": operation.cache_invalidation,
-            "evidence": evidence,
-            "identity": operation.identity,
-            "sources": [asdict(source) for source in operation.sources],
-        },
+        attributes=attributes,
     )
 
 
@@ -758,7 +839,7 @@ def _append_operation_contract(
     lineage_items: list[tuple[dict[str, Any], ContractNode]] = []
     for item in operation.lineage:
         kind = str(item.get("kind", "unknown"))
-        if kind == "auth_requirement":
+        if kind in {"auth_requirement", "operation_contract"}:
             continue
         name = str(item.get("name", kind))
         reference = str(item.get("ref", f"{kind}:{name}"))
