@@ -374,6 +374,7 @@ def _responsive_findings(
         if (
             measurements.get("isScrollRegionY") is True
             and concealed_actions_y > 0
+            and _measurement_float(measurements, "navigationLinkCount") == 0
             and client_height > 0
             and scroll_height > client_height + 1
         ):
