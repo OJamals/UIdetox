@@ -1007,6 +1007,119 @@ def _contract_edge(
     )
 
 
+def _transport_contract_difference(
+    frontend: ContractNode,
+    backend: ContractNode,
+    outgoing: Mapping[tuple[str, str], list[ContractNode]],
+) -> tuple[str, str, str, Any, Any, bool] | None:
+    front_parameters = {
+        (str(node.attributes.get("location", "")), node.name): node
+        for node in outgoing.get((frontend.id, "declares_parameter"), ())
+        if node.kind == "api_parameter"
+    }
+    back_parameters = {
+        (str(node.attributes.get("location", "")), node.name): node
+        for node in outgoing.get((backend.id, "declares_parameter"), ())
+        if node.kind == "api_parameter"
+    }
+    if front_parameters:
+        for key in sorted(set(front_parameters) | set(back_parameters)):
+            front_parameter = front_parameters.get(key)
+            back_parameter = back_parameters.get(key)
+            field = f"{key[0]}:{key[1]}"
+            if back_parameter is None:
+                return (
+                    "parameter_not_supported",
+                    field,
+                    "Frontend serializes a parameter absent from the selected operation.",
+                    None,
+                    _json_mapping(front_parameter.attributes),
+                    False,
+                )
+            if front_parameter is None:
+                if back_parameter.attributes.get("required") is not True:
+                    continue
+                return (
+                    "required_parameter_missing",
+                    field,
+                    "Frontend omits a required selected-operation parameter.",
+                    _json_mapping(back_parameter.attributes),
+                    None,
+                    False,
+                )
+            serialization_keys = (
+                "style",
+                "explode",
+                "allowEmptyValue",
+                "allowReserved",
+            )
+            expected = {
+                name: _json_value(back_parameter.attributes[name])
+                for name in serialization_keys
+                if name in back_parameter.attributes
+            }
+            actual = {
+                name: _json_value(front_parameter.attributes[name])
+                for name in serialization_keys
+                if name in front_parameter.attributes
+            }
+            if actual != expected:
+                return (
+                    "parameter_serialization_mismatch",
+                    field,
+                    "Frontend parameter serialization differs from the selected operation.",
+                    expected,
+                    actual,
+                    False,
+                )
+
+    for relation, kind, label in (
+        ("accepts_media_type", "request_media_type", "request"),
+        ("returns_media_type", "response_media_type", "response"),
+    ):
+        front_nodes = tuple(
+            node
+            for node in outgoing.get((frontend.id, relation), ())
+            if node.kind == kind
+        )
+        if not front_nodes:
+            continue
+        back_nodes = tuple(
+            node
+            for node in outgoing.get((backend.id, relation), ())
+            if node.kind == kind
+        )
+        if label == "request":
+            actual = {node.name for node in front_nodes}
+            expected = {node.name for node in back_nodes}
+            field = ""
+        else:
+            actual = {
+                (str(node.attributes.get("status", "")), node.name)
+                for node in front_nodes
+            }
+            expected = {
+                (str(node.attributes.get("status", "")), node.name)
+                for node in back_nodes
+            }
+            mismatched_statuses = sorted(
+                status
+                for status, media_type in actual
+                if (status, media_type) not in expected
+            )
+            field = mismatched_statuses[0] if mismatched_statuses else ""
+        if not actual.issubset(expected):
+            return (
+                f"{label}_media_type_mismatch",
+                field,
+                f"Frontend selects a {label} media type absent from the exact operation.",
+                sorted(expected),
+                sorted(actual),
+                False,
+            )
+    return None
+
+
 def _first_contract_difference(
     frontend: ContractNode,
     backend: ContractNode,
@@ -1033,6 +1146,9 @@ def _first_contract_difference(
             frontend.capability_status,
             True,
         )
+    transport_difference = _transport_contract_difference(frontend, backend, outgoing)
+    if transport_difference is not None:
+        return transport_difference
     for label in ("request", "response"):
         relation = "accepts" if label == "request" else "returns"
         front_schemas = _schema_variants_from_graph(frontend.id, relation, outgoing)

@@ -48,6 +48,16 @@ STYLE_EXTENSIONS = {".css", ".less", ".sass", ".scss"}
 
 _CSS_TOKEN_PATTERN = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
 
+_HTTP_LITERAL_HEADERS = (
+    "Accept",
+    "Authorization",
+    "Content-Type",
+    "Idempotency-Key",
+    "If-Match",
+    "If-None-Match",
+)
+_HTTP_STATUS_PATTERN = re.compile(r"\.status\s*(?:===?|!==?)\s*([1-5][0-9]{2})\b")
+
 _DIAGNOSTIC_CATEGORIES = {
     "action": "interaction",
     "console": "runtime",
@@ -55,6 +65,106 @@ _DIAGNOSTIC_CATEGORIES = {
     "network": "integration",
     "page": "runtime",
 }
+
+
+def _literal_header_value(expression: str, name: str) -> str | None:
+    match = re.search(
+        rf"""["']{re.escape(name)}["']\s*:\s*(["'])(?P<value>[^"']{{1,256}})\1""",
+        expression,
+        re.IGNORECASE,
+    )
+    return match.group("value") if match else None
+
+
+def _frontend_http_lineage(
+    facts: Any,
+    call: Any,
+    content: str,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    source_calls = tuple(
+        source_call
+        for source_call in facts.calls
+        if source_call.target == call.target and source_call.line == call.line
+    )
+    if len(source_calls) != 1 or len(source_calls[0].arguments) < 2:
+        return (), ()
+    options = source_calls[0].arguments[1]
+    if not options.lstrip().startswith("{") or not options.rstrip().endswith("}"):
+        return (), ()
+
+    lineage: list[dict[str, Any]] = []
+    headers = {
+        name: value
+        for name in _HTTP_LITERAL_HEADERS
+        if (value := _literal_header_value(options, name)) is not None
+    }
+    content_type = headers.get("Content-Type")
+    if content_type:
+        lineage.append(
+            {
+                "kind": "request_media_type",
+                "name": content_type,
+                "ref": f"request_media_type:{content_type}",
+                "provenance": "frontend-source:literal-header",
+                "edge": "accepts_media_type",
+            }
+        )
+    for name in sorted(headers):
+        if name in {"Accept", "Content-Type"}:
+            continue
+        lineage.append(
+            {
+                "kind": "api_parameter",
+                "name": name,
+                "ref": f"api_parameter:header:{name}",
+                "location": "header",
+                "provenance": "frontend-source:literal-header",
+                "edge": "declares_parameter",
+            }
+        )
+
+    owner_calls = tuple(
+        item for item in facts.network_calls if item.owner == call.owner
+    )
+    statuses = (
+        tuple(sorted(set(_HTTP_STATUS_PATTERN.findall(content))))
+        if len(owner_calls) == 1
+        else ()
+    )
+    accept = headers.get("Accept")
+    if accept:
+        for status in statuses:
+            lineage.append(
+                {
+                    "kind": "response_media_type",
+                    "name": accept,
+                    "ref": f"response_media_type:{status}:{accept}",
+                    "status": status,
+                    "provenance": "frontend-source:literal-header",
+                    "edge": "returns_media_type",
+                }
+            )
+
+    obligation_names = set()
+    if "Idempotency-Key" in headers:
+        obligation_names.add("idempotency")
+    if re.search(r"(?:^|[,\s{])signal\s*(?::|[,}])", options):
+        obligation_names.add("cancellation")
+    if set(statuses) & {"409", "412"}:
+        obligation_names.add("conflict")
+    for name in sorted(obligation_names):
+        lineage.append(
+            {
+                "kind": "operation_obligation",
+                "name": name,
+                "ref": f"operation_obligation:{name}",
+                "applicable": True,
+                "capability_status": "present",
+                "provenance": "frontend-source:exact-operation",
+                "edge": "requires_behavior",
+            }
+        )
+    return tuple(lineage), statuses
 
 
 @dataclass(frozen=True)
@@ -451,6 +561,11 @@ def map_frontend(
                 for reference in call.response_type_refs
                 if reference in module.contracts
             }
+            operation_lineage, handled_statuses = _frontend_http_lineage(
+                facts,
+                call,
+                content,
+            )
             metadata = {
                 "transport": (
                     "graphql"
@@ -471,6 +586,8 @@ def map_frontend(
                 "response_type_refs": list(call.response_type_refs),
                 "request_contracts": request_contracts,
                 "response_contracts": response_contracts,
+                "lineage": list(operation_lineage),
+                "status_codes": list(handled_statuses),
                 "ui_actions": (sorted(action_names) if attributable_ui else []),
                 "ui_states": sorted(state_names) if attributable_ui else [],
                 "ui_lifecycle_evidence": (
