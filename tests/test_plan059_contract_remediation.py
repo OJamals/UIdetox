@@ -339,6 +339,7 @@ export function Orders() {
     assert '"evidence_basis":"measured"' in brief
     assert '"operations":[{"method":"POST","path":"/orders"}]' in brief
     assert '"obligation":"retry"' in brief
+    assert '"contract_anchor":{"field":"retry"' in brief
     assert (
         '"constraints":["{\\"applicable\\":true,\\"condition\\":\\"503\\"}"]' in brief
     )
