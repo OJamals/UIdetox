@@ -75,7 +75,8 @@ _OPERATION_OBLIGATIONS = (
 )
 _OPERATION_OBLIGATION_REQUIRED_DETAILS = {
     "affected-reads": ("operations",),
-    "idempotency": ("scope",),
+    "duplicate-submit": ("mechanism",),
+    "idempotency": ("scope", "retention", "replay"),
     "retry": ("condition",),
 }
 
@@ -317,6 +318,58 @@ def _swagger_media_types(
     return tuple(sorted({str(value) for value in values if isinstance(value, str)}))
 
 
+def _openapi_read_operation_counts(document: Mapping[str, Any]) -> dict[str, int]:
+    """Count exact canonical backend read operations for reference validation."""
+
+    counts: dict[str, int] = {}
+    paths = document.get("paths")
+    if not isinstance(paths, Mapping):
+        return counts
+    for route, path_item in paths.items():
+        if not isinstance(path_item, Mapping):
+            continue
+        normalized, _parameters, unresolved = normalize_route_path(str(route))
+        if unresolved:
+            continue
+        for method, operation in path_item.items():
+            normalized_method = normalize_http_method(method)
+            if normalized_method not in {"GET", "HEAD"} or not isinstance(
+                operation, Mapping
+            ):
+                continue
+            reference = f"{normalized_method} {normalized}"
+            counts[reference] = counts.get(reference, 0) + 1
+    return counts
+
+
+def _validation_schema_has_field_association(value: Any) -> bool:
+    """Accept only bounded schemas linking a field location to an error message."""
+
+    remaining = _OPENAPI_SCHEMA_NODE_LIMIT
+
+    def visit(node: Any) -> bool:
+        nonlocal remaining
+        if not isinstance(node, (Mapping, list, tuple)):
+            return False
+        remaining -= 1
+        if remaining < 0:
+            return False
+        if isinstance(node, Mapping):
+            properties = node.get("properties")
+            if isinstance(properties, Mapping):
+                names = {str(name).lower() for name in properties}
+                locations = {"field", "fieldname", "loc", "location", "path"}
+                messages = {"code", "error", "message", "msg", "type"}
+                if names & locations and names & messages:
+                    return True
+            return any(visit(node[key]) for key in sorted(node, key=str))
+        if isinstance(node, (list, tuple)):
+            return any(visit(child) for child in node)
+        return False
+
+    return visit(value)
+
+
 def _extract_openapi(
     path: Path,
     relative: str,
@@ -333,6 +386,7 @@ def _extract_openapi(
         document.get("paths"), Mapping
     ):
         return []
+    available_reads = _openapi_read_operation_counts(document)
     operations: list[ContractObservation] = []
     for route, path_item in sorted(
         document["paths"].items(), key=lambda item: str(item[0])
@@ -444,6 +498,7 @@ def _extract_openapi(
                 security,
                 document,
                 method=normalized_method,
+                available_reads=available_reads,
             )
             operations.append(
                 ContractObservation(
@@ -1188,6 +1243,7 @@ def _openapi_operation_obligations(
     responses: Mapping[str, Any] | None = None,
     security: Any = None,
     document: Mapping[str, Any] | None = None,
+    available_reads: Mapping[str, int] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     raw = operation.get("x-uidetox-operation")
     raw = raw if isinstance(raw, Mapping) else {}
@@ -1233,6 +1289,21 @@ def _openapi_operation_obligations(
             applicable = None
             details["constraint_status"] = "unknown"
             details["missing_constraints"] = missing_details
+        if name == "affected-reads" and applicable is True:
+            operations = details.get("operations")
+            if isinstance(operations, list):
+                invalid_operations = [
+                    reference
+                    for reference in operations
+                    if not isinstance(reference, str)
+                    or (available_reads or {}).get(reference) != 1
+                ]
+                if len(set(map(str, operations))) != len(operations):
+                    invalid_operations = list(operations)
+            if invalid_operations:
+                applicable = None
+                details["constraint_status"] = "unknown"
+                details["invalid_operations"] = invalid_operations
         obligations.append(
             {
                 "kind": "operation_obligation",
@@ -1266,10 +1337,15 @@ def _openapi_operation_obligations(
             response_headers.update(str(name).lower() for name in headers)
 
     native: dict[str, dict[str, Any]] = {}
+    native_unknown: dict[str, dict[str, Any]] = {}
 
     def prove(name: str, **details: Any) -> None:
         if name not in explicit_names:
             native[name] = details
+
+    def investigate(name: str, **details: Any) -> None:
+        if name not in explicit_names and name not in native:
+            native_unknown[name] = details
 
     safe_method = method.upper() in {"GET", "HEAD", "OPTIONS"}
     idempotency_header = ("header", "idempotency-key") in parameter_names
@@ -1283,10 +1359,22 @@ def _openapi_operation_obligations(
     if safe_method and retry_signaled:
         prove("retry", condition="safe-method")
     elif idempotency_header:
-        prove("retry", condition="idempotency-key")
+        investigate(
+            "retry",
+            evidence="request-header:Idempotency-Key",
+            missing_constraints=["condition"],
+        )
     if idempotency_header:
-        prove("idempotency", scope="request-header:Idempotency-Key")
-        prove("duplicate-submit", mechanism="idempotency-key")
+        investigate(
+            "idempotency",
+            evidence="request-header:Idempotency-Key",
+            missing_constraints=["scope", "retention", "replay"],
+        )
+        investigate(
+            "duplicate-submit",
+            evidence="request-header:Idempotency-Key",
+            missing_constraints=["mechanism"],
+        )
     if status_codes & {"409", "412"} or precondition_header:
         prove(
             "conflict",
@@ -1299,8 +1387,22 @@ def _openapi_operation_obligations(
         prove("rate-limit", statuses=["429"])
     if status_codes & {"408", "504"}:
         prove("timeout", statuses=sorted(status_codes & {"408", "504"}))
-    if status_codes & {"400", "422"}:
-        prove("validation", statuses=sorted(status_codes & {"400", "422"}))
+    validation_statuses = sorted(status_codes & {"400", "422"})
+    proven_validation_statuses = [
+        status
+        for status in validation_statuses
+        if _validation_schema_has_field_association(
+            _openapi_content_schema((responses or {}).get(status), document or {})
+        )
+    ]
+    if proven_validation_statuses:
+        prove("validation", statuses=proven_validation_statuses)
+    elif validation_statuses:
+        investigate(
+            "validation",
+            statuses=validation_statuses,
+            missing_constraints=["field-error-schema"],
+        )
     if "403" in status_codes:
         prove("forbidden", statuses=["403"])
     if safe_method and response_headers & {"etag", "last-modified"}:
@@ -1324,6 +1426,20 @@ def _openapi_operation_obligations(
                 "capability_status": "present",
                 "provenance": "openapi:native-operation",
                 "edge": "requires_behavior",
+                **details,
+            }
+        )
+    for name, details in sorted(native_unknown.items()):
+        obligations.append(
+            {
+                "kind": "operation_obligation",
+                "name": name,
+                "ref": f"operation_obligation:{name}",
+                "applicable": None,
+                "capability_status": "unknown",
+                "provenance": "openapi:native-operation",
+                "edge": "requires_behavior",
+                "constraint_status": "unknown",
                 **details,
             }
         )
@@ -1383,6 +1499,7 @@ def _openapi_transport_lineage(
     document: Mapping[str, Any],
     *,
     method: str = "",
+    available_reads: Mapping[str, int] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     lineage: list[dict[str, Any]] = [
         _openapi_operation_contract(path_item, operation, document)
@@ -1615,6 +1732,11 @@ def _openapi_transport_lineage(
             responses=responses,
             security=security,
             document=document,
+            available_reads=(
+                available_reads
+                if available_reads is not None
+                else _openapi_read_operation_counts(document)
+            ),
         )
     )
     return _bounded_openapi_lineage(lineage)

@@ -400,7 +400,7 @@ def test_boolean_only_obligations_require_operation_specific_evidence(
         node.name: tuple(node.attributes["missing_constraints"]) for node in obligations
     } == {
         "affected-reads": ("operations",),
-        "idempotency": ("scope",),
+        "idempotency": ("scope", "retention", "replay"),
         "retry": ("condition",),
     }
 
@@ -523,6 +523,7 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
         "openapi": "3.1.0",
         "paths": {
             "/orders": {
+                "get": {"responses": {"200": {"description": "ok"}}},
                 "post": {
                     "x-uidetox-operation": {
                         "auth-required": {"applicable": True, "scheme": "OAuth"},
@@ -540,7 +541,10 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
                             "operations": ["GET /orders"],
                         },
                         "cancellation": {"applicable": True},
-                        "duplicate-submit": {"applicable": True},
+                        "duplicate-submit": {
+                            "applicable": True,
+                            "mechanism": "client-in-flight",
+                        },
                         "optimistic-rollback": {
                             "applicable": True,
                             "scope": "<script>alert(1)</script>",
@@ -548,7 +552,7 @@ def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -
                         "<script>alert(1)</script>": {"applicable": True},
                     },
                     "responses": {"202": {"description": "accepted"}},
-                }
+                },
             }
         },
     }
@@ -854,7 +858,23 @@ def test_native_openapi_evidence_derives_only_proven_operation_obligations(
                             "required": True,
                         },
                     ],
-                    "responses": {"207": {}, "412": {}, "422": {}},
+                    "responses": {
+                        "207": {},
+                        "412": {},
+                        "422": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "field": {"type": "string"},
+                                            "message": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    },
                 }
             },
         },
@@ -877,14 +897,16 @@ def test_native_openapi_evidence_derives_only_proven_operation_obligations(
     } <= {name for name, _condition, _scope in obligations}
     assert {
         "conflict",
-        "duplicate-submit",
-        "idempotency",
         "partial-success",
         "validation",
     } <= {name for name, _condition, _scope in obligations}
     assert ("retry", "safe-method", None) in obligations
-    assert ("retry", "idempotency-key", None) in obligations
-    assert ("idempotency", None, "request-header:Idempotency-Key") in obligations
+    unknown = {
+        node.name
+        for node in _nodes(project, "operation_obligation")
+        if node.capability_status == "unknown"
+    }
+    assert unknown == {"duplicate-submit", "idempotency", "retry"}
     assert {
         node.attributes["provenance"]
         for node in _nodes(project, "operation_obligation")
@@ -1183,3 +1205,75 @@ def test_cache_remediation_requires_exact_affected_read_applicability() -> None:
     difference = _first_contract_difference(frontend, backend, outgoing)
     assert difference is not None
     assert difference[0] == "cache_invalidation_missing"
+
+
+def test_affected_reads_fail_closed_for_nonexistent_or_mutating_references(
+    tmp_path,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/orders": {
+                "get": {"responses": {"200": {"description": "ok"}}},
+                "post": {
+                    "x-uidetox-operation": {
+                        "affected-reads": {
+                            "applicable": True,
+                            "operations": ["POST /orders", "GET /does-not-exist"],
+                        }
+                    },
+                    "responses": {"204": {"description": "done"}},
+                },
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    obligation = next(
+        node
+        for node in _nodes(build_project_map(tmp_path), "operation_obligation")
+        if node.name == "affected-reads"
+    )
+    assert obligation.capability_status == "unknown"
+    assert obligation.attributes["applicable"] is None
+    assert obligation.attributes["invalid_operations"] == [
+        "POST /orders",
+        "GET /does-not-exist",
+    ]
+
+
+def test_validation_status_without_field_error_schema_is_investigate(
+    tmp_path,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/orders": {
+                "post": {
+                    "responses": {
+                        "422": {
+                            "description": "invalid",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {"detail": {"type": "string"}},
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    obligation = next(
+        node
+        for node in _nodes(build_project_map(tmp_path), "operation_obligation")
+        if node.name == "validation"
+    )
+    assert obligation.capability_status == "unknown"
+    assert obligation.attributes["applicable"] is None
+    assert obligation.attributes["missing_constraints"] == ["field-error-schema"]

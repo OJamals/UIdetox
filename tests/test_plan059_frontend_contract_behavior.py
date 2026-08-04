@@ -304,6 +304,8 @@ export async function save(payload: unknown, signal: AbortSignal) {
                                 "idempotency": {
                                     "applicable": True,
                                     "scope": "one order creation",
+                                    "retention": "24h",
+                                    "replay": "same status and body",
                                 },
                                 "cancellation": {"applicable": True},
                                 "conflict": {"applicable": True},
@@ -355,9 +357,9 @@ export async function save(payload: unknown, signal: AbortSignal) {
     } == {
         ("cancellation", "investigate"),
         ("conflict", "investigate"),
-        ("duplicate-submit", "pending"),
+        ("duplicate-submit", "investigate"),
         ("idempotency", "investigate"),
-        ("retry", "pending"),
+        ("retry", "investigate"),
     }
 
 
