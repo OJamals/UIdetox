@@ -22,5 +22,6 @@ def test_plan058_screenshot_capture_disables_animations(tmp_path: Path) -> None:
 
     assert destination.read_bytes() == b"stable"
     assert page.options["animations"] == "disabled"
+    assert page.options["style"] == "* { caret-color: transparent !important; }"
     assert page.options["full_page"] is True
     assert page.options["type"] == "png"

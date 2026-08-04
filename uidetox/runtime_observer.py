@@ -1145,6 +1145,7 @@ def _capture_screenshot_atomically(
             full_page=full_page,
             type="png",
             animations="disabled",
+            style="* { caret-color: transparent !important; }",
         )
         os.replace(temporary, destination)
     finally:
