@@ -90,7 +90,10 @@ def test_post_detox_expectations_separate_history_from_current_findings() -> Non
         not findings
         for findings in expectations["deliberate_operation_findings"].values()
     )
-    assert expectations["expected_contract_counts"]["contract_mismatch"] == 0
+    assert expectations["expected_contract_counts"] == {
+        "contract_mismatch": 33,
+        "coverage_gap": 99,
+    }
 
 
 def test_prepare_script_passes_canonical_intent_to_uidetox(tmp_path: Path) -> None:
