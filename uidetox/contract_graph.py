@@ -1719,6 +1719,8 @@ def _schema_from_node(
         if key not in {"status", "type_identities"}
         and not (key == "required" and isinstance(value, bool))
     }
+    if node.capability_status != "present":
+        schema["capability_status"] = node.capability_status
     fields = outgoing.get((node.id, "has_field"), [])
     if fields:
         schema["properties"] = {

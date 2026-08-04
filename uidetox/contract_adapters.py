@@ -1114,6 +1114,18 @@ def _bounded_openapi_value(value: Any, *, depth: int = 0) -> Any:
     return None
 
 
+def _bounded_openapi_names(values: list[Any]) -> tuple[list[str], bool]:
+    truncated = len(values) > _OPENAPI_SCHEMA_PROPERTY_LIMIT
+    names: list[str] = []
+    for raw_name in values[:_OPENAPI_SCHEMA_PROPERTY_LIMIT]:
+        name = _bounded_openapi_text(raw_name)
+        if not isinstance(raw_name, str) or not name or name != raw_name:
+            truncated = True
+            continue
+        names.append(name)
+    return sorted(set(names)), truncated
+
+
 def _openapi_operation_obligations(
     operation: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
@@ -1512,8 +1524,10 @@ def _openapi_schema_shape(
             merged["name"] = name
         if isinstance(reference, str):
             merged["reference"] = reference
-        merged["required"] = sorted(set(merged["required"]))
-        if len(all_of) > _OPENAPI_SCHEMA_VARIANT_LIMIT:
+        merged["required"], required_truncated = _bounded_openapi_names(
+            merged["required"]
+        )
+        if len(all_of) > _OPENAPI_SCHEMA_VARIANT_LIMIT or required_truncated:
             merged["truncated"] = True
             merged["capability_status"] = "unknown"
         return merged
@@ -1566,16 +1580,29 @@ def _openapi_schema_shape(
                 result["capability_status"] = "unknown"
     required = schema.get("required")
     if isinstance(required, list):
-        result["required"] = sorted(str(item) for item in required)
+        result["required"], required_truncated = _bounded_openapi_names(required)
+        if required_truncated:
+            result["truncated"] = True
+            result["capability_status"] = "unknown"
     properties = schema.get("properties")
     if isinstance(properties, Mapping):
         property_rows = sorted(properties.items(), key=lambda item: str(item[0]))
-        result["properties"] = {
-            str(field_name): _openapi_schema_shape(field, document, seen, depth + 1)
-            for field_name, field in property_rows[:_OPENAPI_SCHEMA_PROPERTY_LIMIT]
-            if isinstance(field, Mapping)
-        }
-        if len(property_rows) > _OPENAPI_SCHEMA_PROPERTY_LIMIT:
+        result["properties"] = {}
+        property_truncated = len(property_rows) > _OPENAPI_SCHEMA_PROPERTY_LIMIT
+        for raw_name, field in property_rows[:_OPENAPI_SCHEMA_PROPERTY_LIMIT]:
+            field_name = _bounded_openapi_text(raw_name)
+            if (
+                not isinstance(raw_name, str)
+                or not field_name
+                or field_name != raw_name
+                or not isinstance(field, Mapping)
+            ):
+                property_truncated = True
+                continue
+            result["properties"][field_name] = _openapi_schema_shape(
+                field, document, seen, depth + 1
+            )
+        if property_truncated:
             result["property_count"] = len(property_rows)
             result["truncated"] = True
             result["capability_status"] = "unknown"
@@ -1595,7 +1622,11 @@ def _openapi_schema_shape(
                 result["capability_status"] = "unknown"
     discriminator = schema.get("discriminator")
     if isinstance(discriminator, Mapping):
-        result["discriminator"] = _json_value(discriminator)
+        bounded = _bounded_openapi_value(discriminator)
+        result["discriminator"] = bounded
+        if bounded != discriminator:
+            result["truncated"] = True
+            result["capability_status"] = "unknown"
     return result
 
 

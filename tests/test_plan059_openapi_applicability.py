@@ -275,6 +275,119 @@ def test_openapi_schema_scalars_are_bounded_and_fail_closed(tmp_path) -> None:
     assert len(json.dumps(project.to_dict())) < 100_000
 
 
+def test_schema_names_and_discriminator_are_bounded_and_fail_closed(tmp_path) -> None:
+    oversized = "x" * 1_000_000
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/oversized": {
+                "post": {
+                    "requestBody": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [oversized],
+                                    "properties": {oversized: {"type": "string"}},
+                                    "discriminator": {"propertyName": oversized},
+                                }
+                            }
+                        }
+                    },
+                    "responses": {"204": {"description": "done"}},
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    shape = _nodes(project, "request_media_type")[0].attributes["schema"]
+
+    assert shape["required"] == []
+    assert shape["properties"] == {}
+    assert shape["discriminator"] == {"propertyName": ""}
+    assert shape["truncated"] is True
+    assert shape["capability_status"] == "unknown"
+    assert len(json.dumps(project.to_dict())) < 100_000
+
+
+def test_nested_items_truncation_survives_graph_reconciliation(tmp_path) -> None:
+    properties = {f"field_{index:03d}": {"type": "string"} for index in range(129)}
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/items": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": properties,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    backend = _nodes(project, "route")[0]
+    backend_schema = next(
+        node for node in _nodes(project, "response_schema") if node.side == "backend"
+    )
+    frontend = ContractNode(
+        "front",
+        "client_operation",
+        backend.name,
+        "frontend",
+        "present",
+        backend.source,
+        dict(backend.attributes),
+    )
+    frontend_schema = ContractNode(
+        "front-schema",
+        "response_schema",
+        "response:200",
+        "frontend",
+        "present",
+        backend.source,
+        {"type": "array", "status": "200"},
+    )
+    findings = reconcile_contract_graph(
+        (frontend, frontend_schema, backend, backend_schema),
+        (
+            ContractEdge(
+                "front", "front-schema", "returns", "test", 1.0, backend.source
+            ),
+            ContractEdge(
+                backend.id,
+                backend_schema.id,
+                "returns",
+                "openapi",
+                1.0,
+                backend.source,
+            ),
+        ),
+    )
+
+    assert backend_schema.capability_status == "unknown"
+    assert any(
+        finding.detector_id == "contract-response-schema-evidence-unknown"
+        and finding.status == "investigate"
+        for finding in findings
+    )
+
+
 def test_explicit_operation_applicability_is_bounded_and_fail_closed(tmp_path) -> None:
     document = {
         "openapi": "3.1.0",
