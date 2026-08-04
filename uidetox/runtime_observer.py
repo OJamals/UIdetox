@@ -1144,6 +1144,7 @@ def _capture_screenshot_atomically(
             path=str(temporary),
             full_page=full_page,
             type="png",
+            animations="disabled",
         )
         os.replace(temporary, destination)
     finally:
