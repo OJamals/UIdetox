@@ -340,6 +340,7 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
     state_locator = SimpleNamespace(
         hover=lambda **kwargs: action_events.append(("hover", kwargs["timeout"])),
         focus=lambda **kwargs: action_events.append(("focus", kwargs["timeout"])),
+        evaluate=lambda _script: action_events.append(("stabilize", 0)),
     )
     for kind in ("hover", "focus"):
         parsed = RuntimeScenarioAction.from_dict(
@@ -349,7 +350,7 @@ def test_scenario_schema_rejects_unsafe_or_unbounded_actions(
             SimpleNamespace(locator=lambda _selector: state_locator),
             parsed,
         )
-    assert action_events == [("hover", 250), ("focus", 250)]
+    assert action_events == [("hover", 250), ("focus", 250), ("stabilize", 0)]
 
     outside = tmp_path.parent / "outside-runtime-scenarios.json"
     outside.write_text("[]", encoding="utf-8")

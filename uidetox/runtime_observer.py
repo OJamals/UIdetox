@@ -992,9 +992,13 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
     elif action.kind == "hover":
         page.locator(action.selector).hover(timeout=action.timeout_ms)
     elif action.kind == "focus":
-        page.locator(action.selector).focus(timeout=action.timeout_ms)
+        locator = page.locator(action.selector)
+        locator.focus(timeout=action.timeout_ms)
+        _stabilize_action_viewport(locator)
     elif action.kind == "key":
-        page.locator(action.selector).press(action.key, timeout=action.timeout_ms)
+        locator = page.locator(action.selector)
+        locator.press(action.key, timeout=action.timeout_ms)
+        _stabilize_action_viewport(locator)
     elif action.kind == "wait-for-selector":
         page.wait_for_selector(
             action.selector,
@@ -1010,6 +1014,13 @@ def _perform_action(page: Any, action: RuntimeScenarioAction) -> None:
             )
         else:
             page.wait_for_load_state(action.state, timeout=action.timeout_ms)
+
+
+def _stabilize_action_viewport(locator: Any) -> None:
+    locator.evaluate(
+        "element => element.scrollIntoView({block: 'center', inline: 'nearest', "
+        "behavior: 'instant'})"
+    )
 
 
 def _capture_scenario_state(
