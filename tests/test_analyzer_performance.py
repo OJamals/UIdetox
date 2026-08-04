@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from uidetox.findings import Finding
 
 _EXPECTED_STATIC_ANALYSIS_FINDING_COUNT = 37
 _EXPECTED_STATIC_ANALYSIS_SEMANTIC_SHA256 = (
-    "ffbcbbcd56db9e1ecad3dbc26f231091fa2b721b86e7aa01b980fb6e7c3acd07"
+    "84b85933c55a7f8f9b2a471d5d70a33f92c9505a04b7e9ed8033db76a942a469"
 )
 
 
@@ -83,7 +84,7 @@ mybutton:hover { color: red; }
 def _normalize_fixture_value(value: object, root: Path) -> object:
     if isinstance(value, str):
         return value.replace(str(root.resolve()), "<ROOT>")
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {
             key: _normalize_fixture_value(item, root) for key, item in value.items()
         }

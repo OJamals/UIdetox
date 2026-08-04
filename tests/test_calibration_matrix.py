@@ -244,7 +244,7 @@ def validate_catalog_contract(
 ) -> None:
     catalog = manifest.get("catalog")
     if not isinstance(catalog, dict):
-        raise ValueError("Invalid calibration catalog: catalog must be an object")
+        raise TypeError("Invalid calibration catalog: catalog must be an object")
     if set(catalog) != {
         "rule_count",
         "fingerprint",

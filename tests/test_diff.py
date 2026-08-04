@@ -36,7 +36,7 @@ def test_diff_json_projects_canonical_findings(
     introduced = _finding(tmp_path / "introduced.py", 2)
     resolved = _finding(tmp_path / "resolved.py", 3)
 
-    monkeypatch.setattr(diff, "load_config", lambda: {})
+    monkeypatch.setattr(diff, "load_config", dict)
     monkeypatch.setattr(
         diff,
         "load_state",

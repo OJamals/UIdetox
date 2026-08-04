@@ -43,7 +43,6 @@ from uidetox.tooling import detect_all
 _AUTO_CATEGORIES = {
     "typography": {
         "TYPOGRAPHY_SLOP",
-        "HARDCODED_PX_FONT_SLOP",
         "TIGHT_LINE_HEIGHT_SLOP",
         "ALL_CAPS_HEADER_SLOP",
         "FONT_WEIGHT_EXTREMES_SLOP",
@@ -57,7 +56,6 @@ _AUTO_CATEGORIES = {
         "COLOR_GRADIENT_SLOP",
         "COLOR_BLACK_SLOP",
         "CSS_GRADIENT_SLOP",
-        "CSS_PURE_BLACK_SLOP",
         "RAW_COLOR_SLOP",
         "DUPLICATE_COLOR_LITERAL",
         "TAILWIND_V4_GRADIENT_SLOP",
@@ -67,7 +65,6 @@ _AUTO_CATEGORIES = {
         "PURE_GRAY_NEUTRAL_SLOP",
         "ALPHA_COLOR_ABUSE_SLOP",
         "PURE_WHITE_BACKGROUND_SLOP",
-        "PURE_BLACK_TEXT_SLOP",
     },
     "layout": {
         "LAYOUT_MATH_SLOP",
@@ -75,7 +72,6 @@ _AUTO_CATEGORIES = {
         "CARD_NESTING_SLOP",
         "OVERPADDED_LAYOUT_SLOP",
         "VIEWPORT_HEIGHT_SLOP",
-        "LAZY_FLEX_CENTER_SLOP",
         "SPACING_REPETITION_SLOP",
         "HARDCODED_BREAKPOINT_SLOP",
         "CENTERED_PARAGRAPH_SLOP",
@@ -92,7 +88,6 @@ _AUTO_CATEGORIES = {
     },
     "motion": {
         "BOUNCE_ANIMATION_SLOP",
-        "MISSING_TRANSITION_SLOP",
         "REDUCED_MOTION_MISSING_SLOP",
         "SCROLL_SMOOTH_NO_MOTION_SLOP",
         "CSS_SCROLL_BEHAVIOR_SLOP",
@@ -100,7 +95,7 @@ _AUTO_CATEGORIES = {
         "HEIGHT_ANIMATION_SLOP",
         "TRANSITION_ALL_SLOP",
         "EASE_DEFAULT_SLOP",
-        "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP",
+        "SCROLL_SNAP_MANDATORY_SLOP",
     },
     "materiality": {
         "GLASSMORPHISM_SLOP",
@@ -115,10 +110,10 @@ _AUTO_CATEGORIES = {
         "OUTER_GLOW_SLOP",
     },
     "states": {
-        "MISSING_HOVER_STATES",
+        "HOVER_ONLY_REVEAL_SLOP",
         "MISSING_FOCUS_SLOP",
         "MISSING_DARK_MODE",
-        "DISABLED_NO_CURSOR_SLOP",
+        "ARIA_DISABLED_ACTIVATION_SLOP",
         "OUTLINE_NONE_SLOP",
         "FOCUS_OUTLINE_REMOVED_SLOP",
         "EMPTY_ARIA_LABEL_SLOP",
@@ -159,17 +154,14 @@ _AUTO_CATEGORIES = {
         "TAILWIND_WEIGHT_CONFLICT_SLOP",
         "TAILWIND_DISPLAY_CONFLICT_SLOP",
         "NO_SELECT_CONTENT_SLOP",
-        "UGLY_SCROLLBAR_SLOP",
         "ARBITRARY_PX_VALUE_SLOP",
         "VERBOSE_HANDLER_NAME_SLOP",
-        "MISSING_TABULAR_NUMS_SLOP",
         "VALUE_NAMED_TOKEN_SLOP",
         "WINDOW_CONFIRM_SLOP",
         "DIALOG_ROLE_ON_DIV_SLOP",
         "SRCSET_MISSING_SLOP",
         "EMPTY_CATCH_SLOP",
         "TYPE_ASSERTION_ABUSE_SLOP",
-        "ASYNC_USEEFFECT_SLOP",
         "HARDCODED_DEV_URL_SLOP",
         "REDUNDANT_BOOL_COMPARE_SLOP",
         "ALERT_USAGE_SLOP",
@@ -179,7 +171,7 @@ _AUTO_CATEGORIES = {
         "BUTTON_TYPE_MISSING_SLOP",
         "CATCH_CONSOLE_ONLY_SLOP",
         "HARDCODED_TIMEOUT_SLOP",
-        "CSS_EMPTY_RULE_SLOP",
+        "BFCACHE_UNLOAD_LISTENER_SLOP",
         "CSS_IMPORTANT_ANIMATION_SLOP",
         "PROP_SPREADING_SLOP",
         "CSS_UNIVERSAL_SELECTOR_SLOP",
@@ -211,6 +203,7 @@ _AUTO_CATEGORIES = {
         "ORPHANED_LABEL_SLOP",
         "MODAL_NO_ARIA_SLOP",
         "TOUCH_TARGET_SLOP",
+        "TEXT_SIZE_ADJUST_NONE_SLOP",
         "AUTOFOCUS_SLOP",
         "SVG_HARDCODED_FILL_SLOP",
         "MISSING_META_DESCRIPTION_SLOP",
@@ -224,10 +217,14 @@ _AUTO_CATEGORIES = {
         "EMPTY_HREF_SLOP",
         "MISSING_LANG_SLOP",
         "INPUT_AUTOCOMPLETE_MISSING_SLOP",
+        "INPUT_IME_ENTER_UNGUARDED_SLOP",
+        "INPUT_PASTE_BLOCKED_SLOP",
         "ARIA_HIDDEN_INTERACTIVE_SLOP",
-        "FOCUS_VISIBLE_MISSING_SLOP",
+        "FORCED_COLOR_ADJUST_NONE_SLOP",
+        "HIDDEN_SCROLLBAR_SLOP",
         "TABINDEX_POSITIVE_SLOP",
         "TABLE_HEADER_NO_SCOPE_SLOP",
+        "SORTABLE_TABLE_ARIA_SORT_SLOP",
         "MEDIA_AUTOPLAY_SLOP",
         "AUTOCOMPLETE_OFF_SLOP",
         "MISSING_ARIA_ROLE_SLOP",
@@ -263,7 +260,7 @@ _AUTO_CATEGORIES = {
         "NEXT_IMAGE_RAW_SLOP",
         "ASYNC_USEEFFECT_SLOP",
         "DEPRECATED_FINDDOMNODE_SLOP",
-        "DEPRECATED_CLASS_COMPONENT_SLOP",
+        "REACT_LEGACY_STRING_REF_SLOP",
         "LAZY_WITHOUT_SUSPENSE_SLOP",
         "NO_PASSIVE_SCROLL_LISTENER_SLOP",
         "CONTEXT_VALUE_INLINE_SLOP",
@@ -271,7 +268,6 @@ _AUTO_CATEGORIES = {
     },
     "duplication": {
         "DUPLICATE_TAILWIND_BLOCK",
-        "DUPLICATE_COLOR_LITERAL",
         "COPY_PASTE_COMPONENT",
         "DUPLICATE_HANDLER",
         "REPEATED_MEDIA_QUERY",
@@ -452,6 +448,7 @@ def run(args: argparse.Namespace):
                 text=True,
                 cwd=scan_path,
                 timeout=10,
+                check=False,
             )
             git_root_text = root_result.stdout.strip()
             if root_result.returncode == 0 and git_root_text:
@@ -462,6 +459,7 @@ def run(args: argparse.Namespace):
                     text=True,
                     cwd=str(since_root),
                     timeout=10,
+                    check=False,
                 )
             else:
                 result = None
@@ -648,8 +646,7 @@ def _save_scan_to_memory(
     for issue in slop_issues:
         tier = issue.get("tier", "T4")
         by_tier[tier] = by_tier.get(tier, 0) + 1
-        desc = issue.get("issue", "").lower()
-        cat = _infer_category(desc)
+        cat = coerce_finding(issue).category
         by_category[cat] = by_category.get(cat, 0) + 1
         f = issue.get("file", "")
         file_counts[f] = file_counts.get(f, 0) + 1
@@ -661,102 +658,3 @@ def _save_scan_to_memory(
         files_scanned=len(file_counts),
         top_files=top_files,
     )
-
-
-def _infer_category(desc: str) -> str:
-    """Infer issue category from description text."""
-    category_keywords = {
-        "typography": [
-            "font",
-            "typography",
-            "inter",
-            "type scale",
-            "line-height",
-            "kerning",
-            "letter-spacing",
-            "px font",
-        ],
-        "color": [
-            "color",
-            "gradient",
-            "palette",
-            "contrast",
-            "dark mode",
-            "purple",
-            "black",
-            "hex color",
-        ],
-        "layout": [
-            "layout",
-            "grid",
-            "spacing",
-            "padding",
-            "margin",
-            "dashboard",
-            "card",
-            "center",
-            "flex center",
-            "viewport",
-        ],
-        "motion": ["animation", "bounce", "pulse", "spin", "transition", "motion"],
-        "materiality": [
-            "shadow",
-            "glassmorphism",
-            "radius",
-            "border",
-            "backdrop",
-            "blur",
-            "glow",
-            "opacity",
-        ],
-        "states": [
-            "loading",
-            "error",
-            "empty",
-            "skeleton",
-            "disabled",
-            "hover",
-            "focus",
-        ],
-        "content": [
-            "copy",
-            "lorem",
-            "generic",
-            "placeholder",
-            "cliche",
-            "john doe",
-            "acme",
-            "emoji",
-            "oops",
-            "exclamation",
-        ],
-        "code quality": [
-            "div soup",
-            "semantic",
-            "z-index",
-            "inline style",
-            "!important",
-            "ternary",
-            "magic number",
-            "any type",
-            "ts-ignore",
-            "eslint-disable",
-        ],
-        "duplication": ["duplicate", "repeated", "copy-paste", "identical", "same hex"],
-        "dead code": [
-            "commented-out",
-            "unused import",
-            "unreachable",
-            "empty handler",
-            "empty css",
-            "unused state",
-            "deprecated",
-            "console",
-            "todo",
-            "fixme",
-        ],
-    }
-    for cat, keywords in category_keywords.items():
-        if any(kw in desc for kw in keywords):
-            return cat
-    return "other"

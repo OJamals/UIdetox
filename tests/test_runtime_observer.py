@@ -1882,8 +1882,7 @@ def test_heading_hierarchy_and_spatial_rhythm_have_boundary_safe_negatives() -> 
         _design_page(heading_one, healthy_h2, *overlapping)
     )
     assert all(
-        "runtime-spatial-rhythm" not in codes
-        for codes in overlap_findings.values()
+        "runtime-spatial-rhythm" not in codes for codes in overlap_findings.values()
     )
 
 
@@ -2882,6 +2881,66 @@ def test_observer_detects_rendered_layout_and_typography_defects(
 
 
 @pytest.mark.browser
+def test_observer_ignores_line_box_contact_and_semantic_token_fragments(
+    tmp_path: Path,
+    local_http_server,
+) -> None:
+    fixture = tmp_path / "valid-text-boundaries.html"
+    fixture.write_text(
+        """
+<!doctype html>
+<style>
+  #summary h2 { font-size: 40px; line-height: 0.9; margin: 0; }
+  #summary p { font-size: 16px; line-height: 1.5; margin: 0; }
+</style>
+<main>
+  <section id="summary">
+    <h2 id="metric">58%</h2>
+    <p id="detail">Across 1 active projects.</p>
+  </section>
+  <strong id="duration"></strong>
+  <small id="status"></small>
+  <label id="glued-label">Rollout<span>50%</span></label>
+</main>
+<script>
+  document.querySelector("#duration").append(
+    document.createTextNode("105"),
+    document.createTextNode("m"),
+  );
+  document.querySelector("#status").append(
+    document.createTextNode("open"),
+    document.createTextNode(" · SLA "),
+    document.createTextNode("15"),
+    document.createTextNode("m"),
+  );
+</script>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    origin = local_http_server(tmp_path)
+    try:
+        observation = observe_frontend(
+            f"{origin}/{fixture.name}",
+            viewports=(RuntimeViewport("mobile", 390, 844),),
+            settle_ms=0,
+        )
+    except RuntimeError as exc:
+        _skip_missing_browser(exc)
+        raise
+
+    findings_by_selector = {
+        element.selector: {finding.code for finding in element.findings}
+        for element in observation.pages[0].elements
+    }
+
+    assert "runtime-text-collision" not in findings_by_selector["#metric"]
+    assert "runtime-text-separation" not in findings_by_selector["#duration"]
+    assert "runtime-text-separation" not in findings_by_selector["#status"]
+    assert "runtime-text-separation" in findings_by_selector["#glued-label"]
+
+
+@pytest.mark.browser
 def test_observer_reports_navigation_overload_and_scroll_concealed_actions(
     tmp_path: Path,
     local_http_server,
@@ -3622,12 +3681,11 @@ def test_browser_modal_context_suppresses_backdrop_noise_and_flags_fake_modal(
     broken_elements = {
         element.selector: element for element in pages[broken.name].elements
     }
+
     def finding_codes(element: RuntimeElement) -> set[str]:
         return {finding.code for finding in element.findings}
 
-    assert "runtime-element-occluded" not in finding_codes(
-        proper_elements["#behind"]
-    )
+    assert "runtime-element-occluded" not in finding_codes(proper_elements["#behind"])
     assert "runtime-dialog-modality" not in finding_codes(
         proper_elements["#proper-dialog"]
     )

@@ -14,11 +14,11 @@ Usage:
 """
 
 import argparse
-from collections import defaultdict
-from collections.abc import Mapping
 import json
 import subprocess
 import sys
+from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ def _get_changed_files(since_sha: str, cwd: str) -> list[str] | None:
             text=True,
             cwd=cwd,
             timeout=10,
+            check=False,
         )
         if result.returncode == 0:
             return [f.strip() for f in result.stdout.splitlines() if f.strip()]
@@ -126,12 +127,12 @@ def _analyze_target(
             else []
         )
     else:
-        kwargs = dict(
-            root_path=path,
-            exclude_paths=exclude_paths,
-            zone_overrides=zone_overrides,
-            design_variance=variance,
-        )
+        kwargs = {
+            "root_path": path,
+            "exclude_paths": exclude_paths,
+            "zone_overrides": zone_overrides,
+            "design_variance": variance,
+        }
         if target_files is not None:
             kwargs["target_files"] = list(target_files)
         raw = analyze_directory(**kwargs)
@@ -176,6 +177,7 @@ def run(args: argparse.Namespace):
                     text=True,
                     cwd=str(git_cwd),
                     timeout=5,
+                    check=False,
                 )
                 root_abs = (
                     gr.stdout.strip()

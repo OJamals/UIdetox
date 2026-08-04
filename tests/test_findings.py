@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from uidetox.analyzer_engine import _analyze_rule, analyze_file
+from uidetox.analyzer_engine import _static_finding as _engine_static_finding
 from uidetox.findings import (
     STRUCTURED_REVIEW_POLICY_VERSION,
     EligibilityContext,
@@ -242,6 +244,212 @@ def test_finding_sanitizes_sensitive_matched_evidence_before_construction(
     serialized = json.dumps(finding.to_dict())
     assert secret not in serialized
     assert "redacted" in serialized.lower()
+
+
+def test_finding_normalizes_bounded_evidence_policy_without_changing_identity() -> None:
+    common = {
+        "detector_id": "POLICY-TEST",
+        "category": "quality",
+        "severity": "warning",
+        "confidence": 0.9,
+        "message": "Review the component.",
+        "provenance": "static",
+        "evidence": {"matched_text": "<div>"},
+    }
+    defaulted = Finding.create(**common)
+    policy = Finding.create(
+        **{
+            **common,
+            "evidence": {
+                "matched_text": "<div>",
+                "basis": "heuristic",
+                "authority": "project-ui-policy",
+                "applicability": {"status": "applicable", "exception": False},
+                "remediation_constraints": ["Preserve the task path."],
+            },
+        }
+    )
+
+    assert defaulted.evidence["basis"] == "review"
+    assert defaulted.evidence["authority"] == ""
+    assert defaulted.evidence["applicability"] == {}
+    assert defaulted.evidence["remediation_constraints"] == ()
+    assert policy.evidence["basis"] == "heuristic"
+    assert policy.evidence["authority"] == "project-ui-policy"
+    assert policy.evidence["applicability"] == {
+        "status": "applicable",
+        "exception": False,
+    }
+    assert policy.evidence["remediation_constraints"] == ("Preserve the task path.",)
+    assert policy.fingerprint == defaulted.fingerprint
+    policy_payload = policy.to_dict()
+    assert (
+        Finding.from_dict(policy_payload).to_dict()["evidence"]
+        == policy_payload["evidence"]
+    )
+
+
+def test_finding_evidence_policy_fails_closed_and_bounds_untrusted_values() -> None:
+    finding = Finding.create(
+        detector_id="POLICY-BOUNDS",
+        category="quality",
+        severity="warning",
+        confidence=0.9,
+        message="Review the component.",
+        provenance="static",
+        evidence={
+            "basis": "mandatory",
+            "authority": "X" * 200,
+            "applicability": {str(index): "Y" * 300 for index in range(20)},
+            "remediation_constraints": ["Z" * 600 for _ in range(10)],
+        },
+    )
+
+    assert finding.evidence["basis"] == "review"
+    assert finding.evidence["authority"] == ""
+    assert len(finding.evidence["applicability"]) == 16
+    assert all(
+        len(value) == 256 for value in finding.evidence["applicability"].values()
+    )
+    assert len(finding.evidence["remediation_constraints"]) == 8
+    assert all(
+        len(value) == 512 for value in finding.evidence["remediation_constraints"]
+    )
+
+
+def test_producer_families_emit_canonical_evidence_policy(tmp_path: Path) -> None:
+    from uidetox import design_semantics
+    from uidetox.contract_graph import _graph_finding
+    from uidetox.runtime_layout import RuntimeFinding
+
+    static = _engine_static_finding(
+        {
+            "id": "STATIC-POLICY",
+            "category": "accessibility",
+            "tier": "T2",
+            "issue": "Focusable control needs a visible indicator.",
+            "command": "Add a visible focus indicator.",
+        },
+        tmp_path / "Card.tsx",
+        "<button />",
+        rule={
+            "tier": "T2",
+            "basis": "normative",
+            "authority": "WCAG 2.4.7",
+            "applicability": {"status": "applicable"},
+            "remediation_constraints": ["Preserve keyboard access."],
+        },
+        matched_evidence="<button />",
+    )
+    runtime = RuntimeFinding(
+        code="RUNTIME-POLICY",
+        category="layout",
+        severity="warning",
+        message="Observed clipping.",
+        metrics={"overflow_px": 12},
+    )
+    design = design_semantics._finding(
+        code="DESIGN-POLICY",
+        category="materiality",
+        severity="warning",
+        confidence=0.8,
+        message="Possible decorative excess.",
+        metrics={"shadow_count": 4},
+    )
+    source = SourceAnchor(
+        file="api/openapi.yaml",
+        line=12,
+        framework="openapi",
+        extractor="test",
+        confidence=0.9,
+    )
+    backend = ContractNode(
+        id="backend:GET:/orders",
+        kind="operation",
+        name="listOrders",
+        side="backend",
+        capability_status="available",
+        source=source,
+        attributes={"normalized_path": "/orders", "method": "GET"},
+    )
+    contract = _graph_finding("response_mismatch", None, backend, "Response differs.")
+
+    assert static.evidence["basis"] == "normative"
+    assert static.evidence["authority"] == "WCAG 2.4.7"
+    assert static.evidence["remediation_constraints"] == ("Preserve keyboard access.",)
+    assert runtime.evidence["basis"] == "measured"
+    assert design.evidence["basis"] == "heuristic"
+    assert contract.evidence["basis"] == "measured"
+    assert contract.evidence["authority"] == "project-contract"
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "runtime-chart-baseline-misalignment",
+        "runtime-component-clipped",
+        "runtime-font-misalignment",
+        "runtime-horizontal-padding",
+        "runtime-interactive-scroll-concealment",
+        "runtime-layout-misalignment",
+        "runtime-line-spacing",
+        "runtime-navigation-choice-overload",
+        "runtime-pathological-text-wrap",
+        "runtime-text-collision",
+        "runtime-text-edge-contact",
+        "runtime-text-separation",
+        "runtime-vertical-padding",
+    ),
+)
+def test_runtime_detectors_emit_direct_bounded_remediation_constraints(
+    code: str,
+) -> None:
+    from uidetox.runtime_layout import RuntimeFinding
+
+    finding = RuntimeFinding(
+        code=code,
+        category="layout",
+        severity="warning",
+        message="Untrusted display copy must not select remediation.",
+    )
+
+    assert isinstance(finding.evidence["remediation_constraints"], tuple)
+    assert 0 < len(finding.evidence["remediation_constraints"]) <= 8
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        "runtime-color-unresolved",
+        "runtime-component-drift",
+        "runtime-contrast",
+        "runtime-dialog-modality",
+        "runtime-focus-appearance-guidance",
+        "runtime-focus-visible",
+        "runtime-offscreen",
+        "runtime-palette-role-drift",
+        "runtime-spatial-rhythm",
+        "runtime-target-size",
+        "runtime-target-spacing-unresolved",
+        "runtime-type-hierarchy",
+    ),
+)
+def test_design_detectors_emit_direct_bounded_remediation_constraints(
+    code: str,
+) -> None:
+    from uidetox.design_semantics import _finding
+
+    finding = _finding(
+        code=code,
+        category="quality",
+        severity="warning",
+        confidence=0.8,
+        message="Untrusted display copy must not select remediation.",
+        metrics={},
+    )
+
+    assert isinstance(finding.evidence["remediation_constraints"], tuple)
+    assert 0 < len(finding.evidence["remediation_constraints"]) <= 8
 
 
 def test_finding_recursively_freezes_caller_owned_payloads(tmp_path: Path) -> None:
@@ -767,7 +975,7 @@ def test_zero_width_standard_rule_terminates_and_preserves_each_anchor(
 def test_runtime_and_contract_producers_return_canonical_findings() -> None:
     class Element:
         tag = "p"
-        measurements = {
+        measurements: ClassVar = {
             "hasText": True,
             "clientWidth": 120.0,
             "scrollWidth": 156.0,

@@ -85,7 +85,7 @@ def _get_commands_dirs() -> list[Path]:
         from uidetox.state import get_project_root
 
         candidates.append(get_project_root() / "commands")
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - optional integration and top-level CLI boundary preserve command failure reporting
         pass
 
     candidates.append(Path.cwd() / ".claude" / "skills" / "uidetox" / "commands")
@@ -195,7 +195,7 @@ def parse_args(args_list=None):
     setup_parser.add_argument(
         "--visual-threshold",
         type=int,
-        choices=range(0, 255),
+        choices=range(255),
         help="Persist the per-channel visual change threshold (0-254)",
     )
     setup_parser.add_argument(
@@ -476,7 +476,7 @@ def parse_args(args_list=None):
     capture_parser.add_argument(
         "--threshold",
         type=int,
-        choices=range(0, 255),
+        choices=range(255),
         help="Per-channel visual change threshold (0-254)",
     )
     capture_parser.add_argument(
@@ -504,7 +504,7 @@ def parse_args(args_list=None):
     capture_parser.add_argument(
         "--png-compress-level",
         type=int,
-        choices=range(0, 10),
+        choices=range(10),
         help="Lossless PNG compression level (0-9)",
     )
     capture_parser.add_argument(
@@ -537,7 +537,7 @@ def parse_args(args_list=None):
     visual_parser.add_argument(
         "--threshold",
         type=int,
-        choices=range(0, 255),
+        choices=range(255),
         default=30,
     )
     visual_parser.add_argument("--max-pixels", type=int, default=40_000_000)
@@ -551,7 +551,7 @@ def parse_args(args_list=None):
     visual_parser.add_argument(
         "--png-compress-level",
         type=int,
-        choices=range(0, 10),
+        choices=range(10),
         default=6,
     )
     visual_parser.add_argument("--png-optimize", action="store_true")
@@ -800,9 +800,7 @@ def parse_args(args_list=None):
     )
 
     # Command: tsc
-    tsc_parser = subparsers.add_parser(
-        "tsc", help="Run TypeScript compiler and queue errors"
-    )
+    subparsers.add_parser("tsc", help="Run TypeScript compiler and queue errors")
     # Command: lint
     lint_parser = subparsers.add_parser(
         "lint", help="Run detected linter and queue errors"
@@ -922,7 +920,7 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - optional integration and top-level CLI boundary preserve command failure reporting
         print(f"An error occurred: {e}", file=sys.stderr)
         sys.exit(1)
 

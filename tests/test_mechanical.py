@@ -51,7 +51,9 @@ def test_run_mechanical_command_preserves_success_output(
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, stdout="stdout\n", stderr="stderr\n")
+        return subprocess.CompletedProcess(
+            argv, 0, stdout="stdout\n", stderr="stderr\n"
+        )
 
     monkeypatch.setattr(mechanical.subprocess, "run", fake_run)
 
@@ -67,6 +69,7 @@ def test_run_mechanical_command_preserves_success_output(
                 "cwd": tmp_path,
                 "timeout": 120,
                 "env": None,
+                "check": False,
             },
         )
     ]
@@ -83,9 +86,9 @@ def test_run_mechanical_command_preserves_nonzero_exit(
         ),
     )
 
-    assert mechanical.run_mechanical_command("tool", tmp_path) == mechanical.MechanicalRun(
-        7, "partial\nfailure\n"
-    )
+    assert mechanical.run_mechanical_command(
+        "tool", tmp_path
+    ) == mechanical.MechanicalRun(7, "partial\nfailure\n")
 
 
 @pytest.mark.parametrize(
@@ -135,9 +138,7 @@ def test_run_mechanical_command_propagates_cwd_and_env(
 def test_run_mechanical_command_terminates_real_child_before_one_second(
     tmp_path: Path,
 ) -> None:
-    command = shlex.join(
-        [sys.executable, "-c", "import time; time.sleep(2)"]
-    )
+    command = shlex.join([sys.executable, "-c", "import time; time.sleep(2)"])
 
     started = time.monotonic()
     run = mechanical.run_mechanical_command(command, tmp_path, timeout=0.05)

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from uidetox.analyzer_rules import RULES as _RAW_RULES
 
@@ -36,6 +37,10 @@ _CATEGORY_MATCHERS = (
             "CAPTION",
             "SEMANTIC",
             "VIEWBOX",
+            "TOUCH_TARGET",
+            "TEXT_SIZE_ADJUST",
+            "HIDDEN_SCROLLBAR",
+            "FORCED_COLOR",
         ),
     ),
     ("typography", ("TYPOGRAPH", "FONT", "LINE_HEIGHT", "TEXT_TRANSFORM")),
@@ -45,7 +50,15 @@ _CATEGORY_MATCHERS = (
     ),
     (
         "motion",
-        ("MOTION", "ANIMAT", "TRANSITION", "BOUNCE", "AUTOPLAY", "SCROLL_BEHAVIOR"),
+        (
+            "MOTION",
+            "ANIMAT",
+            "TRANSITION",
+            "BOUNCE",
+            "AUTOPLAY",
+            "SCROLL_BEHAVIOR",
+            "SCROLL_SNAP",
+        ),
     ),
     (
         "layout",
@@ -101,6 +114,7 @@ _CATEGORY_MATCHERS = (
             "REFERENCE",
             "SETINTERVAL",
             "SETTIMEOUT",
+            "BFCACHE",
         ),
     ),
     (

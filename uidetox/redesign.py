@@ -17,6 +17,7 @@ from uidetox.experience_states import (
     normalize_experience_states,
     required_experience_states,
 )
+from uidetox.findings import coerce_finding
 from uidetox.frontend_map import (
     FrontendMap,
     frontend_map_is_fresh,
@@ -67,7 +68,7 @@ class RedesignBrief:
         object.__setattr__(self, "visual_density", dials.visual_density)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RedesignBrief":
+    def from_dict(cls, value: dict[str, Any]) -> RedesignBrief:
         return cls(
             target=str(value.get("target", ".")),
             variants=int(value.get("variants", 3)),
@@ -116,7 +117,7 @@ class RedesignProposal:
         )
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RedesignProposal":
+    def from_dict(cls, value: dict[str, Any]) -> RedesignProposal:
         return cls(
             id=str(value["id"]),
             name=str(value["name"]),
@@ -175,7 +176,7 @@ class ProposalDistance:
     changed_dimensions: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "ProposalDistance":
+    def from_dict(cls, value: dict[str, Any]) -> ProposalDistance:
         return cls(
             left=str(value["left"]),
             right=str(value["right"]),
@@ -205,7 +206,7 @@ class RedesignSet:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RedesignSet":
+    def from_dict(cls, value: dict[str, Any]) -> RedesignSet:
         version = int(value.get("schema_version", 0))
         if version != 2:
             raise ValueError(f"Unsupported redesign schema {version}; expected 2.")
@@ -657,74 +658,6 @@ def _ground_creative_direction(
     )
 
 
-def _runtime_remediation_instruction(
-    detector_id: str,
-    categories: tuple[str, ...],
-    constraints: tuple[str, ...],
-) -> str:
-    if constraints:
-        return " ".join(constraints)
-    signal = " ".join((detector_id, *categories)).lower()
-    if any(token in signal for token in ("clip", "overflow", "truncat")):
-        return (
-            "Restore intrinsic sizing and wrapping at every observed anchor; keep "
-            "truncation or scrolling only when source semantics explicitly require it."
-        )
-    if any(
-        token in signal for token in ("target-size", "target-spacing", "touch-target")
-    ):
-        return (
-            "Meet the evidenced pointer-target size or spacing rule without changing "
-            "the control's accessible role or inline behavior."
-        )
-    if "navigation-choice-overload" in signal:
-        return (
-            "Group destinations by user task, expose a clear first choice, and remove "
-            "scroll-dependent navigation discovery."
-        )
-    if "typography" in categories or any(
-        token in signal
-        for token in ("font", "line-spacing", "text-wrap", "text-separation")
-    ):
-        return (
-            "Reconcile type hierarchy, line metrics, and content measure through existing "
-            "tokens at every observed viewport."
-        )
-    if any(token in signal for token in ("align", "collision", "geometry", "overlap")):
-        return (
-            "Repair the shared layout parent so peer alignment, spacing, and collision "
-            "behavior follow one responsive rule."
-        )
-    if "spacing" in categories or any(
-        token in signal for token in ("padding", "edge-contact", "inset")
-    ):
-        return (
-            "Normalize the owning component's logical padding and content insets through "
-            "shared spacing tokens, preserving intentional scroll boundaries."
-        )
-    if any(
-        token in signal for token in ("a11y", "access", "contrast", "focus", "keyboard")
-    ):
-        return (
-            "Restore semantic, contrast, focus, and keyboard behavior at the owning "
-            "component boundary."
-        )
-    if any(token in signal for token in ("responsive", "viewport", "edge", "padding")):
-        return (
-            "Replace the viewport-specific exception with one narrow-to-wide layout rule "
-            "that preserves source order and safe edge spacing."
-        )
-    if any(token in signal for token in ("state", "action", "interact", "navigation")):
-        return (
-            "Make the intended action and every loading, empty, error, success, and "
-            "disabled state explicit without changing its contract."
-        )
-    return (
-        "Correct the owning component and shared token or layout rule, then recapture "
-        "every observed anchor to prove the detector is absent."
-    )
-
-
 def _experience_state_plan(
     frontend_map: FrontendMap,
     start_order: int,
@@ -864,37 +797,25 @@ def _runtime_remediation_plan(
                 str(target) for target in targets if target
             )
 
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for finding in findings:
-        if not isinstance(finding, dict):
+    grouped: dict[str, list[tuple[dict[str, Any], Any]]] = {}
+    for row in findings:
+        if not isinstance(row, dict):
             continue
-        detector_id = str(
-            finding.get("detector_id") or finding.get("code") or ""
-        ).strip()
-        selector = str(finding.get("selector", "")).strip()
+        finding = coerce_finding(row)
+        detector_id = finding.detector_id
+        selector = str(row.get("selector", "")).strip()
         if detector_id and selector and not detector_id.startswith("browser-"):
-            grouped.setdefault(detector_id, []).append(finding)
+            grouped.setdefault(detector_id, []).append((row, finding))
 
     plan: list[dict[str, Any]] = []
     for offset, detector_id in enumerate(sorted(grouped)):
         rows = grouped[detector_id]
         categories = tuple(
-            sorted(
-                {
-                    str(row.get("category", "")).strip()
-                    for row in rows
-                    if row.get("category")
-                }
-            )
+            sorted({finding.category for _, finding in rows if finding.category})
         )
         constraints: list[str] = []
-        for row in rows:
-            metrics = row.get("metrics", {})
-            raw_constraints = (
-                metrics.get("remediation_constraints", ())
-                if isinstance(metrics, dict)
-                else ()
-            )
+        for _, finding in rows:
+            raw_constraints = finding.evidence.get("remediation_constraints", ())
             if isinstance(raw_constraints, (list, tuple)):
                 constraints.extend(
                     str(constraint).strip()
@@ -903,12 +824,12 @@ def _runtime_remediation_plan(
                 )
         remediation_constraints = tuple(dict.fromkeys(constraints))
         severity = max(
-            (str(row.get("severity", "info")) for row in rows),
+            (finding.severity for _, finding in rows),
             key=lambda value: _SEVERITY_ORDER.get(value, -1),
         )
         anchors_by_key: dict[tuple[str, ...], dict[str, str]] = {}
         modules: set[str] = set()
-        for row in rows:
+        for row, _ in rows:
             anchor = {
                 key: str(row.get(key, ""))
                 for key in (
@@ -925,22 +846,28 @@ def _runtime_remediation_plan(
             modules.update(
                 source_targets.get((anchor["capture_id"], anchor["selector"]), ())
             )
+        requires_review = not remediation_constraints
         plan.append(
             {
                 "order": start_order + offset,
-                "kind": "runtime-finding",
+                "kind": "runtime-review" if requires_review else "runtime-finding",
                 "modules": sorted(modules),
                 "detector_id": detector_id,
                 "category": ", ".join(categories) or "ui",
                 "severity": severity,
                 "finding_count": len(rows),
-                "instruction": _runtime_remediation_instruction(
-                    detector_id,
-                    categories,
-                    remediation_constraints,
+                "instruction": (
+                    "Investigate the current detector evidence and define bounded "
+                    "detector-owned remediation constraints before source changes."
+                    if requires_review
+                    else " ".join(remediation_constraints)
                 ),
                 "anchors": [anchors_by_key[key] for key in sorted(anchors_by_key)],
-                "evidence": "current frontend-map runtime findings",
+                "evidence": (
+                    "current frontend-map runtime finding lacks remediation constraints"
+                    if requires_review
+                    else "current frontend-map runtime findings"
+                ),
             }
         )
     return tuple(plan)
@@ -1020,8 +947,14 @@ def _build_proposal(
             for item in experience_state_plan
         )
         + tuple(
-            f"Runtime remediation check: {item['detector_id']} is absent from fresh "
-            f"captures across {item['finding_count']} mapped occurrence(s)."
+            (
+                f"Runtime remediation review: {item['detector_id']} lacks "
+                "detector-owned remediation constraints; investigate before source "
+                "changes."
+                if item["kind"] == "runtime-review"
+                else f"Runtime remediation check: {item['detector_id']} is absent from "
+                f"fresh captures across {item['finding_count']} mapped occurrence(s)."
+            )
             for item in runtime_remediation
         )
     )
@@ -1139,7 +1072,7 @@ def _source_module_evidence(
             if node.file and node.kind in {"action", "data", "region", "route", "state"}
         }
     selected = set(owned)
-    pending = list(sorted(owned))
+    pending = sorted(owned)
     while pending:
         current = pending.pop()
         for dependency in sorted(dependencies.get(current, ())):

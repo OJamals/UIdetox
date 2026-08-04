@@ -198,7 +198,7 @@ def _flag_for_review(session_id: str, meta: dict, confidence: float):
             f"confidence={confidence:.2f}. {meta.get('review_reason', '')}. "
             f"Action: {review_request['action_required']}"
         )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - non-critical review annotation must not block session persistence
         pass  # Non-critical
 
 
@@ -563,6 +563,7 @@ def _diagnose_prompt(issues: list, dials_block: str) -> str:
 ## Your Mission
 Compare the observations from the OBSERVE stage against SKILL.md rules.
 Identify every AI slop pattern and design violation.
+Classify each result as normative, measured, heuristic, or house style. Never report a house-style preference as a WCAG or protocol failure.
 
 ## Already Known Issues
 {existing}
@@ -570,55 +571,57 @@ Identify every AI slop pattern and design violation.
 ## Systematic Audit Checklist (check ALL categories)
 
 ### 1. Typography (consult reference/typography.md)
-- Banned fonts: Inter, Roboto, Arial, Open Sans, system-ui as primary
+- Generic font choice without project-intent, language-coverage, performance, or design-system evidence
 - Missing type hierarchy (only Regular 400 and Bold 700 used)
-- Serif fonts on dashboards
+- Font choice mismatched to content, density, brand, or glyph needs
 - Monospace as lazy "developer" vibe
 - Large icons above every heading
-- Hardcoded px font sizes instead of rem (accessibility)
-- Overly tight leading/line-height on body paragraphs
+- Text resize, spacing override, zoom, fallback-font, or localization clipping failures
+- Overly tight leading/line-height proven in rendered body paragraphs
 
 ### 2. Color & Contrast (consult reference/color-and-contrast.md)
 - Purple-blue gradients (the #1 AI fingerprint)
 - Cyan-on-dark palette
-- Pure black (#000000)
+- Pure black used as an unexamined AI-slop default (house-style review only)
 - Gray text on colored backgrounds
 - Gradient text on headings
 - Oversaturated accents (> 80%)
 - Neon/outer glows
-- No dark mode support
+- Incomplete dark mode when dark mode is in product scope
 - Raw CSS named colors (red, blue, green) instead of palette
 
 ### 3. Layout & Spacing (consult reference/spatial-design.md)
 - Centered hero sections (banned when DESIGN_VARIANCE > 4)
 - 3-column card feature rows
-- h-screen instead of min-h-[100dvh]
+- Viewport-filling UI without tested 100vh/100dvh, safe-area, and virtual-keyboard behavior
 - No max-width container
 - Cards for everything / nested cards
 - Uniform spacing everywhere
 - Overpadded layouts
-- Custom flex centering instead of grid place-items-center
+- Needlessly complex centering or brittle percentage math
 
 ### 4. Materiality & Surfaces
 - Glassmorphism (backdrop-blur + transparency)
 - Oversized border-radius (20-32px on everything)
 - Oversized shadows (2xl/3xl)
 - Pill-shaped badges
-- Solid opaque borders for dividers (missing /50 opacity)
+- Border/surface treatment inconsistent with project tokens or measured contrast needs
 
 ### 5. Motion & Interaction (consult reference/motion-design.md)
-- Bounce/elastic easing
-- animate-bounce/pulse/spin
-- Missing hover, focus, active states
+- Decorative bounce/elastic easing without product intent
+- Perpetual decorative animate-bounce/pulse/spin; do not flag task-appropriate progress indicators
+- Missing visible focus, activation, or applicable pending/disabled states
+- Hover-only affordances or hover assumptions on coarse/no-hover input
 - Transform animations on nav links
-- Hover states missing transition-all/colors
+- Motion that ignores reduced-motion preferences or delays interaction
 
-### 6. States & UX Completeness
-- Missing loading states (or generic spinners instead of skeletons)
+### 6. States & UX Completeness (consult reference/full-stack-integration.md)
+- Missing applicable first-run/loading/progress/retrying/cancelled/offline/stale/partial states
 - Missing error states
 - Missing empty states
 - Missing disabled states
-- Native browser scrollbars (missing custom styling/hiding)
+- Missing auth/forbidden/conflict/rate-limit/recovery states
+- Hidden or undiscoverable scroll overflow
 
 ### 7. Content & Data Quality
 - Lorem Ipsum
@@ -634,12 +637,16 @@ Identify every AI slop pattern and design violation.
 - Inline styles mixed with classes
 - Import hallucinations
 
-### 9. Accessibility
-- Missing focus indicators
-- No ARIA labels on icon-only buttons
-- Insufficient contrast ratios
-- No skip-to-content link
-- Labels missing htmlFor attributes linking to inputs
+### 9. Accessibility (consult reference/accessibility-and-inclusive-design.md)
+- Missing, imperceptible, clipped, or obscured focus indicators
+- Controls without accurate accessible names
+- Insufficient measured text/non-text contrast across relevant states
+- Repeated blocks without a bypass mechanism
+- Inputs without persistent accessible-name associations
+- Sub-24×24 CSS pixel targets without evidenced WCAG 2.5.8 exception
+- Drag-only operations, inaccessible authentication, redundant entry, or inconsistent repeated help
+- Status/error/progress updates not programmatically announced
+- Forced-colors, zoom/reflow, text-spacing, RTL, localization, or IME failures
 
 ### 10. Strategic Omissions
 - Missing 404 page
@@ -647,6 +654,16 @@ Identify every AI slop pattern and design violation.
 - Missing form validation
 - Missing favicon
 - Missing meta tags
+
+### 11. Full-Stack Integration (consult reference/full-stack-integration.md)
+- UI types or states diverging from backend/API/DB contracts
+- Client-only validation or authorization treated as authoritative
+- Missing parameter-location, media-type, header/cookie, scope, response, nullability, or read/write lineage
+- Human-readable error text parsed as control flow instead of status/problem identity
+- 401 and 403 collapsed into same redirect behavior
+- Unsafe retry, duplicate submission, optimistic mutation, rollback, idempotency, or conflict behavior
+- Stale response races, incomplete cache invalidation, partial-success ambiguity, or lost user input
+- Missing correlation/trace evidence or telemetry containing secrets/personal data
 
 ## Output Format
 For each issue found, output:
@@ -692,13 +709,13 @@ Review all queued issues and optimize the fix order for maximum impact with mini
 {issue_list}
 
 ## Prioritization Rules (from AGENTS.md)
-1. Font swap — biggest instant improvement, lowest risk
-2. Color palette cleanup — remove clashing or oversaturated colors
-3. Hover and active states — makes the interface feel alive
-4. Layout and spacing — proper grid, max-width, consistent padding
-5. Replace generic components — swap cliché patterns for modern alternatives
-6. Add loading, empty, and error states — makes it feel finished
-7. Polish typography scale and spacing — the premium final touch
+1. Broken contracts, security, data loss, and inaccessible task completion
+2. Missing error/auth/conflict/retry/offline and mutation-recovery states
+3. Keyboard, focus, names, contrast, target, reflow, localization, and input-modality failures
+4. Clipping, overflow, responsive structure, performance, and interaction latency
+5. Proven design-system drift and repeated component inconsistency
+6. House-style anti-slop cleanup that preserves product intent
+7. Typography, motion, color, and spacing polish verified in real browser states
 
 ## Output
 Provide the recommended fix order as a numbered list with rationale for each grouping.
@@ -746,7 +763,7 @@ def _fix_prompt(
         context_block = "\n".join(lines)
 
     # Build memory and deconfliction blocks with targeted local context
-    batch_files = list(set(i.get("file", "") for i in batch))
+    batch_files = list({i.get("file", "") for i in batch})
     memory_block = _build_memory_block(
         query=query_text,
         files=batch_files,

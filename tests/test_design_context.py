@@ -1,8 +1,9 @@
 """Typed design intent and structurally active redesign dials."""
 
-import pytest
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from uidetox.cli import parse_args
 from uidetox.commands import setup as setup_command
@@ -109,7 +110,7 @@ def test_setup_persists_typed_design_intent(monkeypatch):
         ),
     )
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
-    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(setup_command, "load_config", dict)
     monkeypatch.setattr(
         setup_command, "save_config", lambda config: saved.update(config)
     )
@@ -186,7 +187,7 @@ def test_setup_interactively_captures_and_confirms_product_intent(monkeypatch):
         return next(answers)
 
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
-    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(setup_command, "load_config", dict)
     monkeypatch.setattr(
         setup_command, "save_config", lambda config: saved.update(config)
     )
@@ -223,7 +224,7 @@ def test_setup_can_skip_interactive_intent_interview(monkeypatch):
             return True
 
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
-    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(setup_command, "load_config", dict)
     monkeypatch.setattr(
         setup_command, "save_config", lambda config: saved.update(config)
     )
@@ -293,7 +294,7 @@ def test_redesign_ranking_weights_user_intent_above_fallback_text(tmp_path):
 def test_default_setup_preserves_mapped_intent_through_redesign(monkeypatch, tmp_path):
     saved = {}
     monkeypatch.setattr(setup_command, "ensure_uidetox_dir", lambda: None)
-    monkeypatch.setattr(setup_command, "load_config", lambda: {})
+    monkeypatch.setattr(setup_command, "load_config", dict)
     monkeypatch.setattr(
         setup_command, "save_config", lambda config: saved.update(config)
     )

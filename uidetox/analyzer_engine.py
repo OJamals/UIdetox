@@ -106,6 +106,16 @@ def _static_finding(
         tier, "warning"
     )
     source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    policy = {
+        key: rule[key]
+        for key in (
+            "basis",
+            "authority",
+            "applicability",
+            "remediation_constraints",
+        )
+        if isinstance(rule, dict) and key in rule
+    }
     return Finding.create(
         detector_id=detector_id,
         category=str(candidate.get("category", "quality")),
@@ -115,7 +125,11 @@ def _static_finding(
             candidate.get("issue", candidate.get("message", "Static finding."))
         ),
         provenance="static",
-        evidence={"matched_text": matched_evidence or "", "source_hash": source_hash},
+        evidence={
+            "matched_text": matched_evidence or "",
+            "source_hash": source_hash,
+            **policy,
+        },
         source_anchor={
             "path": str(filepath.resolve()),
             "line": line,

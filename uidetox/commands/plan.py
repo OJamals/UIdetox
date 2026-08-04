@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from uidetox.findings import (
+    coerce_finding,
     current_evidence_hashes,
     requires_resolution,
     score_current_snapshot,
@@ -57,76 +58,6 @@ def _component_key(filepath: str) -> str:
     return parent
 
 
-def _categorize_issue(desc: str) -> str:
-    """Quick category inference from description."""
-    desc_lower = desc.lower()
-    category_keywords = {
-        "typography": [
-            "font",
-            "typography",
-            "inter",
-            "roboto",
-            "type scale",
-            "line-height",
-            "px font",
-        ],
-        "color": [
-            "color",
-            "gradient",
-            "palette",
-            "contrast",
-            "dark mode",
-            "purple",
-            "black",
-        ],
-        "layout": [
-            "layout",
-            "grid",
-            "spacing",
-            "padding",
-            "center",
-            "viewport",
-            "card",
-            "dashboard",
-        ],
-        "motion": ["animation", "bounce", "pulse", "spin", "transition"],
-        "materiality": ["shadow", "glassmorphism", "radius", "glow", "opacity", "blur"],
-        "states": ["hover", "focus", "disabled", "loading", "error", "empty"],
-        "content": [
-            "copy",
-            "lorem",
-            "generic",
-            "placeholder",
-            "emoji",
-            "oops",
-            "exclamation",
-        ],
-        "code quality": [
-            "div soup",
-            "z-index",
-            "inline style",
-            "!important",
-            "ternary",
-            "any type",
-            "ts-ignore",
-        ],
-        "duplication": ["duplicate", "repeated", "copy-paste", "identical"],
-        "dead code": [
-            "commented",
-            "unused",
-            "unreachable",
-            "empty handler",
-            "dead",
-            "deprecated",
-            "console",
-        ],
-    }
-    for cat, kws in category_keywords.items():
-        if any(kw in desc_lower for kw in kws):
-            return cat
-    return "other"
-
-
 def run(args: argparse.Namespace):
     state = load_state()
     config = load_config()
@@ -165,7 +96,7 @@ def run(args: argparse.Namespace):
     # ---- Category breakdown ----
     cat_counts: dict[str, int] = defaultdict(int)
     for i in issues:
-        cat = _categorize_issue(i.get("issue", ""))
+        cat = coerce_finding(i).category
         cat_counts[cat] += 1
 
     if cat_counts:
@@ -199,7 +130,7 @@ def run(args: argparse.Namespace):
         files_in_group = set()
         for i in comp_issues:
             tier_breakdown[i.get("tier") or "T4"] += 1
-            cat_breakdown[_categorize_issue(i.get("issue", ""))] += 1
+            cat_breakdown[coerce_finding(i).category] += 1
             files_in_group.add(i.get("file", ""))
 
         tier_str = " ".join(f"{t}:{c}" for t, c in sorted(tier_breakdown.items()))
@@ -212,12 +143,13 @@ def run(args: argparse.Namespace):
         print(f"     Files: {len(files_in_group)}")
 
         # Show up to 5 issues per group
-        shown = 0
-        for i in sorted(
-            comp_issues,
-            key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(
-                x.get("tier", "T4"), 4
-            ),
+        for shown, i in enumerate(
+            sorted(
+                comp_issues,
+                key=lambda x: {"T1": 0, "T2": 1, "T3": 2, "T4": 3}.get(
+                    x.get("tier", "T4"), 4
+                ),
+            )
         ):
             if shown >= 5:
                 remaining = len(comp_issues) - shown
@@ -228,7 +160,6 @@ def run(args: argparse.Namespace):
             print(
                 f"       [{i.get('tier', '?')}] {i.get('id', '?')} {short_file}{location}: {i.get('issue', '?')[:70]}"
             )
-            shown += 1
         print()
 
     # ---- Score context ----

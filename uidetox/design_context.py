@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from uidetox.frontend_map import FrontendMap
@@ -70,7 +71,7 @@ class DesignDials:
         )
 
     @classmethod
-    def from_config(cls, config: Mapping[str, Any]) -> "DesignDials":
+    def from_config(cls, config: Mapping[str, Any]) -> DesignDials:
         return cls(
             design_variance=config.get("DESIGN_VARIANCE", 8),
             motion_intensity=config.get("MOTION_INTENSITY", 6),
@@ -117,7 +118,7 @@ class DesignIntent:
     confirmed_at: str = ""
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any] | None) -> "DesignIntent":
+    def from_dict(cls, value: Mapping[str, Any] | None) -> DesignIntent:
         data = value or {}
         provenance = _provenance(data.get("provenance"))
         evidence = _intent_evidence(data.get("evidence"))
@@ -171,9 +172,9 @@ class DesignSettings:
     def from_config(
         cls,
         config: Mapping[str, Any],
-        frontend_map: "FrontendMap | None" = None,
+        frontend_map: FrontendMap | None = None,
         target: str = ".",
-    ) -> "DesignSettings":
+    ) -> DesignSettings:
         inferred = infer_design_intent(frontend_map, target)
         configured = config.get("design_intent")
         if not isinstance(configured, Mapping) or not configured:
@@ -211,7 +212,7 @@ class DesignSettings:
 
 
 def infer_design_intent(
-    frontend_map: "FrontendMap | None",
+    frontend_map: FrontendMap | None,
     target: str = ".",
 ) -> DesignIntent:
     """Infer a conservative preflight brief when PRODUCT/DESIGN context is absent."""

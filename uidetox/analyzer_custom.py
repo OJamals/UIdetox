@@ -185,22 +185,28 @@ def _analyze_component_layout(filepath: Path, content: str, ext: str) -> list[di
             }
         )
 
-    # ── Heuristic 4: Zero Interactivity File ──
+    # ── Heuristic 4: Large Display-Only File ──
     has_interactivity = bool(
         re.search(
             r"(?:onClick|onChange|onSubmit|onPress|onFocus|onBlur|onKeyDown|onMouseEnter|onHover|hover:|focus:|active:|useState|useReducer|motion\.|animate)",
             content,
         )
     )
+    has_task_path = bool(
+        re.search(
+            r"<(?:a|button|input|select|textarea|summary|form|Route|Routes|Link|NavLink)\b",
+            content,
+        )
+    )
     jsx_count = len(re.findall(r"<[A-Z]\w+", content))
-    if not has_interactivity and jsx_count >= 5 and file_len > 50:
+    if not has_interactivity and not has_task_path and jsx_count >= 5 and file_len > 50:
         issues.append(
             {
                 "id": "STATIC_COMPONENT_SLOP",
                 "file": fpath,
                 "tier": "T2",
-                "issue": f"Static component detected: {jsx_count} JSX elements but zero interactivity (no handlers, no hover/focus, no animation).",
-                "command": "Add hover states, transitions, or micro-interactions. Static pages feel dead — every component should respond to user input.",
+                "issue": f"Large display-only component detected: {jsx_count} JSX elements but no local task path or interaction.",
+                "command": "Verify the component intentionally presents read-only content. Add a task path only when product intent requires one; do not add gratuitous motion.",
             }
         )
 
@@ -272,8 +278,6 @@ def _analyze_document_structure_custom_rule(
             )
         return issues
 
-    # Custom check: missing_hover — buttons with className but no hover: class
-
     if custom == "nested_ternary":
         if has_ast_for(ext):
             return issues  # Handled by AST
@@ -291,8 +295,6 @@ def _analyze_document_structure_custom_rule(
             )
         return issues
 
-    # Custom check: disabled_cursor — disabled elements missing cursor-not-allowed
-
     return None
 
 
@@ -305,24 +307,35 @@ def _analyze_interaction_custom_rule(
     """Run interaction-state heuristics."""
     issues = []
     custom = rule.get("_custom_check")
-    if custom == "missing_hover":
+    if custom == "hover_only_reveal":
         for m in re.finditer(
-            r'<button[^>]*className=["\']([^"\']*)["\']', content, re.IGNORECASE
+            r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE
         ):
             classes = m.group(1)
-            if not class_list_has_interaction_state(
-                classes, filepath, "hover", "button"
+            hidden = re.search(
+                r"(?:^|\s)(?:hidden|invisible|opacity-0)(?:\s|$)", classes
+            )
+            reveal = re.search(
+                r"(?:^|\s)group-hover:(opacity-100|visible|block)\b", classes
+            )
+            if not hidden or not reveal:
+                continue
+            state = re.escape(reveal.group(1))
+            if re.search(
+                rf"(?:^|\s)(?:group-focus|group-focus-within|focus|focus-visible):{state}\b",
+                classes,
             ):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
-                break  # Flag once per file
+                continue
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
+            break
         return issues
 
     # Custom check: missing_focus — interactive elements without focus: class
@@ -347,69 +360,65 @@ def _analyze_interaction_custom_rule(
                 break  # Flag once per file
         return issues
 
-    # Custom check: missing_transition — hover: classes without transition-
-    if custom == "missing_transition":
-        for m in re.finditer(
-            r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE
-        ):
-            classes = m.group(1)
-            if "hover:" in classes and "transition" not in classes:
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
-                break  # Flag once per file
+    if custom == "no_passive_scroll_listener":
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, re.Pattern):
+            return issues
+        for match in pattern.finditer(content):
+            statement_end = content.find(";", match.end())
+            if statement_end < 0:
+                statement_end = len(content)
+            statement = content[match.start() : statement_end + 1]
+            if re.search(r"\bpassive\s*:\s*true\b", statement, re.IGNORECASE):
+                continue
+            if re.search(r"\.preventDefault\s*\(", statement):
+                continue
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
+            break
         return issues
 
-    # Custom check: ugly_scrollbar — overflow scroll without scrollbar styling
-    if custom == "ugly_scrollbar":
-        for m in re.finditer(
-            r'class(?:Name)?=["\']([^"\']*)["\']', content, re.IGNORECASE
-        ):
-            classes = m.group(1)
-            if (
-                re.search(r"overflow-[xy]-(?:auto|scroll)", classes)
-                and "scrollbar" not in classes
-            ):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
-                break  # Flag once per file
+    if custom == "input_ime_enter_unguarded":
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, re.Pattern):
+            return issues
+        for match in pattern.finditer(content):
+            control_start = max(
+                content.rfind("<input", 0, match.start()),
+                content.rfind("<textarea", 0, match.start()),
+            )
+            if control_start < 0 or match.start() - control_start > 600:
+                continue
+            before_match = content[control_start : match.start()]
+            if "onKeyDown" not in before_match:
+                continue
+            if before_match.rfind("/>") > before_match.rfind("onKeyDown"):
+                continue
+            control_context = content[
+                control_start : min(len(content), match.end() + 300)
+            ]
+            if "isComposing" in control_context:
+                continue
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
+            break
         return issues
 
     # Custom check: nested_ternary — only flag in JSX return blocks (rough heuristic)
-
-    if custom == "disabled_cursor":
-        # Find elements with disabled prop/attr
-        disabled_elements = re.findall(
-            r'(?:disabled|isDisabled)[^>]*class(?:Name)?=["\']([^"\']*)["\']',
-            content,
-            re.IGNORECASE,
-        )
-        for classes in disabled_elements:
-            if "cursor-not-allowed" not in classes and "disabled:" not in classes:
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
-                break
-        return issues
 
     return None
 
@@ -599,10 +608,14 @@ def _analyze_accessibility_custom_rule(
             )
         return issues
 
-    if custom == "focus_visible_missing":
-        if re.search(r":focus\s*\{", content, re.IGNORECASE) and not re.search(
-            r":focus-visible\s*\{", content, re.IGNORECASE
+    if custom == "no_select_content":
+        if re.search(r"\bselect-none\b", content) and re.search(
+            r"<(?!button)(?:[a-z][a-z0-9]*)(?:\s[^>]*)?\bclassName=[^>]*select-none",
+            content,
+            re.IGNORECASE,
         ):
+            # Flag if used on non-button elements (not inside <button>)
+            # Simple heuristic: flag if it appears in className on a non-button
             issues.append(
                 {
                     "id": rule["id"],
@@ -612,26 +625,6 @@ def _analyze_accessibility_custom_rule(
                     "command": rule["command"],
                 }
             )
-        return issues
-
-    if custom == "no_select_content":
-        if re.search(r"\bselect-none\b", content):
-            # Flag if used on non-button elements (not inside <button>)
-            # Simple heuristic: flag if it appears in className on a non-button
-            if re.search(
-                r"<(?!button)(?:[a-z][a-z0-9]*)(?:\s[^>]*)?\bclassName=[^>]*select-none",
-                content,
-                re.IGNORECASE,
-            ):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
         return issues
 
     if custom == "outline_none":
@@ -688,19 +681,20 @@ def _analyze_accessibility_custom_rule(
         return issues
 
     if custom == "skip_to_content_missing":
-        if re.search(r"<nav\b", content, re.IGNORECASE) and re.search(
-            r"<main\b", content, re.IGNORECASE
+        if (
+            re.search(r"<nav\b", content, re.IGNORECASE)
+            and re.search(r"<main\b", content, re.IGNORECASE)
+            and not re.search(r'href=["\']#', content, re.IGNORECASE)
         ):
-            if not re.search(r'href=["\']#', content, re.IGNORECASE):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "missing_favicon":
@@ -783,21 +777,6 @@ def _analyze_css_custom_rule(
                 break
         return issues
 
-    if custom == "scroll_snap_without_behavior":
-        if re.search(r"scroll-snap-type:", content, re.IGNORECASE) and not re.search(
-            r"scroll-behavior:", content, re.IGNORECASE
-        ):
-            issues.append(
-                {
-                    "id": rule["id"],
-                    "file": str(filepath.resolve()),
-                    "tier": rule["tier"],
-                    "issue": rule["description"],
-                    "command": rule["command"],
-                }
-            )
-        return issues
-
     if custom == "generic_font_family":
         AI_FONTS = re.compile(
             r"font-family:\s*(?:'Inter'|Inter|'Roboto'|Roboto|'Open Sans'|Open Sans|'Montserrat'|Montserrat|'Poppins'|Poppins|'Lato'|Lato)",
@@ -853,17 +832,16 @@ def _analyze_css_custom_rule(
             r"grid-template-columns:\s*repeat\(\s*(?:[2-9]|\d{2,})\s*,",
             content,
             re.IGNORECASE,
-        ):
-            if not re.search(r"auto-fit|auto-fill", content, re.IGNORECASE):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+        ) and not re.search(r"auto-fit|auto-fill", content, re.IGNORECASE):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "scroll_smooth_no_motion":
@@ -1065,19 +1043,28 @@ def _analyze_html_custom_rule(
                 break
         return issues
 
-    if custom == "missing_tabular_nums":
-        if re.search(r"<table\b", content, re.IGNORECASE) and not re.search(
-            r"tabular-nums", content, re.IGNORECASE
+    if custom == "sortable_table_aria_sort":
+        for header in re.finditer(
+            r"<th\b(?P<attributes>[^>]*)>(?P<body>.*?)</th>",
+            content,
+            re.IGNORECASE | re.DOTALL,
         ):
-            issues.append(
-                {
-                    "id": rule["id"],
-                    "file": str(filepath.resolve()),
-                    "tier": rule["tier"],
-                    "issue": rule["description"],
-                    "command": rule["command"],
-                }
+            attributes = header.group("attributes")
+            body = header.group("body")
+            is_sortable = re.search(r"\bonClick\s*=", attributes) or re.search(
+                r"<button\b", body, re.IGNORECASE
             )
+            if is_sortable and not re.search(r"\baria-sort\s*=", attributes):
+                issues.append(
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                    }
+                )
+                break
         return issues
 
     if custom == "placeholder_only_input":
@@ -1123,19 +1110,19 @@ def _analyze_html_custom_rule(
         return issues
 
     if custom == "anchor_target_blank":
-        if re.search(r'target=["\']_blank["\']', content, re.IGNORECASE):
-            if not re.search(r"noopener", content, re.IGNORECASE) or not re.search(
-                r"noreferrer", content, re.IGNORECASE
-            ):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+        if re.search(r'target=["\']_blank["\']', content, re.IGNORECASE) and (
+            not re.search(r"noopener", content, re.IGNORECASE)
+            or not re.search(r"noreferrer", content, re.IGNORECASE)
+        ):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     return None
@@ -1226,48 +1213,50 @@ def _analyze_browser_security_custom_rule(
         return issues
 
     if custom == "localstorage_ssr":
-        if re.search(r"\b(?:localStorage|sessionStorage)\b", content):
-            if not re.search(r'typeof\s+window\s*!==\s*["\']undefined["\']', content):
-                # Don't flag if it's inside a useEffect (client-only)
-                in_use_effect = bool(
-                    re.search(
-                        r"useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*(?:localStorage|sessionStorage)",
-                        content,
-                        re.DOTALL,
-                    )
+        if re.search(r"\b(?:localStorage|sessionStorage)\b", content) and not re.search(
+            r'typeof\s+window\s*!==\s*["\']undefined["\']', content
+        ):
+            # Don't flag if it's inside a useEffect (client-only)
+            in_use_effect = bool(
+                re.search(
+                    r"useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*(?:localStorage|sessionStorage)",
+                    content,
+                    re.DOTALL,
                 )
-                if not in_use_effect:
-                    issues.append(
-                        {
-                            "id": rule["id"],
-                            "file": str(filepath.resolve()),
-                            "tier": rule["tier"],
-                            "issue": rule["description"],
-                            "command": rule["command"],
-                        }
-                    )
+            )
+            if not in_use_effect:
+                issues.append(
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                    }
+                )
         return issues
 
     if custom == "window_object_ssr":
-        if re.search(r"\bwindow\.\w+", content):
-            if not re.search(r'typeof\s+window\s*!==\s*["\']undefined["\']', content):
-                in_use_effect = bool(
-                    re.search(
-                        r"useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*window\.",
-                        content,
-                        re.DOTALL,
-                    )
+        if re.search(r"\bwindow\.\w+", content) and not re.search(
+            r'typeof\s+window\s*!==\s*["\']undefined["\']', content
+        ):
+            in_use_effect = bool(
+                re.search(
+                    r"useEffect\s*\(\s*(?:\(\s*\)|[^,)]+)\s*=>\s*\{[^}]*window\.",
+                    content,
+                    re.DOTALL,
                 )
-                if not in_use_effect:
-                    issues.append(
-                        {
-                            "id": rule["id"],
-                            "file": str(filepath.resolve()),
-                            "tier": rule["tier"],
-                            "issue": rule["description"],
-                            "command": rule["command"],
-                        }
-                    )
+            )
+            if not in_use_effect:
+                issues.append(
+                    {
+                        "id": rule["id"],
+                        "file": str(filepath.resolve()),
+                        "tier": rule["tier"],
+                        "issue": rule["description"],
+                        "command": rule["command"],
+                    }
+                )
         return issues
 
     return None
@@ -1343,9 +1332,17 @@ def _analyze_react_custom_rule(
         setters = set(
             re.findall(r"\[[^,\]]+,\s*([A-Za-z_$][\w$]*)\]\s*=\s*useState", content)
         )
+        module_constants = set(
+            re.findall(
+                r"^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=",
+                content,
+                re.MULTILINE,
+            )
+        )
         stable = (
             imported
             | setters
+            | module_constants
             | {
                 "String",
                 "Number",
@@ -1367,7 +1364,9 @@ def _analyze_react_custom_rule(
             }
         )
         effect_pattern = re.compile(
-            r"useEffect\s*\(\s*\(\s*\)\s*=>\s*\{(?P<body>.*?)\}\s*,\s*\[\s*\]\s*\)",
+            r"useEffect\s*\(\s*\(\s*\)\s*=>\s*\{"
+            r"(?P<body>(?:(?!\}\s*,\s*\[)[\s\S])*?)"
+            r"\}\s*,\s*\[\s*\]\s*\)",
             re.DOTALL,
         )
         keywords = {
@@ -1430,19 +1429,20 @@ def _analyze_react_custom_rule(
         return issues
 
     if custom == "framer_no_reduced_motion":
-        if re.search(r"from ['\"]framer-motion['\"]", content) and re.search(
-            r"\bmotion\.", content
+        if (
+            re.search(r"from ['\"]framer-motion['\"]", content)
+            and re.search(r"\bmotion\.", content)
+            and not re.search(r"useReducedMotion", content)
         ):
-            if not re.search(r"useReducedMotion", content):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "lazy_without_suspense":
@@ -1619,19 +1619,20 @@ def _analyze_runtime_custom_rule(
         return issues
 
     if custom == "next_image_raw":
-        if re.search(r"from ['\"]next/", content) and re.search(
-            r"<img\b", content, re.IGNORECASE
+        if (
+            re.search(r"from ['\"]next/", content)
+            and re.search(r"<img\b", content, re.IGNORECASE)
+            and not re.search(r"from ['\"]next/image['\"]", content)
         ):
-            if not re.search(r"from ['\"]next/image['\"]", content):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "missing_loading_state":
@@ -1650,17 +1651,20 @@ def _analyze_runtime_custom_rule(
         return issues
 
     if custom == "missing_error_state":
-        if re.search(r"\buseQuery\b", content) and re.search(r"\bisLoading\b", content):
-            if not re.search(r"\bisError\b|\berror\b", content):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+        if (
+            re.search(r"\buseQuery\b", content)
+            and re.search(r"\bisLoading\b", content)
+            and not re.search(r"\bisError\b|\berror\b", content)
+        ):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     return None
@@ -1746,19 +1750,20 @@ def _analyze_design_pattern_custom_rule(
         return issues
 
     if custom == "font_weight_extremes":
-        if re.search(r"\bfont-bold\b", content) and re.search(
-            r"\bfont-normal\b", content
+        if (
+            re.search(r"\bfont-bold\b", content)
+            and re.search(r"\bfont-normal\b", content)
+            and not re.search(r"\bfont-medium\b|\bfont-semibold\b", content)
         ):
-            if not re.search(r"\bfont-medium\b|\bfont-semibold\b", content):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "accordion_faq":
@@ -1781,31 +1786,31 @@ def _analyze_design_pattern_custom_rule(
             r"(?:ThemeToggle|toggleDarkMode|DarkModeToggle|darkMode)",
             content,
             re.IGNORECASE,
-        ):
-            if not re.search(r"prefers-color-scheme", content, re.IGNORECASE):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+        ) and not re.search(r"prefers-color-scheme", content, re.IGNORECASE):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "hardcoded_copyright_year":
-        if re.search(r"©\s*20\d{2}|&copy;\s*20\d{2}", content, re.IGNORECASE):
-            if not re.search(r"getFullYear\s*\(\s*\)", content):
-                issues.append(
-                    {
-                        "id": rule["id"],
-                        "file": str(filepath.resolve()),
-                        "tier": rule["tier"],
-                        "issue": rule["description"],
-                        "command": rule["command"],
-                    }
-                )
+        if re.search(
+            r"©\s*20\d{2}|&copy;\s*20\d{2}", content, re.IGNORECASE
+        ) and not re.search(r"getFullYear\s*\(\s*\)", content):
+            issues.append(
+                {
+                    "id": rule["id"],
+                    "file": str(filepath.resolve()),
+                    "tier": rule["tier"],
+                    "issue": rule["description"],
+                    "command": rule["command"],
+                }
+            )
         return issues
 
     if custom == "pricing_table":
@@ -1832,23 +1837,20 @@ def _analyze_design_pattern_custom_rule(
 
 _CUSTOM_CHECK_HANDLERS = {
     "div_soup": _analyze_document_structure_custom_rule,
-    "missing_hover": _analyze_interaction_custom_rule,
+    "hover_only_reveal": _analyze_interaction_custom_rule,
     "missing_focus": _analyze_interaction_custom_rule,
-    "missing_transition": _analyze_interaction_custom_rule,
-    "ugly_scrollbar": _analyze_interaction_custom_rule,
+    "no_passive_scroll_listener": _analyze_interaction_custom_rule,
+    "input_ime_enter_unguarded": _analyze_interaction_custom_rule,
     "nested_ternary": _analyze_document_structure_custom_rule,
-    "disabled_cursor": _analyze_interaction_custom_rule,
     "commented_code": _analyze_commented_code_custom_rule,
     "unused_import": _analyze_unused_import_custom_rule,
     "unused_state": _analyze_unused_state_custom_rule,
     "video_no_captions": _analyze_accessibility_custom_rule,
     "focus_outline_removed": _analyze_accessibility_custom_rule,
-    "focus_visible_missing": _analyze_accessibility_custom_rule,
     "important_abuse": _analyze_css_custom_rule,
     "important_animation": _analyze_css_custom_rule,
     "css_scroll_behavior": _analyze_css_custom_rule,
     "sticky_without_top": _analyze_css_custom_rule,
-    "scroll_snap_without_behavior": _analyze_css_custom_rule,
     "generic_font_family": _analyze_css_custom_rule,
     "font_display_missing": _analyze_css_custom_rule,
     "alpha_color_abuse": _analyze_css_custom_rule,
@@ -1865,7 +1867,7 @@ _CUSTOM_CHECK_HANDLERS = {
     "missing_favicon": _analyze_accessibility_custom_rule,
     "img_missing_dimensions": _analyze_html_custom_rule,
     "orphaned_label": _analyze_html_custom_rule,
-    "missing_tabular_nums": _analyze_html_custom_rule,
+    "sortable_table_aria_sort": _analyze_html_custom_rule,
     "placeholder_only_input": _analyze_html_custom_rule,
     "srcset_missing": _analyze_html_custom_rule,
     "anchor_target_blank": _analyze_html_custom_rule,

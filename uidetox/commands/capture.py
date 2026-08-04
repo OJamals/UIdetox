@@ -74,7 +74,7 @@ def _server_is_reachable(url: str) -> bool:
         )
         response.close()
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - network reachability probe intentionally maps all transport failures to false
         return False
 
 

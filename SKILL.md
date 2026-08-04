@@ -31,6 +31,19 @@ This preflight combines taste-skill's brief inference, Impeccable's product/desi
 
 ---
 
+## 1.6 EVIDENCE CLASSES — KNOW WHAT KIND OF RULE YOU ARE APPLYING
+
+Keep four classes separate:
+
+1. **Normative baseline:** standards and protocol requirements, including WCAG, HTML, HTTP, OpenAPI, and project contracts. Conformance claims require complete applicable evidence; automated findings alone never prove conformance.
+2. **Measured finding:** rendered or source-linked evidence with a reproducible threshold and preserved provenance.
+3. **Heuristic:** a risk signal that requires confirmation. Never present it as a standards failure.
+4. **House style:** UIdetox's anti-slop bias. Project intent, brand, user needs, and proven functional constraints can override it.
+
+WCAG is normative. WAI-ARIA Authoring Practices guidance is informative, not a conformance standard. Aesthetic bans below are house-style defaults unless a project contract makes them requirements. Consult [accessibility and inclusive-design guidance](reference/accessibility-and-inclusive-design.md) before making accessibility claims.
+
+---
+
 ## 2. DESIGN DIRECTION
 
 Commit to a BOLD aesthetic direction before writing a single line of code:
@@ -57,9 +70,9 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 
 → *Consult [typography reference](reference/typography.md) for scales, pairing, and loading strategies.*
 
-* **Display/Headlines:** Default to large, tight tracking, reduced line-height. Headlines should feel heavy and intentional.
-  * **ANTI-SLOP:** `Inter`, `Roboto`, `Arial`, `Open Sans`, system defaults are BANNED for creative or premium vibes. Force unique character using `Geist`, `Outfit`, `Cabinet Grotesk`, `Satoshi`, or a distinctive display font.
-  * **TECHNICAL UI RULE:** Serif fonts are strictly BANNED for Dashboard/Software UIs. Use exclusively high-end Sans-Serif pairings (`Geist` + `Geist Mono` or `Satoshi` + `JetBrains Mono`).
+* **Display/Headlines:** Default to a clear, intentional hierarchy suited to the product's content and language coverage.
+  * **ANTI-SLOP HEURISTIC:** Common defaults such as `Inter`, `Roboto`, `Arial`, or system stacks may feel generic in identity-led work. Preserve them when brand, platform familiarity, performance, glyph coverage, or existing design-system evidence supports them.
+  * **TECHNICAL UI HEURISTIC:** Sans-serif and monospace families often suit dense software, but serif faces are valid when readability, brand, or editorial intent supports them. Never swap fonts without checking loading, fallback metrics, glyph coverage, and rendered layout.
 * **Body/Paragraphs:** Readable sizes (14-16px body), limit paragraph width to ~65 characters, generous line-height.
 * **Weight Spectrum:** Use Medium (500) and SemiBold (600), not just Regular and Bold.
 * **Numbers:** Use monospace or enable `font-variant-numeric: tabular-nums` for data interfaces.
@@ -70,11 +83,11 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 
 → *Consult [color reference](reference/color-and-contrast.md) for OKLCH, palettes, and dark mode.*
 
-* **Constraint:** Max 1 Accent Color. Saturation < 80%.
+* **House-style default:** Start with one accent role and restrained saturation; add roles only when semantics or brand evidence requires them.
 * **THE AI PALETTE BAN:** Purple/blue gradients, cyan-on-dark, neon accents on dark backgrounds — all BANNED. These are the fingerprints of AI-generated work. Use absolute neutral bases (Zinc/Slate) with high-contrast, singular accents (Emerald, Electric Blue, or Deep Rose).
 * **COLOR CONSISTENCY:** Stick to one palette for the entire output. Never mix warm and cool grays. Tint all neutrals toward your brand hue.
 * **GRAY ON COLOR:** Never put gray text on colored backgrounds — it looks washed out. Use a shade of the background color instead.
-* **NO PURE BLACK:** Never use `#000000`. Use off-black, zinc-950, or tinted dark.
+* **PURE BLACK HEURISTIC:** Tinted darks often feel less generic, but use measured contrast, forced-color behavior, and project palette evidence—not a universal color ban.
 * **NO GRADIENT TEXT:** Do not use text-fill gradients for "impact" — especially on metrics or headings.
 * Use modern CSS color functions (oklch, color-mix, light-dark) for perceptually uniform palettes.
 * **Color Priority Order:**
@@ -90,7 +103,7 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 * **3-COLUMN CARD BAN:** The generic "3 equal cards horizontally" feature row is BANNED. Use a 2-column zig-zag, asymmetric grid, horizontal scroll, or masonry layout.
 * **Container Constraint:** Always use max-width (1200-1440px) with auto margins.
 * **Grid over Flex-Math:** Never use complex flexbox percentage math. Always use CSS Grid for reliable structures.
-* **Viewport Stability:** Never use `h-screen` for full-height sections. Always use `min-h-[100dvh]`.
+* **Viewport Stability:** For viewport-filling UI, use a tested `100vh` fallback plus `100dvh` where dynamic browser chrome matters. Do not replace intentional fixed-height behavior blindly.
 * Create visual rhythm through varied spacing — tight groupings, generous separations. **NO SPACING REPETITION:** Avoid overusing identical spacing utilities (like repeating `p-4` or `gap-4` five times). Mix scales to create rhythm.
 * Use asymmetry and unexpected compositions. Break the grid intentionally for emphasis.
 
@@ -107,11 +120,11 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 
 → *Consult [interaction reference](reference/interaction-design.md) for forms, focus, and loading patterns.*
 
-* **Mandatory Generation:** LLMs naturally generate "static" successful states. You MUST implement full interaction cycles:
-  * **Hover:** Subtle scale, color shift, or shadow change.
+* **Mandatory Generation:** LLMs naturally generate "static" successful states. Implement every applicable interaction cycle:
+  * **Hover:** Optional pointer enhancement when `hover` capability exists; never the only affordance.
   * **Focus:** Visible keyboard focus indicators (accessibility requirement).
   * **Active:** `-translate-y-[1px]` or `scale-[0.98]` to simulate a physical push.
-  * **Loading:** Skeletal loaders matching layout sizes (never generic circular spinners).
+  * **Loading:** Preserve layout and announce meaningful progress; choose skeleton, progress, or spinner from known duration and content shape.
   * **Empty States:** Composed states indicating how to populate data.
   * **Error States:** Clear, inline error reporting.
 * Progressive disclosure — start simple, reveal sophistication through interaction.
@@ -119,8 +132,8 @@ LLMs have statistical biases toward specific UI cliché patterns. Override them 
 
 ### Rule 6: Data & Form Patterns
 
-* Label MUST sit above input. Helper text optional. Error text below input.
-* Use standard gap between input blocks.
+* Give every control a persistent accessible name. Place visible labels and help where scanning, locale, density, and component layout support them; preserve programmatic association.
+* Put field errors next to their controls and associate them with `aria-describedby` or `aria-errormessage` as applicable.
 * Make every button primary hierarchy explicit — use ghost buttons, text links, secondary styles.
 
 ---
@@ -434,6 +447,8 @@ For deep-dive guidance, consult these reference files:
 | [anti-patterns](reference/anti-patterns.md) | Consolidated AI slop ban list |
 | [color-palettes](reference/color-palettes.md) | Curated dark/light color schemes |
 | [creative-arsenal](reference/creative-arsenal.md) | Advanced design concepts |
+| [accessibility-and-inclusive-design](reference/accessibility-and-inclusive-design.md) | WCAG 2.2, input modalities, status, i18n, inclusive testing |
+| [full-stack-integration](reference/full-stack-integration.md) | UI/API/DB lineage, errors, mutations, resilience, observability |
 
 ---
 
@@ -505,37 +520,37 @@ Use container queries for component-level responsiveness:
 
 ## 13. FULL-STACK INTEGRATION
 
-When backend, API, or database layers are detected, check these integration points:
+When backend, API, or database layers are detected, consult [full-stack integration guidance](reference/full-stack-integration.md) and preserve exact source-to-UI lineage.
 
 ### DTO & Type Safety
-- Frontend types/interfaces must match backend DTOs exactly
-- Shared types in a `shared/` or `types/` package are preferred
-- Zod schemas, tRPC routers, or OpenAPI specs should be the single source of truth
-- Never duplicate type definitions across frontend and backend — use code generation or shared packages
+- Frontend wire types must match the authoritative backend contract; intentional view-model transformations stay explicit and traceable.
+- Prefer generated or shared contract types where architecture supports them. Do not create a second hand-maintained schema.
+- Preserve parameter locations, media types, headers/cookies, security requirements/scopes, response variants, nullability, and read/write direction.
 
 ### API Contract Consistency
-- Every API call must handle: loading state, success, error, empty data
-- UI owners must distinguish first-run from zero results and expose disabled actions with an explanation or recovery path
-- Error responses must be typed — never `catch(e: any)`
+- Every operation must cover applicable initial, loading, empty, ready, success, error, disabled, first-run, retrying, cancelled, stale/partial, rate-limited, auth, and conflict states.
+- UI owners must distinguish first-run from zero results and expose disabled actions with an explanation or recovery path.
+- Use stable machine-readable error codes or RFC 9457 problem types. Never parse human-readable detail as control flow.
 - Pagination, sorting, and filtering params must match between frontend query and backend handler
-- API URLs should come from environment config, never hardcoded
+- Public API origins may be build/runtime configuration; secrets and authorization policy never belong in frontend bundles.
 
 ### Database Schema Alignment
-- Frontend form validation must reflect database constraints (required fields, max lengths, enums)
+- Client validation should reflect known contract constraints for fast feedback; server validation and authorization remain authoritative.
 - Nullable database columns must be handled as `| null` in frontend types
 - Enum values in the database must match dropdown/select options in the UI
-- Date formats must be consistent across the stack (ISO 8601 preferred)
+- Transport timestamps need documented instant/offset/time-zone semantics; localize display without mutating wire values.
 
 ### Error Handling Chain
-- Backend validation errors must surface as inline field errors, not generic toasts
-- Network errors (timeout, 5xx) must show retry-capable error states
-- Optimistic updates must have rollback logic
-- Auth errors (401/403) must redirect to login, not show a broken page
+- Map backend validation pointers to associated field errors; provide a safe summary for form-wide or unmapped problems.
+- Retry only safe/idempotent operations automatically; honor `Retry-After`, cancellation, offline state, and duplicate-submit risk.
+- Restrict optimistic UI to reversible, conflict-aware operations with rollback or reconciliation evidence.
+- Treat `401` as authentication/session recovery when appropriate. Preserve context on `403` and show a stable forbidden state with allowed recovery.
 
 ### Environment & Config
-- All API URLs, feature flags, and secrets must come from environment variables
+- Centralize public endpoints and feature flags in the project's configuration seam.
 - Frontend must never expose backend secrets or internal API keys
 - Feature flags should be consistent — don't show UI for disabled backend features
+- Correlate UI failures with trace/request IDs without logging secrets, tokens, or unnecessary personal data.
 
 ---
 
@@ -553,7 +568,7 @@ Review the anti-pattern catalog. Those are the fingerprints of AI-generated work
 
 Before outputting code, evaluate against this matrix:
 - [ ] Does the output pass the AI Slop Test?
-- [ ] Is typography intentional (not Inter/system defaults)?
+- [ ] Is typography intentional, language-complete, performant, and consistent with project intent?
 - [ ] Is the color palette cohesive and non-generic?
 - [ ] Are hover, focus, active, loading, empty, error, success, disabled, and first-run states provided where applicable?
 - [ ] Is layout asymmetric where appropriate?
@@ -566,6 +581,6 @@ Before outputting code, evaluate against this matrix:
 - [ ] Is all code complete with no banned placeholder patterns?
 - [ ] Did you check `package.json` before importing new libraries?
 - [ ] Do frontend types match backend DTOs?
-- [ ] Are API errors handled with proper UI states?
-- [ ] Do form validations reflect database constraints?
-- [ ] Are environment variables used for all config?
+- [ ] Are API errors, auth, conflicts, rate limits, cancellation, and partial/stale results mapped to proper UI states?
+- [ ] Does client validation mirror known constraints while server validation/authorization remain authoritative?
+- [ ] Are public config and secrets correctly separated?

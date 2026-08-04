@@ -382,7 +382,7 @@ def test_add_issue_produces_manual_finding_linkable_by_displayed_queue_id(
     captured = []
     hashes = {"source": "s", "map": "m", "runtime": "r"}
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(add_issue_command, "load_config", lambda: {})
+    monkeypatch.setattr(add_issue_command, "load_config", dict)
     monkeypatch.setattr(add_issue_command, "add_issue", captured.append)
     add_issue_command.run(
         argparse.Namespace(

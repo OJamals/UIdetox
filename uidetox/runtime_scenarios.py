@@ -190,7 +190,7 @@ class RuntimeViewport:
             raise ValueError("Runtime viewport relation must be below or above.")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeViewport":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeViewport:
         return cls(
             name=str(value["name"]),
             width=int(value["width"]),
@@ -234,7 +234,7 @@ class RuntimeViewportDiscovery:
     truncated: bool = False
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeViewportDiscovery":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeViewportDiscovery:
         return cls(
             viewports=tuple(
                 RuntimeViewport.from_dict(dict(item))
@@ -372,11 +372,11 @@ class RuntimeCoverage:
     truncated: bool = False
 
     @classmethod
-    def empty(cls, budget: int) -> "RuntimeCoverage":
+    def empty(cls, budget: int) -> RuntimeCoverage:
         return cls(0, 0, 0, 0, budget)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeCoverage":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeCoverage:
         return cls(
             total=int(value.get("total", 0)),
             candidates=int(value.get("candidates", 0)),
@@ -404,7 +404,7 @@ class RuntimeDiagnostic:
         object.__setattr__(self, "url", sanitize_runtime_url(self.url))
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeDiagnostic":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeDiagnostic:
         return cls(
             kind=str(value.get("kind", "browser")),
             code=str(value.get("code", "browser-error")),
@@ -426,7 +426,7 @@ class RuntimeReadiness:
     detail: str = ""
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeReadiness":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeReadiness:
         return cls(
             status=str(value.get("status", "degraded")),
             strategy=str(value.get("strategy", "legacy")),
@@ -459,7 +459,7 @@ class RuntimeReadinessPolicy:
             raise ValueError("Runtime app hook must be a dotted identifier.")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeReadinessPolicy":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeReadinessPolicy:
         allowed = {
             "selector",
             "app_hook",
@@ -534,7 +534,7 @@ class RuntimeScenarioAction:
                 raise ValueError(f"Runtime wait-for-state must be one of: {domain}.")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeScenarioAction":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeScenarioAction:
         kind = str(value.get("kind", ""))
         if kind not in _SUPPORTED_ACTIONS:
             raise ValueError(f"Unsupported runtime action: {kind}")
@@ -578,7 +578,7 @@ class RuntimeScenario:
             )
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeScenario":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeScenario:
         allowed = {
             "name",
             "url",
@@ -591,7 +591,7 @@ class RuntimeScenario:
         actions = value.get("actions", [])
         readiness = value.get("readiness", {})
         if not isinstance(actions, list) or not isinstance(readiness, dict):
-            raise ValueError("Runtime scenario actions/readiness have invalid types.")
+            raise TypeError("Runtime scenario actions/readiness have invalid types.")
         if any(not isinstance(action, dict) for action in actions):
             raise ValueError("Runtime scenario actions must be objects.")
         return cls(
@@ -633,7 +633,7 @@ class RuntimeCaptureRecord:
             raise ValueError("Runtime capture status must be completed or failed.")
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeCaptureRecord":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeCaptureRecord:
         return cls(
             capture_id=str(value.get("capture_id", "")),
             scenario=str(value.get("scenario", "default")),
@@ -795,7 +795,7 @@ def load_runtime_scenarios(
             f"Runtime scenario file is unreadable: {scenario_path}"
         ) from exc
     if not isinstance(value, list):
-        raise ValueError("Runtime scenario file must contain a JSON array.")
+        raise TypeError("Runtime scenario file must contain a JSON array.")
     if len(value) > RUNTIME_OBSERVATION_LIMITS.scenarios:
         raise ValueError(
             f"Runtime scenario count exceeds {RUNTIME_OBSERVATION_LIMITS.scenarios}."
@@ -806,7 +806,7 @@ def load_runtime_scenarios(
     for item in value:
         actions = item.get("actions", [])
         if not isinstance(actions, list):
-            raise ValueError("Runtime scenario actions/readiness have invalid types.")
+            raise TypeError("Runtime scenario actions/readiness have invalid types.")
         if len(actions) > RUNTIME_OBSERVATION_LIMITS.actions_per_scenario:
             raise ValueError(
                 "Runtime scenario action count exceeds "

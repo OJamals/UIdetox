@@ -76,7 +76,11 @@ def test_capture_json_adapter_is_atomic_under_contention(tmp_path: Path) -> None
     payloads = [{"writer": index, "value": "雪"} for index in range(64)]
 
     with ThreadPoolExecutor(max_workers=16) as pool:
-        list(pool.map(lambda payload: capture._atomic_write_json(target, payload), payloads))
+        list(
+            pool.map(
+                lambda payload: capture._atomic_write_json(target, payload), payloads
+            )
+        )
 
     assert json.loads(target.read_text(encoding="utf-8")) in payloads
     assert list(tmp_path.glob(f".{target.name}.*.tmp")) == []
@@ -235,14 +239,8 @@ def test_json_writer_adapters_preserve_exact_bytes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = {"unicode": "雪", "order": [2, 1]}
-    sorted_json = (
-        '{\n  "order": [\n    2,\n    1\n  ],\n'
-        '  "unicode": "\\u96ea"\n}\n'
-    ).encode()
-    state_json = (
-        '{\n  "unicode": "\\u96ea",\n  "order": [\n'
-        "    2,\n    1\n  ]\n}"
-    ).encode()
+    sorted_json = b'{\n  "order": [\n    2,\n    1\n  ],\n  "unicode": "\\u96ea"\n}\n'
+    state_json = b'{\n  "unicode": "\\u96ea",\n  "order": [\n    2,\n    1\n  ]\n}'
     monkeypatch.chdir(tmp_path)
 
     state._save_json(payload, "state file.json", "state_")

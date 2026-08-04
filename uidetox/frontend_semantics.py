@@ -63,9 +63,7 @@ def extract_script_semantics(
         actions=tuple(
             SemanticOccurrence(item.name, item.line) for item in facts.actions
         ),
-        states=tuple(
-            SemanticOccurrence(item.name, item.line) for item in facts.states
-        ),
+        states=tuple(SemanticOccurrence(item.name, item.line) for item in facts.states),
         endpoints=tuple(
             SemanticOccurrence(
                 item.url or item.url_expression or item.target,
@@ -75,9 +73,7 @@ def extract_script_semantics(
             )
             for item in facts.network_calls
         ),
-        routes=tuple(
-            SemanticOccurrence(item.name, item.line) for item in facts.routes
-        ),
+        routes=tuple(SemanticOccurrence(item.name, item.line) for item in facts.routes),
         extractor=facts.extractor,
         confidence=facts.confidence,
         parse_errors=facts.parse_errors,

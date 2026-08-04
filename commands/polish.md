@@ -63,31 +63,31 @@ Work through these dimensions methodically:
 ### Color & Contrast
 
 - **Contrast ratios**: All text meets WCAG standards
-- **Consistent token usage**: No hard-coded colors, all use design tokens
+- **Consistent token usage**: Use design tokens where the product system defines them; document intentional one-offs
 - **Theme consistency**: Works in all theme variants
 - **Color meaning**: Same colors mean same things throughout
 - **Accessible focus**: Focus indicators visible with sufficient contrast
-- **Tinted neutrals**: No pure gray or pure black—add subtle color tint (0.01 chroma)
-- **Gray on color**: Never put gray text on colored backgrounds—use a shade of that color or transparency
+- **Tinted neutrals**: Treat tinted neutrals as house style, not a universal quality or accessibility rule
+- **Text on color**: Judge computed contrast and semantic emphasis; hue family alone does not prove failure
 
 ### Interaction States
 
-Every interactive element needs all states:
+Design states that each control's semantics and data contract can enter:
 
 - **Default**: Resting state
-- **Hover**: Subtle feedback (color, scale, shadow)
+- **Hover**: Optional pointer-capability enhancement, never the only affordance
 - **Focus**: Keyboard focus indicator (never remove without replacement)
 - **Active**: Click/tap feedback
-- **Disabled**: Clearly non-interactive
-- **Loading**: Async action feedback
-- **Error**: Validation or error state
-- **Success**: Successful completion
+- **Disabled**: Clear unavailability plus reason/recovery where useful
+- **Loading**: Feedback for user-visible async work
+- **Error**: Validation or operation failure when applicable
+- **Success**: Completion feedback when the outcome is not otherwise apparent
 
 **Missing states create confusion and broken experiences**.
 
 ### Micro-interactions & Transitions
 
-- **Smooth transitions**: All state changes animated appropriately (150-300ms)
+- **Purposeful transitions**: Animate only state changes where motion improves continuity or feedback; measure duration in context
 - **Consistent easing**: Use ease-out-quart/quint/expo for natural deceleration. Never bounce or elastic—they feel dated.
 - **No jank**: 60fps animations, only animate transform and opacity
 - **Appropriate motion**: Motion serves purpose, not decoration
@@ -121,7 +121,7 @@ Every interactive element needs all states:
 
 ### Edge Cases & Error States
 
-- **Loading states**: All async actions have loading feedback
+- **Loading states**: User-visible async work has feedback without masking stale or partial data
 - **Empty states**: Helpful empty states, not just blank space
 - **Error states**: Clear error messages with recovery paths
 - **Success states**: Confirmation of successful actions
@@ -131,23 +131,23 @@ Every interactive element needs all states:
 
 ### Responsiveness
 
-- **All breakpoints**: Test mobile, tablet, desktop
-- **Touch targets**: 44x44px minimum on touch devices
-- **Readable text**: No text smaller than 14px on mobile
+- **Supported boundaries**: Test content-driven breakpoints, orientation, zoom, and representative mobile/desktop viewports
+- **Target size**: Meet 24×24 CSS pixels or a documented WCAG 2.5.8 exception; aim for 44×44 where context permits
+- **Readable text**: Verify font metrics, language, density, 200% resize, text spacing, and user scaling instead of enforcing a universal px floor
 - **No horizontal scroll**: Content fits viewport
 - **Appropriate reflow**: Content adapts logically
 
 ### Performance
 
-- **Fast initial load**: Optimize critical path
-- **No layout shift**: Elements don't jump after load (CLS)
-- **Smooth interactions**: No lag or jank
+- **Fast initial load**: Measure LCP and optimize the critical path
+- **Stable layout**: Measure CLS and reserve dynamic media/content space
+- **Responsive interactions**: Measure INP and profile long tasks on representative hardware
 - **Optimized images**: Appropriate formats and sizes
 - **Lazy loading**: Off-screen content loads lazily
 
 ### Code Quality
 
-- **Remove console logs**: No debug logging in production
+- **Logging**: Remove accidental debug output; retain intentional structured, redacted operational diagnostics
 - **Remove commented code**: Clean up dead code
 - **Remove unused imports**: Clean up unused dependencies
 - **Consistent naming**: Variables and functions follow conventions
@@ -161,15 +161,15 @@ Go through systematically:
 - [ ] Visual alignment perfect at all breakpoints
 - [ ] Spacing uses design tokens consistently
 - [ ] Typography hierarchy consistent
-- [ ] All interactive states implemented
-- [ ] All transitions smooth (60fps)
+- [ ] Applicable hover, focus, pressed, selected, disabled, busy, and validation states implemented
+- [ ] Motion avoids dropped frames on target hardware; interaction responsiveness meets the measured INP budget
 - [ ] Copy is consistent and polished
 - [ ] Icons are consistent and properly sized
 - [ ] All forms properly labeled and validated
 - [ ] Error states are helpful
 - [ ] Loading states are clear
 - [ ] Empty states are welcoming
-- [ ] Touch targets are 44x44px minimum
+- [ ] Targets meet 24×24 CSS pixels or a documented exception; high-frequency targets are larger where feasible
 - [ ] Contrast ratios meet WCAG AA
 - [ ] Keyboard navigation works
 - [ ] Focus indicators visible
@@ -177,7 +177,7 @@ Go through systematically:
 - [ ] No layout shift on load
 - [ ] Works in all supported browsers
 - [ ] Respects reduced motion preference
-- [ ] Code is clean (no TODOs, console.logs, commented code)
+- [ ] No orphaned TODOs, accidental debug output, stale comments, or dead code
 
 **IMPORTANT**: Polish is about details. Zoom in. Squint at it. Use it yourself. The little things add up.
 
@@ -199,4 +199,3 @@ Before marking as done:
 - **Check all states**: Don't just test happy path
 
 Remember: You have impeccable attention to detail and exquisite taste. Polish until it feels effortless, looks intentional, and works flawlessly. Sweat the details - they matter.
-

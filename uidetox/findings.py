@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterator, Mapping
+import re
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any
 
 from uidetox.prompt_safety import sanitize_untrusted_data
 from uidetox.utils import now_iso
@@ -17,18 +18,61 @@ from uidetox.utils import now_iso
 FINDING_SCHEMA_VERSION = 2
 STRUCTURED_REVIEW_POLICY_VERSION = 2
 _VOLATILE = frozenset(
-    "checked_at created_at generated_at source_hash timestamp".split()
+    ["checked_at", "created_at", "generated_at", "source_hash", "timestamp"]
 )
 _TIERS = {"info": "T1", "warning": "T2", "error": "T3", "critical": "T4"}
 _SEVERITY = {tier: severity for severity, tier in _TIERS.items()}
 _WEIGHTS = {"info": 3.0, "warning": 10.0, "error": 20.0, "critical": 30.0}
 _NON_DEFECT = {"informational", "investigate", "suppressed", "verified_resolved"}
+_EVIDENCE_BASES = frozenset({"normative", "measured", "heuristic", "review"})
+_POLICY_EVIDENCE_KEYS = frozenset(
+    {"basis", "authority", "applicability", "remediation_constraints"}
+)
+_MAX_EVIDENCE_AUTHORITY = 160
+_MAX_EVIDENCE_APPLICABILITY_ITEMS = 16
+_MAX_EVIDENCE_APPLICABILITY_KEY = 64
+_MAX_EVIDENCE_APPLICABILITY_VALUE = 256
+_MAX_REMEDIATION_CONSTRAINTS = 8
+_MAX_REMEDIATION_CONSTRAINT = 512
+_AUTHORITY_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .:/#_-]*")
 _CANONICAL = frozenset(
-    """schema_version fingerprint id code detector_id category severity confidence
-    message status provenance evidence evidence_freshness source_anchor runtime_anchor
-    contract_anchor suppression_key verifier last_verification display_excerpt legacy
-    extensions file tier issue command line column snippet metrics kind normalized_path
-    frontend backend detail""".split()
+    [
+        "schema_version",
+        "fingerprint",
+        "id",
+        "code",
+        "detector_id",
+        "category",
+        "severity",
+        "confidence",
+        "message",
+        "status",
+        "provenance",
+        "evidence",
+        "evidence_freshness",
+        "source_anchor",
+        "runtime_anchor",
+        "contract_anchor",
+        "suppression_key",
+        "verifier",
+        "last_verification",
+        "display_excerpt",
+        "legacy",
+        "extensions",
+        "file",
+        "tier",
+        "issue",
+        "command",
+        "line",
+        "column",
+        "snippet",
+        "metrics",
+        "kind",
+        "normalized_path",
+        "frontend",
+        "backend",
+        "detail",
+    ]
 )
 
 
@@ -106,6 +150,74 @@ def _safe(value: Mapping[str, Any], matched: object = None) -> dict[str, Any]:
     return dict(clean) if isinstance(clean, Mapping) else {}
 
 
+def _bounded_evidence_text(value: object, *, limit: int) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return str(value).strip()[:limit] if isinstance(value, str) else ""
+
+
+def _bounded_applicability(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    bounded: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        if len(bounded) >= _MAX_EVIDENCE_APPLICABILITY_ITEMS:
+            break
+        key = _bounded_evidence_text(raw_key, limit=_MAX_EVIDENCE_APPLICABILITY_KEY)
+        if not key:
+            continue
+        if isinstance(raw_value, (str, bytes)):
+            bounded[key] = _bounded_evidence_text(
+                raw_value, limit=_MAX_EVIDENCE_APPLICABILITY_VALUE
+            )
+        elif raw_value is None or isinstance(raw_value, bool):
+            bounded[key] = raw_value
+        elif isinstance(raw_value, (int, float)):
+            try:
+                if math.isfinite(float(raw_value)):
+                    bounded[key] = raw_value
+            except OverflowError:
+                continue
+    return bounded
+
+
+def _bounded_remediation_constraints(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    constraints: list[str] = []
+    for raw_constraint in value:
+        if len(constraints) >= _MAX_REMEDIATION_CONSTRAINTS:
+            break
+        constraint = _bounded_evidence_text(
+            raw_constraint, limit=_MAX_REMEDIATION_CONSTRAINT
+        )
+        if constraint:
+            constraints.append(constraint)
+    return tuple(constraints)
+
+
+def _policy_evidence(value: object) -> dict[str, Any]:
+    evidence = dict(value) if isinstance(value, Mapping) else {}
+    basis = _bounded_evidence_text(evidence.get("basis"), limit=32).lower()
+    evidence["basis"] = basis if basis in _EVIDENCE_BASES else "review"
+    raw_authority = evidence.get("authority")
+    if isinstance(raw_authority, bytes):
+        raw_authority = raw_authority.decode("utf-8", errors="replace")
+    authority = raw_authority.strip() if isinstance(raw_authority, str) else ""
+    evidence["authority"] = (
+        authority
+        if authority
+        and len(authority) <= _MAX_EVIDENCE_AUTHORITY
+        and _AUTHORITY_IDENTIFIER.fullmatch(authority)
+        else ""
+    )
+    evidence["applicability"] = _bounded_applicability(evidence.get("applicability"))
+    evidence["remediation_constraints"] = _bounded_remediation_constraints(
+        evidence.get("remediation_constraints")
+    )
+    return evidence
+
+
 def _identity(value: object) -> object:
     if isinstance(value, Mapping):
         return {
@@ -116,6 +228,16 @@ def _identity(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [_identity(item) for item in value]
     return round(value, 6) if isinstance(value, float) else value
+
+
+def _evidence_identity(value: Mapping[str, Any]) -> object:
+    return _identity(
+        {
+            key: item
+            for key, item in value.items()
+            if str(key) not in _POLICY_EVIDENCE_KEYS
+        }
+    )
 
 
 def _hash(value: object) -> str:
@@ -132,7 +254,7 @@ def _fingerprint(finding: Finding) -> str:
             "source_anchor": _identity(finding.source_anchor),
             "runtime_anchor": _identity(finding.runtime_anchor),
             "contract_anchor": _identity(finding.contract_anchor),
-            "evidence": _identity(finding.evidence),
+            "evidence": _evidence_identity(finding.evidence),
         }
     )
 
@@ -190,7 +312,10 @@ class Finding(Mapping[str, Any]):
             "legacy",
             "extensions",
         ):
-            object.__setattr__(self, name, _mapping(getattr(self, name)))
+            value = getattr(self, name)
+            if name == "evidence":
+                value = _policy_evidence(value)
+            object.__setattr__(self, name, _mapping(value))
         object.__setattr__(self, "fingerprint", _fingerprint(self))
 
     @classmethod
@@ -393,9 +518,24 @@ class Finding(Mapping[str, Any]):
 
     def to_dict(self) -> dict[str, Any]:
         payload = dict(_thaw(self.extensions))  # type: ignore[arg-type]
-        fields = """detector_id category severity confidence message status provenance
-        evidence evidence_freshness source_anchor runtime_anchor contract_anchor
-        suppression_key verifier display_excerpt legacy""".split()
+        fields = [
+            "detector_id",
+            "category",
+            "severity",
+            "confidence",
+            "message",
+            "status",
+            "provenance",
+            "evidence",
+            "evidence_freshness",
+            "source_anchor",
+            "runtime_anchor",
+            "contract_anchor",
+            "suppression_key",
+            "verifier",
+            "display_excerpt",
+            "legacy",
+        ]
         payload.update({name: _thaw(getattr(self, name)) for name in fields})
         payload.update(
             {

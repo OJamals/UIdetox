@@ -5,13 +5,14 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from uidetox.mechanical import run_mechanical_command
-from uidetox.tooling import detect_all
-from uidetox.state import get_project_root, load_config, save_config
-from uidetox.utils import tracked_changed_files
-from uidetox.commands import tsc as tsc_cmd
-from uidetox.commands import lint as lint_cmd
+
 from uidetox.commands import format_cmd
+from uidetox.commands import lint as lint_cmd
+from uidetox.commands import tsc as tsc_cmd
+from uidetox.mechanical import run_mechanical_command
+from uidetox.state import get_project_root, load_config, save_config
+from uidetox.tooling import detect_all
+from uidetox.utils import tracked_changed_files
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ def run(args: argparse.Namespace):
                             "[UIdetox] Mechanical auto-fix (formatting/linting)",
                         )
                         print("  📦 Auto-committed mechanical fixes to git.\n")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - optional auto-commit failure must not hide completed mechanical checks
                 print(
                     f"  ⚠️  Warning: Git auto-commit failed during mechanical check: {e}\n"
                 )

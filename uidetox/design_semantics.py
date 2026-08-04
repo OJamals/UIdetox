@@ -20,6 +20,58 @@ from uidetox.color_utils import (
 )
 from uidetox.findings import Finding
 
+_DESIGN_REMEDIATION_CONSTRAINTS: dict[str, tuple[str, ...]] = {
+    "runtime-color-unresolved": (
+        "Retain unresolved coverage until the same capture proves an opaque backdrop.",
+        "Do not substitute token names or guessed palette pairings.",
+        "Capture computed colors and their actual painted ancestors.",
+        "Preserve the raw computed value for a fresh browser capture.",
+        "Capture ancestor layers through a proven opaque canvas.",
+        "Extend the captured ancestor stack to a proven opaque layer.",
+    ),
+    "runtime-component-drift": (
+        "Preserve component identity and behavior.",
+        "Align only the outlier properties evidenced by the repeated source-owned group.",
+    ),
+    "runtime-contrast": (
+        "Preserve the captured semantic color role and interaction state.",
+        "Change only a rendered foreground or painted backdrop in this source-owned region.",
+    ),
+    "runtime-dialog-modality": (
+        "Keep focus within the active dialog and restore it to the invoking control when the dialog closes.",
+    ),
+    "runtime-focus-appearance-guidance": (
+        "Do not label focus appearance geometry as a WCAG AA failure.",
+    ),
+    "runtime-focus-visible": (
+        "Preserve keyboard focus order and control semantics.",
+        "Add a distinguishable computed visual delta specific to the captured focus state.",
+        "Do not label focus appearance geometry as a WCAG AA failure.",
+    ),
+    "runtime-offscreen": (
+        "Preserve intentional scroll regions.",
+        "Keep the full target reachable at the captured viewport.",
+    ),
+    "runtime-palette-role-drift": (
+        "Keep the existing semantic role; reconcile the outlier with its evidenced peer group.",
+    ),
+    "runtime-spatial-rhythm": (
+        "Preserve grouping and reading order.",
+        "Reconcile the causal gap rather than globally rewriting spacing.",
+    ),
+    "runtime-target-size": (
+        "Preserve inline, user-agent, essential, and spacing exceptions when evidenced.",
+        "Increase the target or its separation without changing its accessible role.",
+    ),
+    "runtime-target-spacing-unresolved": (
+        "Capture every visible interactive target in the same DOM pass before granting a spacing exception.",
+    ),
+    "runtime-type-hierarchy": (
+        "Preserve semantic heading levels and reading order.",
+        "Create measurable type-scale or weight separation without changing content hierarchy.",
+    ),
+}
+
 
 class DesignElement(Protocol):
     kind: str
@@ -101,7 +153,12 @@ def _finding(
         confidence=confidence,
         message=message,
         provenance="runtime",
-        evidence={"metrics": dict(metrics)},
+        evidence={
+            "basis": "heuristic",
+            "applicability": {"status": "observed"},
+            "remediation_constraints": _DESIGN_REMEDIATION_CONSTRAINTS.get(code, ()),
+            "metrics": dict(metrics),
+        },
         suppression_key=code,
         verifier={"kind": "runtime", "detector_id": code},
         status=status,
@@ -604,15 +661,12 @@ def _geometry_findings(
             )
         position = element.styles.get("position", "")
         offscreen = (
-            (
-                (left < -1 or right > page.viewport.width + 1)
-                and not element.measurements.get("insideScrollRegionX")
-            )
-            or (
-                position in {"fixed", "sticky"}
-                and (top < -1 or top + height > page.viewport.height + 1)
-                and not element.measurements.get("insideScrollRegionY")
-            )
+            (left < -1 or right > page.viewport.width + 1)
+            and not element.measurements.get("insideScrollRegionX")
+        ) or (
+            position in {"fixed", "sticky"}
+            and (top < -1 or top + height > page.viewport.height + 1)
+            and not element.measurements.get("insideScrollRegionY")
         )
         if offscreen and not element.measurements.get("isScrollRegion"):
             findings[index].append(
@@ -688,8 +742,7 @@ def _interaction_findings(
                                 element.measurements.get("modalDialog") is True
                             ),
                             "focus_contained": (
-                                element.measurements.get("dialogFocusContained")
-                                is True
+                                element.measurements.get("dialogFocusContained") is True
                             ),
                         },
                         constraints=(

@@ -79,6 +79,564 @@ createBrowserRouter(routes);
     assert facts.parse_errors is False
 
 
+def test_route_sources_bind_same_line_routes_to_their_own_elements(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "App.tsx",
+            "src/App.tsx",
+            'import { Route, Routes } from "react-router-dom"; '
+            'import { ProjectsPage } from "./ProjectsPage"; '
+            'import { SupportPage } from "./SupportPage"; '
+            "export function App() { return <Routes>"
+            '<Route path="/projects" element={<ProjectsPage />} />'
+            '<Route path="/support" element={<SupportPage />} />'
+            "</Routes>; }",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function SupportPage() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/App.tsx",
+        "src/ProjectsPage.tsx",
+    )
+
+
+def test_route_sources_preserve_nested_route_element_lineage(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "App.tsx",
+            "src/App.tsx",
+            'import { Route } from "react-router-dom"; '
+            'import { AuthBoundary } from "./AuthBoundary"; '
+            'import { ProjectsPage } from "./ProjectsPage"; '
+            "export function App() { return "
+            '<Route path="/projects" element={<AuthBoundary><ProjectsPage /></AuthBoundary>} />; '
+            "}",
+        ),
+        SourceDocument(
+            src / "AuthBoundary.tsx",
+            "src/AuthBoundary.tsx",
+            "export function AuthBoundary({ children }) { return <>{children}</>; }",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/App.tsx",
+        "src/AuthBoundary.tsx",
+        "src/ProjectsPage.tsx",
+    )
+
+
+def test_route_sources_resolve_component_prop_routes_independently(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "App.tsx",
+            "src/App.tsx",
+            'import { Route, Routes } from "react-router-dom"; '
+            'import { ProjectsPage as Projects } from "./ProjectsPage"; '
+            'import { SupportPage as Support } from "./SupportPage"; '
+            "export function App() { return <Routes>"
+            '<Route path="/projects" Component={Projects} />'
+            '<Route path="/support" Component={Support} />'
+            "</Routes>; }",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function SupportPage() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/App.tsx",
+        "src/ProjectsPage.tsx",
+    )
+
+
+def test_route_sources_resolve_route_object_components_independently(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'import { ProjectsPage as Projects } from "./ProjectsPage"; '
+            'import { SupportPage as Support } from "./SupportPage"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/projects", Component: Projects },'
+            '{ path: "/support", Component: Support }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function SupportPage() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/ProjectsPage.tsx",
+        "src/router.tsx",
+    )
+
+
+def test_route_sources_resolve_namespace_component_routes_independently(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'import * as Pages from "./pages"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/projects", Component: Pages.ProjectsPage },'
+            '{ path: "/support", Component: Pages.SupportPage }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "pages.ts",
+            "src/pages.ts",
+            'export { ProjectsPage } from "./ProjectsPage"; '
+            'export { SupportPage } from "./SupportPage";',
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function SupportPage() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/ProjectsPage.tsx",
+        "src/router.tsx",
+    )
+
+
+def test_route_sources_preserve_unicode_namespace_component_identity(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'import * as Écrans from "./pages"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/projects", Component: Écrans.Proyectos },'
+            '{ path: "/support", Component: Écrans.Soporte },'
+            '{ path: "/computed", Component: Écrans["Soporte"] }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "pages.ts",
+            "src/pages.ts",
+            'export { Proyectos } from "./ProjectsPage"; '
+            'export { Soporte } from "./SupportPage";',
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function Proyectos() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function Soporte() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/ProjectsPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/computed") == ("src/router.tsx",)
+
+
+def test_route_sources_match_optional_segments_without_cross_linking(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'import { CategoriesPage } from "./CategoriesPage"; '
+            'import { ProjectsPage } from "./ProjectsPage"; '
+            'import { SettingsPage } from "./SettingsPage"; '
+            'import { SupportPage } from "./SupportPage"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/:lang?/categories", Component: CategoriesPage },'
+            '{ path: "/projects/:projectId?", Component: ProjectsPage },'
+            '{ path: "/account/preferences?", Component: SettingsPage },'
+            '{ path: "/support", Component: SupportPage }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "CategoriesPage.tsx",
+            "src/CategoriesPage.tsx",
+            "export function CategoriesPage() { return <main>Categories</main>; }",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SettingsPage.tsx",
+            "src/SettingsPage.tsx",
+            "export function SettingsPage() { return <main>Settings</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export function SupportPage() { return <main>Support</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    expected_categories = ("src/CategoriesPage.tsx", "src/router.tsx")
+    assert semantics.route_sources("http://localhost/categories") == expected_categories
+    assert (
+        semantics.route_sources("http://localhost/en/categories") == expected_categories
+    )
+    expected = ("src/ProjectsPage.tsx", "src/router.tsx")
+    assert semantics.route_sources("http://localhost/projects") == expected
+    assert semantics.route_sources("http://localhost/projects?tab=recent") == expected
+    assert semantics.route_sources("http://localhost/projects/42") == expected
+    expected_settings = ("src/SettingsPage.tsx", "src/router.tsx")
+    assert semantics.route_sources("http://localhost/account") == expected_settings
+    assert (
+        semantics.route_sources("http://localhost/account/preferences")
+        == expected_settings
+    )
+    assert semantics.route_sources("http://localhost/support") == (
+        "src/SupportPage.tsx",
+        "src/router.tsx",
+    )
+
+
+def test_route_sources_narrow_only_strictly_more_specific_dynamic_matches(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'import { CategoryReportPage } from "./CategoryReportPage"; '
+            'import { FileBrowserPage } from "./FileBrowserPage"; '
+            'import { FileDetailPage } from "./FileDetailPage"; '
+            'import { GenericTeamPage } from "./GenericTeamPage"; '
+            'import { MonthlyReportPage } from "./MonthlyReportPage"; '
+            'import { OptionalCatalogPage } from "./OptionalCatalogPage"; '
+            'import { RequiredCatalogPage } from "./RequiredCatalogPage"; '
+            'import { TeamEditPage } from "./TeamEditPage"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/catalog/:section?", Component: OptionalCatalogPage },'
+            '{ path: "/catalog/:section", Component: RequiredCatalogPage },'
+            '{ path: "/files/*", Component: FileBrowserPage },'
+            '{ path: "/files/:fileId", Component: FileDetailPage },'
+            '{ path: "/teams/:teamId/edit", Component: TeamEditPage },'
+            '{ path: "/teams/:section/:action", Component: GenericTeamPage },'
+            '{ path: "/reports/:category/:slug", Component: CategoryReportPage },'
+            '{ path: "/reports/:year/:month", Component: MonthlyReportPage }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "CategoryReportPage.tsx",
+            "src/CategoryReportPage.tsx",
+            "export function CategoryReportPage() { return <main>Category</main>; }",
+        ),
+        SourceDocument(
+            src / "FileBrowserPage.tsx",
+            "src/FileBrowserPage.tsx",
+            "export function FileBrowserPage() { return <main>Files</main>; }",
+        ),
+        SourceDocument(
+            src / "FileDetailPage.tsx",
+            "src/FileDetailPage.tsx",
+            "export function FileDetailPage() { return <main>File</main>; }",
+        ),
+        SourceDocument(
+            src / "GenericTeamPage.tsx",
+            "src/GenericTeamPage.tsx",
+            "export function GenericTeamPage() { return <main>Team</main>; }",
+        ),
+        SourceDocument(
+            src / "MonthlyReportPage.tsx",
+            "src/MonthlyReportPage.tsx",
+            "export function MonthlyReportPage() { return <main>Month</main>; }",
+        ),
+        SourceDocument(
+            src / "OptionalCatalogPage.tsx",
+            "src/OptionalCatalogPage.tsx",
+            "export function OptionalCatalogPage() { return <main>Catalog</main>; }",
+        ),
+        SourceDocument(
+            src / "RequiredCatalogPage.tsx",
+            "src/RequiredCatalogPage.tsx",
+            "export function RequiredCatalogPage() { return <main>Section</main>; }",
+        ),
+        SourceDocument(
+            src / "TeamEditPage.tsx",
+            "src/TeamEditPage.tsx",
+            "export function TeamEditPage() { return <main>Edit</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/catalog") == (
+        "src/OptionalCatalogPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/catalog/featured") == (
+        "src/RequiredCatalogPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/files/42") == (
+        "src/FileDetailPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/files/archive/42") == (
+        "src/FileBrowserPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/teams/42/edit") == (
+        "src/TeamEditPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/reports/2026/08") == (
+        "src/CategoryReportPage.tsx",
+        "src/MonthlyReportPage.tsx",
+        "src/router.tsx",
+    )
+
+
+def test_route_sources_fail_closed_above_specificity_vector_budget(tmp_path):
+    src = tmp_path / "src"
+    vector_budget = 64
+    runtime_parts = tuple(f"segment-{index}" for index in range(vector_budget + 1))
+    documents = []
+    expected_sources = []
+    for static_count in range(vector_budget + 1):
+        relative_path = f"src/route-{static_count:03}.ts"
+        pattern = "/" + "/".join(
+            runtime_part if index < static_count else f":param{index}"
+            for index, runtime_part in enumerate(runtime_parts)
+        )
+        documents.append(
+            SourceDocument(
+                src / f"route-{static_count:03}.ts",
+                relative_path,
+                'import { createBrowserRouter } from "react-router-dom"; '
+                "export const router = createBrowserRouter(["
+                f'{{ path: "{pattern}" }}'
+                "]);",
+            )
+        )
+        expected_sources.append(relative_path)
+
+    runtime_url = "http://localhost/" + "/".join(runtime_parts)
+    within_budget = build_application_semantics(tmp_path, src, tuple(documents[:-1]))
+    assert within_budget.route_sources(runtime_url) == ("src/route-063.ts",)
+
+    semantics = build_application_semantics(tmp_path, src, tuple(documents))
+    assert semantics.route_sources(runtime_url) == tuple(expected_sources)
+
+
+def test_route_sources_resolve_direct_lazy_component_imports_only(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import React, { lazy as loadComponent } from "react"; '
+            'import { createBrowserRouter } from "react-router-dom"; '
+            'const ProjectsPage = loadComponent(() => import("./ProjectsPage")); '
+            'const SupportPage = React.lazy(() => import("./SupportPage")); '
+            'const GlobalPage = lazy(() => import("./GlobalPage")); '
+            "const UnsafePage = loadComponent(() => import(routeModule)); "
+            "export const router = createBrowserRouter(["
+            '{ path: "/projects", Component: ProjectsPage },'
+            '{ path: "/support", Component: SupportPage },'
+            '{ path: "/global", Component: GlobalPage },'
+            '{ path: "/unsafe", Component: UnsafePage },'
+            '{ path: "/inline", Component: loadComponent(() => import("./InlinePage")) }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "GlobalPage.tsx",
+            "src/GlobalPage.tsx",
+            "export default function GlobalPage() { return <main>Global</main>; }",
+        ),
+        SourceDocument(
+            src / "ProjectsPage.tsx",
+            "src/ProjectsPage.tsx",
+            "export default function ProjectsPage() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportPage.tsx",
+            "src/SupportPage.tsx",
+            "export default function SupportPage() { return <main>Support</main>; }",
+        ),
+        SourceDocument(
+            src / "UnsafePage.tsx",
+            "src/UnsafePage.tsx",
+            "export default function UnsafePage() { return <main>Unsafe</main>; }",
+        ),
+        SourceDocument(
+            src / "InlinePage.tsx",
+            "src/InlinePage.tsx",
+            "export default function InlinePage() { return <main>Inline</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/ProjectsPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/support") == (
+        "src/SupportPage.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/global") == ("src/router.tsx",)
+    assert semantics.route_sources("http://localhost/unsafe") == ("src/router.tsx",)
+    assert semantics.route_sources("http://localhost/inline") == ("src/router.tsx",)
+    router = semantics.module("src/router.tsx")
+    assert router is not None
+    assert router.facts.imports == (
+        "react",
+        "react-router-dom",
+        "./ProjectsPage",
+        "./SupportPage",
+    )
+    assert (
+        ImportAlias("./ProjectsPage", "default", "ProjectsPage", "default")
+        in router.facts.import_aliases
+    )
+    assert (
+        ImportAlias("./SupportPage", "default", "SupportPage", "default")
+        in router.facts.import_aliases
+    )
+    assert all(
+        item.local not in {"GlobalPage", "UnsafePage", "InlinePage"}
+        for item in router.facts.import_aliases
+    )
+
+
+def test_route_sources_resolve_direct_inline_lazy_route_modules_only(tmp_path):
+    src = tmp_path / "src"
+    documents = (
+        SourceDocument(
+            src / "router.tsx",
+            "src/router.tsx",
+            'import { createBrowserRouter } from "react-router-dom"; '
+            "export const router = createBrowserRouter(["
+            '{ path: "/projects", lazy: () => import("./ProjectsRoute") },'
+            '{ path: "/support", lazy: () => import("./SupportRoute") },'
+            '{ path: "/computed", lazy: () => import(routeModule) },'
+            '{ path: "/mapped", lazy: () => import("./MappedRoute").then('
+            "(module) => ({ Component: module.Page })) },"
+            '{ path: "/block", lazy: async () => { '
+            'return import("./BlockRoute"); } }'
+            "]);",
+        ),
+        SourceDocument(
+            src / "ProjectsRoute.tsx",
+            "src/ProjectsRoute.tsx",
+            "export function Component() { return <main>Projects</main>; }",
+        ),
+        SourceDocument(
+            src / "SupportRoute.tsx",
+            "src/SupportRoute.tsx",
+            "export function Component() { return <main>Support</main>; }",
+        ),
+        SourceDocument(
+            src / "MappedRoute.tsx",
+            "src/MappedRoute.tsx",
+            "export function Page() { return <main>Mapped</main>; }",
+        ),
+        SourceDocument(
+            src / "BlockRoute.tsx",
+            "src/BlockRoute.tsx",
+            "export function Component() { return <main>Block</main>; }",
+        ),
+    )
+
+    semantics = build_application_semantics(tmp_path, src, documents)
+
+    assert semantics.route_sources("http://localhost/projects") == (
+        "src/ProjectsRoute.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/support") == (
+        "src/SupportRoute.tsx",
+        "src/router.tsx",
+    )
+    assert semantics.route_sources("http://localhost/computed") == ("src/router.tsx",)
+    assert semantics.route_sources("http://localhost/mapped") == ("src/router.tsx",)
+    assert semantics.route_sources("http://localhost/block") == ("src/router.tsx",)
+    router = semantics.module("src/router.tsx")
+    assert router is not None
+    assert router.facts.imports == (
+        "react-router-dom",
+        "./ProjectsRoute",
+        "./SupportRoute",
+    )
+    assert {route.name: route.target for route in router.facts.routes} == {
+        "/block": "",
+        "/computed": "",
+        "/mapped": "",
+        "/projects": "./ProjectsRoute",
+        "/support": "./SupportRoute",
+    }
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -280,9 +838,7 @@ def test_analyzer_and_semantic_consumers_reuse_one_source_fact_parse(tmp_path):
     assert semantics.components[0].name == "Shell"
     assert [issue["id"] for issue in ast_issues] == ["ANIMATE_STATE_SLOP"]
     canonical = next(
-        issue
-        for issue in file_issues
-        if issue["detector_id"] == "ANIMATE_STATE_SLOP"
+        issue for issue in file_issues if issue["detector_id"] == "ANIMATE_STATE_SLOP"
     )
     assert ast_issues[0]["issue"] == canonical["issue"]
     assert ast_issues[0]["file"] == canonical["file"]

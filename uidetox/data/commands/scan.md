@@ -50,19 +50,18 @@ Does this look like every other AI-generated interface from 2024-2025? Check aga
 - Cards used where spacing/borders would suffice?
 
 ### 5. Interactivity & States
-- Missing hover states on buttons?
-- No active/pressed feedback?
-- No focus indicators for keyboard navigation?
-- No loading states (or generic circular spinners)?
-- No empty states?
-- No error states?
-- Instant transitions (zero duration)?
+- Missing applicable pointer hover or pressed feedback?
+- Focus indicators missing, obscured, or clipped during keyboard navigation?
+- Drag/swipe action lacks a simple pointer and keyboard alternative?
+- Dynamic status is neither visible nor announced through appropriate semantics?
+- Loading, stale, partial, empty, error, success, disabled, offline, or first-run states missing where the contract requires them?
+- Motion ignores reduced-motion preferences or impairs orientation?
 
 ### 6. Responsiveness
 - Fixed widths that break on mobile?
-- Touch targets <44x44px?
+- Targets below 24×24 CSS pixels without a documented WCAG 2.5.8 exception?
 - Horizontal scroll on narrow viewports?
-- No mobile/tablet breakpoints?
+- Layout fails at content-driven boundaries, 200% text resize, text-spacing overrides, or RTL direction?
 
 ### 7. Accessibility
 - Contrast ratios <4.5:1?
@@ -70,7 +69,13 @@ Does this look like every other AI-generated interface from 2024-2025? Check aga
 - No semantic HTML (div soup)?
 - Missing alt text on images?
 
-### 8. Code Quality
+### 8. Full-Stack Integration
+- Request/response DTOs, statuses, headers, media types, auth scopes, or DB constraints drift from UI assumptions?
+- 401, 403, validation, conflict, rate-limit, partial-success, and offline behavior map to distinct native states?
+- Mutations define idempotency, optimistic rollback, concurrency, and cache invalidation?
+- UI action → request → handler → DB work is observable with redacted correlation evidence?
+
+### 9. Code Quality
 - Div soup instead of semantic elements?
 - Inline styles mixed with CSS classes?
 - Hardcoded pixel widths?

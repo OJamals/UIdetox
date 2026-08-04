@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from uidetox import cli
-from uidetox import onboarding
+from uidetox import cli, onboarding
 from uidetox.agent_integration import (
     AgentProvisioningResult,
     ProvisioningStatus,

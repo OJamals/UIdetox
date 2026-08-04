@@ -2,13 +2,14 @@
 
 import argparse
 import html
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
+
 from uidetox.state import (
-    load_state,
     ensure_uidetox_dir,
     get_project_root,
     get_uidetox_dir,
+    load_state,
 )
 
 

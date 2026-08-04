@@ -48,7 +48,7 @@ Analyze where motion would improve the experience:
 
 If any of these are unclear from the codebase, {{ask_instruction}}
 
-**CRITICAL**: Respect `prefers-reduced-motion`. Always provide non-animated alternatives for users who need them.
+**CRITICAL**: Respect `prefers-reduced-motion`. Remove or reduce non-essential motion while preserving clear state changes and task completion.
 
 ## Plan Animation Strategy
 

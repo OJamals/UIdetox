@@ -27,24 +27,31 @@ Run comprehensive checks across multiple dimensions:
 2. **Performance** - Check for:
    - **Layout thrashing**: Reading/writing layout properties in loops
    - **Expensive animations**: Animating layout properties (width, height, top, left) instead of transform/opacity
-   - **Missing optimization**: Images without lazy loading, unoptimized assets, missing will-change
+   - **Missing optimization**: Incorrect image sizing/loading, excessive JS, or measured critical-path waste; avoid speculative `will-change`
    - **Bundle size**: Unnecessary imports, unused dependencies
-   - **Render performance**: Unnecessary re-renders, missing memoization
+   - **Render performance**: Profile unnecessary work before adding memoization
+   - **User metrics**: LCP, INP, and CLS at the 75th percentile for relevant route/device segments
 
 3. **Theming** - Check for:
    - **Hard-coded colors**: Colors not using design tokens
-   - **Broken dark mode**: Missing dark mode variants, poor contrast in dark theme
+   - **Broken dark mode**: Missing variants or poor contrast when a dark theme is in product scope
    - **Inconsistent tokens**: Using wrong tokens, mixing token types
    - **Theme switching issues**: Values that don't update on theme change
 
 4. **Responsive Design** - Check for:
    - **Fixed widths**: Hard-coded widths that break on mobile
-   - **Touch targets**: Interactive elements < 44x44px
+   - **Target size**: Below 24×24 CSS pixels without a documented WCAG 2.5.8 exception; treat 44×44 as an enhanced aim
    - **Horizontal scroll**: Content overflow on narrow viewports
    - **Text scaling**: Layouts that break when text size increases
-   - **Missing breakpoints**: No mobile/tablet variants
+   - **Missing boundaries**: No content-driven adaptation where layout or tasks break
 
-5. **Anti-Patterns (CRITICAL)** - Check against ALL the **DON'T** guidelines in the frontend-design skill. Look for AI slop tells (AI color palette, gradient text, glassmorphism, hero metrics, card grids, generic fonts) and general design anti-patterns (gray on color, nested cards, bounce easing, redundant copy).
+5. **Full-Stack Integration** - Check for:
+   - **Contract drift**: UI request/response assumptions differ from API schemas, status codes, headers, auth, or DB constraints
+   - **Failure semantics**: 401/403, validation, conflict, rate-limit, partial-success, offline, and retry behavior lack native UI states
+   - **Mutation safety**: Optimistic rollback, idempotency, concurrency control, and cache invalidation are absent or unverified
+   - **Observability**: User action, request, backend handler, and DB work cannot be correlated without exposing secrets or personal data
+
+6. **Anti-Patterns** - Classify skill **DON'T** guidance as standards, measured risks, heuristics, or house style. Report AI-slop tells (generic gradients, glassmorphism, hero metrics, card grids, default typography) as design evidence, not automatic WCAG failures.
 
 **CRITICAL**: This is an audit, not a fix. Document issues thoroughly with clear explanations of impact. Use other commands (normalize, optimize, harden, etc.) to fix issues after audit.
 
@@ -69,7 +76,7 @@ For each issue, document:
 - **Category**: Accessibility / Performance / Theming / Responsive
 - **Description**: What the issue is
 - **Impact**: How it affects users
-- **WCAG/Standard**: Which standard it violates (if applicable)
+- **WCAG/Standard**: Exact criterion or standard only when evidence proves a violation; otherwise mark heuristic or house style
 - **Recommendation**: How to fix it
 - **Suggested command**: Which command to use (prefer: {{available_commands}} — or other installed skills you're sure exist)
 
@@ -89,7 +96,7 @@ For each issue, document:
 
 Identify recurring problems:
 - "Hard-coded colors appear in 15+ components, should use design tokens"
-- "Touch targets consistently too small (<44px) throughout mobile experience"
+- "Targets below 24×24 CSS pixels lack a verified WCAG 2.5.8 exception"
 - "Missing focus indicators on all custom interactive components"
 
 ### Positive Findings
@@ -126,4 +133,3 @@ Examples:
 - Report false positives without verification
 
 Remember: You're a quality auditor with exceptional attention to detail. Document systematically, prioritize ruthlessly, and provide clear paths to improvement. A good audit makes fixing easy.
-

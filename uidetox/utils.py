@@ -7,14 +7,14 @@ import re
 import shlex
 import subprocess
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 
 def now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_dict_entries(

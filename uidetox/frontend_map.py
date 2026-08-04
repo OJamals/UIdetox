@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -67,7 +66,7 @@ class FrontendNode:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "FrontendNode":
+    def from_dict(cls, value: dict[str, Any]) -> FrontendNode:
         return cls(
             id=str(value["id"]),
             kind=str(value["kind"]),
@@ -88,7 +87,7 @@ class FrontendEdge:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "FrontendEdge":
+    def from_dict(cls, value: dict[str, Any]) -> FrontendEdge:
         return cls(
             source=str(value["source"]),
             target=str(value["target"]),
@@ -106,7 +105,7 @@ class ExperienceContract:
     unknown: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "ExperienceContract":
+    def from_dict(cls, value: dict[str, Any]) -> ExperienceContract:
         return cls(
             must_preserve=tuple(str(item) for item in value.get("must_preserve", [])),
             may_change=tuple(str(item) for item in value.get("may_change", [])),
@@ -133,7 +132,7 @@ class FrontendMap:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "FrontendMap":
+    def from_dict(cls, value: dict[str, Any]) -> FrontendMap:
         version = int(value.get("schema_version", 0))
         if version != SCHEMA_VERSION:
             raise ValueError(
@@ -395,7 +394,13 @@ def map_frontend(
 
         call_count = len(facts.network_calls)
 
-        def ui_owner_for_call(call_owner: str) -> str:
+        def ui_owner_for_call(
+            call_owner: str,
+            ui_owners: set[str] = ui_owners,
+            ui_actions_by_call_owner: dict[
+                str, dict[str, set[str]]
+            ] = ui_actions_by_call_owner,
+        ) -> str:
             if call_owner in ui_owners:
                 return call_owner
             owners = ui_actions_by_call_owner.get(call_owner, {}).keys() & ui_owners
@@ -1565,7 +1570,7 @@ def _runtime_route(url: str) -> str:
 
 
 def _node_id(kind: str, file_path: str, name: str, ordinal: int = 0) -> str:
-    raw = f"{kind}\0{file_path}\0{name}\0{ordinal}".encode("utf-8")
+    raw = f"{kind}\0{file_path}\0{name}\0{ordinal}".encode()
     return f"{kind}:{hashlib.sha1(raw, usedforsecurity=False).hexdigest()[:12]}"
 
 

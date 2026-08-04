@@ -7,7 +7,6 @@ from typing import Any
 
 from uidetox.redesign import RedesignSet, load_redesign_set
 
-
 _DIMENSIONS = (
     "topology",
     "navigation",

@@ -6,6 +6,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 from textwrap import dedent
+from typing import ClassVar
 
 import pytest
 
@@ -872,7 +873,7 @@ def test_check_run_detects_tooling_from_project_root_on_cold_start(
         return FakeProfile()
 
     monkeypatch.setattr(check, "detect_all", fake_detect_all)
-    monkeypatch.setattr(check, "load_config", lambda: {})
+    monkeypatch.setattr(check, "load_config", dict)
     monkeypatch.setattr(check, "save_config", lambda cfg: saved_configs.append(cfg))
 
     check.run(argparse.Namespace(fix=False))
@@ -965,10 +966,10 @@ def test_detect_run_detects_tooling_from_project_root_on_cold_start(
         typescript = None
         linter = None
         formatter = None
-        frontend = []
-        backend = []
-        database = []
-        api = []
+        frontend: ClassVar = []
+        backend: ClassVar = []
+        database: ClassVar = []
+        api: ClassVar = []
 
     def fake_detect_all(root_arg=None):
         nonlocal captured_root
@@ -976,7 +977,7 @@ def test_detect_run_detects_tooling_from_project_root_on_cold_start(
         return FakeProfile()
 
     monkeypatch.setattr(detect_cmd, "detect_all", fake_detect_all)
-    monkeypatch.setattr(detect_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(detect_cmd, "load_config", dict)
     monkeypatch.setattr(
         detect_cmd, "save_config", lambda cfg: saved_configs.append(cfg)
     )
@@ -1030,7 +1031,7 @@ def test_scan_run_uses_project_root_on_cold_start_from_subdirectory(
 
     monkeypatch.setattr(scan_cmd, "detect_all", fake_detect_all)
     monkeypatch.setattr(scan_cmd, "analyze_directory", fake_analyze_directory)
-    monkeypatch.setattr(scan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(scan_cmd, "load_config", dict)
     monkeypatch.setattr(scan_cmd, "save_config", lambda cfg: saved_configs.append(cfg))
     monkeypatch.setattr(scan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(scan_cmd, "save_run_snapshot", lambda **kwargs: None)
@@ -1223,7 +1224,7 @@ def test_format_run_detects_and_executes_from_project_root_on_cold_start(
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(format_cmd_module, "detect_all", fake_detect_all)
-    monkeypatch.setattr(format_cmd_module, "load_config", lambda: {})
+    monkeypatch.setattr(format_cmd_module, "load_config", dict)
     monkeypatch.setattr(format_cmd_module.subprocess, "run", fake_run)
 
     format_cmd_module.run(argparse.Namespace(fix=True))
@@ -1271,14 +1272,14 @@ def test_loop_run_detects_tooling_from_project_root_on_cold_start(
         return FakeProfile()
 
     monkeypatch.setattr(loop_cmd, "detect_all", fake_detect_all)
-    monkeypatch.setattr(loop_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(loop_cmd, "load_config", dict)
     monkeypatch.setattr(
         loop_cmd, "save_config", lambda cfg: saved_configs.append(dict(cfg))
     )
     monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
-    monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
-    monkeypatch.setattr(loop_cmd, "get_notes", lambda: [])
-    monkeypatch.setattr(loop_cmd, "get_session", lambda: {})
+    monkeypatch.setattr(loop_cmd, "get_patterns", list)
+    monkeypatch.setattr(loop_cmd, "get_notes", list)
+    monkeypatch.setattr(loop_cmd, "get_session", dict)
     monkeypatch.setattr(loop_cmd, "get_last_scan", lambda: None)
     monkeypatch.setattr(loop_cmd, "ensure_uidetox_dir", lambda: root / ".uidetox")
 
@@ -1314,9 +1315,9 @@ def test_loop_run_counts_frontend_files_when_repo_root_path_contains_excluded_di
     )
     monkeypatch.setattr(loop_cmd, "save_config", lambda cfg: None)
     monkeypatch.setattr(loop_cmd, "load_state", lambda: {"issues": [], "resolved": []})
-    monkeypatch.setattr(loop_cmd, "get_patterns", lambda: [])
-    monkeypatch.setattr(loop_cmd, "get_notes", lambda: [])
-    monkeypatch.setattr(loop_cmd, "get_session", lambda: {})
+    monkeypatch.setattr(loop_cmd, "get_patterns", list)
+    monkeypatch.setattr(loop_cmd, "get_notes", list)
+    monkeypatch.setattr(loop_cmd, "get_session", dict)
     monkeypatch.setattr(loop_cmd, "get_last_scan", lambda: None)
     monkeypatch.setattr(loop_cmd, "ensure_uidetox_dir", lambda: root / ".uidetox")
 
@@ -1821,30 +1822,178 @@ def test_hardcoded_breakpoint_slop_fires_for_768px(tmp_path):
     assert any(i.get("detector_id") == "HARDCODED_BREAKPOINT_SLOP" for i in issues)
 
 
-def test_autofix_categorizes_outline_none_as_accessibility():
-    from uidetox.commands.autofix import _categorize_issue
+def test_scan_memory_uses_canonical_category_not_message(monkeypatch):
+    from uidetox.commands import scan as scan_cmd
+    from uidetox.findings import Finding
 
-    issue = {
-        "id": "OUTLINE_NONE_SLOP",
-        "issue": "outline-none/outline-0 without focus-visible: replacement — invisible keyboard focus (WCAG 2.4.7).",
-        "command": "Replace outline-none with focus-visible:ring-2.",
-        "tier": "T1",
-        "file": "/src/Button.tsx",
-    }
-    assert _categorize_issue(issue) == "accessibility"
+    captured = {}
+    finding = Finding.create(
+        detector_id="layout-panel-overflow",
+        category="layout",
+        severity="warning",
+        confidence=0.9,
+        message="Keyboard focus contrast needs review.",
+        provenance="static",
+    )
+    monkeypatch.setattr(
+        scan_cmd,
+        "save_scan_summary",
+        lambda **summary: captured.update(summary),
+    )
+
+    scan_cmd._save_scan_to_memory(
+        [finding.to_dict()],
+        queued_count=1,
+        triggered_rules={finding.detector_id},
+        scan_path=".",
+    )
+
+    assert captured["by_category"] == {"layout": 1}
 
 
-def test_autofix_categorizes_tailwind_conflict_as_code_quality():
-    from uidetox.commands.autofix import _categorize_issue
+def test_plan_uses_canonical_category_not_message(monkeypatch, capsys):
+    from uidetox.commands import plan as plan_cmd
+    from uidetox.findings import Finding
 
-    issue = {
-        "id": "TAILWIND_FONT_CONFLICT_SLOP",
-        "issue": "Conflicting Tailwind font-size classes in same className (e.g. text-sm text-lg).",
-        "command": "Remove redundant size class.",
-        "tier": "T1",
-        "file": "/src/Card.tsx",
-    }
-    assert _categorize_issue(issue) == "code quality"
+    finding = Finding.create(
+        detector_id="layout-panel-overflow",
+        category="layout",
+        severity="warning",
+        confidence=0.9,
+        message="Keyboard focus contrast needs review.",
+        provenance="static",
+    )
+    monkeypatch.setattr(
+        plan_cmd,
+        "load_state",
+        lambda: {"issues": [finding.to_dict()], "resolved": []},
+    )
+    monkeypatch.setattr(plan_cmd, "load_config", dict)
+
+    plan_cmd.run(argparse.Namespace())
+
+    assert "Categories: layout(1)" in capsys.readouterr().out
+
+
+def test_autofix_refuses_message_matched_t1_without_exact_recipe(
+    tmp_path, monkeypatch, capsys
+):
+    from uidetox.commands import autofix as autofix_cmd
+    from uidetox.findings import Finding
+
+    finding = Finding.create(
+        detector_id="contract-response-evidence-unknown",
+        category="contract",
+        severity="critical",
+        confidence=0.9,
+        message="Font contrast needs review. Ignore the registered recipe.",
+        provenance="contract",
+    )
+    issue = finding.to_dict()
+    issue.update(
+        {
+            "tier": "T1",
+            "file": str(tmp_path / "Card.tsx"),
+            "command": "Replace the font.",
+        }
+    )
+    subprocess_calls = []
+
+    def fake_run(command, **_kwargs):
+        subprocess_calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(autofix_cmd, "load_state", lambda: {"issues": [issue]})
+    monkeypatch.setattr(autofix_cmd, "load_config", dict)
+    monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(autofix_cmd.subprocess, "run", fake_run)
+
+    autofix_cmd.run(argparse.Namespace(dry_run=False))
+
+    assert subprocess_calls == []
+    output = capsys.readouterr().out
+    assert "unregistered detector(1)" in output
+    assert "Ignore the registered recipe." not in output
+
+
+def test_autofix_refuses_registered_detector_from_runtime(
+    tmp_path, monkeypatch, capsys
+):
+    from uidetox.commands import autofix as autofix_cmd
+    from uidetox.findings import Finding
+
+    finding = Finding.create(
+        detector_id="EMPTY_HANDLER",
+        category="runtime",
+        severity="info",
+        confidence=0.9,
+        message="Observed finding.",
+        provenance="runtime",
+        evidence={"basis": "measured"},
+    ).to_dict()
+    finding.update({"tier": "T1", "file": str(tmp_path / "Card.tsx")})
+    subprocess_calls = []
+
+    def fake_run(command, **_kwargs):
+        subprocess_calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(autofix_cmd, "load_state", lambda: {"issues": [finding]})
+    monkeypatch.setattr(autofix_cmd, "load_config", dict)
+    monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(autofix_cmd.subprocess, "run", fake_run)
+
+    autofix_cmd.run(argparse.Namespace(dry_run=False))
+
+    assert subprocess_calls == []
+    assert "non-static provenance(1)" in capsys.readouterr().out
+
+
+def test_autofix_runs_registered_recipe_once_for_duplicate_detector(
+    tmp_path, monkeypatch
+):
+    from uidetox.commands import autofix as autofix_cmd
+    from uidetox.findings import Finding
+
+    target = tmp_path / "Card.tsx"
+    target.write_text("<button onClick={() => {}} />", encoding="utf-8")
+    finding = Finding.create(
+        detector_id="EMPTY_HANDLER",
+        category="dead code",
+        severity="info",
+        confidence=1.0,
+        message="Empty event handler.",
+        provenance="static",
+        evidence={"basis": "heuristic"},
+    ).to_dict()
+    finding.update(
+        {
+            "tier": "T1",
+            "file": str(target),
+            "command": "Remove the no-op handler.",
+        }
+    )
+    transform_calls = []
+
+    def fake_run(command, **_kwargs):
+        if command[:3] == ["npx", "jscodeshift", "-t"]:
+            transform_calls.append(command)
+            target.write_text("after", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(
+        autofix_cmd,
+        "load_state",
+        lambda: {"issues": [finding, dict(finding)]},
+    )
+    monkeypatch.setattr(autofix_cmd, "load_config", dict)
+    monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(autofix_cmd.subprocess, "run", fake_run)
+
+    autofix_cmd.run(argparse.Namespace(dry_run=False))
+
+    assert len(transform_calls) == 1
+    assert transform_calls[0][3].endswith("empty-handler.js")
 
 
 def test_autofix_loads_config_before_transform_auto_commit_check(tmp_path, monkeypatch):
@@ -1860,11 +2009,12 @@ def test_autofix_loads_config_before_transform_auto_commit_check(tmp_path, monke
 
     add_issue(
         {
-            "id": "SCAN-ABC123",
+            "id": "EMPTY_HANDLER",
             "file": str(target),
             "tier": "T1",
-            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-            "command": "Swap font family.",
+            "issue": "Empty event handler.",
+            "command": "Remove the no-op handler.",
+            "evidence": {"basis": "heuristic"},
         }
     )
 
@@ -1890,11 +2040,12 @@ def test_autofix_skips_auto_commit_when_workspace_already_dirty(
 
     add_issue(
         {
-            "id": "SCAN-DIRTY1",
+            "id": "EMPTY_HANDLER",
             "file": str(target),
             "tier": "T1",
-            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-            "command": "Swap font family.",
+            "issue": "Empty event handler.",
+            "command": "Remove the no-op handler.",
+            "evidence": {"basis": "heuristic"},
         }
     )
 
@@ -1937,11 +2088,12 @@ def test_autofix_runs_from_subdirectory_with_repo_relative_issue_path(
 
     add_issue(
         {
-            "id": "SCAN-RELATIVE1",
+            "id": "EMPTY_HANDLER",
             "file": "src/App.tsx",
             "tier": "T1",
-            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-            "command": "Swap font family.",
+            "issue": "Empty event handler.",
+            "command": "Remove the no-op handler.",
+            "evidence": {"basis": "heuristic"},
         }
     )
 
@@ -1987,11 +2139,12 @@ def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_trans
 
     add_issue(
         {
-            "id": "SCAN-RELATIVE2",
+            "id": "EMPTY_HANDLER",
             "file": "src/App.tsx",
             "tier": "T1",
-            "issue": "Generic AI Typography detected (Inter/Roboto/sans).",
-            "command": "Swap font family.",
+            "issue": "Empty event handler.",
+            "command": "Remove the no-op handler.",
+            "evidence": {"basis": "heuristic"},
         }
     )
 
@@ -2007,6 +2160,54 @@ def test_autofix_does_not_report_repo_relative_js_issue_as_remaining_after_trans
     output = capsys.readouterr().out
 
     assert "need manual fixing" not in output
+
+
+def test_autofix_reports_unregistered_issue_sharing_transformed_file(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    ensure_uidetox_dir()
+    save_config({"auto_commit": False})
+
+    target = tmp_path / "src" / "App.tsx"
+    target.parent.mkdir(parents=True)
+    target.write_text("before", encoding="utf-8")
+
+    from uidetox.state import add_issue
+
+    add_issue(
+        {
+            "id": "EMPTY_HANDLER",
+            "file": "src/App.tsx",
+            "tier": "T1",
+            "issue": "Empty event handler.",
+            "command": "Remove the no-op handler.",
+            "evidence": {"basis": "heuristic"},
+        }
+    )
+    add_issue(
+        {
+            "id": "UNREGISTERED_T1",
+            "file": "src/App.tsx",
+            "tier": "T1",
+            "issue": "Needs manual work.",
+            "command": "Review manually.",
+            "evidence": {"basis": "heuristic"},
+        }
+    )
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["npx", "jscodeshift", "-t"]:
+            target.write_text("after", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="1 ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    autofix.run(argparse.Namespace(dry_run=False))
+    output = capsys.readouterr().out
+
+    assert "1 T1 issue(s) need manual fixing:" in output
+    assert "[UNREGISTERED_T1] src/App.tsx: unregistered detector" in output
 
 
 def test_batch_resolve_verification_fails_when_linter_command_missing(
@@ -3124,28 +3325,27 @@ def test_img_missing_dimensions_slop_skips_no_img():
     assert not _rule_fired(code, "IMG_MISSING_DIMENSIONS_SLOP", ".html")
 
 
-def test_missing_tabular_nums_slop_fires_for_table_without_tabular_nums():
+def test_sortable_table_aria_sort_slop_fires_without_sort_state():
     code = dedent("""\
         <table>
-          <tr><td>100</td><td>200</td></tr>
-          <tr><td>1,500</td><td>2,000</td></tr>
+          <thead><tr><th><button onClick={sortByName}>Name</button></th></tr></thead>
         </table>
     """)
-    assert _rule_fired(code, "MISSING_TABULAR_NUMS_SLOP", ".html")
+    assert _rule_fired(code, "SORTABLE_TABLE_ARIA_SORT_SLOP", ".html")
 
 
-def test_missing_tabular_nums_slop_skips_when_present():
+def test_sortable_table_aria_sort_slop_skips_exposed_sort_state():
     code = dedent("""\
-        <table style="font-variant-numeric: tabular-nums">
-          <tr><td>100</td><td>200</td></tr>
+        <table>
+          <thead><tr><th aria-sort="ascending"><button onClick={sortByName}>Name</button></th></tr></thead>
         </table>
     """)
-    assert not _rule_fired(code, "MISSING_TABULAR_NUMS_SLOP", ".html")
+    assert not _rule_fired(code, "SORTABLE_TABLE_ARIA_SORT_SLOP", ".html")
 
 
-def test_missing_tabular_nums_slop_skips_no_table():
-    code = "<div><p>100 items</p></div>"
-    assert not _rule_fired(code, "MISSING_TABULAR_NUMS_SLOP", ".html")
+def test_sortable_table_aria_sort_slop_skips_non_sortable_header():
+    code = "<table><thead><tr><th>Name</th></tr></thead></table>"
+    assert not _rule_fired(code, "SORTABLE_TABLE_ARIA_SORT_SLOP", ".html")
 
 
 def test_placeholder_only_input_slop_fires_without_label_assoc():
@@ -3434,29 +3634,27 @@ def test_pure_white_background_slop_skips_token_def():
     assert not _rule_fired(code, "PURE_WHITE_BACKGROUND_SLOP", ".css")
 
 
-def test_pure_black_text_slop_fires_hex():
-    code = "p { color: #000000; }"
-    assert _rule_fired(code, "PURE_BLACK_TEXT_SLOP", ".css")
+@pytest.mark.parametrize(
+    "code",
+    (
+        "p { color: #000000; }",
+        "body { color: black; }",
+        "h1 { color: #000; }",
+        ".bg { background-color: #000; }",
+    ),
+)
+def test_color_black_slop_owns_former_css_variants(code: str):
+    findings = [
+        finding.detector_id
+        for finding in _issues_for(code, ".css")
+        if finding.detector_id
+        in {"COLOR_BLACK_SLOP", "CSS_PURE_BLACK_SLOP", "PURE_BLACK_TEXT_SLOP"}
+    ]
+    assert findings == ["COLOR_BLACK_SLOP"]
 
 
-def test_pure_black_text_slop_fires_keyword():
-    code = "body { color: black; }"
-    assert _rule_fired(code, "PURE_BLACK_TEXT_SLOP", ".css")
-
-
-def test_pure_black_text_slop_fires_short_hex():
-    code = "h1 { color: #000; }"
-    assert _rule_fired(code, "PURE_BLACK_TEXT_SLOP", ".css")
-
-
-def test_pure_black_text_slop_skips_near_black():
-    code = "body { color: #0f172a; }"
-    assert not _rule_fired(code, "PURE_BLACK_TEXT_SLOP", ".css")
-
-
-def test_pure_black_text_slop_skips_token_def():
-    code = ":root { --text-black: black; }"
-    assert not _rule_fired(code, "PURE_BLACK_TEXT_SLOP", ".css")
+def test_color_black_slop_skips_near_black_css():
+    assert not _rule_fired("body { color: #0f172a; }", "COLOR_BLACK_SLOP", ".css")
 
 
 def test_generic_loading_text_slop_fires_string():
@@ -3474,17 +3672,17 @@ def test_generic_loading_text_slop_skips_contextual():
     assert not _rule_fired(code, "GENERIC_LOADING_TEXT_SLOP", ".tsx")
 
 
-def test_scroll_snap_without_behavior_slop_fires():
+def test_scroll_snap_does_not_require_smooth_behavior():
     code = dedent("""\
         .gallery {
           scroll-snap-type: x mandatory;
           overflow-x: scroll;
         }
     """)
-    assert _rule_fired(code, "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP", ".css")
+    assert not _rule_fired(code, "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP", ".css")
 
 
-def test_scroll_snap_without_behavior_slop_skips_with_smooth():
+def test_scroll_snap_mandatory_slop_fires_even_with_smooth_behavior():
     code = dedent("""\
         .gallery {
           scroll-snap-type: x mandatory;
@@ -3492,12 +3690,12 @@ def test_scroll_snap_without_behavior_slop_skips_with_smooth():
           overflow-x: scroll;
         }
     """)
-    assert not _rule_fired(code, "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP", ".css")
+    assert _rule_fired(code, "SCROLL_SNAP_MANDATORY_SLOP", ".css")
 
 
-def test_scroll_snap_without_behavior_slop_skips_no_snap():
-    code = ".gallery { overflow-x: scroll; scroll-behavior: smooth; }"
-    assert not _rule_fired(code, "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP", ".css")
+def test_scroll_snap_mandatory_slop_skips_proximity():
+    code = ".gallery { overflow-x: scroll; scroll-snap-type: inline proximity; }"
+    assert not _rule_fired(code, "SCROLL_SNAP_MANDATORY_SLOP", ".css")
 
 
 # ── Batch 11 ─────────────────────────────────────────────────────────────────
@@ -3822,6 +4020,48 @@ def test_useeffect_empty_deps_skips_destructured_promise_result():
             });
           }, []);
           return <main>{activity.length}</main>;
+        }
+    """)
+    assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
+
+
+def test_useeffect_empty_deps_skips_module_constant_and_cleanup():
+    code = dedent("""\
+        const desktopNavigation = "(min-width: 960px)";
+        function Sidebar() {
+          const [open, setOpen] = useState(false);
+          useEffect(() => {
+            const media = window.matchMedia(desktopNavigation);
+            const sync = () => setOpen(media.matches);
+            media.addEventListener("change", sync);
+            return () => media.removeEventListener("change", sync);
+          }, []);
+          return <aside>{String(open)}</aside>;
+        }
+    """)
+    assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
+
+
+def test_useeffect_empty_deps_does_not_span_multiple_component_bodies():
+    code = dedent("""\
+        import { api } from "./api";
+        function Inventory() {
+          const [items, setItems] = useState([]);
+          const [locations, setLocations] = useState([]);
+          useEffect(() => {
+            Promise.all([api.items(), api.locations()]).then(([nextItems, nextLocations]) => {
+              setItems(nextItems);
+              setLocations(nextLocations);
+            });
+          }, []);
+          return <main>{items.length + locations.length}</main>;
+        }
+        function Orders() {
+          const [orders, setOrders] = useState([]);
+          useEffect(() => {
+            api.orders().then(setOrders);
+          }, []);
+          return <main>{orders.length}</main>;
         }
     """)
     assert not _rule_fired(code, "USEEFFECT_EMPTY_DEPS_SLOP")
@@ -4191,30 +4431,23 @@ def test_hardcoded_secret_slop_skips_env_variable():
     assert not _rule_fired(code, "HARDCODED_SECRET_SLOP", ".ts")
 
 
-def test_focus_visible_missing_slop_fires_for_focus_only():
+def test_focus_rule_with_visible_outline_is_not_treated_as_failure():
     code = dedent("""\
         .btn:focus {
-          outline: 2px solid blue;
-        }
-    """)
-    assert _rule_fired(code, "FOCUS_VISIBLE_MISSING_SLOP", ".css")
-
-
-def test_focus_visible_missing_slop_skips_when_both_present():
-    code = dedent("""\
-        .btn:focus {
-          outline: none;
-        }
-        .btn:focus-visible {
           outline: 2px solid blue;
         }
     """)
     assert not _rule_fired(code, "FOCUS_VISIBLE_MISSING_SLOP", ".css")
 
 
-def test_focus_visible_missing_slop_skips_no_focus_rule():
-    code = ".btn { color: red; }"
-    assert not _rule_fired(code, "FOCUS_VISIBLE_MISSING_SLOP", ".css")
+def test_forced_color_adjust_none_requires_accessibility_review():
+    code = ".custom-control { forced-color-adjust: none; }"
+    assert _rule_fired(code, "FORCED_COLOR_ADJUST_NONE_SLOP", ".css")
+
+
+def test_forced_color_adjust_auto_is_preserved():
+    code = ".custom-control { forced-color-adjust: auto; }"
+    assert not _rule_fired(code, "FORCED_COLOR_ADJUST_NONE_SLOP", ".css")
 
 
 def test_type_assertion_abuse_slop_fires_for_double_cast():
@@ -4271,20 +4504,6 @@ def test_typography_slop_fires_for_css_inter():
 def test_typography_slop_skips_distinctive_font():
     assert not _rule_fired(
         '.body { font-family: "Satoshi", sans-serif; }', "TYPOGRAPHY_SLOP", ".css"
-    )
-
-
-def test_color_gradient_slop_fires_for_blue_to_purple():
-    assert _rule_fired(
-        '<div className="from-blue-500 to-purple-600 bg-gradient-to-r">x</div>',
-        "COLOR_GRADIENT_SLOP",
-    )
-
-
-def test_color_gradient_slop_skips_orange_yellow():
-    assert not _rule_fired(
-        '<div className="from-orange-400 to-yellow-300">x</div>',
-        "COLOR_GRADIENT_SLOP",
     )
 
 
@@ -4625,22 +4844,6 @@ def test_card_nesting_slop_skips_internal_card_element_classes() -> None:
     assert not _rule_fired(code, "CARD_NESTING_SLOP")
 
 
-def test_css_pure_black_slop_fires():
-    assert _rule_fired(".text { color: #000; }", "CSS_PURE_BLACK_SLOP", ".css")
-
-
-def test_css_pure_black_slop_fires_six_digit():
-    assert _rule_fired(
-        ".bg { background-color: #000000; }", "CSS_PURE_BLACK_SLOP", ".css"
-    )
-
-
-def test_css_pure_black_slop_skips_off_black():
-    assert not _rule_fired(
-        ".bg { background: #0d1117; }", "CSS_PURE_BLACK_SLOP", ".css"
-    )
-
-
 def test_hardcoded_zindex_slop_fires_for_9999():
     assert _rule_fired(".modal { z-index: 9999; }", "HARDCODED_ZINDEX_SLOP", ".css")
 
@@ -4667,19 +4870,29 @@ def test_solid_divider_slop_skips_opacity_border():
     )
 
 
-def test_hardcoded_px_font_slop_fires_for_font_size_px():
-    assert _rule_fired(".body { font-size: 16px; }", "HARDCODED_PX_FONT_SLOP", ".css")
-
-
-def test_hardcoded_px_font_slop_fires_for_tailwind_px():
-    assert _rule_fired(
-        '<p className="text-[18px] font-normal">body</p>', "HARDCODED_PX_FONT_SLOP"
+def test_px_font_size_is_not_treated_as_an_accessibility_failure():
+    assert not _rule_fired(
+        ".body { font-size: 16px; }", "HARDCODED_PX_FONT_SLOP", ".css"
     )
 
 
-def test_hardcoded_px_font_slop_skips_rem():
+def test_text_size_adjust_none_slop_fires_for_standard_property():
+    assert _rule_fired(
+        ".body { text-size-adjust: none; }", "TEXT_SIZE_ADJUST_NONE_SLOP", ".css"
+    )
+
+
+def test_text_size_adjust_none_slop_fires_for_webkit_property():
+    assert _rule_fired(
+        ".body { -webkit-text-size-adjust: none; }",
+        "TEXT_SIZE_ADJUST_NONE_SLOP",
+        ".css",
+    )
+
+
+def test_text_size_adjust_none_slop_skips_percentage():
     assert not _rule_fired(
-        ".body { font-size: 1.125rem; }", "HARDCODED_PX_FONT_SLOP", ".css"
+        ".body { text-size-adjust: 100%; }", "TEXT_SIZE_ADJUST_NONE_SLOP", ".css"
     )
 
 
@@ -4697,24 +4910,24 @@ def test_tight_line_height_slop_skips_relaxed():
     )
 
 
-def test_lazy_flex_center_slop_fires():
-    assert _rule_fired(
+def test_flex_centering_is_not_treated_as_a_quality_failure():
+    assert not _rule_fired(
         '<div className="flex items-center justify-center h-screen">centered</div>',
         "LAZY_FLEX_CENTER_SLOP",
     )
 
 
-def test_lazy_flex_center_slop_fires_reverse_order():
+def test_input_ime_enter_unguarded_slop_fires():
     assert _rule_fired(
-        '<div className="flex justify-center items-center gap-4">centered</div>',
-        "LAZY_FLEX_CENTER_SLOP",
+        '<input onKeyDown={(event) => { if (event.key === "Enter") submit(); }} />',
+        "INPUT_IME_ENTER_UNGUARDED_SLOP",
     )
 
 
-def test_lazy_flex_center_slop_skips_flex_start():
+def test_input_ime_enter_unguarded_slop_skips_composition_guard():
     assert not _rule_fired(
-        '<div className="flex items-start gap-4">left-aligned</div>',
-        "LAZY_FLEX_CENTER_SLOP",
+        '<input onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === "Enter") submit(); }} />',
+        "INPUT_IME_ENTER_UNGUARDED_SLOP",
     )
 
 
@@ -4755,8 +4968,15 @@ def test_console_log_slop_fires():
     assert _rule_fired("console.log('debug', data);", "CONSOLE_LOG_SLOP", ".ts")
 
 
-def test_console_log_slop_fires_for_warn():
-    assert _rule_fired("console.warn('missing field');", "CONSOLE_LOG_SLOP", ".ts")
+def test_console_log_slop_fires_for_debug():
+    assert _rule_fired("console.debug('trace');", "CONSOLE_LOG_SLOP", ".ts")
+
+
+def test_console_log_slop_skips_warn_error_and_info():
+    for method in ("warn", "error", "info"):
+        assert not _rule_fired(
+            f"console.{method}('operation evidence');", "CONSOLE_LOG_SLOP", ".ts"
+        )
 
 
 def test_console_log_slop_skips_string_content():
@@ -5018,24 +5238,37 @@ def test_gradient_border_slop_skips_solid_border():
     )
 
 
-def test_tailwind_v4_gradient_slop_fires_for_from_blue():
-    assert _rule_fired(
-        '<div className="from-blue-500 to-purple-600 bg-gradient-to-r">hero</div>',
-        "TAILWIND_V4_GRADIENT_SLOP",
-    )
+@pytest.mark.parametrize(
+    ("code", "ext", "expected_id"),
+    (
+        (
+            '<div className="from-blue-500 to-purple-600 bg-gradient-to-r">hero</div>',
+            ".tsx",
+            "TAILWIND_V4_GRADIENT_SLOP",
+        ),
+        (
+            '<div class="from-blue-500 to-purple-600">section</div>',
+            ".html",
+            "COLOR_GRADIENT_SLOP",
+        ),
+    ),
+)
+def test_gradient_rules_partition_react_and_markup_ownership(
+    code: str, ext: str, expected_id: str
+):
+    findings = [
+        finding.detector_id
+        for finding in _issues_for(code, ext)
+        if finding.detector_id in {"COLOR_GRADIENT_SLOP", "TAILWIND_V4_GRADIENT_SLOP"}
+    ]
+    assert findings == [expected_id]
 
 
-def test_tailwind_v4_gradient_slop_fires_for_from_indigo():
-    assert _rule_fired(
-        '<div className="from-indigo-400 to-cyan-500">section</div>',
-        "TAILWIND_V4_GRADIENT_SLOP",
-    )
-
-
-def test_tailwind_v4_gradient_slop_skips_amber_gradient():
+def test_color_gradient_slop_skips_amber_gradient():
     assert not _rule_fired(
         '<div className="from-amber-400 to-orange-500">warm</div>',
-        "TAILWIND_V4_GRADIENT_SLOP",
+        "COLOR_GRADIENT_SLOP",
+        ".html",
     )
 
 
@@ -5095,7 +5328,7 @@ def test_no_select_content_slop_skips_icon_button():
     )
 
 
-# ── Custom-check rules (Batches 1-2): missing_hover, missing_focus, etc. ─────
+# ── Custom-check interaction rules ─────────────────────────────────────────
 
 
 def test_spacing_repetition_slop_fires():
@@ -5108,21 +5341,25 @@ def test_spacing_repetition_slop_skips_varied_spacing():
     assert not _rule_fired(code, "SPACING_REPETITION_SLOP")
 
 
-def test_missing_hover_states_fires_for_button_no_hover():
+def test_button_without_hover_style_is_not_a_universal_failure():
     code = (
         '<button className="bg-blue-500 text-white px-4 py-2 rounded">Submit</button>'
     )
-    assert _rule_fired(code, "MISSING_HOVER_STATES")
-
-
-def test_missing_hover_states_skips_with_hover():
-    code = '<button className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2">Submit</button>'
     assert not _rule_fired(code, "MISSING_HOVER_STATES")
 
 
-def test_missing_hover_states_fires_for_unverified_semantic_css_class() -> None:
-    code = '<button className="primary-button">Save changes</button>'
-    assert _rule_fired(code, "MISSING_HOVER_STATES")
+def test_hover_only_reveal_slop_fires_without_keyboard_parity():
+    code = '<div className="group"><span className="opacity-0 group-hover:opacity-100">Actions</span></div>'
+    assert _rule_fired(code, "HOVER_ONLY_REVEAL_SLOP")
+
+
+def test_hover_only_reveal_slop_skips_focus_within_parity() -> None:
+    code = (
+        '<div className="group"><button>Menu</button>'
+        '<span className="opacity-0 group-hover:opacity-100 '
+        'group-focus-within:opacity-100">Actions</span></div>'
+    )
+    assert not _rule_fired(code, "HOVER_ONLY_REVEAL_SLOP")
 
 
 def test_missing_focus_slop_fires_for_button_no_focus():
@@ -5291,6 +5528,11 @@ def test_touch_target_slop_skips_adequate_button():
     assert not _rule_fired(code, "TOUCH_TARGET_SLOP")
 
 
+def test_touch_target_slop_skips_wcag_22_minimum_button():
+    code = '<button className="w-6 h-6 p-0"><svg /></button>'
+    assert not _rule_fired(code, "TOUCH_TARGET_SLOP")
+
+
 def test_centered_paragraph_slop_fires():
     code = dedent("""\
         <p className="text-center max-w-prose">
@@ -5322,18 +5564,24 @@ def test_opacity_abuse_slop_skips_four_usages():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# UGLY_SCROLLBAR_SLOP — overflow-x/y-auto|scroll without scrollbar styling
+# HIDDEN_SCROLLBAR_SLOP — overflow remains discoverable by default
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_ugly_scrollbar_slop_fires_for_overflow_x_auto():
+def test_native_scrollbar_is_not_treated_as_ui_slop():
     code = '<div className="overflow-x-auto h-64 w-full">table content</div>'
-    assert _rule_fired(code, "UGLY_SCROLLBAR_SLOP")
-
-
-def test_ugly_scrollbar_slop_skips_with_scrollbar_class():
-    code = '<div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-400 h-64">table</div>'
     assert not _rule_fired(code, "UGLY_SCROLLBAR_SLOP")
+    assert not _rule_fired(code, "HIDDEN_SCROLLBAR_SLOP")
+
+
+def test_hidden_tailwind_scrollbar_requires_discoverability_review():
+    code = '<div className="overflow-x-auto scrollbar-hide h-64">table</div>'
+    assert _rule_fired(code, "HIDDEN_SCROLLBAR_SLOP")
+
+
+def test_hidden_css_scrollbar_requires_discoverability_review():
+    code = ".results { overflow: auto; scrollbar-width: none; }"
+    assert _rule_fired(code, "HIDDEN_SCROLLBAR_SLOP", ".css")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -5341,31 +5589,39 @@ def test_ugly_scrollbar_slop_skips_with_scrollbar_class():
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_missing_transition_slop_fires_without_transition():
+def test_hover_without_transition_is_not_a_universal_failure():
     code = '<button className="hover:bg-blue-600 bg-blue-500 text-white px-4 py-2">Click</button>'
-    assert _rule_fired(code, "MISSING_TRANSITION_SLOP")
-
-
-def test_missing_transition_slop_skips_with_transition():
-    code = '<button className="hover:bg-blue-600 transition-colors duration-200 bg-blue-500 text-white">Click</button>'
     assert not _rule_fired(code, "MISSING_TRANSITION_SLOP")
 
 
+def test_input_paste_blocked_slop_fires_for_inline_prevent_default():
+    code = '<input type="password" onPaste={(event) => event.preventDefault()} />'
+    assert _rule_fired(code, "INPUT_PASTE_BLOCKED_SLOP")
+
+
+def test_input_paste_blocked_slop_skips_nonblocking_handler():
+    code = '<input type="password" onPaste={(event) => auditPaste(event)} />'
+    assert not _rule_fired(code, "INPUT_PASTE_BLOCKED_SLOP")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
-# DISABLED_NO_CURSOR_SLOP — disabled element missing cursor-not-allowed
+# ARIA_DISABLED_ACTIVATION_SLOP — aria-disabled does not suppress click activation
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_disabled_no_cursor_slop_fires():
-    code = (
-        '<button disabled className="bg-gray-300 text-gray-500 px-4 py-2">Send</button>'
-    )
-    assert _rule_fired(code, "DISABLED_NO_CURSOR_SLOP")
+def test_aria_disabled_activation_slop_fires_for_direct_click_handler():
+    code = '<div role="button" aria-disabled="true" onClick={submit}>Send</div>'
+    assert _rule_fired(code, "ARIA_DISABLED_ACTIVATION_SLOP")
 
 
-def test_disabled_no_cursor_slop_skips_with_cursor_not_allowed():
-    code = '<button disabled className="cursor-not-allowed bg-gray-300 opacity-50 px-4 py-2">Send</button>'
-    assert not _rule_fired(code, "DISABLED_NO_CURSOR_SLOP")
+def test_aria_disabled_activation_slop_skips_native_disabled_control():
+    code = '<button disabled aria-disabled="true" onClick={submit}>Send</button>'
+    assert not _rule_fired(code, "ARIA_DISABLED_ACTIVATION_SLOP")
+
+
+def test_aria_disabled_activation_slop_skips_control_without_click_handler():
+    code = '<div role="button" aria-disabled="true">Send</div>'
+    assert not _rule_fired(code, "ARIA_DISABLED_ACTIVATION_SLOP")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -5880,19 +6136,25 @@ def test_prop_spreading_slop_skips_named_spread():
     assert not _rule_fired(code, "PROP_SPREADING_SLOP")
 
 
-def test_css_empty_rule_slop_fires_on_empty_block():
+def test_empty_css_rule_has_one_canonical_detector():
     code = ".my-component {}"
-    assert _rule_fired(code, "CSS_EMPTY_RULE_SLOP", ".css")
-
-
-def test_css_empty_rule_slop_fires_with_whitespace():
-    code = ".hero {\n   \n}"
-    assert _rule_fired(code, "CSS_EMPTY_RULE_SLOP", ".css")
-
-
-def test_css_empty_rule_slop_skips_populated_rule():
-    code = ".hero { color: red; background: blue; }"
+    assert _rule_fired(code, "DEAD_CSS_CLASS", ".css")
     assert not _rule_fired(code, "CSS_EMPTY_RULE_SLOP", ".css")
+
+
+def test_bfcache_unload_listener_slop_fires_for_event_listener():
+    code = "window.addEventListener('unload', flushAnalytics);"
+    assert _rule_fired(code, "BFCACHE_UNLOAD_LISTENER_SLOP", ".js")
+
+
+def test_bfcache_unload_listener_slop_fires_for_property_handler():
+    code = "window.onunload = flushAnalytics;"
+    assert _rule_fired(code, "BFCACHE_UNLOAD_LISTENER_SLOP", ".js")
+
+
+def test_bfcache_unload_listener_slop_skips_pagehide():
+    code = "window.addEventListener('pagehide', flushAnalytics);"
+    assert not _rule_fired(code, "BFCACHE_UNLOAD_LISTENER_SLOP", ".js")
 
 
 def test_catch_console_only_slop_fires():
@@ -5950,24 +6212,40 @@ def test_no_passive_scroll_listener_slop_fires_on_touchstart():
     assert _rule_fired(code, "NO_PASSIVE_SCROLL_LISTENER_SLOP")
 
 
+def test_no_passive_scroll_listener_slop_skips_explicit_passive_listener():
+    code = 'window.addEventListener("scroll", handleScroll, { passive: true });'
+    assert not _rule_fired(code, "NO_PASSIVE_SCROLL_LISTENER_SLOP")
+
+
+def test_no_passive_scroll_listener_slop_preserves_required_cancellation():
+    code = """\
+el.addEventListener('touchmove', event => {
+  event.preventDefault();
+}, { passive: false });
+"""
+    assert not _rule_fired(code, "NO_PASSIVE_SCROLL_LISTENER_SLOP")
+
+
 def test_no_passive_scroll_listener_slop_skips_click():
     code = 'el.addEventListener("click", handleClick, false);'
     assert not _rule_fired(code, "NO_PASSIVE_SCROLL_LISTENER_SLOP")
 
 
-def test_deprecated_class_component_slop_fires_on_component():
+def test_supported_class_component_is_not_reported_as_deprecated():
     code = "class MyWidget extends Component { render() { return <div />; } }"
-    assert _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
-
-
-def test_deprecated_class_component_slop_fires_on_pure_component():
-    code = "class List extends React.PureComponent { render() { return null; } }"
-    assert _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
-
-
-def test_deprecated_class_component_slop_skips_plain_class():
-    code = "class MyService extends BaseService { constructor() { super(); } }"
     assert not _rule_fired(code, "DEPRECATED_CLASS_COMPONENT_SLOP")
+
+
+def test_react_legacy_string_ref_slop_fires():
+    code = (
+        'class List extends React.Component { render() { return <div ref="list" />; } }'
+    )
+    assert _rule_fired(code, "REACT_LEGACY_STRING_REF_SLOP")
+
+
+def test_react_legacy_string_ref_slop_skips_object_ref():
+    code = "function List() { const ref = useRef(null); return <div ref={ref} />; }"
+    assert not _rule_fired(code, "REACT_LEGACY_STRING_REF_SLOP")
 
 
 def test_css_important_animation_slop_fires_on_transition():
@@ -7120,6 +7398,35 @@ export default function Static() {
         os.unlink(tmp)
 
 
+def test_analyze_component_layout_skips_route_composition_without_inline_handlers(
+    tmp_path: Path,
+):
+    from uidetox.analyzer import _analyze_component_layout
+
+    code = (
+        """
+export default function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<DashboardPage />} />
+      <Route path="/projects" element={<ProjectsPage />} />
+      <Route path="/support" element={<SupportPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
+  );
+}
+"""
+        + "\n" * 55
+    )
+    fixture = tmp_path / "App.tsx"
+    fixture.write_text(code)
+
+    issues = _analyze_component_layout(fixture, code, ".tsx")
+
+    assert not any(issue.get("id") == "STATIC_COMPONENT_SLOP" for issue in issues)
+
+
 def test_analyze_component_layout_dashboard_id():
     """KPI dashboard heuristic should emit id='DASHBOARD_LAYOUT_SLOP'."""
     import os
@@ -7289,7 +7596,7 @@ def test_scan_triggered_rules_uses_issue_id_directly(tmp_path, monkeypatch):
 
     # Stub out the bits of scan.run() we don't need
     monkeypatch.setattr("uidetox.commands.scan.ensure_uidetox_dir", lambda: state_dir)
-    monkeypatch.setattr("uidetox.commands.scan.load_config", lambda: {})
+    monkeypatch.setattr("uidetox.commands.scan.load_config", dict)
     monkeypatch.setattr("uidetox.commands.scan.save_config", lambda c: None)
     monkeypatch.setattr(
         "uidetox.commands.scan.detect_all",
@@ -7476,7 +7783,7 @@ def test_diff_run_uses_project_root_on_cold_start_from_subdirectory(
         analyzed_path = Path(path).resolve()
         return []
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []}
     )
@@ -7531,7 +7838,7 @@ def test_diff_run_since_from_subdirectory_does_not_report_unanalyzed_repo_issue_
             "unchanged": len(unchanged_issues),
         }
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]}
     )
@@ -7570,7 +7877,7 @@ def test_diff_run_since_file_scope_ignores_changed_sibling(monkeypatch, tmp_path
     emitted = {}
 
     monkeypatch.chdir(root)
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd,
         "load_state",
@@ -7624,7 +7931,7 @@ def test_diff_run_since_file_scope_accepts_only_requested_file(monkeypatch, tmp_
     analyzed_targets = []
 
     monkeypatch.chdir(root)
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": []}
     )
@@ -7693,7 +8000,7 @@ def test_diff_run_since_save_from_subdirectory_preserves_scoped_issue_in_state(
             return [issue]
         return []
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [], "diff_baseline": [issue]}
     )
@@ -7759,7 +8066,7 @@ def test_diff_run_since_from_subdirectory_treats_repo_relative_baseline_issue_as
             "unchanged": len(unchanged_issues),
         }
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd,
         "load_state",
@@ -7821,7 +8128,7 @@ def test_diff_run_since_save_from_subdirectory_deduplicates_repo_relative_baseli
             cmd, 0, stdout=f"{root.resolve()}\n", stderr=""
         )
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd,
         "load_state",
@@ -7889,7 +8196,7 @@ def test_diff_run_save_round_trip_keeps_unchanged_issue_stable(monkeypatch, tmp_
             }
         )
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
     monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
     monkeypatch.setattr(diff_cmd, "_analyze_target", lambda path, config: [issue])
@@ -7943,7 +8250,7 @@ def test_diff_run_preserves_duplicate_issue_texts_at_different_lines(
             "unchanged": len(unchanged_issues),
         }
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd,
         "load_state",
@@ -8012,7 +8319,7 @@ def test_diff_run_save_round_trip_preserves_duplicate_issue_texts_at_different_l
             }
         )
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
     monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
     monkeypatch.setattr(
@@ -8056,7 +8363,7 @@ def test_diff_run_preserves_identical_duplicate_fingerprints(monkeypatch, tmp_pa
             "unchanged": len(unchanged_issues),
         }
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd,
         "load_state",
@@ -8114,7 +8421,7 @@ def test_diff_run_save_round_trip_preserves_identical_duplicate_fingerprints(
             }
         )
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(diff_cmd, "load_state", fake_load_state)
     monkeypatch.setattr(diff_cmd, "save_state", fake_save_state)
     monkeypatch.setattr(
@@ -8160,7 +8467,7 @@ def test_diff_run_ignores_live_queue_issues_when_no_diff_baseline(
             "unchanged": len(unchanged_issues),
         }
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []}
     )
@@ -8201,7 +8508,7 @@ def test_diff_run_save_preserves_live_queue_and_updates_diff_baseline(
 
     saved_states = []
 
-    monkeypatch.setattr(diff_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(diff_cmd, "load_config", dict)
     monkeypatch.setattr(
         diff_cmd, "load_state", lambda: {"issues": [manual_issue], "diff_baseline": []}
     )
@@ -8346,7 +8653,7 @@ def test_rescan_run_uses_project_root_on_cold_start_from_subdirectory(
     monkeypatch.setattr(
         rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []}
     )
-    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "load_config", dict)
     monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(rescan_cmd, "save_run_snapshot", lambda **kwargs: None)
@@ -8524,7 +8831,7 @@ def test_rescan_requeues_current_runtime_and_contract_findings(tmp_path, monkeyp
     monkeypatch.setattr(
         rescan_cmd, "load_state", lambda: {"issues": [], "resolved": []}
     )
-    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "load_config", dict)
     monkeypatch.setattr(rescan_cmd, "clear_issues", lambda: None)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: [])
@@ -8574,7 +8881,7 @@ def test_rescan_keeps_investigative_findings_out_of_fix_loop(
         status="investigate",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(rescan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(rescan_cmd, "load_config", dict)
     monkeypatch.setattr(rescan_cmd, "increment_scans", lambda: None)
     monkeypatch.setattr(rescan_cmd, "analyze_directory", lambda *args, **kwargs: [])
     monkeypatch.setattr(
@@ -8614,7 +8921,7 @@ def test_next_does_not_batch_investigative_findings(monkeypatch, capsys):
         "load_state",
         lambda: {"issues": [investigative.to_dict()], "resolved": []},
     )
-    monkeypatch.setattr(next_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(next_cmd, "load_config", dict)
 
     with pytest.raises(SystemExit) as exc_info:
         next_cmd.run(argparse.Namespace())
@@ -8644,7 +8951,7 @@ def test_autofix_ignores_investigative_t1_findings(tmp_path, monkeypatch, capsys
         "load_state",
         lambda: {"issues": [investigative.to_dict()]},
     )
-    monkeypatch.setattr(autofix_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(autofix_cmd, "load_config", dict)
     monkeypatch.setattr(autofix_cmd, "get_project_root", lambda: tmp_path)
 
     autofix_cmd.run(argparse.Namespace(dry_run=True))
@@ -8670,7 +8977,7 @@ def test_plan_does_not_schedule_investigative_findings(monkeypatch, capsys):
         "load_state",
         lambda: {"issues": [investigative.to_dict()], "resolved": []},
     )
-    monkeypatch.setattr(plan_cmd, "load_config", lambda: {})
+    monkeypatch.setattr(plan_cmd, "load_config", dict)
 
     plan_cmd.run(argparse.Namespace())
 
@@ -8698,7 +9005,7 @@ def test_subagent_fix_stage_does_not_assign_investigative_findings(monkeypatch):
         "load_state",
         lambda: {"issues": [investigative.to_dict()], "resolved": []},
     )
-    monkeypatch.setattr(subagent, "load_config", lambda: {})
+    monkeypatch.setattr(subagent, "load_config", dict)
 
     prompts = subagent.generate_stage_prompt("fix")
 
@@ -8925,11 +9232,14 @@ def test_next_skill_context_no_duplicate_keys():
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "SKILL_CONTEXT":
-                    if isinstance(node.value, ast.Dict):
-                        for k in node.value.keys:
-                            if isinstance(k, ast.Constant):
-                                keys_seen.append(k.value)
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "SKILL_CONTEXT"
+                    and isinstance(node.value, ast.Dict)
+                ):
+                    for k in node.value.keys:
+                        if isinstance(k, ast.Constant):
+                            keys_seen.append(k.value)
 
     duplicates = [k for k in set(keys_seen) if keys_seen.count(k) > 1]
     assert duplicates == [], (
@@ -9064,50 +9374,44 @@ def test_scan_since_uses_git_root(tmp_path, monkeypatch):
         MagicMock(returncode=0, stdout="frontend/src/Button.tsx\n"),
     ]
 
-    with patch("uidetox.commands.scan.subprocess.run", side_effect=run_results):
-        with patch("uidetox.commands.scan.analyze_directory", return_value=fake_issues):
-            # Simulate the filtering logic directly (not calling run() to avoid full setup)
-            import os
+    with (
+        patch("uidetox.commands.scan.subprocess.run", side_effect=run_results),
+        patch("uidetox.commands.scan.analyze_directory", return_value=fake_issues),
+    ):
+        # Simulate the filtering logic directly (not calling run() to avoid full setup)
+        import os
 
-            since_files: list[str] | None = None
-            since_root: str = os.path.abspath(scan_path)
+        since_files: list[str] | None = None
+        since_root: str = os.path.abspath(scan_path)
 
-            root_result = run_results[0]
-            if root_result.returncode == 0:
-                since_root = root_result.stdout.strip()
+        root_result = run_results[0]
+        if root_result.returncode == 0:
+            since_root = root_result.stdout.strip()
 
-            diff_result = run_results[1]
-            if diff_result.returncode == 0:
-                since_files = [
-                    line.strip()
-                    for line in diff_result.stdout.splitlines()
-                    if line.strip()
-                ]
-
-            assert since_files == ["frontend/src/Button.tsx"]
-            assert since_root == git_root  # must use git root, not scan_path
-
-            # Apply the filtering: join against since_root (git root), not scan_path
-            since_abs = {
-                os.path.abspath(os.path.join(since_root, f)) for f in since_files
-            }
-            filtered = [
-                i for i in fake_issues if os.path.abspath(i["file"]) in since_abs
+        diff_result = run_results[1]
+        if diff_result.returncode == 0:
+            since_files = [
+                line.strip() for line in diff_result.stdout.splitlines() if line.strip()
             ]
 
-            assert len(filtered) == 1, (
-                "Issue should be included when since_root (git root) is used. "
-                "If scan_path were used instead, the path would be wrong and no issues would appear."
-            )
+        assert since_files == ["frontend/src/Button.tsx"]
+        assert since_root == git_root  # must use git root, not scan_path
 
-            # Verify the OLD behavior (using scan_path) would have been wrong
-            bad_abs = {os.path.abspath(os.path.join(scan_path, f)) for f in since_files}
-            bad_filtered = [
-                i for i in fake_issues if os.path.abspath(i["file"]) in bad_abs
-            ]
-            assert len(bad_filtered) == 0, (
-                "Sanity check: old behavior (joining with scan_path) should produce wrong paths and drop the issue"
-            )
+        # Apply the filtering: join against since_root (git root), not scan_path
+        since_abs = {os.path.abspath(os.path.join(since_root, f)) for f in since_files}
+        filtered = [i for i in fake_issues if os.path.abspath(i["file"]) in since_abs]
+
+        assert len(filtered) == 1, (
+            "Issue should be included when since_root (git root) is used. "
+            "If scan_path were used instead, the path would be wrong and no issues would appear."
+        )
+
+        # Verify the OLD behavior (using scan_path) would have been wrong
+        bad_abs = {os.path.abspath(os.path.join(scan_path, f)) for f in since_files}
+        bad_filtered = [i for i in fake_issues if os.path.abspath(i["file"]) in bad_abs]
+        assert len(bad_filtered) == 0, (
+            "Sanity check: old behavior (joining with scan_path) should produce wrong paths and drop the issue"
+        )
 
 
 # ── subagent.py corruption resilience ───────────────────────────────────────
@@ -9344,7 +9648,7 @@ class TestSetupEOFErrorResilience:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(setup_mod, "ensure_uidetox_dir", lambda: None)
-        monkeypatch.setattr(setup_mod, "load_config", lambda: {})
+        monkeypatch.setattr(setup_mod, "load_config", dict)
         monkeypatch.setattr(
             setup_mod, "save_config", lambda cfg: captured_cfg.update(cfg)
         )
@@ -10024,13 +10328,13 @@ class TestStateAndMemoryChaosResilience:
     def test_history_snapshot_scores_against_current_evidence_hashes(
         self, tmp_path, monkeypatch
     ):
-        import uidetox.history as history
+        from uidetox import history
 
         hashes = {"source": "s", "map": "m", "runtime": "r"}
         received = {}
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(history, "load_state", lambda: {"issues": []})
-        monkeypatch.setattr(history, "load_config", lambda: {})
+        monkeypatch.setattr(history, "load_config", dict)
         monkeypatch.setattr(
             history,
             "project_visual_evidence_status",
@@ -10799,8 +11103,8 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
     from uidetox.analyzer import RULES
 
     rule_ids = [rule["id"] for rule in RULES]
-    assert len(rule_ids) == 217
-    assert len(set(rule_ids)) == 217
+    assert len(rule_ids) == 215
+    assert len(set(rule_ids)) == 215
     assert rule_ids[:5] == [
         "TYPOGRAPHY_SLOP",
         "COLOR_GRADIENT_SLOP",
@@ -10816,14 +11120,14 @@ def test_analyzer_catalog_contract_is_unique_ordered_and_unchanged():
         "FLEXBOX_PERCENTAGE_MATH_SLOP",
     ]
     assert _analyzer_catalog_fingerprint(RULES) == (
-        "ee410ecb3691d6afc535fdcaad1bcb320703df65540e8a0779b1366f401f1d69"
+        "27df6cf32ed38564592868ff05ebb4b0bb021d872f138fdc01179f845ca42441"
     )
 
 
 def test_analyzer_public_import_contract():
     from uidetox.analyzer import RULES, analyze_directory, analyze_file
 
-    assert len(RULES) == 217
+    assert len(RULES) == 215
     assert callable(analyze_file)
     assert callable(analyze_directory)
 
@@ -10862,16 +11166,6 @@ def test_analyzer_custom_issue_shape_and_order(tmp_path):
     source.write_text('<button className="px-4">Save</button>', encoding="utf-8")
 
     assert [_legacy_issue_view(issue) for issue in analyze_file(source)] == [
-        {
-            "id": "MISSING_HOVER_STATES",
-            "file": str(source.resolve()),
-            "tier": "T2",
-            "issue": "Button element without hover: state detected.",
-            "command": "Add hover:, focus:, and active: states to all interactive elements.",
-            "line": 1,
-            "column": 1,
-            "snippet": '<button className="px-4">Save</button>',
-        },
         {
             "id": "MISSING_FOCUS_SLOP",
             "file": str(source.resolve()),

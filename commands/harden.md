@@ -88,17 +88,19 @@ Systematically improve resilience:
 
 **Responsive text sizing**:
 - Use `clamp()` for fluid typography
-- Set minimum readable sizes (14px on mobile)
-- Test text scaling (zoom to 200%)
+- Choose readable sizing from font metrics, language, density, and user settings; avoid a universal px floor
+- Test browser zoom, 200% text resize, and user text-spacing overrides
 - Ensure containers expand with text
 
 ### Internationalization (i18n)
 
 **Text expansion**:
-- Add 30-40% space budget for translations
+- Use pseudolocalization plus representative locale strings; expansion varies by source length and language
 - Use flexbox/grid that adapts to content
-- Test with longest language (usually German)
+- Test short/long translations, plural forms, mixed scripts, and data-derived strings
 - Avoid fixed widths on text containers
+- Use logical properties and verify `dir="rtl"` layout, icon directionality, focus order, and truncation
+- Preserve IME composition; do not submit or validate mid-composition
 
 ```jsx
 // ❌ Bad: Assumes short English text
@@ -355,4 +357,3 @@ Test thoroughly with edge cases:
 - **Empty**: Remove all data, test empty states
 
 Remember: You're hardening for production reality, not demo perfection. Expect users to input weird data, lose connection mid-flow, and use your product in unexpected ways. Build resilience into every component.
-

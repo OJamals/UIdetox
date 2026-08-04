@@ -24,7 +24,7 @@ def test_history_snapshot_records_visual_evidence_status(
         "load_state",
         lambda: {"issues": [], "resolved": [], "stats": {}},
     )
-    monkeypatch.setattr(history, "load_config", lambda: {})
+    monkeypatch.setattr(history, "load_config", dict)
     monkeypatch.setattr(
         history,
         "project_visual_evidence_status",

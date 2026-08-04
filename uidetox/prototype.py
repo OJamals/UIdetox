@@ -172,7 +172,12 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
             f"{item.get('instruction', '')}"
         )
         for item in proposal.migration_plan
-        if item.get("kind") not in {"experience-state", "runtime-finding"}
+        if item.get("kind")
+        not in {
+            "experience-state",
+            "runtime-finding",
+            "runtime-review",
+        }
     ]
     migration_evidence = _resources.bounded_lines(
         [
@@ -184,7 +189,8 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
                 (
                     item
                     for item in proposal.migration_plan
-                    if item.get("kind") not in {"experience-state", "runtime-finding"}
+                    if item.get("kind")
+                    not in {"experience-state", "runtime-finding", "runtime-review"}
                 ),
                 migration_evidence,
                 strict=True,
@@ -200,7 +206,7 @@ def build_prototype_brief(redesign_set: RedesignSet, proposal_id: str) -> str:
     ]
     runtime_remediation_entries: list[tuple[str, str]] = []
     for item in proposal.migration_plan:
-        if item.get("kind") != "runtime-finding":
+        if item.get("kind") not in {"runtime-finding", "runtime-review"}:
             continue
         anchors = item.get("anchors", [])
         anchors = anchors if isinstance(anchors, list) else []

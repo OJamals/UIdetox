@@ -1,8 +1,8 @@
 # Interaction Design
 
-## The Eight Interactive States
+## Applicable Interactive States
 
-Every interactive element needs these states designed:
+Design every state that a control's semantics and backend contract can actually enter. Do not invent loading/error/success states for a static link, or omit them from an async mutation:
 
 | State | When | Visual Treatment |
 |-------|------|------------------|
@@ -10,8 +10,8 @@ Every interactive element needs these states designed:
 | **Hover** | Pointer over (not touch) | Subtle lift, color shift |
 | **Focus** | Keyboard/programmatic focus | Visible ring (see below) |
 | **Active** | Being pressed | Pressed in, darker |
-| **Disabled** | Not interactive | Reduced opacity, no pointer |
-| **Loading** | Processing | Spinner, skeleton |
+| **Disabled** | Unavailable by contract | Distinct state plus reason/recovery where useful |
+| **Loading** | Processing | Stable layout plus meaningful status/progress |
 | **Error** | Invalid state | Red border, icon, message |
 | **Success** | Completed | Green check, confirmation |
 
@@ -19,15 +19,9 @@ Every interactive element needs these states designed:
 
 ## Focus Rings: Do Them Right
 
-**Never `outline: none` without replacement.** It's an accessibility violation. Instead, use `:focus-visible` to show focus only for keyboard users:
+Never remove a visible focus indication without an equally visible replacement. `:focus-visible` can reduce pointer-only rings, but `:focus` is valid and lack of `:focus-visible` is not a failure:
 
 ```css
-/* Hide focus ring for mouse/touch */
-button:focus {
-  outline: none;
-}
-
-/* Show focus ring for keyboard */
 button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
@@ -35,18 +29,19 @@ button:focus-visible {
 ```
 
 **Focus ring design**:
-- High contrast (3:1 minimum against adjacent colors)
-- 2-3px thick
-- Offset from element (not inside it)
+- Clearly distinguishable from focused and unfocused adjacent colors
+- Large and thick enough for product risk; test WCAG 2.4.7 and applicable enhanced criteria separately
+- Use an inset or outset treatment with enough separation from adjacent colors and clipping boundaries
 - Consistent across all interactive elements
+- Not entirely hidden by sticky or overlay content during real keyboard traversal
 
 ## Form Design: The Non-Obvious
 
-**Placeholders aren't labels**—they disappear on input. Always use visible `<label>` elements. **Validate on blur**, not on every keystroke (exception: password strength). Place errors **below** fields with `aria-describedby` connecting them.
+Placeholders are not persistent labels. Prefer visible labels and preserve an exact accessible-name association. Validate on submission, blur, or carefully designed inline feedback according to task risk; every-keystroke feedback can disrupt typing and IME composition. Put errors near their fields and connect them with `aria-describedby` or `aria-errormessage` as applicable.
 
 ## Loading States
 
-**Optimistic updates**: Show success immediately, rollback on failure. Use for low-stakes actions (likes, follows), not payments or destructive actions. **Skeleton screens > spinners**—they preview content shape and feel faster than generic spinners.
+Use optimistic updates only for reversible, conflict-aware operations with rollback or reconciliation evidence. Avoid them for payments, destructive actions, or security-sensitive changes. Choose skeletons for predictable content geometry, determinate progress for measurable work, and spinners for short indeterminate waits; announce meaningful status without stealing focus.
 
 ## Modals: The Inert Approach
 
@@ -57,9 +52,9 @@ Focus trapping in modals used to require complex JavaScript. Now use the `inert`
 <main inert>
   <!-- Content behind modal can't be focused or clicked -->
 </main>
-<dialog open>
+<dialog>
   <h2>Modal Title</h2>
-  <!-- Focus stays inside modal -->
+  <!-- Open with showModal() for modal behavior -->
 </dialog>
 ```
 
@@ -82,11 +77,11 @@ For tooltips, dropdowns, and non-modal overlays, use native popovers:
 </div>
 ```
 
-**Benefits**: Light-dismiss (click outside closes), proper stacking, no z-index wars, accessible by default.
+**Benefits**: Browser-managed top-layer placement and optional light-dismiss. Authors still own accessible naming, semantics, focus behavior, and the widget's expected keyboard model.
 
 ## Destructive Actions: Undo > Confirm
 
-**Undo is better than confirmation dialogs**—users click through confirmations mindlessly. Remove from UI immediately, show undo toast, actually delete after toast expires. Use confirmation only for truly irreversible actions (account deletion), high-cost actions, or batch operations.
+Undo often outperforms routine confirmation dialogs, but only when backend semantics support safe compensation or delayed commitment. Use confirmation or review for irreversible, high-cost, legal/financial, security-sensitive, and batch actions. Preserve mutation idempotency, rollback, and conflict behavior.
 
 ## Keyboard Navigation Patterns
 
@@ -106,7 +101,11 @@ Arrow keys move `tabindex="0"` between items. Tab moves to the next component en
 
 ### Skip Links
 
-Provide skip links (`<a href="#main-content">Skip to main content</a>`) for keyboard users to jump past navigation. Hide off-screen, show on focus.
+When repeated blocks precede main content, provide a bypass such as `<a href="#main-content">Skip to main content</a>`. Hide it off-screen, then reveal it on focus.
+
+### Scroll Snap
+
+`scroll-snap-type: mandatory` can make content between non-adjacent snap points unreachable when content or viewports vary. Prefer `proximity` unless real keyboard, touch, zoom, and responsive tests prove every item remains reachable. Smooth scrolling is a separate motion choice and must not be added merely because snap is present.
 
 ## Gesture Discoverability
 
@@ -120,4 +119,4 @@ Don't rely on gestures as the only way to perform actions.
 
 ---
 
-**Avoid**: Removing focus indicators without alternatives. Using placeholder text as labels. Touch targets <44x44px. Generic error messages. Custom controls without ARIA/keyboard support.
+**Avoid**: Removing focus indicators without alternatives. Using placeholder text as labels. Pointer targets below the WCAG 2.2 24×24 CSS pixel minimum without a valid spacing or other exception. Generic errors. Gesture-only actions. Custom controls without complete semantics and keyboard support. Aim for 44×44 CSS pixels where density and task context permit as an enhanced usability target.

@@ -126,7 +126,7 @@ def run(args: argparse.Namespace):
             zone_overrides=config.get("zone_overrides", {}),
         ).discover()
     )
-    unique_files = len(set(i.get("file", "") for i in issues))
+    unique_files = len({i.get("file", "") for i in issues})
     spread = unique_files if unique_files > 0 else (frontend_count // 5)
     auto_parallel = max(1, min(5, spread))
     is_orchestrator = getattr(args, "orchestrator", False) or frontend_count > 15

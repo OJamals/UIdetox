@@ -76,7 +76,7 @@ Open `http://127.0.0.1:4173`.
 ```bash
 npm run build
 .venv/bin/python -m pytest -q tests
-.venv/bin/playwright install chromium
+npx playwright install chromium
 npm run test:e2e
 ```
 

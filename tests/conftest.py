@@ -141,7 +141,9 @@ def local_http_server() -> Iterator[Callable[[Path], str]]:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                raise RuntimeError("Local qualification server exited before readiness.")
+                raise RuntimeError(
+                    "Local qualification server exited before readiness."
+                )
             try:
                 with urlopen(f"{origin}/", timeout=0.2) as response:
                     if response.status == 200:

@@ -29,9 +29,7 @@ def run(args: argparse.Namespace) -> None:
         ]
         scenario_file = config.get("runtime_scenarios")
         scenarios = (
-            load_runtime_scenarios(scenario_file, root=root)
-            if scenario_file
-            else None
+            load_runtime_scenarios(scenario_file, root=root) if scenario_file else None
         )
         if scenarios is not None and not getattr(args, "urls", None):
             urls = list(dict.fromkeys(scenario.url for scenario in scenarios))

@@ -88,6 +88,7 @@ def run_mechanical_command(
             cwd=root,
             timeout=timeout,
             env=env,
+            check=False,
         )
         return MechanicalRun(result.returncode, result.stdout + result.stderr)
     except FileNotFoundError:
@@ -106,7 +107,9 @@ def run_diagnostics(
 def parse_diagnostics(tool: str, output: str) -> tuple[MechanicalDiagnostic, ...]:
     if tool == "typescript":
         return tuple(
-            MechanicalDiagnostic(path.strip(), int(line), int(column), code, message.strip())
+            MechanicalDiagnostic(
+                path.strip(), int(line), int(column), code, message.strip()
+            )
             for path, line, column, code, message in _TSC_ERROR.findall(output)
         )
     if tool == "linter":
@@ -133,7 +136,7 @@ def parse_diagnostics(tool: str, output: str) -> tuple[MechanicalDiagnostic, ...
         return tuple(
             MechanicalDiagnostic(path, int(line), int(column), "lint", message.strip())
             for path, line, column, message in _LINT_ERROR.findall(output)
-            if path.startswith("/") or path.startswith(".") or ":" not in path
+            if path.startswith(("/", ".")) or ":" not in path
         )
     return ()
 
@@ -160,6 +163,10 @@ def diagnostic_finding(tool: str, diagnostic: MechanicalDiagnostic) -> Finding:
             "column": diagnostic.column,
         },
         suppression_key=f"{tool}:{diagnostic.signature}",
-        verifier={"kind": "mechanical", "tool": tool, "signature": diagnostic.signature},
+        verifier={
+            "kind": "mechanical",
+            "tool": tool,
+            "signature": diagnostic.signature,
+        },
         legacy={"id": queue_id, "command": f"{prefix.lower()}-fix"},
     )

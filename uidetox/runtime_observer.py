@@ -302,7 +302,7 @@ class RuntimeElement:
     findings: tuple[Finding, ...] = ()
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeElement":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeElement:
         bounds = value.get("bounds", {})
         styles = value.get("styles", {})
         states = value.get("states", {})
@@ -376,7 +376,7 @@ class RuntimePage:
     state: str = "initial"
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimePage":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimePage:
         return cls(
             url=str(value["url"]),
             title=str(value.get("title", "")),
@@ -537,7 +537,7 @@ class RuntimeObservation:
         return payload
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RuntimeObservation":
+    def from_dict(cls, value: dict[str, Any]) -> RuntimeObservation:
         capture_rows = tuple(value.get("captures", []))
         if not all(isinstance(capture, dict) for capture in capture_rows):
             raise TypeError("Runtime observation contains an invalid capture row.")
@@ -571,7 +571,7 @@ def observe_frontend(
     settle_ms: int = 250,
     scenarios: Iterable[RuntimeScenario] | None = None,
     readiness: RuntimeReadinessPolicy | None = None,
-    dom_budget: RuntimeDomBudget = RuntimeDomBudget(),
+    dom_budget: RuntimeDomBudget | None = None,
     source_root: str | Path | None = None,
     viewport_discovery: RuntimeViewportDiscovery | None = None,
 ) -> RuntimeObservation:
@@ -583,6 +583,7 @@ def observe_frontend(
     """
 
     normalized_urls = normalize_runtime_urls(urls)
+    effective_dom_budget = dom_budget if dom_budget is not None else RuntimeDomBudget()
     normalized_viewports = bounded_tuple(
         viewports,
         limit=RUNTIME_OBSERVATION_LIMITS.viewports,
@@ -666,7 +667,7 @@ def observe_frontend(
                                 scenario,
                                 viewport,
                                 timeout_ms=timeout_ms,
-                                dom_budget=dom_budget,
+                                dom_budget=effective_dom_budget,
                                 screenshot_root=screenshot_root,
                                 screenshot_namer=screenshot_namer,
                                 full_page=full_page,
@@ -845,7 +846,7 @@ def _observe_scenario(
                 )
                 pages.append(runtime_page)
                 captures.append(capture)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - browser adapter exposes no stable cross-version exception base
             state = state_context["state"]
             message = sanitize_runtime_text(
                 f"{scenario.url} [{viewport.name}/{scenario.name}/{state}]: {exc}"
@@ -1251,7 +1252,7 @@ def _elements_and_coverage_from_payload(
             budget=budget.candidates,
         )
     if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
-        raise ValueError("Runtime DOM observer returned an invalid payload.")
+        raise TypeError("Runtime DOM observer returned an invalid payload.")
     elements = tuple(
         RuntimeElement.from_dict(item)
         for item in payload["elements"]
@@ -1259,7 +1260,7 @@ def _elements_and_coverage_from_payload(
     )
     raw_coverage = payload.get("coverage", {})
     if not isinstance(raw_coverage, dict):
-        raise ValueError("Runtime DOM observer returned invalid coverage.")
+        raise TypeError("Runtime DOM observer returned invalid coverage.")
     coverage = RuntimeCoverage.from_dict(raw_coverage)
     if coverage.emitted != len(elements):
         raise ValueError("Runtime DOM coverage does not match emitted elements.")
@@ -2613,10 +2614,17 @@ async () => {
         const overlap = Math.min(previous.end.bottom, fragment.start.bottom)
           - Math.max(previous.end.top, fragment.start.top);
         const gap = fragment.start.left - previous.end.right;
-        const previousCharacter = previous.raw.trim().slice(-1);
-        const nextCharacter = fragment.raw.trim().slice(0, 1);
+        const previousText = previous.raw.trim();
+        const nextText = fragment.raw.trim();
+        const previousCharacter = previousText.slice(-1);
+        const nextCharacter = nextText.slice(0, 1);
+        const semanticUnitBoundary = (
+          /\p{N}$/u.test(previousText)
+          && /^(?:ms|s|min|m|h|d|wk|mo|yr|px|r?em|v[hw]|c[hwq]|kg|g|lb|oz|kb|mb|gb|tb)\b/iu.test(nextText)
+        );
         if (
-          overlap >= Math.min(previous.end.height, fragment.start.height) * 0.5
+          !semanticUnitBoundary
+          && overlap >= Math.min(previous.end.height, fragment.start.height) * 0.5
           && gap >= -0.5
           && gap <= 1
           && /[\p{L}\p{N}%]/u.test(previousCharacter)
@@ -2788,6 +2796,16 @@ async () => {
           && selectedSet.has(candidate.element)
         )
       ) continue;
+      const candidateElementRect = baseMeasurement(candidate.element).rect;
+      const elementHorizontalOverlap = (
+        Math.min(measured.rect.right, candidateElementRect.right)
+        - Math.max(measured.rect.left, candidateElementRect.left)
+      );
+      const elementVerticalOverlap = (
+        Math.min(measured.rect.bottom, candidateElementRect.bottom)
+        - Math.max(measured.rect.top, candidateElementRect.top)
+      );
+      if (elementHorizontalOverlap > 1 && elementVerticalOverlap <= 1) continue;
       const area = Math.max(...ownRects.map(rect => {
         const width = Math.min(rect.right, candidate.rect.right)
           - Math.max(rect.left, candidate.rect.left);

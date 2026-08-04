@@ -101,7 +101,7 @@ def _default_chromium_probe() -> ProbeState:
             if executable.is_file() and os.access(executable, os.X_OK):
                 return ProbeState.AVAILABLE
             return ProbeState.MISSING
-    except Exception:
+    except Exception:  # noqa: BLE001 - external capability probes define no shared exception taxonomy
         return ProbeState.UNKNOWN
 
 
@@ -223,7 +223,7 @@ def _probe_distribution(
         return ProbeState.AVAILABLE, environment.distribution_version(name)
     except metadata.PackageNotFoundError:
         return ProbeState.MISSING, None
-    except Exception:
+    except Exception:  # noqa: BLE001 - external capability probes define no shared exception taxonomy
         return ProbeState.UNKNOWN, None
 
 
@@ -234,7 +234,7 @@ def _probe_import(name: str, environment: CapabilityEnvironment) -> ProbeState:
             if environment.find_spec(name) is not None
             else ProbeState.MISSING
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - external capability probes define no shared exception taxonomy
         return ProbeState.UNKNOWN
 
 
@@ -249,7 +249,7 @@ def detect_capabilities(
     if codebase_path is not None:
         try:
             mcp_state = environment.mcp_probe(codebase_path)
-        except Exception:
+        except Exception:  # noqa: BLE001 - external capability probes define no shared exception taxonomy
             mcp_state = ProbeState.UNKNOWN
     codebase = CapabilityStatus(
         capability=Capability.CODEBASE_MEMORY,
@@ -295,7 +295,7 @@ def detect_capabilities(
         try:
             chromium_state = environment.chromium_probe()
             chromium_detail = "Playwright-managed Chromium executable readiness."
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - external capability probes define no shared exception taxonomy
             chromium_state = ProbeState.UNKNOWN
             chromium_detail = f"Chromium readiness could not be verified: {error}"
     chromium = CapabilityStatus(

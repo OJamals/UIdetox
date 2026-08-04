@@ -1,6 +1,6 @@
-from argparse import Namespace
 import json
 import re
+from argparse import Namespace
 
 import pytest
 
@@ -16,7 +16,7 @@ def _untrusted_records(output: str) -> list[dict]:
 
 
 def _disable_optional_context(monkeypatch):
-    import uidetox.subagent as subagent
+    from uidetox import subagent
 
     monkeypatch.setattr(next_command, "_get_relevant_context", lambda batch: [])
     monkeypatch.setattr(next_command, "_get_skill_path", lambda: None)
@@ -32,7 +32,7 @@ def test_get_skill_path_ignores_untrusted_project_skill_by_default(
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(next_command, "load_config", lambda: {})
+    monkeypatch.setattr(next_command, "load_config", dict)
 
     selected = next_command._get_skill_path()
 
@@ -101,7 +101,7 @@ def test_run_batches_highest_priority_directory(monkeypatch, capsys):
     monkeypatch.setattr(
         next_command, "load_state", lambda: {"issues": issues, "resolved": [1, 2]}
     )
-    monkeypatch.setattr(next_command, "load_config", lambda: {})
+    monkeypatch.setattr(next_command, "load_config", dict)
     _disable_optional_context(monkeypatch)
 
     next_command.run(Namespace())
@@ -186,7 +186,7 @@ def test_run_isolates_adversarial_repository_fields(monkeypatch, capsys):
             "resolved": [],
         },
     )
-    monkeypatch.setattr(next_command, "load_config", lambda: {})
+    monkeypatch.setattr(next_command, "load_config", dict)
     _disable_optional_context(monkeypatch)
 
     next_command.run(Namespace())
@@ -217,7 +217,7 @@ def test_run_isolates_adversarial_repository_fields(monkeypatch, capsys):
 
 def test_run_empty_queue_signals_rescan(monkeypatch, capsys):
     monkeypatch.setattr(next_command, "load_state", lambda: {"issues": []})
-    monkeypatch.setattr(next_command, "load_config", lambda: {})
+    monkeypatch.setattr(next_command, "load_config", dict)
 
     with pytest.raises(SystemExit) as error:
         next_command.run(Namespace())

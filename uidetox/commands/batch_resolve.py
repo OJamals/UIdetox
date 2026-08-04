@@ -1,4 +1,5 @@
 """Batch-resolve command: resolve multiple issues with a single coherent commit."""
+
 import argparse
 import json
 import os
@@ -56,20 +57,21 @@ def _run_verification(config: dict) -> bool:
                 cwd=project_root,
                 timeout=120,
                 env=env,
+                check=False,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as error:
             missing = isinstance(error, FileNotFoundError)
             status = "command_not_found" if missing else "timeout"
-            message = "failed: command not found." if missing else "timed out after 120s."
+            message = (
+                "failed: command not found." if missing else "timed out after 120s."
+            )
             output = (
                 f"Command not found: {command}"
                 if missing
                 else f"Timed out after 120s: {command}"
             )
             print(f"  ❌ {label} {action} {message}")
-            diagnostics.append(
-                {"tool": tool_key, "status": status, "output": output}
-            )
+            diagnostics.append({"tool": tool_key, "status": status, "output": output})
             continue
         if result.returncode == 0:
             message = f"{label} auto-fix applied" if auto_fix else f"{label} passed"
@@ -101,11 +103,12 @@ def _run_verification(config: dict) -> bool:
         print()
         try:
             from uidetox.memory import add_note
+
             safe_diagnostics = sanitize_untrusted_data(
                 {"source": "self_healing", "diagnostics": diagnostics}
             )
             add_note(json.dumps(safe_diagnostics))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - non-critical diagnostic note must not alter verification result
             pass  # Non-critical
     return not diagnostics
 
@@ -188,9 +191,7 @@ def run(args: argparse.Namespace):
             record_verification_override(
                 issue_ids, actor=actor, reason=reason, results=verifications
             )
-            print(
-                "⚠️  Verifier override recorded; findings remain pending and scored."
-            )
+            print("⚠️  Verifier override recorded; findings remain pending and scored.")
             return
         details = "; ".join(
             f"{issue_id}: {result.outcome}" for issue_id, result in uncleared.items()
@@ -198,20 +199,20 @@ def run(args: argparse.Namespace):
         print(f"❌ Finding verification failed: {details}", file=sys.stderr)
         sys.exit(1)
     # Batch resolve
-    removed = batch_remove_issues(
-        issue_ids, note=note, verifications=verifications
-    )
+    removed = batch_remove_issues(issue_ids, note=note, verifications=verifications)
     if not removed:
         print("❌ No issues were resolved.", file=sys.stderr)
         sys.exit(1)
     # Collect affected files
-    affected_files = list(set(r.get("file", "") for r in removed if r.get("file")))
+    affected_files = list({r.get("file", "") for r in removed if r.get("file")})
     component = _derive_component_name(affected_files)
     state = load_state()
     remaining = sum(requires_resolution(issue) for issue in state.get("issues", []))
     resolved_total = len(state.get("resolved", []))
     if single:
-        print(f"✅ Resolved {removed[0]['id']}: [{removed[0]['tier']}] {removed[0]['issue']}")
+        print(
+            f"✅ Resolved {removed[0]['id']}: [{removed[0]['tier']}] {removed[0]['issue']}"
+        )
     else:
         print(f"✅ Batch-resolved {len(removed)} issue(s):")
         for r in removed:
@@ -221,6 +222,7 @@ def run(args: argparse.Namespace):
     print()
     # ---- Progress snapshot ----
     from uidetox.findings import current_evidence_hashes, score_current_snapshot
+
     scores = score_current_snapshot(state, evidence_hashes=current_evidence_hashes())
     target = config.get("target_score", 95)
     filled = scores["blended_score"] // 5
@@ -246,12 +248,14 @@ def run(args: argparse.Namespace):
     # Git auto-commit (single commit for the entire batch)
     if config.get("auto_commit", False):
         project_root = get_project_root()
+
         def _normalize(path: str) -> str:
             return (
                 str((project_root / path).resolve())
                 if not os.path.isabs(path)
                 else os.path.abspath(path)
             )
+
         allowed_tracked_changes = {
             _normalize(path) for path in affected_files + [".uidetox/state.json"]
         }
@@ -358,6 +362,7 @@ def run(args: argparse.Namespace):
     # Persist fix outcomes for future sub-agent context injection
     try:
         from uidetox.memory import record_fix_outcome
+
         for r in removed:
             record_fix_outcome(
                 file_path=r.get("file", ""),

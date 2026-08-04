@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-import uidetox.analyzer_ast as analyzer_ast
-import uidetox.frontend_semantics as frontend_semantics
+from uidetox import analyzer_ast, frontend_semantics
 
 
 def test_ast_capabilities_are_visible_and_extension_specific():

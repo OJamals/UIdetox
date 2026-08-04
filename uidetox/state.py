@@ -120,7 +120,7 @@ def _load_json_object(input_path: Path, artifact: str) -> dict:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{artifact} is unreadable: {input_path}") from exc
     if not isinstance(value, dict):
-        raise ValueError(f"{artifact} must contain a JSON object: {input_path}")
+        raise TypeError(f"{artifact} must contain a JSON object: {input_path}")
     return value
 
 

@@ -2,7 +2,8 @@
 
 import argparse
 import sys
-from uidetox.state import load_state, save_state, load_config, save_config
+
+from uidetox.state import load_config, load_state, save_config, save_state
 
 VALID_ZONES = {"production", "test", "config", "generated", "script", "vendor"}
 
@@ -13,9 +14,9 @@ def run(args: argparse.Namespace):
     if action == "show":
         _zone_show()
     elif action == "set":
-        _zone_set(getattr(args, "zone_path"), getattr(args, "zone_value"))
+        _zone_set(args.zone_path, args.zone_value)
     elif action == "clear":
-        _zone_clear(getattr(args, "zone_path"))
+        _zone_clear(args.zone_path)
     else:
         print("Usage: uidetox zone {show|set|clear}")
 
@@ -27,11 +28,11 @@ def _determine_zone(filepath: str) -> str:
         return "vendor"
     if "test" in p or "spec" in p:
         return "test"
-    if p.endswith(".config.js") or p.endswith(".config.ts") or "config" in p:
+    if p.endswith((".config.js", ".config.ts")) or "config" in p:
         return "config"
     if "dist" in p or "build" in p or "out" in p or ".next" in p:
         return "generated"
-    if p.endswith(".sh") or p.endswith(".py") or "scripts" in p:
+    if p.endswith((".sh", ".py")) or "scripts" in p:
         return "script"
     return "production"
 
@@ -44,7 +45,7 @@ def _zone_show():
 
     # We only know about files that have issues currently, unless we do a full tree walk.
     # To keep it snappy and relevant, we'll show zones for files currently in the queue.
-    unique_files = list(set(i.get("file") for i in issues if i.get("file")))
+    unique_files = list({i.get("file") for i in issues if i.get("file")})
 
     by_zone = {z: [] for z in VALID_ZONES}
     for f in unique_files:

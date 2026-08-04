@@ -75,7 +75,7 @@ Text at `margin-left: 0` looks indented due to letterform whitespace—use negat
 
 ### Touch Targets vs Visual Size
 
-Buttons can look small but need large touch targets (44px minimum). Use padding or pseudo-elements:
+Controls may look small while their rendered target meets the WCAG 2.2 24×24 CSS pixel minimum or a documented exception. Where density permits, expand frequent targets toward the 44×44 CSS pixel enhanced target with padding or pseudo-elements:
 
 ```css
 .icon-button {
@@ -87,7 +87,7 @@ Buttons can look small but need large touch targets (44px minimum). Use padding 
 .icon-button::before {
   content: '';
   position: absolute;
-  inset: -10px;  /* Expand tap target to 44px */
+  inset: -10px;  /* Expand this 24px visual control to a 44px hit area */
 }
 ```
 

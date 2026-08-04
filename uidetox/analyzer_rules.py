@@ -23,21 +23,27 @@ RULES = [
     {
         "id": "COLOR_GRADIENT_SLOP",
         "pattern": re.compile(
-            r"\b(from-(blue|purple|indigo)-[4-6]00.*?to-(purple|blue|indigo)-[4-6]00)\b",
+            r"\b(from-(blue|purple|indigo)-[4-6]00.*?"
+            r"to-(purple|blue|indigo)-[4-6]00)\b",
             re.IGNORECASE,
         ),
         "tier": "T1",
-        "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
-        "description": "AI Pipeline Palette (Purple-Blue gradient) detected.",
-        "command": "Replace generic gradient with a high-contrast solid accent color on a neutral base.",
+        "exts": {".html", ".svelte", ".vue"},
+        "description": "Cool-spectrum utility gradient detected; review brand-specific intent and rendered contrast.",
+        "command": "Review brand intent and rendered contrast before replacing a utility-gradient treatment.",
     },
     {
         "id": "COLOR_BLACK_SLOP",
-        "pattern": re.compile(r"\b(#000000|bg-black|text-black)\b", re.IGNORECASE),
-        "tier": "T1",
+        "pattern": re.compile(
+            r"(?:#000000\b|\b(?:bg|text)-black\b|"
+            r"(?:color|background(?:-color)?)\s*:\s*#000\b|"
+            r"(?<!:root\s)color:\s*black\b)",
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
         "exts": {".css", ".scss", ".tsx", ".jsx", ".html", ".svelte", ".vue"},
-        "description": "Pure black (#000000) detected. Pure black rarely exists in nature.",
-        "command": "Replace true black with tinted dark neutrals (e.g. zinc-950 or slate-900).",
+        "description": "Pure-black visual treatment detected; review brand and rendered contrast evidence.",
+        "command": "Review brand intent, rendered contrast, and forced-colors behavior before changing a true-black treatment.",
     },
     {
         "id": "ICONOGRAPHY_SLOP",
@@ -163,15 +169,15 @@ RULES = [
         "command": "Rewrite copy to be specific, concrete, and human. Describe what the product does, not what it 'unlocks'.",
     },
     {
-        "id": "MISSING_HOVER_STATES",
+        "id": "HOVER_ONLY_REVEAL_SLOP",
         "pattern": re.compile(
-            r'<button[^>]*className=["\'][^"\']*["\']', re.IGNORECASE
+            r"\bgroup-hover:(?:opacity-100|visible|block)\b", re.IGNORECASE
         ),
         "tier": "T2",
-        "exts": {".tsx", ".jsx", ".html", ".svelte", ".vue"},
-        "description": "Button element without hover: state detected.",
-        "command": "Add hover:, focus:, and active: states to all interactive elements.",
-        "_custom_check": "missing_hover",
+        "exts": _JSX_EXTS,
+        "description": "Content is hidden by default and revealed only through pointer hover.",
+        "command": "Keep the content visible or add equivalent focus/focus-within and simple pointer/keyboard access.",
+        "_custom_check": "hover_only_reveal",
     },
     {
         "id": "EMOJI_HEAVY_SLOP",
@@ -310,16 +316,6 @@ RULES = [
         "command": "Flatten hierarchy. Use spacing, borders, or typography for inner grouping.",
     },
     {
-        "id": "CSS_PURE_BLACK_SLOP",
-        "pattern": re.compile(
-            r"(?:color|background(?:-color)?)\s*:\s*#000(?:000)?\b", re.IGNORECASE
-        ),
-        "tier": "T1",
-        "exts": {".css", ".scss", ".less"},
-        "description": "Pure black (#000) in CSS — rarely exists in nature.",
-        "command": "Replace with off-black tinted neutral (e.g., #0f0f0f, #1a1a2e, #0d1117).",
-    },
-    {
         "id": "HARDCODED_ZINDEX_SLOP",
         "pattern": re.compile(r"\b(z-index:\s*9{3,}|z-\[9{3,}\])\b", re.IGNORECASE),
         "tier": "T1",
@@ -347,24 +343,26 @@ RULES = [
         "command": "Use opacity (e.g., border-gray-200/50 or border-white/10) for softer blending.",
     },
     {
-        "id": "HARDCODED_PX_FONT_SLOP",
-        "pattern": re.compile(r"(?:font-size:\s*\d+px|text-\[\d+px\])", re.IGNORECASE),
-        "tier": "T1",
-        "exts": _ALL_FE_EXTS,
-        "description": "Hardcoded px font sizes break accessible scaling.",
-        "command": "Use rem or Tailwind text-sm/text-lg scale for accessibility.",
-    },
-    {
-        "id": "UGLY_SCROLLBAR_SLOP",
+        "id": "TEXT_SIZE_ADJUST_NONE_SLOP",
         "pattern": re.compile(
-            r'class(?:Name)?=["\'][^"\']*overflow-[xy]-(?:auto|scroll)[^"\']*["\']',
+            r"(?:(?:-webkit-)?text-size-adjust\s*:\s*none\b|(?:Webkit)?textSizeAdjust\s*:\s*[\"']none[\"'])",
             re.IGNORECASE,
         ),
-        "tier": "T1",
-        "exts": _JSX_EXTS,
-        "description": "Scrollable container without scrollbar styling or hiding.",
-        "command": "Add scrollbar-hide or custom CSS scrollbar for polish.",
-        "_custom_check": "ugly_scrollbar",
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "text-size-adjust: none disables browser text inflation on small screens.",
+        "command": "Remove the none override; verify responsive readability, browser zoom, and 200% text resize instead.",
+    },
+    {
+        "id": "HIDDEN_SCROLLBAR_SLOP",
+        "pattern": re.compile(
+            r"(?:\b(?:scrollbar-hide|no-scrollbar)\b|scrollbar-width:\s*none\b|::-webkit-scrollbar\s*\{[^}]*display:\s*none\b)",
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": _ALL_FE_EXTS,
+        "description": "Scrollbar hiding detected — verify overflow remains discoverable and operable.",
+        "command": "Preserve a visible scrollbar unless an equally discoverable, keyboard-operable overflow affordance is evidenced.",
     },
     {
         "id": "TIGHT_LINE_HEIGHT_SLOP",
@@ -378,15 +376,15 @@ RULES = [
         "command": "Use leading-relaxed or leading-normal for paragraphs.",
     },
     {
-        "id": "MISSING_TRANSITION_SLOP",
+        "id": "INPUT_PASTE_BLOCKED_SLOP",
         "pattern": re.compile(
-            r'class(?:Name)?=["\'][^"\']*hover:[^"\']*["\']', re.IGNORECASE
+            r"<(?:input|textarea)\b[^>]*\bonPaste\s*=\s*\{[^}]{0,300}\.preventDefault\s*\(",
+            re.IGNORECASE,
         ),
-        "tier": "T1",
+        "tier": "T2",
         "exts": _JSX_EXTS,
-        "description": "Interactive element with hover states but missing transition class.",
-        "command": "Add 'transition-colors' or 'transition-all' with duration (e.g., duration-200) for smooth easing.",
-        "_custom_check": "missing_transition",
+        "description": "Text input blocks paste, which can prevent password-manager and low-memory authentication workflows.",
+        "command": "Allow paste and autofill; validate the resulting value instead of forcing manual transcription.",
     },
     {
         "id": "ORPHANED_LABEL_SLOP",
@@ -398,15 +396,15 @@ RULES = [
         "_custom_check": "orphaned_label",
     },
     {
-        "id": "LAZY_FLEX_CENTER_SLOP",
+        "id": "INPUT_IME_ENTER_UNGUARDED_SLOP",
         "pattern": re.compile(
-            r'class(?:Name)?=["\'][^"\']*flex[^"\']*(?:items-center[^"\']*justify-center|justify-center[^"\']*items-center)[^"\']*["\']',
-            re.IGNORECASE,
+            r"\b[A-Za-z_$][\w$]*\.(?:key|code)\s*={2,3}\s*[\"']Enter[\"']"
         ),
-        "tier": "T1",
+        "tier": "T2",
         "exts": _JSX_EXTS,
-        "description": "Verbose flex centering detected.",
-        "command": "Use 'grid place-items-center' instead of 'flex items-center justify-center' for cleaner markup.",
+        "description": "Text-input Enter handling lacks an IME composition guard.",
+        "command": "Before submit/commit handling, return when KeyboardEvent.isComposing or nativeEvent.isComposing is true.",
+        "_custom_check": "input_ime_enter_unguarded",
     },
     {
         "id": "RAW_COLOR_SLOP",
@@ -441,13 +439,11 @@ RULES = [
     },
     {
         "id": "CONSOLE_LOG_SLOP",
-        "pattern": re.compile(
-            r"\bconsole\.(log|warn|error|debug|info)\s*\(", re.IGNORECASE
-        ),
+        "pattern": re.compile(r"\bconsole\.(?:log|debug)\s*\(", re.IGNORECASE),
         "tier": "T1",
         "exts": {".tsx", ".jsx", ".ts", ".js"},
-        "description": "Console statement detected in production code.",
-        "command": "Remove console statements or replace with a proper logging utility.",
+        "description": "Ad hoc console.log/debug statement detected in production code.",
+        "command": "Remove accidental debug output or replace it with intentional structured, redacted diagnostics.",
     },
     {
         "id": "TODO_FIXME_SLOP",
@@ -480,15 +476,18 @@ RULES = [
         "_custom_check": "nested_ternary",
     },
     {
-        "id": "DISABLED_NO_CURSOR_SLOP",
+        "id": "ARIA_DISABLED_ACTIVATION_SLOP",
         "pattern": re.compile(
-            r'disabled[^"\']*(?:className|class)=["\'][^"\']*["\']', re.IGNORECASE
+            r"<(?:button|a|div|span|[A-Z]\w*)\b"
+            r"(?=[^>\n]*\baria-disabled\s*=\s*(?:[\"']true[\"']|\{\s*true\s*\}))"
+            r"(?=[^>\n]*\bonClick\s*=\s*\{\s*[A-Za-z_$][\w$]*\s*\})"
+            r"(?![^>\n]*(?<!aria-)\bdisabled(?:\s|=))[^>\n]*>",
+            re.IGNORECASE,
         ),
         "tier": "T2",
         "exts": _JSX_EXTS,
-        "description": "Disabled element without cursor-not-allowed style.",
-        "command": "Add 'disabled:cursor-not-allowed disabled:opacity-50' for clear disabled state.",
-        "_custom_check": "disabled_cursor",
+        "description": "Literal aria-disabled control retains a direct click handler; aria-disabled does not suppress activation.",
+        "command": "Use native disabled when appropriate, or suppress pointer and keyboard activation whenever aria-disabled is true.",
     },
     {
         "id": "BROKEN_IMAGE_SLOP",
@@ -639,6 +638,10 @@ RULES = [
         "exts": _JSX_EXTS,
         "description": "Empty event handler (no-op arrow function) detected.",
         "command": "Either implement the handler or remove the prop. No-op handlers confuse readers.",
+        "basis": "heuristic",
+        "remediation_constraints": [
+            "Remove only the empty no-argument event-handler prop; preserve sibling interaction behavior."
+        ],
     },
     {
         "id": "DEAD_CSS_CLASS",
@@ -992,16 +995,6 @@ RULES = [
         "command": "Use off-white with subtle warm/cool tint: #fafaf9, oklch(98% 0.005 85).",
     },
     {
-        "id": "PURE_BLACK_TEXT_SLOP",
-        "pattern": re.compile(
-            r"(?<!:root\s)color:\s*(?:#000(?:000)?|black)\b", re.IGNORECASE
-        ),
-        "tier": "T2",
-        "exts": {".css", ".scss", ".less"},
-        "description": "Pure black (#000) text — too harsh, no premium designs use pure black.",
-        "command": "Use off-black: #1a1a1a, #0f172a, or oklch(18% 0 0).",
-    },
-    {
         "id": "GRADIENT_TEXT_CSS_SLOP",
         "pattern": re.compile(r"background-clip:\s*text", re.IGNORECASE),
         "tier": "T1",
@@ -1113,13 +1106,12 @@ RULES = [
         "command": "Use targeted resets (*, *::before, *::after) with only box-sizing.",
     },
     {
-        "id": "FOCUS_VISIBLE_MISSING_SLOP",
-        "pattern": re.compile(r":focus\s*\{", re.IGNORECASE),
+        "id": "FORCED_COLOR_ADJUST_NONE_SLOP",
+        "pattern": re.compile(r"forced-color-adjust:\s*none\b", re.IGNORECASE),
         "tier": "T2",
         "exts": {".css", ".scss", ".less"},
-        "description": ":focus styles without :focus-visible pairing — over-triggers on mouse clicks.",
-        "command": "Use :focus-visible instead of :focus for ring/outline styles.",
-        "_custom_check": "focus_visible_missing",
+        "description": "forced-color-adjust: none suppresses user-agent high-contrast adaptation.",
+        "command": "Remove forced-color-adjust: none or prove the component preserves every meaningful indicator in forced-colors mode.",
     },
     {
         "id": "GRADIENT_BORDER_SLOP",
@@ -1150,12 +1142,15 @@ RULES = [
         "_custom_check": "important_animation",
     },
     {
-        "id": "CSS_EMPTY_RULE_SLOP",
-        "pattern": re.compile(r"\.[a-zA-Z][\w-]*\s*\{\s*\}", re.MULTILINE),
-        "tier": "T1",
-        "exts": {".css", ".scss", ".less"},
-        "description": "Empty CSS rule with no declarations — dead code.",
-        "command": "Remove empty CSS classes or add declarations.",
+        "id": "BFCACHE_UNLOAD_LISTENER_SLOP",
+        "pattern": re.compile(
+            r"(?:addEventListener\s*\(\s*[\"']unload[\"']|\bonunload\s*=)",
+            re.IGNORECASE,
+        ),
+        "tier": "T2",
+        "exts": {".tsx", ".jsx", ".ts", ".js"},
+        "description": "unload handler can block back/forward cache eligibility and is unreliable on mobile browsers.",
+        "command": "Use pagehide for lifecycle cleanup or navigator.sendBeacon for analytics; verify bfcache restoration in a real browser.",
     },
     {
         "id": "STICKY_WITHOUT_TOP_SLOP",
@@ -1167,13 +1162,14 @@ RULES = [
         "_custom_check": "sticky_without_top",
     },
     {
-        "id": "SCROLL_SNAP_WITHOUT_BEHAVIOR_SLOP",
-        "pattern": re.compile(r"scroll-snap-type:", re.IGNORECASE),
+        "id": "SCROLL_SNAP_MANDATORY_SLOP",
+        "pattern": re.compile(
+            r"scroll-snap-type\s*:[^;}]*\bmandatory\b", re.IGNORECASE
+        ),
         "tier": "T2",
         "exts": {".css", ".scss", ".less"},
-        "description": "scroll-snap-type without scroll-behavior: smooth — abrupt snapping.",
-        "command": "Add scroll-behavior: smooth to the scroll container for smooth snap transitions.",
-        "_custom_check": "scroll_snap_without_behavior",
+        "description": "Mandatory scroll snap can make content between non-adjacent snap points inaccessible on variable viewports.",
+        "command": "Prefer proximity for variable-size content or prove every item remains reachable across supported viewports and input methods.",
     },
     {
         "id": "ASPECT_RATIO_HACK_SLOP",
@@ -1240,13 +1236,14 @@ RULES = [
     {
         "id": "TAILWIND_V4_GRADIENT_SLOP",
         "pattern": re.compile(
-            r"from-(?:blue|indigo|purple|violet|cyan|sky)-\d+.*?to-(?:blue|indigo|purple|violet|cyan|sky)-\d+",
+            r"from-(?:blue|indigo|purple|violet|cyan|sky)-\d+.*?"
+            r"to-(?:blue|indigo|purple|violet|cyan|sky)-\d+",
             re.IGNORECASE | re.DOTALL,
         ),
         "tier": "T1",
         "exts": {".tsx", ".jsx"},
-        "description": "Purple-to-blue Tailwind gradient — #1 AI default gradient. Banned.",
-        "command": "Remove gradient or use brand-specific color stops. No blue/purple rainbow.",
+        "description": "Tailwind cool-spectrum gradient detected; review brand-specific intent and rendered contrast.",
+        "command": "Review brand intent and rendered contrast before replacing a utility-gradient treatment.",
     },
     {
         "id": "EASE_DEFAULT_SLOP",
@@ -1480,7 +1477,7 @@ RULES = [
         "tier": "T1",
         "exts": {".tsx", ".ts", ".js"},
         "description": "Empty catch block silently swallows errors.",
-        "command": "Log the error at minimum: catch (err) { console.error(err); }",
+        "command": "Recover, rethrow, return a typed failure, or emit structured redacted diagnostics at the owning error boundary.",
     },
     {
         "id": "HARDCODED_SECRET_SLOP",
@@ -1515,12 +1512,12 @@ RULES = [
         "command": "Replace findDOMNode with useRef() and attach ref directly to the element.",
     },
     {
-        "id": "DEPRECATED_CLASS_COMPONENT_SLOP",
-        "pattern": re.compile(r"extends\s+(?:React\.)?(?:Component|PureComponent)\b"),
+        "id": "REACT_LEGACY_STRING_REF_SLOP",
+        "pattern": re.compile(r"\bref\s*=\s*[\"'][^\"']+[\"']"),
         "tier": "T2",
         "exts": {".tsx", ".jsx"},
-        "description": "Class component detected — migrate to functional component + hooks.",
-        "command": "Rewrite as functional component using useState, useEffect, useMemo.",
+        "description": "Legacy React string ref detected — relies on obsolete this.refs behavior.",
+        "command": "Replace the string ref with createRef, useRef, or a ref callback; keep a supported class component when migration is not otherwise justified.",
     },
     {
         "id": "USEEFFECT_EMPTY_DEPS_SLOP",
@@ -1661,8 +1658,9 @@ RULES = [
         ),
         "tier": "T2",
         "exts": {".tsx", ".ts", ".js"},
-        "description": "Scroll event listener without {passive: true} — janks scroll performance.",
-        "command": "Add passive option: addEventListener('scroll', handler, { passive: true })",
+        "description": "Scroll/touch/wheel listener lacks an evidenced passive policy.",
+        "command": "Use { passive: true } only when the handler never calls preventDefault(); otherwise preserve cancellation and measure/reduce listener work.",
+        "_custom_check": "no_passive_scroll_listener",
     },
     {
         "id": "INNER_HTML_ASSIGN_SLOP",
@@ -1805,13 +1803,13 @@ RULES = [
         "_custom_check": "img_missing_dimensions",
     },
     {
-        "id": "MISSING_TABULAR_NUMS_SLOP",
-        "pattern": re.compile(r"<table\b", re.IGNORECASE),
+        "id": "SORTABLE_TABLE_ARIA_SORT_SLOP",
+        "pattern": re.compile(r"<th\b", re.IGNORECASE),
         "tier": "T2",
         "exts": {".tsx", ".jsx", ".html"},
-        "description": "<table> without tabular-nums — numbers shift alignment when they change.",
-        "command": "Add font-variant-numeric: tabular-nums to the table or use Tailwind tabular-nums.",
-        "_custom_check": "missing_tabular_nums",
+        "description": "Sortable table header does not expose its current sort state with aria-sort.",
+        "command": "Set aria-sort on the currently sorted <th>; update it when the sort direction changes.",
+        "_custom_check": "sortable_table_aria_sort",
     },
     {
         "id": "PLACEHOLDER_ONLY_INPUT_SLOP",
@@ -1899,13 +1897,13 @@ RULES = [
     {
         "id": "TOUCH_TARGET_SLOP",
         "pattern": re.compile(
-            r'<button\b[^>]*className=["\'][^"\']*(?:w-[1-6]|h-[1-6])\b[^"\']*["\']',
+            r'<button\b[^>]*className=["\'][^"\']*(?:w-[1-5]|h-[1-5])\b[^"\']*["\']',
             re.IGNORECASE,
         ),
         "tier": "T2",
         "exts": {".tsx", ".jsx"},
-        "description": "Button with small w-/h- class — may be below 44px touch target (WCAG 2.5.5).",
-        "command": "Ensure all touch targets are at least 44x44px (w-11 h-11 minimum).",
+        "description": "Button with a sub-24px w-/h- class — verify WCAG 2.2 target size or spacing exceptions.",
+        "command": "Make the rendered target at least 24x24 CSS px or satisfy a WCAG 2.5.8 exception; aim for 44x44px for enhanced usability.",
     },
     {
         "id": "NEXT_IMAGE_RAW_SLOP",

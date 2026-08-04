@@ -312,7 +312,7 @@ def extract_source_facts(
         return None
     try:
         tree = parser.parse(content.encode("utf-8", errors="ignore"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - parser backends expose no shared exception type
         return None
 
     root_node = tree.root_node
@@ -370,11 +370,14 @@ def extract_source_facts(
 
     if has_router_signal:
         routes.extend(config_routes)
+    route_imports = tuple(
+        route.target for route in routes if route.target.startswith((".", "/"))
+    )
     parse_errors = bool(tree.root_node.has_error)
     return SourceFacts(
         path=path,
         extension=extension,
-        imports=tuple(dict.fromkeys(item for item in imports if item)),
+        imports=tuple(dict.fromkeys((*imports, *route_imports))),
         import_aliases=aliases,
         exports=exports,
         bindings=bindings,
@@ -462,6 +465,7 @@ class _MutableAnalyzerState:
 def _extract_imports(
     nodes: Iterable[object],
 ) -> tuple[list[str], tuple[ImportAlias, ...]]:
+    nodes = tuple(nodes)
     imports: list[str] = []
     aliases: list[ImportAlias] = []
     for node in nodes:
@@ -501,7 +505,68 @@ def _extract_imports(
                     local = _text(specifier.child_by_field_name("alias")) or imported
                     if imported and local:
                         aliases.append(ImportAlias(source, imported, local))
+    lazy_bindings = {
+        item.local
+        for item in aliases
+        if item.source == "react" and item.imported == "lazy"
+    }
+    lazy_bindings.update(
+        f"{item.local}.lazy"
+        for item in aliases
+        if item.source == "react" and item.kind in {"default", "namespace"}
+    )
+    if not lazy_bindings:
+        return imports, tuple(aliases)
+    imported_locals = {item.local for item in aliases}
+    for node in nodes:
+        lazy_import = _lazy_component_import(node, lazy_bindings)
+        if lazy_import is None or lazy_import.local in imported_locals:
+            continue
+        imports.append(lazy_import.source)
+        aliases.append(lazy_import)
+        imported_locals.add(lazy_import.local)
     return imports, tuple(aliases)
+
+
+def _lazy_component_import(
+    node: object,
+    lazy_bindings: set[str],
+) -> ImportAlias | None:
+    if node.type != "variable_declarator":
+        return None
+    name_node = node.child_by_field_name("name")
+    value_node = node.child_by_field_name("value")
+    local = _text(name_node)
+    if (
+        name_node is None
+        or name_node.type != "identifier"
+        or not local[:1].isupper()
+        or value_node is None
+        or value_node.type != "call_expression"
+        or _text(value_node.child_by_field_name("function")) not in lazy_bindings
+    ):
+        return None
+    arguments = value_node.child_by_field_name("arguments")
+    lazy_arguments = list(arguments.named_children) if arguments is not None else []
+    if len(lazy_arguments) != 1 or lazy_arguments[0].type != "arrow_function":
+        return None
+    body = lazy_arguments[0].child_by_field_name("body")
+    if body is None or body.type != "call_expression":
+        return None
+    import_function = body.child_by_field_name("function")
+    import_arguments = body.child_by_field_name("arguments")
+    source_nodes = (
+        list(import_arguments.named_children) if import_arguments is not None else []
+    )
+    if (
+        import_function is None
+        or import_function.type != "import"
+        or len(source_nodes) != 1
+        or source_nodes[0].type != "string"
+    ):
+        return None
+    source = _literal(source_nodes[0])
+    return ImportAlias(source, "default", local, "default") if source else None
 
 
 def _extract_exports(
@@ -873,6 +938,10 @@ def _collect_semantic_node(
         selectors.append(SelectorFact(tag.lower(), _line(node), "heuristic"))
         if tag.lower() in _REGION_TAGS:
             regions.append(SourceOccurrence(tag.lower(), _line(node)))
+        is_route = tag.rsplit(".", 1)[-1] == "Route"
+        route_name = ""
+        route_line = 0
+        route_target = ""
         for child in node.named_children:
             if child.type != "jsx_attribute":
                 continue
@@ -900,16 +969,108 @@ def _collect_semantic_node(
                         action_target if _is_identifier(action_target) else "",
                     )
                 )
-            if tag.rsplit(".", 1)[-1] == "Route":
+            if is_route:
                 route_match = _ROUTE_ATTRIBUTE_RE.match(attribute)
                 if route_match:
-                    routes.append(SourceOccurrence(route_match.group(1), _line(child)))
+                    route_name = route_match.group(1)
+                    route_line = _line(child)
+                target = _route_render_target(attribute_name, value_node)
+                if target:
+                    route_target = target
+        if route_name:
+            routes.append(SourceOccurrence(route_name, route_line, target=route_target))
     elif node.type == "pair":
         key = _text(node.child_by_field_name("key")).strip("\"'")
         if key == "path":
             literal = _literal(node.child_by_field_name("value"))
             if literal:
-                config_routes.append(SourceOccurrence(literal, _line(node)))
+                route_target = ""
+                container = node.parent
+                if container is not None:
+                    for sibling in container.named_children:
+                        if sibling.type != "pair":
+                            continue
+                        sibling_key = _text(sibling.child_by_field_name("key")).strip(
+                            "\"'"
+                        )
+                        target = _route_render_target(
+                            sibling_key,
+                            sibling.child_by_field_name("value"),
+                        )
+                        if target:
+                            route_target = target
+                config_routes.append(
+                    SourceOccurrence(literal, _line(node), target=route_target)
+                )
+
+
+def _route_render_target(attribute_name: str, value_node) -> str:
+    if value_node is None:
+        return ""
+    if attribute_name == "lazy":
+        return _direct_lazy_route_specifier(value_node)
+    if attribute_name == "Component":
+        component_node = value_node
+        if value_node.type == "jsx_expression":
+            children = list(value_node.named_children)
+            component_node = children[0] if len(children) == 1 else None
+        if component_node is None:
+            return ""
+        if component_node.type == "identifier":
+            return _text(component_node)
+        if component_node.type != "member_expression":
+            return ""
+        root = component_node.child_by_field_name("object")
+        member = component_node.child_by_field_name("property")
+        if (
+            root is None
+            or member is None
+            or root.type != "identifier"
+            or member.type != "property_identifier"
+        ):
+            return ""
+        return f"{_text(root)}.{_text(member)}"
+    if attribute_name != "element":
+        return ""
+    route_element = next(
+        (
+            item
+            for item in _walk(value_node)
+            if item.type in {"jsx_opening_element", "jsx_self_closing_element"}
+        ),
+        None,
+    )
+    return (
+        _text(route_element.child_by_field_name("name"))
+        if route_element is not None
+        else ""
+    )
+
+
+def _direct_lazy_route_specifier(value_node) -> str:
+    expression = value_node
+    if value_node.type == "jsx_expression":
+        children = list(value_node.named_children)
+        expression = children[0] if len(children) == 1 else None
+    if expression is None or expression.type != "arrow_function":
+        return ""
+    body = expression.child_by_field_name("body")
+    if body is None or body.type != "call_expression":
+        return ""
+    import_function = body.child_by_field_name("function")
+    import_arguments = body.child_by_field_name("arguments")
+    source_nodes = (
+        list(import_arguments.named_children) if import_arguments is not None else []
+    )
+    if (
+        import_function is None
+        or import_function.type != "import"
+        or len(source_nodes) != 1
+        or source_nodes[0].type != "string"
+    ):
+        return ""
+    source = _literal(source_nodes[0])
+    return source if source.startswith((".", "/")) else ""
 
 
 def _collect_analyzer_node(node, state: _MutableAnalyzerState) -> None:

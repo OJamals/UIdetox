@@ -184,8 +184,7 @@ def _discover_backend_sources(root: Path) -> tuple[_BackendSource, ...]:
 def backend_source_manifest(root: Path) -> dict[str, str]:
     """Hash every source qualified to contribute backend/API evidence."""
     return {
-        source.relative: source.digest
-        for source in _discover_backend_sources(root)
+        source.relative: source.digest for source in _discover_backend_sources(root)
     }
 
 
@@ -236,10 +235,7 @@ def extract_backend_observations(
         "adapters": adapters,
         "files_scanned": len(sources),
         "unknown": unknown,
-        "source_manifest": {
-            source.relative: source.digest
-            for source in sources
-        },
+        "source_manifest": {source.relative: source.digest for source in sources},
     }
 
 
@@ -330,24 +326,36 @@ def _extract_openapi(
                 )
             )
             security = operation.get("security", document.get("security"))
-            if security is None:
+            if security is None or security == []:
                 auth = "absent"
                 security_names: tuple[str, ...] = ()
-            elif security == []:
-                auth = "absent"
-                security_names = ()
-            else:
-                auth = "present"
+            elif isinstance(security, list):
+                requirements = tuple(
+                    requirement
+                    for requirement in security
+                    if isinstance(requirement, Mapping)
+                )
                 security_names = tuple(
                     sorted(
                         {
                             str(name)
-                            for requirement in security
-                            if isinstance(requirement, Mapping)
+                            for requirement in requirements
                             for name in requirement
                         }
                     )
                 )
+                allows_anonymous = any(not requirement for requirement in requirements)
+                if security_names and allows_anonymous:
+                    auth = "unknown"
+                elif security_names:
+                    auth = "present"
+                elif allows_anonymous:
+                    auth = "absent"
+                else:
+                    auth = "unknown"
+            else:
+                auth = "unknown"
+                security_names = ()
             lineage = tuple(
                 {
                     "kind": "auth_requirement",
@@ -355,6 +363,12 @@ def _extract_openapi(
                     "provenance": "openapi:security",
                 }
                 for name in security_names
+            ) + _openapi_transport_lineage(
+                path_item,
+                operation,
+                response_map,
+                security,
+                document,
             )
             operations.append(
                 ContractObservation(
@@ -1041,6 +1055,171 @@ def _javascript_code_positions(content: str) -> tuple[bool, ...]:
 
 def _line_number(content: str, offset: int) -> int:
     return content.count("\n", 0, offset) + 1
+
+
+def _openapi_transport_lineage(
+    path_item: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    responses: Mapping[str, Any],
+    security: Any,
+    document: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    lineage: list[dict[str, Any]] = []
+    parameters: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for parameter_values in (
+        path_item.get("parameters"),
+        operation.get("parameters"),
+    ):
+        if not isinstance(parameter_values, list):
+            continue
+        for value in parameter_values:
+            if not isinstance(value, Mapping):
+                continue
+            parameter = _resolve_openapi_mapping(value, document)
+            name = parameter.get("name")
+            location = parameter.get("in")
+            if not isinstance(name, str) or not isinstance(location, str):
+                continue
+            if not name or location not in {"cookie", "header", "path", "query"}:
+                continue
+            parameters[(location, name)] = parameter
+
+    for (location, name), parameter in sorted(parameters.items()):
+        item: dict[str, Any] = {
+            "kind": "api_parameter",
+            "name": name,
+            "ref": f"api_parameter:{location}:{name}",
+            "location": location,
+            "required": parameter.get("required") is True,
+            "provenance": "openapi:parameter",
+            "edge": "declares_parameter",
+        }
+        schema = parameter.get("schema")
+        if isinstance(schema, Mapping):
+            item["schema"] = _openapi_schema_shape(schema, document)
+        for key in (
+            "style",
+            "explode",
+            "deprecated",
+            "allowEmptyValue",
+            "allowReserved",
+        ):
+            value = parameter.get(key)
+            if isinstance(value, (bool, str)):
+                item[key] = value
+        lineage.append(item)
+
+    request_body = operation.get("requestBody")
+    for media_type in _openapi_media_types(request_body, document):
+        lineage.append(
+            {
+                "kind": "request_media_type",
+                "name": media_type,
+                "ref": f"request_media_type:{media_type}",
+                "provenance": "openapi:request-body",
+                "edge": "accepts_media_type",
+            }
+        )
+
+    for status, response_value in sorted(responses.items()):
+        for media_type in _openapi_media_types(response_value, document):
+            lineage.append(
+                {
+                    "kind": "response_media_type",
+                    "name": media_type,
+                    "ref": f"response_media_type:{status}:{media_type}",
+                    "status": status,
+                    "provenance": "openapi:response",
+                    "edge": "returns_media_type",
+                }
+            )
+        if not isinstance(response_value, Mapping):
+            continue
+        response = _resolve_openapi_mapping(response_value, document)
+        headers = response.get("headers")
+        if not isinstance(headers, Mapping):
+            continue
+        for header_name, header_value in sorted(
+            headers.items(), key=lambda item: str(item[0]).lower()
+        ):
+            if not isinstance(header_value, Mapping):
+                continue
+            header = _resolve_openapi_mapping(header_value, document)
+            item = {
+                "kind": "response_header",
+                "name": str(header_name),
+                "ref": f"response_header:{status}:{header_name}",
+                "status": status,
+                "provenance": "openapi:response-header",
+                "edge": "returns_header",
+            }
+            schema = header.get("schema")
+            if isinstance(schema, Mapping):
+                item["schema"] = _openapi_schema_shape(schema, document)
+            lineage.append(item)
+
+    if isinstance(security, list):
+        normalized_requirements = {
+            tuple(
+                sorted(
+                    (
+                        str(scheme),
+                        (
+                            tuple(sorted({str(scope) for scope in raw_scopes}))
+                            if isinstance(raw_scopes, list)
+                            else ()
+                        ),
+                    )
+                    for scheme, raw_scopes in requirement.items()
+                )
+            )
+            for requirement in security
+            if isinstance(requirement, Mapping)
+        }
+        for index, requirement in enumerate(sorted(normalized_requirements)):
+            parent = f"auth_alternative:{index}"
+            lineage.append(
+                {
+                    "kind": "auth_alternative",
+                    "name": f"alternative:{index + 1}",
+                    "ref": parent,
+                    "allows_anonymous": not requirement,
+                    "provenance": "openapi:security",
+                    "edge": "allows",
+                }
+            )
+            for scheme, scopes in requirement:
+                lineage.append(
+                    {
+                        "kind": "auth_scheme_requirement",
+                        "name": str(scheme),
+                        "ref": f"auth_scheme_requirement:{index}:{scheme}",
+                        "parent": parent,
+                        "scopes": scopes,
+                        "provenance": "openapi:security",
+                        "edge": "requires",
+                    }
+                )
+    return tuple(lineage)
+
+
+def _openapi_media_types(
+    value: Any,
+    document: Mapping[str, Any],
+) -> tuple[str, ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    resolved_value = _resolve_openapi_mapping(value, document)
+    content = resolved_value.get("content")
+    if not isinstance(content, Mapping):
+        return ()
+    return tuple(
+        sorted(
+            str(media_type)
+            for media_type, item in content.items()
+            if isinstance(item, Mapping)
+        )
+    )
 
 
 def _openapi_content_schema(

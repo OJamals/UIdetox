@@ -48,7 +48,7 @@ def test_status_json_exposes_visual_evidence(
         warnings=("ICC profile fallback",),
     )
     monkeypatch.setattr(status, "load_state", _state)
-    monkeypatch.setattr(status, "load_config", lambda: {})
+    monkeypatch.setattr(status, "load_config", dict)
     monkeypatch.setattr(status, "_git_context", lambda: ("main", False))
     monkeypatch.setattr(status, "current_verification_fresh", lambda: False)
     monkeypatch.setattr(
@@ -85,7 +85,7 @@ def test_status_required_visual_evidence_gate_exits_nonzero(
         reasons=("before source hash changed",),
     )
     monkeypatch.setattr(status, "load_state", _state)
-    monkeypatch.setattr(status, "load_config", lambda: {})
+    monkeypatch.setattr(status, "load_config", dict)
     monkeypatch.setattr(status, "_git_context", lambda: ("main", False))
     monkeypatch.setattr(status, "current_verification_fresh", lambda: False)
     monkeypatch.setattr(
@@ -146,7 +146,7 @@ def test_status_splits_actionable_and_investigative_findings(
             "stats": {},
         },
     )
-    monkeypatch.setattr(status, "load_config", lambda: {})
+    monkeypatch.setattr(status, "load_config", dict)
     monkeypatch.setattr(status, "_git_context", lambda: ("main", False))
     monkeypatch.setattr(status, "current_verification_fresh", lambda: False)
     monkeypatch.setattr(

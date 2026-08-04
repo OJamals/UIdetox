@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import uidetox.contract_adapters as contract_adapters
+from uidetox import contract_adapters
 from uidetox.frontend_map import FrontendMap, map_frontend
 from uidetox.project_map import (
     ContractEdge,
@@ -173,9 +173,7 @@ def test_backend_discovery_preserves_exact_manifest_and_observation_parity(
 ) -> None:
     _write_backend_discovery_fixture(tmp_path)
 
-    observations, extraction = contract_adapters.extract_backend_observations(
-        tmp_path
-    )
+    observations, extraction = contract_adapters.extract_backend_observations(tmp_path)
     manifest = project_source_manifest(tmp_path)
 
     assert tuple(manifest) == (
@@ -388,16 +386,14 @@ paths:
     backend = _operation_nodes(project, "backend")
     assert len(backend) == 2
     assert {
-        (node.source.file, tuple(node.attributes["parameters"]))
-        for node in backend
+        (node.source.file, tuple(node.attributes["parameters"])) for node in backend
     } == {
         ("openapi.json", ("id",)),
         ("swagger.yaml", ("userId",)),
     }
     assert all(node.attributes["normalized_path"] == "/users/{}" for node in backend)
     assert any(
-        node.kind == "response_schema" and node.name == "User"
-        for node in project.nodes
+        node.kind == "response_schema" and node.name == "User" for node in project.nodes
     )
     assert project.counts == {"contract_mismatch": 0, "coverage_gap": 1}
 
@@ -799,9 +795,7 @@ app.get("/api/users/:id", handler);
 
 
 def test_fullstack_fixture_preserves_sources_and_causal_findings() -> None:
-    fixture = (
-        Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
-    )
+    fixture = Path(__file__).parents[1] / "examples" / "fullstack-slop-lab"
 
     frontend_map = map_frontend(fixture, ".")
     project = ProjectMap.from_dict(frontend_map.project_map)
@@ -810,10 +804,13 @@ def test_fullstack_fixture_preserves_sources_and_causal_findings() -> None:
     assert project.evidence["unknown_backend_evidence"] == 0
     assert len(_operation_nodes(project, "frontend")) == 142
     assert len(_operation_nodes(project, "backend")) == 148
-    assert sum(
-        finding.detector_id == "contract-evidence-contradictory"
-        for finding in project.findings
-    ) == 0
+    assert (
+        sum(
+            finding.detector_id == "contract-evidence-contradictory"
+            for finding in project.findings
+        )
+        == 0
+    )
 
 
 def test_frontend_map_preserves_same_path_requests_by_method(tmp_path) -> None:
@@ -959,12 +956,8 @@ def test_contract_reconciliation_reports_one_smallest_field_mismatch() -> None:
     edges = (
         ContractEdge(frontend.id, front_schema.id, "accepts", "test", 1.0, source),
         ContractEdge(backend.id, back_schema.id, "accepts", "test", 1.0, source),
-        ContractEdge(
-            front_schema.id, front_email.id, "has_field", "test", 1.0, source
-        ),
-        ContractEdge(
-            back_schema.id, back_email.id, "has_field", "test", 1.0, source
-        ),
+        ContractEdge(front_schema.id, front_email.id, "has_field", "test", 1.0, source),
+        ContractEdge(back_schema.id, back_email.id, "has_field", "test", 1.0, source),
     )
 
     findings = reconcile_contract_graph(
@@ -1011,7 +1004,9 @@ def test_unknown_contract_evidence_never_reports_parity() -> None:
     assert findings[0].status == "investigate"
 
 
-def test_openapi_contract_fields_status_errors_and_auth_are_graph_nodes(tmp_path) -> None:
+def test_openapi_contract_fields_status_errors_and_auth_are_graph_nodes(
+    tmp_path,
+) -> None:
     document = {
         "openapi": "3.1.0",
         "components": {
@@ -1084,6 +1079,220 @@ def test_openapi_contract_fields_status_errors_and_auth_are_graph_nodes(tmp_path
     assert route.attributes["status_codes"] == ["201", "422"]
     auth = next(node for node in project.nodes if node.kind == "auth_requirement")
     assert auth.capability_status == "present"
+
+
+def test_openapi_preserves_transport_and_security_lineage(tmp_path) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "components": {
+            "parameters": {
+                "TraceHeader": {
+                    "name": "X-Trace-ID",
+                    "in": "header",
+                    "schema": {"type": "string"},
+                }
+            }
+        },
+        "paths": {
+            "/orders/{orderId}": {
+                "parameters": [
+                    {
+                        "name": "orderId",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {"type": "integer", "maximum": 100},
+                    },
+                    {"$ref": "#/components/parameters/TraceHeader"},
+                ],
+                "post": {
+                    "parameters": [
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "maximum": 25},
+                        }
+                    ],
+                    "security": [
+                        {"OAuth2": ["orders:write"]},
+                        {"ApiKey": []},
+                    ],
+                    "requestBody": {
+                        "content": {
+                            "application/json": {"schema": {"type": "object"}},
+                            "multipart/form-data": {"schema": {"type": "object"}},
+                        }
+                    },
+                    "responses": {
+                        "201": {
+                            "headers": {
+                                "ETag": {"schema": {"type": "string"}},
+                            },
+                            "content": {
+                                "application/json": {"schema": {"type": "object"}}
+                            },
+                        },
+                        "429": {
+                            "headers": {
+                                "Retry-After": {"schema": {"type": "integer"}},
+                            },
+                            "content": {
+                                "application/problem+json": {
+                                    "schema": {"type": "object"}
+                                }
+                            },
+                        },
+                    },
+                },
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    by_kind = {
+        kind: [node for node in project.nodes if node.kind == kind]
+        for kind in (
+            "api_parameter",
+            "request_media_type",
+            "response_media_type",
+            "response_header",
+            "auth_alternative",
+            "auth_scheme_requirement",
+        )
+    }
+
+    parameters = {
+        (node.attributes["location"], node.name): node
+        for node in by_kind["api_parameter"]
+    }
+    assert set(parameters) == {
+        ("header", "X-Trace-ID"),
+        ("path", "orderId"),
+        ("query", "limit"),
+    }
+    assert parameters[("path", "orderId")].attributes["required"] is True
+    assert parameters[("query", "limit")].attributes["schema"]["maximum"] == 25
+    assert {node.name for node in by_kind["request_media_type"]} == {
+        "application/json",
+        "multipart/form-data",
+    }
+    assert {
+        (node.attributes["status"], node.name)
+        for node in by_kind["response_media_type"]
+    } == {("201", "application/json"), ("429", "application/problem+json")}
+    assert {
+        (node.attributes["status"], node.name) for node in by_kind["response_header"]
+    } == {("201", "ETag"), ("429", "Retry-After")}
+    assert len(by_kind["auth_alternative"]) == 2
+    assert {
+        (node.name, tuple(node.attributes["scopes"]))
+        for node in by_kind["auth_scheme_requirement"]
+    } == {("ApiKey", ()), ("OAuth2", ("orders:write",))}
+
+
+def test_openapi_transport_lineage_is_stable_under_semantic_reordering(
+    tmp_path,
+) -> None:
+    parameter_a = {
+        "name": "cursor",
+        "in": "query",
+        "schema": {"type": "string"},
+    }
+    parameter_b = {
+        "name": "X-Request-ID",
+        "in": "header",
+        "schema": {"type": "string"},
+    }
+
+    def document(*, reverse: bool) -> dict[str, object]:
+        parameters = (
+            [parameter_b, parameter_a] if reverse else [parameter_a, parameter_b]
+        )
+        security = (
+            [{"ApiKey": []}, {"OAuth2": ["read", "write", "read"]}]
+            if reverse
+            else [{"OAuth2": ["write", "read"]}, {"ApiKey": []}]
+        )
+        media = (
+            {
+                "text/csv": {"schema": {"type": "string"}},
+                "application/json": {"schema": {"type": "object"}},
+            }
+            if reverse
+            else {
+                "application/json": {"schema": {"type": "object"}},
+                "text/csv": {"schema": {"type": "string"}},
+            }
+        )
+        return {
+            "openapi": "3.1.0",
+            "paths": {
+                "/items": {
+                    "get": {
+                        "parameters": parameters,
+                        "security": security,
+                        "responses": {"200": {"content": media}},
+                    }
+                }
+            },
+        }
+
+    snapshots = []
+    lineage_kinds = {
+        "api_parameter",
+        "response_media_type",
+        "auth_alternative",
+        "auth_scheme_requirement",
+    }
+    for name, reverse in (("forward", False), ("reverse", True)):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "openapi.json").write_text(
+            json.dumps(document(reverse=reverse)), encoding="utf-8"
+        )
+        project = build_project_map(root)
+        snapshots.append(
+            [node.to_dict() for node in project.nodes if node.kind in lineage_kinds]
+        )
+
+    assert snapshots[0] == snapshots[1]
+
+
+@pytest.mark.parametrize(
+    ("security", "expected_auth"),
+    [
+        ([{}], "absent"),
+        ([{}, {"OAuth2": []}], "unknown"),
+        ([{"OAuth2": []}], "present"),
+    ],
+)
+def test_openapi_security_alternatives_do_not_overstate_required_auth(
+    tmp_path,
+    security,
+    expected_auth,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/profile": {
+                "get": {
+                    "security": security,
+                    "responses": {"200": {"content": {}}},
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    auth = next(node for node in project.nodes if node.kind == "auth_requirement")
+
+    assert auth.capability_status == expected_auth
 
 
 def test_fastapi_handler_service_entity_and_column_lineage(tmp_path) -> None:
@@ -1295,9 +1504,7 @@ def _repair_contract_graph(
         kind: str,
     ) -> None:
         nodes.append(node)
-        edges.append(
-            ContractEdge(operation.id, node.id, kind, "test", 1.0, anchor)
-        )
+        edges.append(ContractEdge(operation.id, node.id, kind, "test", 1.0, anchor))
 
     for operation, schema, side in (
         (front, front_schema, "frontend"),
@@ -1734,9 +1941,7 @@ def _write_items_openapi(
 ) -> None:
     operation: dict[str, object] = {
         "responses": {
-            status: {
-                "content": {"application/json": {"schema": schema}}
-            }
+            status: {"content": {"application/json": {"schema": schema}}}
             for status, schema in (responses or {"200": {"type": "string"}}).items()
         }
     }
@@ -1776,9 +1981,7 @@ def test_multiple_distinct_dto_references_are_not_first_wins(tmp_path) -> None:
     }
 
     assert operation.attributes["evidence"]["request"] == "contradictory"
-    assert {
-        node.name for node in graph.nodes if node.id in request_nodes
-    } == {"A", "B"}
+    assert {node.name for node in graph.nodes if node.id in request_nodes} == {"A", "B"}
     assert any(
         finding.detector_id == "contract-evidence-contradictory"
         for finding in graph.findings

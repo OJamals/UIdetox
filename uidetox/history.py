@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .findings import (
@@ -22,7 +22,7 @@ def _history_dir() -> Path:
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
 
 
 def _coerce_history_text(value: object, default: str = "") -> str:
@@ -51,7 +51,7 @@ def save_run_snapshot(*, trigger: str = "scan") -> Path:
     issues = state.get("issues", [])
     pending_issues = sum(requires_resolution(issue) for issue in issues)
     snapshot = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "trigger": trigger,
         "design_score": scores["blended_score"],
         "objective_score": scores["objective_score"],

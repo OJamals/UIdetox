@@ -185,7 +185,7 @@ def main() -> int:
             limit=output_limit,
         )
         return 1
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - isolated worker must serialize every unexpected failure
         output_limit = policy.max_output_bytes if "policy" in locals() else 64 * 1024
         _write_response(_error_payload(error), limit=output_limit)
         return 1

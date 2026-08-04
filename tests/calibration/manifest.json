@@ -2,10 +2,10 @@
   "schema_version": 1,
   "fixture_root": "fixtures",
   "catalog": {
-    "rule_count": 217,
-    "fingerprint": "f39e1b0ea8dbe1b4c7a33133f40a2523c7d91a317815a893599226dfe018004a",
-    "manual_rule_count": 212,
-    "manual_rule_fingerprint": "8ed02a2ba3d2acffc73a4d84cfd9e92e60d95c78a35cf5e07a34655684ba08ea",
+    "rule_count": 215,
+    "fingerprint": "d77ccf1696920938b910479c786124414566b1d0d9559e212c071e99c1fcb387",
+    "manual_rule_count": 210,
+    "manual_rule_fingerprint": "e720062f03060d5e61f53b28bc3a7ac02790819aec085919a12a2dfeaddf7cad",
     "manual_rationale": "No deterministic corpus pair yet; qualification owned by plans/015-occurrence-complete-static-analysis.md."
   },
   "detector_budgets": {
@@ -194,19 +194,6 @@
       "rationale": "Tailwind gradient utilities must be detected."
     },
     {
-      "id": "tailwind-gradient-family-positive",
-      "fixture": "tailwind/component.tsx",
-      "framework": "tailwind",
-      "language": "tsx",
-      "capability": "tailwind",
-      "detector": "static-analyzer",
-      "rule_id": "COLOR_GRADIENT_SLOP",
-      "status": "positive",
-      "expected_anchors": [{"path": "tailwind/component.tsx", "contains": "from-purple-500"}],
-      "severity": "warning",
-      "rationale": "Generic purple-blue gradient detection intentionally overlaps the Tailwind-specific rule."
-    },
-    {
       "id": "tailwind-gradient-negative",
       "fixture": "tailwind/solid.tsx",
       "framework": "tailwind",
@@ -220,17 +207,30 @@
       "rationale": "Solid Tailwind utilities must not trigger gradient detection."
     },
     {
-      "id": "tailwind-gradient-family-negative",
-      "fixture": "tailwind/solid.tsx",
-      "framework": "tailwind",
-      "language": "tsx",
-      "capability": "tailwind",
+      "id": "markup-gradient-positive",
+      "fixture": "svelte/gradient.svelte",
+      "framework": "svelte",
+      "language": "svelte",
+      "capability": "svelte",
+      "detector": "static-analyzer",
+      "rule_id": "COLOR_GRADIENT_SLOP",
+      "status": "positive",
+      "expected_anchors": [{"path": "svelte/gradient.svelte", "contains": "from-blue-500"}],
+      "severity": "warning",
+      "rationale": "Markup utility gradients retain generic gradient coverage outside React source files."
+    },
+    {
+      "id": "markup-gradient-negative",
+      "fixture": "svelte/gradient-negative.svelte",
+      "framework": "svelte",
+      "language": "svelte",
+      "capability": "svelte",
       "detector": "static-analyzer",
       "rule_id": "COLOR_GRADIENT_SLOP",
       "status": "negative",
       "expected_anchors": [],
       "severity": "warning",
-      "rationale": "Solid Tailwind utilities must not trigger generic gradient detection."
+      "rationale": "Warm markup gradients must not trigger cool-spectrum detection."
     },
     {
       "id": "python-backend-degraded",

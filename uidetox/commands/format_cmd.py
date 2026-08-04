@@ -2,8 +2,9 @@
 
 import argparse
 import subprocess
-from uidetox.tooling import detect_all
+
 from uidetox.state import get_project_root, load_config
+from uidetox.tooling import detect_all
 from uidetox.utils import prepare_subprocess_cmd
 
 
@@ -41,7 +42,13 @@ def run(args: argparse.Namespace):
     try:
         argv, env = prepare_subprocess_cmd(cmd)
         result = subprocess.run(
-            argv, capture_output=True, text=True, cwd=project_root, timeout=120, env=env
+            argv,
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+            timeout=120,
+            env=env,
+            check=False,
         )
     except FileNotFoundError:
         print(f"Command not found. Install {formatter['name']}.")

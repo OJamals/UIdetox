@@ -64,7 +64,7 @@ def test_review_gate_requires_fresh_visual_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(review, "load_config", lambda: {})
+    monkeypatch.setattr(review, "load_config", dict)
     monkeypatch.setattr(
         review,
         "project_visual_evidence_status",
@@ -199,7 +199,7 @@ def test_review_stores_structured_dimensions_and_current_evidence_hashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(review, "load_config", lambda: {})
+    monkeypatch.setattr(review, "load_config", dict)
     monkeypatch.setattr(
         review,
         "project_visual_evidence_status",

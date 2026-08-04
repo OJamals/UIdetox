@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from uidetox.findings import Finding
@@ -40,7 +41,7 @@ class SourceAnchor:
     confidence: float
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "SourceAnchor":
+    def from_dict(cls, value: Mapping[str, Any]) -> SourceAnchor:
         return cls(
             file=str(value.get("file", "")),
             line=int(value.get("line", 0)),
@@ -74,7 +75,7 @@ class ContractNode:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ContractNode":
+    def from_dict(cls, value: Mapping[str, Any]) -> ContractNode:
         return cls(
             id=str(value.get("id", "")),
             kind=str(value.get("kind", "unknown")),
@@ -110,7 +111,7 @@ class ContractEdge:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ContractEdge":
+    def from_dict(cls, value: Mapping[str, Any]) -> ContractEdge:
         return cls(
             source=str(value.get("source", "")),
             target=str(value.get("target", "")),
@@ -131,7 +132,7 @@ class ContractSchema:
     status: str | None = None
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ContractSchema":
+    def from_dict(cls, value: Mapping[str, Any]) -> ContractSchema:
         return cls(
             identities=tuple(str(item) for item in value.get("identities", [])),
             shape=dict(value.get("shape", {})),
@@ -168,7 +169,7 @@ class ContractObservation:
     evidence: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ContractObservation":
+    def from_dict(cls, value: Mapping[str, Any]) -> ContractObservation:
         return cls(
             identity=str(value.get("identity", "")),
             side=str(value.get("side", "unknown")),
@@ -230,7 +231,7 @@ class ProjectMap:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any] | None) -> "ProjectMap":
+    def from_dict(cls, value: Mapping[str, Any] | None) -> ProjectMap:
         if not value:
             return cls()
         version = int(value.get("schema_version", 1))
@@ -1262,7 +1263,7 @@ def _schema_difference(
     front_required = {str(item) for item in frontend.get("required", [])}
     back_required = {str(item) for item in backend.get("required", [])}
     if front_required != back_required:
-        field_name = sorted(front_required ^ back_required)[0]
+        field_name = min(front_required ^ back_required)
         return (
             "field_required_mismatch",
             _field_path(prefix, field_name),
@@ -1274,7 +1275,7 @@ def _schema_difference(
     front_properties = dict(frontend.get("properties", {}))
     back_properties = dict(backend.get("properties", {}))
     if set(front_properties) != set(back_properties):
-        field_name = sorted(set(front_properties) ^ set(back_properties))[0]
+        field_name = min(set(front_properties) ^ set(back_properties))
         return (
             "field_missing",
             _field_path(prefix, field_name),
@@ -1306,7 +1307,7 @@ def _schema_difference(
             True,
         )
     if isinstance(front_items, Mapping) and isinstance(back_items, Mapping):
-        return _schema_difference(front_items, back_items, f"{prefix}[]" or "[]")
+        return _schema_difference(front_items, back_items, f"{prefix}[]")
     return None
 
 
@@ -1486,6 +1487,11 @@ def _graph_finding(
         message=detail,
         provenance="contract",
         evidence={
+            "basis": "review" if status == "investigate" else "measured",
+            "authority": "project-contract",
+            "applicability": {
+                "status": "unknown" if status == "investigate" else "applicable"
+            },
             "frontend": [frontend.id] if frontend else [],
             "backend": [backend.id] if backend else [],
             "expected": _finding_evidence_value(expected),

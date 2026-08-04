@@ -3,7 +3,8 @@
 import argparse
 import fnmatch
 import sys
-from uidetox.state import load_state, save_state, load_config, save_config
+
+from uidetox.state import load_config, load_state, save_config, save_state
 
 _MAX_PATTERN_LEN = 200
 
@@ -110,7 +111,7 @@ def _add_pattern(pattern: str):
     pattern_already_exists = pattern in patterns
     if not pattern_already_exists:
         patterns.add(pattern)
-        config["ignore_patterns"] = sorted(list(patterns))
+        config["ignore_patterns"] = sorted(patterns)
         save_config(config)
 
     removed_issues, removed_baseline = _prune_matching_state_entries(pattern)
@@ -132,7 +133,7 @@ def _remove_pattern(pattern: str):
 
     if pattern in patterns:
         patterns.remove(pattern)
-        config["ignore_patterns"] = sorted(list(patterns))
+        config["ignore_patterns"] = sorted(patterns)
         save_config(config)
         print(f"Removed suppress pattern: {pattern}")
         print("  (Run 'uidetox rescan' to catch issues that were previously ignored.)")

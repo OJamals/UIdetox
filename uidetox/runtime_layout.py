@@ -6,6 +6,48 @@ from typing import Any, Protocol
 
 from uidetox.findings import Finding
 
+_RUNTIME_REMEDIATION_CONSTRAINTS: dict[str, tuple[str, ...]] = {
+    "runtime-chart-baseline-misalignment": (
+        "Align every chart series to the measured shared baseline; preserve data order and labels.",
+    ),
+    "runtime-component-clipped": (
+        "Restore intrinsic sizing or wrapping at every observed anchor; retain overflow only when source semantics explicitly require it.",
+    ),
+    "runtime-font-misalignment": (
+        "Reconcile the evidenced font family and baseline with equivalent peer text without changing content order.",
+    ),
+    "runtime-horizontal-padding": (
+        "Apply the measured logical inline padding through the owning layout rule without changing intentional scroll boundaries.",
+    ),
+    "runtime-interactive-scroll-concealment": (
+        "Expose every interactive control without requiring scroll discovery; preserve intentional overflow regions.",
+    ),
+    "runtime-layout-misalignment": (
+        "Repair the shared layout parent so the measured peer alignment follows one responsive rule.",
+    ),
+    "runtime-line-spacing": (
+        "Reconcile the measured line-height with the owning type scale while preserving text content and hierarchy.",
+    ),
+    "runtime-navigation-choice-overload": (
+        "Group destinations by user task, expose a clear first choice, and preserve reachable navigation paths.",
+    ),
+    "runtime-pathological-text-wrap": (
+        "Adjust the owning content measure or type rule so measured text wraps remain readable at every observed viewport.",
+    ),
+    "runtime-text-collision": (
+        "Repair the owning layout rule so measured text and peer bounds no longer overlap at observed anchors.",
+    ),
+    "runtime-text-edge-contact": (
+        "Restore measured logical edge spacing through the owning layout rule without changing source order.",
+    ),
+    "runtime-text-separation": (
+        "Restore measured separation between text regions through the shared spacing or type rule.",
+    ),
+    "runtime-vertical-padding": (
+        "Apply the measured logical block padding through the owning layout rule without changing intentional scroll boundaries.",
+    ),
+}
+
 
 class RuntimeMeasuredElement(Protocol):
     tag: str
@@ -28,7 +70,12 @@ def RuntimeFinding(
         confidence=0.9,
         message=message,
         provenance="runtime",
-        evidence={"metrics": metrics or {}},
+        evidence={
+            "basis": "measured",
+            "applicability": {"status": "observed"},
+            "remediation_constraints": _RUNTIME_REMEDIATION_CONSTRAINTS.get(code, ()),
+            "metrics": metrics or {},
+        },
         suppression_key=code,
         verifier={"kind": "runtime", "detector_id": code},
         status="informational" if severity == "info" else "pending",
@@ -263,9 +310,9 @@ def _clipping_findings(
         )
 
     descendant_clipped = measurements.get("descendantClipped") is True
-    if (
-        descendant_clipped and not (contains_scroll_x or contains_scroll_y)
-    ) or (clipped_by_unmanaged_ancestor and not has_text):
+    if (descendant_clipped and not (contains_scroll_x or contains_scroll_y)) or (
+        clipped_by_unmanaged_ancestor and not has_text
+    ):
         findings.append(
             RuntimeFinding(
                 code="runtime-component-clipped",
@@ -311,10 +358,14 @@ def _responsive_findings(
 
     navigation_links = _measurement_float(measurements, "navigationLinkCount")
     navigation_groups = _measurement_float(measurements, "navigationGroupCount")
-    if navigation_links > 12 and (
-        measurements.get("isScrollRegionX") is True
-        or measurements.get("isScrollRegionY") is True
-    ) and navigation_groups < 2:
+    if (
+        navigation_links > 12
+        and (
+            measurements.get("isScrollRegionX") is True
+            or measurements.get("isScrollRegionY") is True
+        )
+        and navigation_groups < 2
+    ):
         client_height = _measurement_float(measurements, "clientHeight")
         scroll_height = _measurement_float(measurements, "scrollHeight")
         metrics = {
@@ -359,12 +410,9 @@ def _spacing_findings(
             "containsScrollRegionY",
         )
     )
-    legacy_scroll_boundary = (
-        not has_axis_scroll_evidence
-        and (
-            measurements.get("isScrollRegion") is True
-            or measurements.get("containsScrollRegion") is True
-        )
+    legacy_scroll_boundary = not has_axis_scroll_evidence and (
+        measurements.get("isScrollRegion") is True
+        or measurements.get("containsScrollRegion") is True
     )
     crosses_x_scroll_boundary = legacy_scroll_boundary or (
         measurements.get("isScrollRegionX") is True
@@ -378,14 +426,10 @@ def _spacing_findings(
         ("vertical", "sideways")
     )
     crosses_inline_scroll_boundary = (
-        crosses_y_scroll_boundary
-        if vertical_writing
-        else crosses_x_scroll_boundary
+        crosses_y_scroll_boundary if vertical_writing else crosses_x_scroll_boundary
     )
     crosses_block_scroll_boundary = (
-        crosses_x_scroll_boundary
-        if vertical_writing
-        else crosses_y_scroll_boundary
+        crosses_x_scroll_boundary if vertical_writing else crosses_y_scroll_boundary
     )
     insets = _logical_values(
         measurements,
@@ -434,9 +478,8 @@ def _spacing_findings(
         and min(inline_insets) < 8.0
     )
     if (
-        (is_box_control or needs_visual_inline_padding)
-        and horizontal_padding is not None
-    ):
+        is_box_control or needs_visual_inline_padding
+    ) and horizontal_padding is not None:
         minimum = 8.0
         if min(horizontal_padding) < minimum or _padding_is_uneven(horizontal_padding):
             findings.append(
@@ -466,10 +509,7 @@ def _spacing_findings(
         and bool(block_insets)
         and min(block_insets) < 8.0
     )
-    if (
-        (is_box_control or needs_visual_block_padding)
-        and vertical_padding is not None
-    ):
+    if (is_box_control or needs_visual_block_padding) and vertical_padding is not None:
         minimum = 6.0 if is_box_control else 8.0
         if min(vertical_padding) < minimum or _padding_is_uneven(vertical_padding):
             findings.append(

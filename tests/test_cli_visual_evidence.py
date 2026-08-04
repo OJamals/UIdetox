@@ -145,7 +145,7 @@ def test_setup_accepts_persistent_visual_evidence_controls() -> None:
 def test_setup_persists_visual_evidence_controls(monkeypatch) -> None:
     saved: list[dict] = []
     monkeypatch.setattr(setup, "ensure_uidetox_dir", lambda: None)
-    monkeypatch.setattr(setup, "load_config", lambda: {})
+    monkeypatch.setattr(setup, "load_config", dict)
     monkeypatch.setattr(setup, "save_config", saved.append)
     monkeypatch.setattr(setup, "_is_interactive", lambda: False)
     args = parse_args(

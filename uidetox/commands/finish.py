@@ -55,12 +55,14 @@ def _detect_main_branch() -> str:
 
 def _workspace_dirty() -> bool:
     try:
-        return bool(subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip())
+        return bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True
 
@@ -117,6 +119,7 @@ def _worktree_index_matches_commit(worktree: Path, commit: str) -> bool:
         cwd=worktree,
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode not in (0, 1):
         raise subprocess.CalledProcessError(
@@ -169,9 +172,7 @@ def _prepare_squash_candidate(
     session_head: str,
     target_head: str,
 ) -> str:
-    temporary_worktree = Path(
-        tempfile.mkdtemp(prefix="uidetox-finish-")
-    ).resolve()
+    temporary_worktree = Path(tempfile.mkdtemp(prefix="uidetox-finish-")).resolve()
     worktree_added = False
     candidate: str | None = None
     operation_error: Exception | None = None
@@ -318,7 +319,9 @@ def run(args):
                 f"❌ Target branch '{target_branch}' is checked out at: "
                 f"{target_worktree}"
             )
-            print("   Remove that linked worktree or check out another branch, then retry.")
+            print(
+                "   Remove that linked worktree or check out another branch, then retry."
+            )
             raise SystemExit(1)
         candidate = _prepare_squash_candidate(
             repository,

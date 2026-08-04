@@ -154,7 +154,9 @@ def test_workflow_waits_for_agent_then_selectively_resumes_issue_dependents(
 
     waiting = engine.run(_inputs(queue="queue-with-issues"))
     assert waiting.waiting == WAITING_AGENT
-    assert fake.calls == [phase.id for phase in PHASES if phase.id != "finish_eligibility"]
+    assert fake.calls == [
+        phase.id for phase in PHASES if phase.id != "finish_eligibility"
+    ]
 
     fake.pending = 0
     resumed = engine.run(_inputs(queue="queue-empty"))
@@ -474,7 +476,7 @@ def test_required_visual_evidence_controls_verification_freshness(
     monkeypatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(workflow_module, "load_config", lambda: {})
+    monkeypatch.setattr(workflow_module, "load_config", dict)
     monkeypatch.setattr(
         workflow_module,
         "load_state",

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import uidetox.visual_semantics as visual_semantics
+from uidetox import visual_semantics
 from uidetox.design_context import DesignIntent
 from uidetox.frontend_map import (
     SCHEMA_VERSION,

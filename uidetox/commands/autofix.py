@@ -2,10 +2,9 @@
 
 import argparse
 import subprocess
-from itertools import chain
 from pathlib import Path
 
-from uidetox.findings import requires_resolution
+from uidetox.findings import coerce_finding, requires_resolution
 from uidetox.state import get_project_root, load_config, load_state
 from uidetox.utils import tracked_changed_files
 
@@ -318,7 +317,7 @@ _CATEGORIES = {
             "missing hover",
             "missing focus",
         ],
-        "guidance": "Add hover:, focus:ring, active: states to all interactive elements. Add disabled:cursor-not-allowed disabled:opacity-50 to disabled elements.",
+        "guidance": "Preserve visible keyboard focus and activation feedback. Add hover only as a pointer enhancement. For controls that can be disabled, expose semantic disabled state plus a perceivable reason where useful.",
     },
     "security": {
         "keywords": [
@@ -533,13 +532,7 @@ _CATEGORIES = {
 }
 
 
-def _categorize_issue(issue: dict) -> str:
-    """Classify an issue into a category by keyword matching."""
-    desc = issue.get("issue", "").lower() + " " + issue.get("command", "").lower()
-    for cat_name, cat in _CATEGORIES.items():
-        if any(kw in desc for kw in cat["keywords"]):
-            return cat_name
-    return "other"
+_AUTOFIX_RECIPES = {"EMPTY_HANDLER": "empty-handler.js"}
 
 
 def run(args: argparse.Namespace):
@@ -556,31 +549,60 @@ def run(args: argparse.Namespace):
 
     dry_run = getattr(args, "dry_run", False)
 
-    # Group by category
-    grouped: dict[str, list[dict]] = {}
+    grouped: dict[str, list[tuple[dict, object, str, str]]] = {}
+    eligible: list[tuple[dict, object, str]] = []
+    ineligible_counts: dict[str, int] = {}
     for issue in t1_issues:
-        cat = _categorize_issue(issue)
-        grouped.setdefault(cat, []).append(issue)
+        finding = coerce_finding(issue)
+        recipe = _AUTOFIX_RECIPES.get(finding.detector_id, "")
+        reason = ""
+        if not recipe:
+            reason = "unregistered detector"
+        elif finding.provenance != "static":
+            reason = "non-static provenance"
+        elif finding.evidence.get("basis") == "review":
+            reason = "review evidence"
+        else:
+            eligible.append((issue, finding, recipe))
+        grouped.setdefault(finding.category, []).append(
+            (issue, finding, recipe, reason)
+        )
+        if reason:
+            ineligible_counts[reason] = ineligible_counts.get(reason, 0) + 1
 
     print("==============================")
     print(" UIdetox Autofix")
     print("==============================")
-    print(f"Found {len(t1_issues)} T1 issue(s) eligible for autofix:\n")
+    print(
+        f"Found {len(t1_issues)} T1 issue(s): {len(eligible)} registered mechanical recipe(s).\n"
+    )
 
-    for cat_name, cat_issues in grouped.items():
+    for cat_name, category_records in grouped.items():
         cat_info = _CATEGORIES.get(cat_name, {})
         guidance = cat_info.get("guidance", "Apply fix as described.")
-        print(f"  --- {cat_name.upper()} ({len(cat_issues)} issues) ---")
+        print(f"  --- {cat_name.upper()} ({len(category_records)} issues) ---")
         print(f"  Guidance: {guidance}")
-        for issue in cat_issues:
-            print(
-                f"    [{issue.get('id', '?')}] {issue.get('file', '?')}: {issue.get('issue', '?')}"
-            )
-            print(f"      -> Fix: {issue.get('command', 'manual')}")
+        for issue, finding, recipe, reason in category_records:
+            action = f"registered {recipe}" if recipe and not reason else reason
+            print(f"    [{finding.detector_id}] {issue.get('file', '?')}: {action}")
         print()
+
+    if ineligible_counts:
+        summary = ", ".join(
+            f"{reason}({count})" for reason, count in sorted(ineligible_counts.items())
+        )
+        print(
+            f"{sum(ineligible_counts.values())} T1 issue(s) require manual work: {summary}."
+        )
 
     if dry_run:
         print("[DRY RUN] No changes applied. Remove --dry-run to apply.")
+        return
+
+    if not eligible:
+        print(
+            "No registered mechanical recipe applies. Keep T1 findings in manual review."
+        )
         return
 
     transforms_dir = Path(__file__).parent.parent / "data" / "transforms"
@@ -588,19 +610,8 @@ def run(args: argparse.Namespace):
     if config.get("auto_commit", False):
         pre_existing_changes = tracked_changed_files()
 
-    # Map categories to transform files (multiple categories can share transforms)
-    _TRANSFORM_MAP = {
-        "typography": "typography.js",
-        "color": "color.js",
-        "materiality": "color.js",  # Color transform handles materiality patterns too
-        "layout": "spacing.js",
-        "motion": "typography.js",  # Typography transform handles animation replacements
-        "states": "spacing.js",  # Spacing transform handles missing transitions
-        "code quality": "spacing.js",  # Spacing transform handles z-index, empty handlers
-        "accessibility": "spacing.js",  # Spacing transform handles outline-none → focus-visible
-    }
-
     changed_files = set()
+    transformed_records: set[int] = set()
 
     def _normalize_issue_path(file_path: str) -> Path:
         path = Path(file_path)
@@ -608,19 +619,17 @@ def run(args: argparse.Namespace):
             return path
         return (project_root / path).resolve()
 
-    transform_groups: dict[str, list[list[dict]]] = {}
-    for cat_name, cat_issues in grouped.items():
-        transform_name = _TRANSFORM_MAP.get(cat_name, f"{cat_name}.js")
-        transform_groups.setdefault(transform_name, []).append(cat_issues)
+    transform_groups: dict[str, list[dict]] = {}
+    for issue, _finding, transform_name in eligible:
+        transform_groups.setdefault(transform_name, []).append(issue)
 
-    for transform_name, issue_groups in transform_groups.items():
+    for transform_name, transform_issues in transform_groups.items():
         transform_file = transforms_dir / transform_name
 
         if not transform_file.exists():
             continue
 
-        files_to_fix = [issue["file"] for issue in chain.from_iterable(issue_groups)]
-        files_to_fix = list(set(files_to_fix))
+        files_to_fix = list(dict.fromkeys(issue["file"] for issue in transform_issues))
 
         # Only transform JS/TS files (jscodeshift doesn't handle CSS)
         js_exts = {".tsx", ".jsx", ".ts", ".js"}
@@ -656,6 +665,7 @@ def run(args: argparse.Namespace):
                     text=True,
                     timeout=30,
                     cwd=project_root,
+                    check=False,
                 )
                 if result.returncode == 0:
                     after_contents = before_contents
@@ -666,6 +676,11 @@ def run(args: argparse.Namespace):
 
                     if before_contents != after_contents:
                         changed_files.add(str(normalized_path))
+                        transformed_records.update(
+                            id(issue)
+                            for issue in transform_issues
+                            if _normalize_issue_path(issue["file"]) == normalized_path
+                        )
                         print(f"    ✓ {normalized_path.name}")
                 else:
                     stderr = result.stderr.strip()
@@ -722,35 +737,21 @@ def run(args: argparse.Namespace):
 
         print("Run `uidetox rescan` to update the issue queue.")
 
-        # Mark the issues in transformed files as needing verification
-        remaining_t1 = [
-            issue
-            for issue in t1_issues
-            if str(_normalize_issue_path(issue.get("file", ""))) not in changed_files
+        remaining_records = [
+            record
+            for category_records in grouped.values()
+            for record in category_records
+            if id(record[0]) not in transformed_records
         ]
-        if remaining_t1:
-            print(
-                f"\n{len(remaining_t1)} T1 issue(s) in non-JS files need manual fixing:"
-            )
-            for issue in remaining_t1[:10]:
+        if remaining_records:
+            print(f"\n{len(remaining_records)} T1 issue(s) need manual fixing:")
+            for issue, finding, _recipe, reason in remaining_records[:10]:
                 print(
-                    f"    [{issue.get('id', '?')}] {issue.get('file', '?')}: {issue.get('issue', '?')[:60]}"
+                    f"    [{finding.detector_id}] {issue.get('file', '?')}: "
+                    f"{reason or 'registered recipe made no source change'}"
                 )
         return
 
-    print("\n[AGENT INSTRUCTION]")
     print(
-        f"Apply all {len(t1_issues)} T1 fixes listed above, working category by category."
+        "No registered transform produced a source change. Keep findings in manual review."
     )
-    print("For each fix:")
-    print("  1. Open the file")
-    print("  2. Apply the fix using the category guidance above")
-    print('  3. Run `uidetox resolve <issue_id> --note "what you changed"` when done')
-    if config.get("auto_commit", False):
-        print(
-            "\n  AUTO-COMMIT is ON — each `resolve` will atomically commit the fix to git."
-        )
-    print(
-        "\nThese are safe, mechanical changes (font swaps, color replacements, spacing)."
-    )
-    print("Apply them all before moving to T2+ issues.")

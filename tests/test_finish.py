@@ -67,14 +67,14 @@ def _allow_finish(
 ) -> None:
     monkeypatch.chdir(repository.path)
     monkeypatch.setattr(finish, "load_config", lambda: {"target_score": 95})
-    monkeypatch.setattr(finish, "load_state", lambda: {})
+    monkeypatch.setattr(finish, "load_state", dict)
     monkeypatch.setattr(
         finish,
         "evaluate_eligibility",
         lambda state, context: SimpleNamespace(eligible=True, blockers=()),
     )
     monkeypatch.setattr(finish, "current_verification_fresh", lambda: True)
-    monkeypatch.setattr(finish, "current_evidence_hashes", lambda: {})
+    monkeypatch.setattr(finish, "current_evidence_hashes", dict)
     monkeypatch.setattr(
         finish,
         "project_visual_evidence_status",
@@ -236,10 +236,7 @@ def _install_git_failure(
                 and command[:2] == ["git", "commit"]
                 and cwd != repository.path.resolve()
             )
-            or (
-                stage == "checkout"
-                and command == ["git", "checkout", "master"]
-            )
+            or (stage == "checkout" and command == ["git", "checkout", "master"])
         )
         if should_fail:
             raise subprocess.CalledProcessError(1, command)
@@ -292,7 +289,9 @@ def _assert_temporary_worktree_cleaned(
     temporary_paths = observed["temporary_paths"]
     assert isinstance(temporary_paths, list)
     assert temporary_paths
-    assert all(not path.exists() and str(path) not in listing for path in temporary_paths)
+    assert all(
+        not path.exists() and str(path) not in listing for path in temporary_paths
+    )
 
 
 def test_finish_stops_before_git_mutation_when_required_evidence_is_stale(
@@ -306,8 +305,8 @@ def test_finish_stops_before_git_mutation_when_required_evidence_is_stale(
         return SimpleNamespace(stdout="uidetox-session-test\n")
 
     monkeypatch.setattr(finish.subprocess, "run", fake_run)
-    monkeypatch.setattr(finish, "load_config", lambda: {})
-    monkeypatch.setattr(finish, "load_state", lambda: {})
+    monkeypatch.setattr(finish, "load_config", dict)
+    monkeypatch.setattr(finish, "load_state", dict)
     monkeypatch.setattr(finish, "_workspace_dirty", lambda: False)
     monkeypatch.setattr(finish, "current_verification_fresh", lambda: True)
     monkeypatch.setattr(
@@ -379,7 +378,9 @@ def test_finish_uses_canonical_pending_finding_gate_before_git_mutation(
         lambda: pytest.fail("eligibility must block before branch mutation"),
     )
     with pytest.raises(SystemExit):
-        finish.run(argparse.Namespace(require_visual_evidence=False, visual_evidence_file=None))
+        finish.run(
+            argparse.Namespace(require_visual_evidence=False, visual_evidence_file=None)
+        )
 
 
 @pytest.mark.parametrize("stage", ["merge", "commit"])
@@ -615,15 +616,18 @@ def test_finish_success_publishes_one_exact_squash_commit_then_deletes_session(
     assert _current_branch(repository) == "master"
     assert _ref(repository, "HEAD") == candidate
     assert _ref(repository, "HEAD^") == repository.target_head
-    assert _git(
-        repository.path,
-        "rev-list",
-        "--count",
-        f"{repository.target_head}..HEAD",
-    ).stdout.strip() == "1"
-    assert _git(repository.path, "show", "-s", "--format=%s", "HEAD").stdout.strip() == (
-        _COMMIT_MESSAGE
+    assert (
+        _git(
+            repository.path,
+            "rev-list",
+            "--count",
+            f"{repository.target_head}..HEAD",
+        ).stdout.strip()
+        == "1"
     )
+    assert _git(
+        repository.path, "show", "-s", "--format=%s", "HEAD"
+    ).stdout.strip() == (_COMMIT_MESSAGE)
     assert (repository.path / "base.txt").read_text() == "session\n"
     assert (repository.path / "feature ü.txt").read_text() == "feature\n"
     assert not _ref_exists(repository, f"refs/heads/{_SESSION_BRANCH}")

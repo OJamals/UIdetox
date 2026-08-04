@@ -4,7 +4,7 @@
 
 ### Vertical Rhythm
 
-Your line-height should be the base unit for ALL vertical spacing. If body text has `line-height: 1.5` on `16px` type (= 24px), spacing values should be multiples of 24px. This creates subconscious harmony—text and space share a mathematical foundation.
+A line-height-derived spacing rhythm can create cohesion, but it is a house-style technique, not a universal requirement. Preserve existing design tokens and adjust spacing from measured content, density, and localization needs.
 
 ### Modular Scale & Hierarchy
 
@@ -122,9 +122,9 @@ Name tokens semantically (`--text-body`, `--text-heading`), not by value (`--fon
 Beyond contrast ratios (which are well-documented), consider:
 
 - **Never disable zoom**: `user-scalable=no` breaks accessibility. If your layout breaks at 200% zoom, fix the layout.
-- **Use rem/em for font sizes**: This respects user browser settings. Never `px` for body text.
-- **Minimum 16px body text**: Smaller than this strains eyes and fails WCAG on mobile.
-- **Adequate touch targets**: Text links need padding or line-height that creates 44px+ tap targets.
+- **Respect user scaling**: Relative root/body sizing is often easier to adapt, but CSS pixel units still participate in browser zoom. Verify 200% text resize, user text-spacing overrides, and reflow instead of declaring a unit-based WCAG result.
+- **Readable body size is contextual**: Start near the user-agent default, then test font metrics, language, viewing distance, density, and zoom. WCAG does not define a universal 16px minimum.
+- **Adequate pointer targets**: Meet the WCAG 2.2 24×24 CSS pixel minimum or a documented exception; aim for 44×44 CSS pixels where context permits.
 
 ---
 

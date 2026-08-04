@@ -107,17 +107,18 @@ def _relevant_contracts(
     name = element.name.lower()
     for contract in frontend_map.contracts.must_preserve:
         lowered = contract.lower()
-        if (tag == "nav" or role == "navigation") and (
-            "route" in lowered or "navigation" in lowered
+        if (
+            (tag == "nav" or role == "navigation")
+            and ("route" in lowered or "navigation" in lowered)
+            or element.kind == "action"
+            and (
+                "interaction" in lowered
+                or "accessible runtime action" in lowered
+                or (name and name in lowered)
+            )
+            or tag == "form"
+            and "form" in lowered
         ):
-            contracts.append(contract)
-        elif element.kind == "action" and (
-            "interaction" in lowered
-            or "accessible runtime action" in lowered
-            or (name and name in lowered)
-        ):
-            contracts.append(contract)
-        elif tag == "form" and "form" in lowered:
             contracts.append(contract)
     return tuple(dict.fromkeys(contracts))
 
@@ -290,12 +291,12 @@ def explicit_ignore_regions(
         return ()
     configured = visual_config.get("ignore_regions", [])
     if not isinstance(configured, list):
-        raise ValueError("visual_evidence.ignore_regions must be a list")
+        raise TypeError("visual_evidence.ignore_regions must be a list")
     page_path = urlsplit(page.url).path or "/"
     regions: list[VisualRegion] = []
     for index, value in enumerate(configured):
         if not isinstance(value, Mapping):
-            raise ValueError(f"ignore region {index} must be an object")
+            raise TypeError(f"ignore region {index} must be an object")
         viewport = str(value.get("viewport", ""))
         url_scope = str(value.get("url", ""))
         if viewport and viewport != page.viewport.name:

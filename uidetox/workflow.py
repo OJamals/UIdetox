@@ -1,4 +1,5 @@
 """Durable, opt-in execution engine for the UIdetox workflow."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,9 +7,10 @@ import json
 import os
 import tempfile
 from argparse import Namespace
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from uidetox.design_context import DesignSettings
 from uidetox.findings import (
@@ -46,6 +48,7 @@ WAITING_VERIFICATION = "waiting_for_verification"
 @dataclass(frozen=True)
 class PhaseDefinition:
     """Static transition knowledge for one workflow phase."""
+
     id: str
     adapter: str
     dependencies: tuple[str, ...]
@@ -149,6 +152,7 @@ class WorkflowInputs:
 @dataclass(frozen=True)
 class AdapterResult:
     """Concise, serializable result returned by an in-process phase adapter."""
+
     artifacts: dict[str, str] = field(default_factory=dict)
     artifact_validation: dict[str, str] = field(default_factory=dict)
     evidence: str = ""
@@ -169,6 +173,7 @@ PhaseRunner = Callable[[WorkflowContext], AdapterResult]
 @dataclass(frozen=True)
 class WorkflowAdapters:
     """Injected in-process functions keyed by phase adapter name."""
+
     runners: Mapping[str, PhaseRunner]
 
     def run(self, phase: PhaseDefinition, context: WorkflowContext) -> AdapterResult:
@@ -206,6 +211,7 @@ class WorkflowPause(RuntimeError):
 
 class WorkflowEngine:
     """Execute each phase at most once per call and persist every transition."""
+
     def __init__(
         self,
         root: str | Path,
@@ -266,10 +272,8 @@ class WorkflowEngine:
                 phase_state["error"] = None
                 phase_state["completed_at"] = None
                 self._save_state(state)
-                return self._wait(
-                    state, phase, pause.waiting, pause.message
-                )
-            except Exception as exc:  # adapters define their own error taxonomy
+                return self._wait(state, phase, pause.waiting, pause.message)
+            except Exception as exc:  # noqa: BLE001 - workflow adapters define their own exception taxonomy
                 phase_state["status"] = "failed"
                 phase_state["error"] = _concise_error(exc)
                 phase_state["completed_at"] = None
@@ -631,12 +635,14 @@ def in_process_adapters() -> WorkflowAdapters:
     from uidetox.commands import check as check_command
     from uidetox.commands import plan as plan_command
     from uidetox.commands import scan as scan_command
+
     def mechanical(context: WorkflowContext) -> AdapterResult:
         check_command.run(Namespace(fix=True))
         return AdapterResult(
             artifacts={"check_report": "inline:mechanical-checks-complete"},
             evidence="Mechanical checks completed in process.",
         )
+
     def static_analysis(context: WorkflowContext) -> AdapterResult:
         scan_command.run(Namespace(path=".", since=None, output="table"))
         current = load_state()
@@ -644,6 +650,7 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"scan_state": "inline:" + _stable_hash(current)},
             evidence="Static analysis completed and issue state was refreshed.",
         )
+
     def semantic_map(context: WorkflowContext) -> AdapterResult:
         output = context.root / ".uidetox" / FRONTEND_MAP_FILE
         previous = load_frontend_map(output) if output.exists() else None
@@ -674,6 +681,7 @@ def in_process_adapters() -> WorkflowAdapters:
             evidence="Semantic frontend map and contract graph persisted.",
             signals={"verification_fresh": verification_fresh},
         )
+
     def issue_plan(context: WorkflowContext) -> AdapterResult:
         plan_command.run(Namespace())
         current = load_state()
@@ -691,6 +699,7 @@ def in_process_adapters() -> WorkflowAdapters:
             evidence=f"Issue plan contains {pending} pending issue(s).",
             signals={"issues_pending": pending},
         )
+
     def redesign(context: WorkflowContext) -> AdapterResult:
         frontend_map = load_frontend_map(context.root / ".uidetox" / FRONTEND_MAP_FILE)
         settings = DesignSettings.from_config(
@@ -711,6 +720,7 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"redesign_set": str(output)},
             evidence="Source-aware redesign proposals persisted.",
         )
+
     def prototype(context: WorkflowContext) -> AdapterResult:
         redesigns = load_redesign_set()
         proposal_id = context.inputs.proposal_id
@@ -721,6 +731,7 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"prototype_brief": str(output)},
             evidence=f"Prototype brief generated for {proposal_id}.",
         )
+
     def subjective_review(context: WorkflowContext) -> AdapterResult:
         current = load_state()
         review = current.get("subjective", {})
@@ -736,6 +747,7 @@ def in_process_adapters() -> WorkflowAdapters:
             artifacts={"structured_review": "inline:" + _stable_hash(review)},
             evidence="Current structured subjective review confirmed.",
         )
+
     def status(context: WorkflowContext) -> AdapterResult:
         current = load_state()
         fresh = (
@@ -764,6 +776,7 @@ def in_process_adapters() -> WorkflowAdapters:
                 "visual_evidence_required": (context.inputs.visual_evidence_required),
             },
         )
+
     def finish_eligibility(context: WorkflowContext) -> AdapterResult:
         eligibility = context.state["signals"].get("eligibility", {})
         if not isinstance(eligibility, Mapping) or not eligibility.get("eligible"):
@@ -776,6 +789,7 @@ def in_process_adapters() -> WorkflowAdapters:
             ),
             signals={"finish_eligible": True},
         )
+
     return WorkflowAdapters(
         {
             "mechanical_checks": mechanical,

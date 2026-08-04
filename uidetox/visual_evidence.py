@@ -202,8 +202,8 @@ class VisualComparison:
     before: ImageEvidence
     after: ImageEvidence
     metrics: VisualMetrics
-    regions: tuple["RegionEvidence", ...]
-    ignored_regions: tuple["RegionEvidence", ...]
+    regions: tuple[RegionEvidence, ...]
+    ignored_regions: tuple[RegionEvidence, ...]
     artifacts: tuple[ArtifactEvidence, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -455,8 +455,10 @@ def _convert_rgb_to_srgb(
             image,
             "native_fallback",
             (
-                "sRGB conversion requested with an invalid ICC profile; "
-                f"used native pixels ({error}).",
+                (
+                    "sRGB conversion requested with an invalid ICC profile; "
+                    f"used native pixels ({error})."
+                ),
             ),
         )
     return converted, "icc_to_srgb", ()
@@ -1263,7 +1265,7 @@ def _request_hash_from_payload(payload: dict[str, Any]) -> str:
     comparisons = payload.get("comparisons")
     freshness = payload.get("freshness")
     if not isinstance(comparisons, list) or not isinstance(freshness, dict):
-        raise ValueError("missing comparisons or freshness object")
+        raise TypeError("missing comparisons or freshness object")
     request_payload = {
         "schema_version": payload.get("schema_version"),
         "parameters": payload.get("parameters"),
@@ -1359,7 +1361,7 @@ def inspect_visual_evidence(
     stale: list[str] = []
     if payload.get("schema_version") != VISUAL_EVIDENCE_SCHEMA_VERSION:
         blocking.append(
-            (f"unsupported visual evidence schema {payload.get('schema_version')!r}")
+            f"unsupported visual evidence schema {payload.get('schema_version')!r}"
         )
     if payload.get("status") != "complete":
         blocking.append("visual evidence manifest is not complete")

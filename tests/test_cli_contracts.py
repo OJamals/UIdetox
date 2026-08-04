@@ -12,7 +12,7 @@ from uidetox.commands import format_cmd, lint, loop, subagent_cmd, tsc
 def _dispatch_result(monkeypatch: pytest.MonkeyPatch, result: object) -> None:
     module = SimpleNamespace(run=lambda _args: result)
     monkeypatch.setattr(cli, "import_module", lambda _name: module)
-    monkeypatch.setattr(cli, "_iter_dynamic_skill_names", lambda: [])
+    monkeypatch.setattr(cli, "_iter_dynamic_skill_names", list)
     monkeypatch.setattr(cli.sys, "argv", ["uidetox", "detect"])
     cli.main()
 

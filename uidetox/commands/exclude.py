@@ -1,6 +1,7 @@
 """Exclude command: add paths to the exclusion list."""
 
 import argparse
+
 from uidetox.state import load_config, save_config
 
 

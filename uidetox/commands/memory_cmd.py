@@ -2,16 +2,17 @@
 
 import argparse
 import sys
+
 from uidetox.memory import (
-    get_patterns,
-    get_notes,
-    add_pattern,
     add_note,
+    add_pattern,
     clear_memory,
+    get_last_scan,
+    get_notes,
+    get_patterns,
+    get_progress_log,
     get_reviewed_files,
     get_session,
-    get_last_scan,
-    get_progress_log,
 )
 
 

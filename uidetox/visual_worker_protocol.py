@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from uidetox.visual_evidence import (
     VISUAL_EVIDENCE_SCHEMA_VERSION,

@@ -69,7 +69,7 @@ def run(args: argparse.Namespace):
 
     try:
         content = skill_file.read_text(encoding="utf-8")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - CLI read boundary must preserve user-facing failure reporting
         print(f"Error reading skill file: {e}")
         sys.exit(1)
 

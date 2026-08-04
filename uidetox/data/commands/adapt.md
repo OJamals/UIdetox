@@ -44,41 +44,41 @@ Create context-appropriate strategy:
 ### Mobile Adaptation (Desktop → Mobile)
 
 **Layout Strategy**:
-- Single column instead of multi-column
-- Vertical stacking instead of side-by-side
-- Full-width components instead of fixed widths
-- Bottom navigation instead of top/side navigation
+- Reflow columns when content no longer fits; do not assume every mobile view is single-column
+- Stack only relationships that remain understandable vertically
+- Prefer fluid sizing over brittle fixed widths
+- Choose top, bottom, drawer, or inline navigation from task frequency and item count
 
 **Interaction Strategy**:
-- Touch targets 44x44px minimum (not hover-dependent)
-- Swipe gestures where appropriate (lists, carousels)
-- Bottom sheets instead of dropdowns
-- Thumbs-first design (controls within thumb reach)
-- Larger tap areas with more spacing
+- Meet the WCAG 2.2 24×24 CSS pixel target minimum or a documented exception; aim for 44×44 where context permits
+- Pair swipe or drag gestures with a simple pointer and keyboard alternative
+- Use bottom sheets only when they improve context and reachability over native controls
+- Place frequent controls within comfortable reach without hiding essential actions
+- Preserve adequate target spacing and visible focus
 
 **Content Strategy**:
 - Progressive disclosure (don't show everything at once)
 - Prioritize primary content (secondary content in tabs/accordions)
 - Shorter text (more concise)
-- Larger text (16px minimum)
+- Choose readable type from font metrics, language, density, zoom, and user settings; WCAG has no universal 16px minimum
 
 **Navigation Strategy**:
-- Hamburger menu or bottom navigation
+- Use visible priority links, disclosure, a drawer, or bottom navigation according to information architecture
 - Reduce navigation complexity
-- Sticky headers for context
+- Use sticky headers only when persistent context outweighs lost viewport space
 - Back button in navigation flow
 
 ### Tablet Adaptation (Hybrid Approach)
 
 **Layout Strategy**:
-- Two-column layouts (not single or three-column)
+- Choose column count at content-driven container breakpoints
 - Side panels for secondary content
 - Master-detail views (list + detail)
 - Adaptive based on orientation (portrait vs landscape)
 
 **Interaction Strategy**:
 - Support both touch and pointer
-- Touch targets 44x44px but allow denser layouts than phone
+- Preserve the 24×24 CSS pixel minimum or a documented exception; use larger targets for frequent or risky actions
 - Side navigation drawers
 - Multi-column forms where appropriate
 
@@ -86,7 +86,7 @@ Create context-appropriate strategy:
 
 **Layout Strategy**:
 - Multi-column layouts (use horizontal space)
-- Side navigation always visible
+- Keep side navigation visible when hierarchy, viewport, and task frequency justify it
 - Multiple information panels simultaneously
 - Fixed widths with max-width constraints (don't stretch to 4K)
 
@@ -121,7 +121,7 @@ Create context-appropriate strategy:
 
 **Layout Strategy**:
 - Narrow width (600px max)
-- Single column only
+- Prefer a resilient narrow-first layout; add columns only with tested email-client fallback
 - Inline CSS (no external stylesheets)
 - Table-based layouts (for email client compatibility)
 
@@ -152,10 +152,10 @@ Choose appropriate breakpoints:
 
 ### Touch Adaptation
 
-- Increase touch target sizes (44x44px minimum)
+- Meet 24×24 CSS pixels or a documented WCAG 2.5.8 exception; aim for 44×44 where motor usability and density permit
 - Add more spacing between interactive elements
 - Remove hover-dependent interactions
-- Add touch feedback (ripples, highlights)
+- Add platform-appropriate touch feedback without relying on animation alone
 - Consider thumb zones (easier to reach bottom than top)
 
 ### Content Adaptation
@@ -164,10 +164,11 @@ Choose appropriate breakpoints:
 - Progressive enhancement (core content first, enhancements on larger screens)
 - Lazy loading for off-screen content
 - Responsive images (`srcset`, `picture` element)
+- Test 200% text resize, user text-spacing overrides, RTL direction, and IME composition
 
 ### Navigation Adaptation
 
-- Transform complex nav to hamburger/drawer on mobile
+- Reduce navigation overload; use a hamburger/drawer only when user testing and item priority support it
 - Bottom nav bar for mobile apps
 - Persistent side navigation on desktop
 - Breadcrumbs on smaller screens for context
@@ -196,4 +197,3 @@ Test thoroughly across contexts:
 - **Slow connections**: Test on throttled network
 
 Remember: You're a cross-platform design expert. Make experiences that feel native to each context while maintaining brand and functionality consistency. Adapt intentionally, test thoroughly.
-

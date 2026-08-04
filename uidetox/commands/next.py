@@ -56,18 +56,24 @@ def _get_skill_path() -> Path | None:
     return None
 
 
+# Shared aliases stay byte-identical so keyword choice cannot change guidance.
+_TYPOGRAPHY_GUIDANCE = (
+    "TYPOGRAPHY RULES: Treat familiar default fonts as a house-style heuristic, not an automatic defect. Preserve intentional product typography. Verify language coverage, loading and fallback metrics, readable hierarchy, line length, user scaling, text spacing, and reflow with real content.",
+    "reference/typography.md",
+)
+
+_ACCESSIBILITY_GUIDANCE = (
+    "A11Y RULES: Every interactive control needs visible, unobscured keyboard focus. Prefer native accessible names; label icon-only buttons. Meet applicable WCAG AA contrast. Pointer targets need a 24×24 CSS px minimum or sufficient spacing under WCAG 2.5.8 exceptions; 44×44px is an enhanced usability aim, not the AA minimum. Include bypass navigation where repeated blocks exist. Respect prefers-reduced-motion.",
+    "reference/accessibility-and-inclusive-design.md",
+)
+
+
 # SKILL.md context fragments keyed by issue pattern keywords.
 # Each entry: (context_snippet, reference_file_path | None)
 SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
     # Typography
-    "typography": (
-        "TYPOGRAPHY RULES: Never use Inter, Roboto, or system-ui as primary. Use Geist, Satoshi, Outfit, or Space Grotesk. Establish a 3-level type scale (display, body, caption). Use Medium (500) and SemiBold (600) — not just Regular and Bold. Negative tracking for large headers, positive for small caps.",
-        "reference/typography.md",
-    ),
-    "font": (
-        "TYPOGRAPHY RULES: Never use Inter, Roboto, or system-ui as primary. Use Geist, Satoshi, Outfit, or Space Grotesk. Establish a 3-level type scale (display, body, caption). Use Medium (500) and SemiBold (600) — not just Regular and Bold.",
-        "reference/typography.md",
-    ),
+    "typography": _TYPOGRAPHY_GUIDANCE,
+    "font": _TYPOGRAPHY_GUIDANCE,
     # Color
     "gradient": (
         "COLOR RULES: Never use purple-blue gradients. Use a single high-contrast accent color on neutral base. Max 1 accent, saturation < 80%. Tint all neutrals toward brand hue. Colors should feel intentional, not generated.",
@@ -144,7 +150,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "reference/spatial-design.md",
     ),
     "viewport": (
-        "VIEWPORT RULES: Never use h-screen for full-height sections — broken on iOS Safari. Always use min-h-[100dvh].",
+        "VIEWPORT RULES: For viewport-filling UI, preserve a tested 100vh fallback and add 100dvh where dynamic browser chrome matters. Verify mobile chrome, safe areas, keyboard resize, and intentional fixed-height behavior before replacing h-screen.",
         None,
     ),
     "z-index": (
@@ -153,11 +159,11 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
     ),
     # Motion
     "bounce": (
-        "MOTION RULES: Never use bounce or elastic easing — they feel dated and tacky. Use exponential easing (ease-out-quart/quint/expo) for natural deceleration. Animate only transform and opacity.",
+        "MOTION HEURISTIC: Bounce or elastic easing is often an AI-slop default. Keep it only when product tone and motion intent support overshoot. Prefer transform/opacity for low-cost effects, but measure paint/layout when other properties are necessary.",
         "reference/motion-design.md",
     ),
     "animation": (
-        "MOTION RULES: Never use animate-bounce/pulse/spin. Use CSS transitions (150-300ms ease) or spring physics. Respect prefers-reduced-motion. Timing: 100-150ms for button press, 200-300ms for hover/menu, 300-500ms for accordion/modal.",
+        "MOTION RULES: Remove perpetual decorative bounce/pulse/spin; a spinner remains valid for short indeterminate work. Match timing/easing to task, preserve state feedback under prefers-reduced-motion, and measure interaction latency instead of enforcing one duration scale.",
         "reference/motion-design.md",
     ),
     "transition": (
@@ -166,20 +172,20 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
     ),
     # States
     "dark": (
-        "THEMING RULES: Every light surface (bg-white, bg-gray-100) MUST have a dark: variant. Use dark:bg-zinc-900 or dark:bg-slate-900. Never use dark mode with glowing accents as substitute for design.",
+        "THEMING RULES: Implement dark mode only when project/product scope requires it. When supported, cover every semantic token and interactive state, respect user preference unless an explicit choice exists, and verify measured contrast plus forced-color behavior.",
         "reference/color-and-contrast.md",
     ),
     "hover": (
-        "INTERACTION RULES: Every interactive element needs hover, focus, and active states. Hover: subtle scale, color shift, or shadow change. Active: -translate-y-[1px] or scale-[0.98]. Focus: visible keyboard focus ring. Use transition-colors duration-150.",
+        "INTERACTION RULES: Every control needs perceivable default, focus, activation, and applicable disabled/pending states. Hover is an optional pointer-capability enhancement, never the only affordance. Preserve visible keyboard focus and reduced-motion behavior.",
         "reference/interaction-design.md",
     ),
     "htmlfor": (
-        "ACCESSIBILITY RULES: All <label> elements must have an 'htmlFor' attribute linking to the target input ID. Unlinked labels break screen readers.",
+        "ACCESSIBILITY RULES: Associate each visible label by wrapping its control or using for/htmlFor with an exact control ID. Do not require htmlFor when valid label wrapping already provides the association.",
         "reference/interaction-design.md",
     ),
     # Micro-polish
     "scrollbar": (
-        "POLISH RULES: Native scrollbars are ugly. Hide them entirely using scrollbar-hide or use a minimal custom-styled track/thumb.",
+        "SCROLL RULES: Preserve discoverable native scrollbars by default. Style them only when platform support, contrast, hit area, and forced-color behavior remain usable; never hide the sole overflow affordance.",
         "reference/interaction-design.md",
     ),
     "border": (
@@ -187,11 +193,11 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "reference/color-and-contrast.md",
     ),
     "line-height": (
-        "TYPOGRAPHY RULES: Body text (text-sm/text-base) must use open leading (leading-relaxed/leading-normal). Tight leading is for large display headers only.",
+        "TYPOGRAPHY RULES: Verify body text remains readable under user text-spacing overrides and 200% resize. Treat leading-normal/relaxed as starting points; font metrics, language, density, and line length determine the measured result.",
         "reference/typography.md",
     ),
     "px": (
-        "TYPOGRAPHY RULES: Never hardcode px for font sizes. Always use responsive rem units or Tailwind scale (text-sm, text-lg) for user accessibility scaling.",
+        "TYPOGRAPHY RULES: Relative root/body sizing often adapts well, but CSS px still scales with browser zoom. Judge accessibility through 200% text resize, user text-spacing overrides, reflow, clipping, and project token use—not unit choice alone.",
         "reference/typography.md",
     ),
     "flex center": (
@@ -199,16 +205,16 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "reference/spatial-design.md",
     ),
     "focus": (
-        "ACCESSIBILITY RULES: Every interactive element MUST have visible focus indicators. Missing focus states = accessibility failure. Use focus:ring-2 focus:ring-offset-2 or custom focus:outline patterns.",
+        "ACCESSIBILITY RULES: Every keyboard-operable control needs visible focus that is not entirely obscured. :focus and :focus-visible are both valid; test actual keyboard traversal, contrast, clipping, sticky overlays, and modal focus behavior.",
         "reference/interaction-design.md",
     ),
     "loading": (
-        "STATE RULES: Every data-dependent component needs loading, error, and empty states. Use skeleton loaders matching layout sizes — never generic circular spinners. Missing states = unfinished UI.",
+        "STATE RULES: Every data operation needs applicable initial/first-run, loading, ready, empty, error, disabled, and recovery states. Choose skeleton, determinate progress, or spinner from known content geometry and duration; announce meaningful status without stealing focus.",
         "reference/interaction-design.md",
     ),
     "error": (
-        "STATE RULES: Show actionable error messages. Backend validation errors → inline field errors, not generic toasts. Network errors → retry-capable states. Auth errors → redirect to login. Never 'Oops!' or 'Something went wrong'.",
-        "reference/interaction-design.md",
+        "STATE RULES: Map typed backend errors to actionable UI without exposing internals. Associate field errors; distinguish timeout, offline, abort, conflict, rate limit, 5xx, and partial results. Treat 401 as session recovery when appropriate; preserve context and allowed recovery for 403. Retry only safe/idempotent operations.",
+        "reference/full-stack-integration.md",
     ),
     "empty": (
         "STATE RULES: Empty states are design opportunities, not afterthoughts. Use composed states indicating how to populate data. Include illustration, heading, description, and CTA.",
@@ -237,7 +243,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "semantic": (
-        "SEMANTIC HTML: Use appropriate HTML5 semantic elements. A single <h1> per page with proper heading hierarchy. Include skip-to-content link for keyboard users.",
+        "SEMANTIC HTML: Use native elements and headings that reflect document structure. A clear page-level <h1> is a useful default, not a universal single-h1 conformance rule. Add bypass navigation when repeated blocks precede main content.",
         None,
     ),
     "any": (
@@ -266,7 +272,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
     ),
     # Duplication
     "duplicate": (
-        "DRY PRINCIPLE: Extract repeated code into shared components, utility functions, or CSS custom properties. If the same className, handler, or markup appears twice, it should be a component.",
+        "REUSE PRINCIPLE: Extract only after repeated code shares stable behavior, ownership, change cadence, and variation needs. Two similar fragments are evidence to compare, not an automatic component boundary; avoid abstractions that couple unrelated UI.",
         None,
     ),
     "copy-paste": (
@@ -295,7 +301,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "console": (
-        "PRODUCTION CODE: Remove all console.log/warn/error statements. Use a proper logging utility or conditional debug logging that's stripped in production.",
+        "OBSERVABILITY: Remove accidental debug output and sensitive console data. Preserve intentional production telemetry through structured, privacy-bounded logging with severity, correlation, and environment controls.",
         None,
     ),
     # Responsive
@@ -304,26 +310,20 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         "reference/responsive-design.md",
     ),
     "mobile": (
-        "RESPONSIVE RULES: Build mobile-first. Ensure touch targets are 44px minimum. Use fluid typography and responsive spacing.",
+        "RESPONSIVE RULES: Build mobile-first. Pointer targets need a 24×24 CSS px minimum or sufficient spacing under WCAG 2.5.8 exceptions; aim for 44×44px where density and task context permit for enhanced motor usability. Use fluid typography and responsive spacing.",
         "reference/responsive-design.md",
     ),
     # Accessibility
-    "accessibility": (
-        "A11Y RULES: Every interactive element needs visible focus indicators. Add ARIA labels to icon-only buttons. Ensure WCAG AA contrast ratios. Include skip-to-content link. Respect prefers-reduced-motion.",
-        None,
-    ),
-    "a11y": (
-        "A11Y RULES: Visible focus indicators on all interactive elements. ARIA labels on icon-only buttons. WCAG AA contrast (4.5:1 text, 3:1 large text). Skip-to-content link.",
-        None,
-    ),
+    "accessibility": _ACCESSIBILITY_GUIDANCE,
+    "a11y": _ACCESSIBILITY_GUIDANCE,
     # Forms
     "form": (
-        "FORM RULES: Label MUST sit above input. Helper text optional. Error text below input. Standard gap between input blocks. Explicit button hierarchy (primary, secondary, ghost, text link).",
+        "FORM RULES: Give every control a persistent accessible name. Place visible labels/help/errors where scanning, locale, density, and component layout support them; preserve programmatic association and IME/password-manager behavior. Make action hierarchy and consequences explicit.",
         "reference/interaction-design.md",
     ),
     "input": (
-        "INPUT RULES: Solid borders, simple focus ring. No animated underlines or morphing shapes. Client-side validation must reflect database constraints. Error state must be inline, not toast.",
-        "reference/interaction-design.md",
+        "INPUT RULES: Preserve visible boundaries and focus. Mirror evidenced contract constraints for fast client feedback, while server validation and authorization remain authoritative. Associate field errors and retain a form-level path for global/unmapped problems.",
+        "reference/full-stack-integration.md",
     ),
     # Batch 18: Accessibility, semantic HTML, modern JS
     "button type": (
@@ -343,7 +343,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "outline": (
-        "FOCUS RING RULES: Never use outline: none or outline: 0 without a replacement. Removing the focus ring is an WCAG 2.1 Level AA failure. Replace with outline: 2px solid currentColor; outline-offset: 2px; scoped to :focus-visible.",
+        "FOCUS RULES: Never remove visible focus without an equally perceivable replacement. :focus and :focus-visible are both valid. Verify actual keyboard focus visibility, distinction, clipping, and obstruction instead of requiring one selector recipe.",
         None,
     ),
     "key prop": (
@@ -400,11 +400,11 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "passive": (
-        "PERFORMANCE: Scroll/touch/wheel event listeners block the browser's compositor thread unless marked passive. Add { passive: true } as the third argument: el.addEventListener('scroll', fn, { passive: true }).",
+        "PERFORMANCE: Mark scroll/touch/wheel listeners passive only when the handler never calls preventDefault(). Otherwise preserve required cancellation behavior and reduce listener work through measurement, throttling, or architecture changes.",
         None,
     ),
     "class component": (
-        "REACT MODERNIZATION: Class components cannot use hooks and have worse tree-shaking than function components. Convert: componentDidMount → useEffect(fn, []), componentDidUpdate → useEffect(fn, [dep]), PureComponent → React.memo.",
+        "REACT MODERNIZATION: Class components cannot use hooks directly, but conversion is not a tree-shaking fix and lifecycle-to-hook mapping is not mechanical. Migrate only with behavior tests covering effects, cleanup, error boundaries, update timing, and memoization.",
         None,
     ),
     "role=": (
@@ -534,7 +534,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "defeats tree-shaking": (
-        "BUNDLE SIZE: Wildcard imports (import * as X from 'library') import the entire library regardless of what you actually use. Modern bundlers can only tree-shake named imports. For lodash: import { debounce, throttle } from 'lodash-es'. For moment: switch to date-fns with named imports. For rxjs: import { map, filter } from 'rxjs/operators'.",
+        "BUNDLE SIZE: Namespace imports can inhibit tree-shaking when package format, side effects, or property access prevents static analysis, but syntax alone does not prove bundle cost. Measure emitted chunks and use package-supported entry points before changing imports or dependencies.",
         None,
     ),
     # ── Batch 22 ────────────────────────────────────────────────────────
@@ -619,7 +619,7 @@ SKILL_CONTEXT: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "accessible label": (
-        "ACCESSIBILITY: Every interactive element needs an accessible name. For icon buttons: aria-label on the button. For form inputs: an associated <label htmlFor>. For images: alt text. For SVGs used as graphics: role='img' and aria-label or an embedded <title> element.",
+        "ACCESSIBILITY: Every control needs an accurate accessible name. Prefer visible text or associated labels; use aria-labelledby/aria-label when needed without overriding useful native text. Image/SVG alternatives depend on whether content is informative, functional, complex, or decorative.",
         None,
     ),
     "svg without viewbox": (
@@ -850,7 +850,7 @@ def run(args: argparse.Namespace):
                 if line.strip():
                     print(f"  {line}")
             print()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - optional agent-memory display must not block issue batching
         pass
 
     # Point the agent to the full SKILL.md for deeper reference

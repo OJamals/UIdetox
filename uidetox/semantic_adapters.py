@@ -35,6 +35,7 @@ _SCRIPT_EXTENSIONS = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"})
 _STYLE_EXTENSIONS = frozenset({".css", ".less", ".sass", ".scss"})
 _EMBEDDED_EXTENSIONS = frozenset({".astro", ".html", ".htm", ".svelte", ".vue"})
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+_ROUTE_SPECIFICITY_VECTOR_BUDGET = 64
 _NETWORK_METHODS = frozenset(
     {
         "create",
@@ -248,9 +249,9 @@ class ApplicationSemantics:
                 "component:package-import",
                 1.0,
             )
-        return self._resolve_export(target_module, export_name, ()) or _unresolved_symbol(
-            "render export unresolved through module graph"
-        )
+        return self._resolve_export(
+            target_module, export_name, ()
+        ) or _unresolved_symbol("render export unresolved through module graph")
 
     def source_ownership(
         self,
@@ -268,9 +269,7 @@ class ApplicationSemantics:
             )
         candidates = tuple(dict.fromkeys((selector, *source_selectors)))
         route_sources = (
-            self.route_sources(runtime_url)
-            if route_sources is None
-            else route_sources
+            self.route_sources(runtime_url) if route_sources is None else route_sources
         )
         exact = _matching_sources(self._index.exact_selectors, candidates)
         if len(exact) == 1:
@@ -287,23 +286,28 @@ class ApplicationSemantics:
                     "resolved", 0.9, "selector:exact+route", narrowed
                 )
             return SourceOwnership("ambiguous", 0.0, "selector:ambiguous", narrowed)
-        heuristic = _matching_sources(
-            self._index.heuristic_selectors,
-            (*candidates, tag.lower()),
+        tag_selector = tag.lower()
+        specific_candidates = tuple(
+            candidate for candidate in candidates if candidate.lower() != tag_selector
         )
-        if len(heuristic) == 1:
-            return SourceOwnership(
-                "resolved", 0.65, "selector:unique-heuristic", heuristic
+        for heuristic_candidates in (specific_candidates, (tag_selector,)):
+            heuristic = _matching_sources(
+                self._index.heuristic_selectors,
+                heuristic_candidates,
             )
-        if heuristic:
-            narrowed = _narrow_sources(heuristic, route_sources)
-            if len(narrowed) == 1:
+            if len(heuristic) == 1:
                 return SourceOwnership(
-                    "resolved", 0.6, "selector:heuristic+route", narrowed
+                    "resolved", 0.65, "selector:unique-heuristic", heuristic
                 )
-            return SourceOwnership(
-                "ambiguous", 0.0, "selector:ambiguous-heuristic", narrowed
-            )
+            if heuristic:
+                narrowed = _narrow_sources(heuristic, route_sources)
+                if len(narrowed) == 1:
+                    return SourceOwnership(
+                        "resolved", 0.6, "selector:heuristic+route", narrowed
+                    )
+                return SourceOwnership(
+                    "ambiguous", 0.0, "selector:ambiguous-heuristic", narrowed
+                )
         if len(route_sources) == 1:
             return SourceOwnership(
                 "resolved", 0.4, "route:unique-context", route_sources
@@ -319,18 +323,69 @@ class ApplicationSemantics:
         if not runtime_route:
             return ()
         exact = self._index.routes.get(runtime_route, ())
-        if exact:
-            return exact
-        return tuple(
-            sorted(
-                {
-                    source
-                    for route, sources in self._index.routes.items()
-                    if _route_matches(route, runtime_route)
-                    for source in sources
-                }
+        route_sources = set(exact)
+        matched_routes = {runtime_route} if exact else set()
+        if not route_sources:
+            matching_routes: dict[str, tuple[str, ...]] = {}
+            for route, sources in self._index.routes.items():
+                if _route_matches(route, runtime_route):
+                    matching_routes[route] = sources
+            matched_routes.update(_most_specific_routes(matching_routes))
+            for route in matched_routes:
+                route_sources.update(matching_routes[route])
+
+        route_roots: set[str] = set()
+        for source in sorted(route_sources):
+            module = self.module(source)
+            if module is None:
+                continue
+            matched_route_facts = tuple(
+                route
+                for route in module.facts.routes
+                if _normalize_route_pattern(route.name) in matched_routes
             )
-        )
+            route_line_counts: dict[int, int] = {}
+            for route in module.facts.routes:
+                route_line_counts[route.line] = route_line_counts.get(route.line, 0) + 1
+            route_lines = {
+                route.line
+                for route in matched_route_facts
+                if not route.target or route_line_counts[route.line] == 1
+            }
+            for route in matched_route_facts:
+                if not route.target:
+                    continue
+                if route.target.startswith((".", "/")):
+                    target_module = self._resolve_specifier(source, route.target)
+                    if target_module is not None:
+                        route_roots.add(target_module)
+                    continue
+                resolved = self.resolve_render(source, route.target)
+                if resolved.status == "resolved" and resolved.module_path is not None:
+                    route_roots.add(resolved.module_path)
+            for rendered in module.facts.rendered_bindings:
+                if rendered.line not in route_lines:
+                    continue
+                resolved = self.resolve_render(source, rendered.binding)
+                if resolved.status == "resolved" and resolved.module_path is not None:
+                    route_roots.add(resolved.module_path)
+
+        pending = sorted(route_roots, reverse=True)
+        route_sources.update(route_roots)
+        while pending:
+            source = pending.pop()
+            module = self.module(source)
+            if module is None:
+                continue
+            for rendered in module.facts.rendered_bindings:
+                resolved = self.resolve_render(source, rendered.binding)
+                target = resolved.module_path
+                if resolved.status != "resolved" or target is None:
+                    continue
+                if target not in route_sources:
+                    route_sources.add(target)
+                    pending.append(target)
+        return tuple(sorted(route_sources))
 
     def _resolve_specifier(self, source_path: str, specifier: str) -> str | None:
         if not specifier.startswith((".", "/")):
@@ -490,7 +545,9 @@ class _EmbeddedMarkupAdapter:
                 facts,
                 extractor="tree-sitter+degraded-markup" if facts else None,
             )
-        return replace(module, facts=_merge_markup_facts(module.facts, document, framework))
+        return replace(
+            module, facts=_merge_markup_facts(module.facts, document, framework)
+        )
 
 
 class _StyleAdapter:
@@ -732,13 +789,11 @@ def _build_application_index(
     for module in modules:
         for selector in module.facts.selectors:
             index = (
-                exact_selectors
-                if selector.strength == "exact"
-                else heuristic_selectors
+                exact_selectors if selector.strength == "exact" else heuristic_selectors
             )
             index.setdefault(selector.selector, set()).add(module.relative_path)
         for route in module.facts.routes:
-            normalized_route = _normalize_route_path(route.name)
+            normalized_route = _normalize_route_pattern(route.name)
             if normalized_route:
                 routes.setdefault(normalized_route, set()).add(module.relative_path)
         symbols = {item.owner: item for item in module.facts.network_symbols}
@@ -805,21 +860,81 @@ def _normalize_route_path(value: str) -> str:
     return "/" if normalized == "/" else normalized.rstrip("/")
 
 
+def _normalize_route_pattern(value: str) -> str:
+    if not value:
+        return ""
+    normalized = "/" + "/".join(part for part in value.split("/") if part)
+    return "/" if normalized == "/" else normalized.rstrip("/")
+
+
 def _route_matches(pattern: str, runtime_route: str) -> bool:
     pattern_parts = pattern.strip("/").split("/") if pattern != "/" else []
     runtime_parts = runtime_route.strip("/").split("/") if runtime_route != "/" else []
+    runtime_indexes = {0}
     for index, pattern_part in enumerate(pattern_parts):
-        if pattern_part == "*" or pattern_part.startswith(":") and pattern_part.endswith(
-            "*"
+        if (
+            pattern_part == "*"
+            or pattern_part.startswith(":")
+            and pattern_part.endswith("*")
         ):
-            return index == len(pattern_parts) - 1 and index <= len(runtime_parts)
-        if index >= len(runtime_parts):
+            return index == len(pattern_parts) - 1 and any(
+                runtime_index <= len(runtime_parts) for runtime_index in runtime_indexes
+            )
+        optional = pattern_part.endswith("?")
+        expected_part = pattern_part[:-1] if optional else pattern_part
+        next_runtime_indexes: set[int] = set()
+        for runtime_index in runtime_indexes:
+            if optional:
+                next_runtime_indexes.add(runtime_index)
+            if runtime_index >= len(runtime_parts):
+                continue
+            if (
+                expected_part.startswith(":")
+                or expected_part == runtime_parts[runtime_index]
+            ):
+                next_runtime_indexes.add(runtime_index + 1)
+        if not next_runtime_indexes:
             return False
-        if pattern_part.startswith(":"):
-            continue
-        if pattern_part != runtime_parts[index]:
-            return False
-    return len(pattern_parts) == len(runtime_parts)
+        runtime_indexes = next_runtime_indexes
+    return len(runtime_parts) in runtime_indexes
+
+
+def _most_specific_routes(routes: Iterable[str]) -> tuple[str, ...]:
+    candidates = tuple(sorted(set(routes)))
+    specificity: dict[str, tuple[int, ...]] = {}
+    for route in candidates:
+        parts = route.strip("/").split("/") if route != "/" else []
+        splat_count = sum(
+            part == "*" or part.startswith(":") and part.endswith("*") for part in parts
+        )
+        optional_count = sum(part.endswith("?") for part in parts)
+        static_count = sum(not part.startswith(":") and part != "*" for part in parts)
+        specificity[route] = (
+            static_count,
+            len(parts) - optional_count - splat_count,
+            len(parts) - splat_count,
+            -optional_count,
+            -splat_count,
+        )
+
+    specificity_values = tuple(sorted(set(specificity.values())))
+    if len(specificity_values) > _ROUTE_SPECIFICITY_VECTOR_BUDGET:
+        return candidates
+    nondominated = {
+        route_specificity
+        for route_specificity in specificity_values
+        if not any(
+            other != route_specificity
+            and all(
+                other_value >= route_value
+                for other_value, route_value in zip(
+                    other, route_specificity, strict=True
+                )
+            )
+            for other in specificity_values
+        )
+    }
+    return tuple(route for route in candidates if specificity[route] in nondominated)
 
 
 def _resolve_network_calls(

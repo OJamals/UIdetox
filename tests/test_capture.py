@@ -160,7 +160,7 @@ def _isolate_run(
 ) -> Path:
     snapshots = tmp_path / "snapshots"
     snapshots.mkdir()
-    monkeypatch.setattr(capture, "load_config", lambda: {})
+    monkeypatch.setattr(capture, "load_config", dict)
     monkeypatch.setattr(capture, "_snapshots_dir", lambda: snapshots)
     monkeypatch.setattr(capture, "_server_is_reachable", lambda _url: True)
     return snapshots

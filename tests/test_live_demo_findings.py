@@ -286,9 +286,7 @@ def test_fresh_scoped_scan_detects_tooling_from_project_root(
 
     output = capsys.readouterr().out
     assert detected_paths == [tmp_path.resolve()]
-    assert (
-        "Full-stack contract lineage: mismatches=0, coverage-gaps=2" in output
-    )
+    assert "Full-stack contract lineage: mismatches=0, coverage-gaps=2" in output
 
 
 def test_html_asset_dependencies_reach_redesign_source_targets(tmp_path) -> None:

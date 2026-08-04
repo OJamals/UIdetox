@@ -9,6 +9,12 @@ accumulating parallel implementations. Root reviewer owns status updates.
 Plans 050-056 were generated on 2026-07-30 against `8bfd929` from the
 non-security application correctness and performance audit. Security issues
 14 and 15 are explicitly deferred and excluded from these plans.
+Plans 057-061 were generated on 2026-08-04 against `68de9b2` and the live
+overlapping dirty capability snapshot. They natively integrate validated UX,
+accessibility, performance, resilience, and full-stack remediation through the
+existing finding/map/redesign/prototype/workflow pipeline. Figma is deferred.
+Plan 057 was explicitly rebaselined by the maintainer and is DONE; downstream
+plans remain TODO.
 
 ## Execution order and status
 
@@ -70,6 +76,11 @@ non-security application correctness and performance audit. Security issues
 | 054 | Consolidate atomic artifact replacement | P1 | M | 050 | DONE — independently reviewed; 1,484 tests pass; production plus shipped assets -1 LOC; text replacement lifecycles 5→1; indeterminate descriptor-close retries removed |
 | 055 | Separate backend source discovery from extraction | P1 | M | — | DONE — independently reviewed at `aa4210e`; 1,474 tests pass; 3.49x manifest speedup; route extractors 65→0 |
 | 056 | Precompute static-scan semantic facts | P1 | L | — | DONE — independently reviewed at `e5a64ac`; 1,476 tests pass; 2.32x/2.43x speedup; nested-selector parity preserved |
+| 057 | Make canonical findings own evidence policy and remediation routing | P0 | L | — | DONE — maintainer-authorized dirty-snapshot rebaseline; 215 rules; 1,742 tests; repo-wide Ruff, cold fullstack loop, wheel, asset-parity, and diff-hygiene gates pass |
+| 058 | Expand one-pass browser evidence for page, navigation, and inclusive UX | P1 | L | 057 | TODO |
+| 059 | Project full-stack operation contracts into native UI remediation | P1 | L | 057 | TODO |
+| 060 | Add evidence-gated performance and resilience qualification | P1 | L | 058, 059 | TODO |
+| 061 | Decompose map and prototype orchestration without changing contracts | P2 | M | 057, 058, 059, 060 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (with rationale)
 
@@ -104,6 +115,18 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (wit
   and the code graph is refreshed.
 - 055 and 056 are independent of each other. Run them after correctness and
   lifecycle plans; both have strict parity gates and high false-negative risk.
+- 057 replaces prose category/remediation/autofix routing with canonical
+  finding evidence and exact detector identity. It must not start until the
+  current overlapping rule/guidance/source/contract work is integrated or
+  explicitly rebaselined.
+- 058 and 059 may run independently after 057. Plan 058 owns one-pass browser
+  and page/cross-page UX evidence; Plan 059 owns operation-specific full-stack
+  applicability. Neither may create a parallel model.
+- 060 requires both browser and contract applicability so performance,
+  pagination, retry, and resilience advice cannot be emitted from a single
+  weak signal.
+- 061 runs last. External differential probes must freeze the final capability
+  surface before private orchestration is decomposed.
 
 ## Cleanup contract for plans 013-019
 
@@ -135,6 +158,29 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with reason) | REJECTED (wit
   invalidation, or verification is failure.
 - Every executor must report focused/full test results, exact files changed,
   production LOC delta, and removed stale/duplicate symbols.
+
+## Native integration contract for plans 057-061
+
+- One pipeline only: canonical `Finding` → `FrontendMap`/`ProjectMap` →
+  redesign → prototype → workflow verification.
+- No new command, public schema, persisted artifact, cache, graph, parser,
+  state vocabulary, compatibility wrapper, provider runner, or Figma seam.
+- `RuntimeObservation.status` remains intrinsic capture truth;
+  `FrontendMap` owns current/stale freshness.
+- Keep loading, empty, error, success, disabled, and first-run as the canonical
+  experience-state vocabulary. Operation-specific auth/offline/timeout/
+  conflict/partial/retry outcomes live in contract/scenario evidence.
+- Replace before adding: migrate callers, delete prose inference/duplicate
+  guidance/old branches in the same plan, and report production plus shipped-
+  asset LOC and deleted symbols.
+- Preserve public signatures, exact errors, finding fingerprints,
+  serialization/order, backend/API/DB lineage, website intent/provenance,
+  every `must_preserve` contract, hostile evidence isolation/budgets, and exact
+  root/bundled asset parity.
+- Every capability lands RED → GREEN → refactor with calibration boundaries,
+  cold CLI, real-browser desktop/mobile, no-op capture parity, full
+  warning-strict tests, Ruff, build, isolated-wheel, diff, parity, and
+  secret/debug/bloat gates.
 
 ## Source findings
 
@@ -170,6 +216,19 @@ for them belongs in the current application/optimization sequence.
   precomputation; keep concurrency and remove repeated semantic work.
 - New plugin/provider runner: no validated workflow need justifies another
   subsystem.
+- Figma integration: explicitly deferred by the maintainer; native source,
+  runtime, contract, intent, and provenance evidence has higher leverage and
+  avoids a provider-specific parallel design model.
+- New lifecycle states for auth/offline/timeout/conflict/partial/retrying:
+  rejected. Existing lifecycle states plus exact operation/scenario evidence
+  model applicability without creating a competing status vocabulary.
+- A standalone UX/performance artifact or telemetry/cache service: rejected.
+  Existing runtime root/page evidence and canonical findings can carry bounded
+  lab diagnostics; field data may be referenced when available but UIdetox
+  should not become a RUM backend.
+- File-size-only splits of `redesign.py`, `runtime_observer.py`,
+  `analyzer_rules.py`, `contract_adapters.py`, or `source_facts.py`: rejected
+  without a measured interface, collision, complexity, or performance cost.
 
 ## Audit limits
 
@@ -188,3 +247,10 @@ Current limits:
 - Plan 055 and Plan 056 benchmark scripts and parity gates are committed
   repository guarantees for their controlled fixtures; they do not guarantee
   equivalent speedups on arbitrary external projects or production hardware.
+- The 2026-08-04 planning audit was read-only for production source. It used the
+  canonical graph (6,832 nodes/30,149 edges at review), live dirty diffs, local
+  research assets, and current primary standards. It did not rerun the full
+  suite or mutate/recapture the fixture.
+- Plans 057-061 are not authorization to overwrite the 39 modified and 6
+  untracked files present during planning. Rebaseline and ownership review are
+  mandatory before execution.

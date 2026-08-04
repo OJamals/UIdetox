@@ -12,9 +12,8 @@ import json
 import os
 import re
 import tomllib
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
 
 _PYTHON_BACKEND_DEPS = {
     "aiohttp",
