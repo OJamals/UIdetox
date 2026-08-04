@@ -1467,7 +1467,14 @@ def _first_contract_difference(
             sorted(front_statuses),
             False,
         )
-    if front.get("mutation"):
+    affected_reads = any(
+        node.kind == "operation_obligation"
+        and node.name == "affected-reads"
+        and node.capability_status == "present"
+        and node.attributes.get("applicable") is True
+        for node in outgoing.get((backend.id, "requires_behavior"), ())
+    )
+    if front.get("mutation") and affected_reads:
         cache_state = _operation_evidence_state(
             frontend,
             "cache",

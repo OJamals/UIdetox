@@ -1001,3 +1001,185 @@ def test_richer_duplicate_backend_evidence_is_selected_order_independently() -> 
             (frontend, *backends, front_parameter, back_parameter), edges
         )
         assert not [finding for finding in findings if finding.status == "pending"]
+
+
+def test_swagger_2_body_and_media_transport_survive_projection(tmp_path) -> None:
+    document = {
+        "swagger": "2.0",
+        "consumes": ["application/json"],
+        "produces": ["application/problem+json"],
+        "paths": {
+            "/items": {
+                "post": {
+                    "parameters": [
+                        {
+                            "in": "body",
+                            "name": "body",
+                            "required": True,
+                            "schema": {
+                                "type": "object",
+                                "required": ["name"],
+                                "properties": {"name": {"type": "string"}},
+                            },
+                        }
+                    ],
+                    "responses": {
+                        "201": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"id": {"type": "integer"}},
+                            }
+                        }
+                    },
+                }
+            }
+        },
+    }
+    (tmp_path / "swagger.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+    route = _nodes(project, "route")[0]
+
+    assert route.attributes["evidence"]["request"] == "present"
+    assert route.attributes["evidence"]["response"] == "present"
+    assert {node.name for node in _nodes(project, "request_media_type")} == {
+        "application/json"
+    }
+    response_media = _nodes(project, "response_media_type")
+    assert {(node.name, node.attributes["status"]) for node in response_media} == {
+        ("application/problem+json", "201")
+    }
+    body = next(
+        node
+        for node in _nodes(project, "api_parameter")
+        if node.attributes["location"] == "body"
+    )
+    assert body.attributes["required"] is True
+    assert body.attributes["schema"]["type"] == "object"
+
+
+def test_retry_after_without_429_does_not_prove_rate_limit(tmp_path) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/health": {
+                "get": {
+                    "responses": {
+                        "200": {"description": "ok"},
+                        "503": {
+                            "description": "maintenance",
+                            "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+                        },
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    obligations = _nodes(build_project_map(tmp_path), "operation_obligation")
+    assert {node.name for node in obligations} == {"retry"}
+
+
+def test_operation_contract_overflow_emits_fail_closed_diagnostic(tmp_path) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/items": {
+                "get": {
+                    "servers": [
+                        {"url": f"https://server-{index}.example"}
+                        for index in range(33)
+                    ],
+                    "callbacks": {f"callback-{index}": {} for index in range(33)},
+                    "responses": {"200": {"description": "ok"}},
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    diagnostics = _nodes(build_project_map(tmp_path), "contract_evidence_limit")
+    assert diagnostics
+    assert any(
+        node.attributes.get("axis") == "operation_transport"
+        and node.capability_status == "unknown"
+        for node in diagnostics
+    )
+
+
+def test_cache_remediation_requires_exact_affected_read_applicability() -> None:
+    from uidetox.contract_graph import _first_contract_difference
+
+    source = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+    base = {
+        "method": "POST",
+        "normalized_path": "/orders",
+        "status_codes": ["204"],
+        "ui_required": False,
+        "cache_invalidation": "absent",
+        "evidence": {
+            "request": "absent",
+            "response": "absent",
+            "error": "absent",
+            "status": "present",
+            "ui_lifecycle": "absent",
+            "cache": "absent",
+        },
+    }
+    frontend = ContractNode(
+        "frontend",
+        "client_operation",
+        "POST /orders",
+        "frontend",
+        "present",
+        source,
+        {**base, "mutation": True},
+    )
+    backend = ContractNode(
+        "backend",
+        "route",
+        "POST /orders",
+        "backend",
+        "present",
+        source,
+        {**base, "mutation": False},
+    )
+    frontend_auth = ContractNode(
+        "frontend-auth",
+        "auth_requirement",
+        "auth",
+        "frontend",
+        "absent",
+        source,
+        {"authorization": "absent", "tenant": "absent"},
+    )
+    backend_auth = ContractNode(
+        "backend-auth",
+        "auth_requirement",
+        "auth",
+        "backend",
+        "absent",
+        source,
+        {"authorization": "absent", "tenant": "absent"},
+    )
+    outgoing = {
+        (frontend.id, "requires"): [frontend_auth],
+        (backend.id, "requires"): [backend_auth],
+    }
+
+    assert _first_contract_difference(frontend, backend, outgoing) is None
+
+    affected_reads = ContractNode(
+        "affected-reads",
+        "operation_obligation",
+        "affected-reads",
+        "backend",
+        "present",
+        source,
+        {"applicable": True, "operations": ["GET /orders"]},
+    )
+    outgoing[(backend.id, "requires_behavior")] = [affected_reads]
+    difference = _first_contract_difference(frontend, backend, outgoing)
+    assert difference is not None
+    assert difference[0] == "cache_invalidation_missing"

@@ -282,6 +282,41 @@ def _is_test_source(relative: str) -> bool:
     )
 
 
+def _openapi_parameters(
+    path_item: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    document: Mapping[str, Any],
+) -> dict[tuple[str, str], Mapping[str, Any]]:
+    """Resolve inherited parameters with operation-level override semantics."""
+
+    parameters: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for values in (path_item.get("parameters"), operation.get("parameters")):
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, Mapping):
+                continue
+            parameter = _resolve_openapi_mapping(value, document)
+            name = parameter.get("name")
+            location = parameter.get("in")
+            if isinstance(name, str) and name and isinstance(location, str):
+                parameters[(location, name)] = parameter
+    return parameters
+
+
+def _swagger_media_types(
+    operation: Mapping[str, Any],
+    document: Mapping[str, Any],
+    key: str,
+) -> tuple[str, ...]:
+    """Return exact Swagger 2 operation/root media declarations."""
+
+    values = operation.get(key, document.get(key))
+    if not isinstance(values, list):
+        return ()
+    return tuple(sorted({str(value) for value in values if isinstance(value, str)}))
+
+
 def _extract_openapi(
     path: Path,
     relative: str,
@@ -311,9 +346,18 @@ def _extract_openapi(
             if normalized_method is None or not isinstance(operation, Mapping):
                 continue
             normalized, parameters, unresolved = normalize_route_path(str(route))
-            request_schema = _openapi_content_schema(
-                operation.get("requestBody"), document
-            )
+            transport_parameters = _openapi_parameters(path_item, operation, document)
+            request_source = operation.get("requestBody")
+            if request_source is None:
+                request_source = next(
+                    (
+                        parameter
+                        for (location, _name), parameter in transport_parameters.items()
+                        if location == "body"
+                    ),
+                    None,
+                )
+            request_schema = _openapi_content_schema(request_source, document)
             request_schemas = contract_schema_observations(
                 request_schema,
                 fallback="request",
@@ -1251,8 +1295,8 @@ def _openapi_operation_obligations(
         )
     if "207" in status_codes:
         prove("partial-success", statuses=["207"])
-    if "429" in status_codes or "retry-after" in response_headers:
-        prove("rate-limit", statuses=sorted(status_codes & {"429"}))
+    if "429" in status_codes:
+        prove("rate-limit", statuses=["429"])
     if status_codes & {"408", "504"}:
         prove("timeout", statuses=sorted(status_codes & {"408", "504"}))
     if status_codes & {"400", "422"}:
@@ -1315,7 +1359,7 @@ def _openapi_operation_contract(
         raw_servers = document.get("servers")
     if isinstance(raw_servers, list):
         servers = []
-        for value in raw_servers[:_OPENAPI_SCHEMA_VARIANT_LIMIT]:
+        for value in raw_servers:
             if not isinstance(value, Mapping) or not isinstance(value.get("url"), str):
                 continue
             server = {"url": value["url"]}
@@ -1327,9 +1371,7 @@ def _openapi_operation_contract(
             contract["servers"] = servers
     callbacks = operation.get("callbacks")
     if isinstance(callbacks, Mapping):
-        contract["callbacks"] = sorted(str(name) for name in callbacks)[
-            :_OPENAPI_SCHEMA_VARIANT_LIMIT
-        ]
+        contract["callbacks"] = sorted(str(name) for name in callbacks)
     return contract
 
 
@@ -1345,26 +1387,12 @@ def _openapi_transport_lineage(
     lineage: list[dict[str, Any]] = [
         _openapi_operation_contract(path_item, operation, document)
     ]
-    parameters: dict[tuple[str, str], Mapping[str, Any]] = {}
-    for parameter_values in (
-        path_item.get("parameters"),
-        operation.get("parameters"),
-    ):
-        if not isinstance(parameter_values, list):
-            continue
-        for value in parameter_values:
-            if not isinstance(value, Mapping):
-                continue
-            parameter = _resolve_openapi_mapping(value, document)
-            name = parameter.get("name")
-            location = parameter.get("in")
-            if not isinstance(name, str) or not isinstance(location, str):
-                continue
-            if not name or location not in {"cookie", "header", "path", "query"}:
-                continue
-            parameters[(location, name)] = parameter
+    parameters = _openapi_parameters(path_item, operation, document)
+    swagger_2 = str(document.get("swagger", "")).startswith("2.")
 
     for (location, name), parameter in sorted(parameters.items()):
+        if location not in {"body", "cookie", "formData", "header", "path", "query"}:
+            continue
         item: dict[str, Any] = {
             "kind": "api_parameter",
             "name": name,
@@ -1374,14 +1402,25 @@ def _openapi_transport_lineage(
             "provenance": "openapi:parameter",
             "edge": "declares_parameter",
         }
-        default_style = "form" if location in {"query", "cookie"} else "simple"
-        style = parameter.get("style")
-        item["style"] = style if isinstance(style, str) else default_style
-        explode = parameter.get("explode")
-        item["explode"] = (
-            explode if isinstance(explode, bool) else item["style"] == "form"
-        )
+        if swagger_2:
+            collection_format = parameter.get("collectionFormat")
+            if isinstance(collection_format, str):
+                item["collection_format"] = collection_format
+        else:
+            default_style = "form" if location in {"query", "cookie"} else "simple"
+            style = parameter.get("style")
+            item["style"] = style if isinstance(style, str) else default_style
+            explode = parameter.get("explode")
+            item["explode"] = (
+                explode if isinstance(explode, bool) else item["style"] == "form"
+            )
         schema = parameter.get("schema")
+        if not isinstance(schema, Mapping) and swagger_2:
+            schema = {
+                key: parameter[key]
+                for key in ("default", "enum", "format", "items", "type")
+                if key in parameter
+            }
         if isinstance(schema, Mapping):
             item["schema"] = _openapi_schema_shape(schema, document)
         for key in (
@@ -1395,13 +1434,29 @@ def _openapi_transport_lineage(
         lineage.append(item)
 
     request_body = operation.get("requestBody")
+    if request_body is None:
+        request_body = next(
+            (
+                parameter
+                for (location, _name), parameter in parameters.items()
+                if location == "body"
+            ),
+            None,
+        )
     resolved_request_body = (
         _resolve_openapi_mapping(request_body, document)
         if isinstance(request_body, Mapping)
         else {}
     )
     request_required = resolved_request_body.get("required") is True
-    for media_type, schema in _openapi_media_schemas(request_body, document):
+    request_media = _openapi_media_schemas(request_body, document)
+    if swagger_2 and not request_media and isinstance(request_body, Mapping):
+        schema = _openapi_content_schema(request_body, document)
+        request_media = tuple(
+            (media_type, schema)
+            for media_type in _swagger_media_types(operation, document, "consumes")
+        )
+    for media_type, schema in request_media:
         item = {
             "kind": "request_media_type",
             "name": media_type,
@@ -1415,7 +1470,14 @@ def _openapi_transport_lineage(
         lineage.append(item)
 
     for status, response_value in sorted(responses.items()):
-        for media_type, schema in _openapi_media_schemas(response_value, document):
+        response_media = _openapi_media_schemas(response_value, document)
+        if swagger_2 and not response_media:
+            schema = _openapi_content_schema(response_value, document)
+            response_media = tuple(
+                (media_type, schema)
+                for media_type in _swagger_media_types(operation, document, "produces")
+            )
+        for media_type, schema in response_media:
             item = {
                 "kind": "response_media_type",
                 "name": media_type,

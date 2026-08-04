@@ -1449,6 +1449,7 @@ def _repair_contract_graph(
     front_states: tuple[str, ...] = ("loading", "error", "empty", "success"),
     front_cache: str = "absent",
     mutation: bool = False,
+    affected_reads: bool = False,
     front_capability: str = "present",
     back_capability: str = "present",
     front_errors: tuple[tuple[str, dict], ...] = (),
@@ -1548,6 +1549,21 @@ def _repair_contract_graph(
             ),
             "requires",
         )
+    if affected_reads:
+        for operation, side in ((front, "frontend"), (back, "backend")):
+            link(
+                operation,
+                ContractNode(
+                    f"{side}-affected-reads",
+                    "operation_obligation",
+                    "affected-reads",
+                    side,
+                    "present",
+                    anchor,
+                    {"applicable": True, "operations": ["GET /items"]},
+                ),
+                "requires_behavior",
+            )
     for state in front_states:
         link(
             front,
@@ -1696,6 +1712,7 @@ def test_repair_schema_lattice_never_treats_one_sided_evidence_as_clean(
         (
             {
                 "mutation": True,
+                "affected_reads": True,
                 "front_cache": "unknown",
                 "front_evidence": {"cache": "unknown"},
             },
