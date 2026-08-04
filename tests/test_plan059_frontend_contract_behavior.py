@@ -364,6 +364,33 @@ export async function load() {
     ]
 
 
+def test_header_like_text_inside_fetch_body_is_not_transport_evidence(
+    tmp_path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "client.ts").write_text(
+        """
+export async function save() {
+  return fetch("/orders", {
+    method: "POST",
+    body: '\"Content-Type\": \"application/json\"'
+  });
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    project_map = ProjectMap.from_dict(map_frontend(tmp_path, "src").project_map)
+
+    assert not [
+        node
+        for node in project_map.nodes
+        if node.side == "frontend"
+        and node.kind in {"api_parameter", "request_media_type"}
+    ]
+
+
 def test_accept_header_without_exact_response_parser_does_not_guess(tmp_path) -> None:
     source = tmp_path / "src"
     source.mkdir()

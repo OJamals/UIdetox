@@ -36,6 +36,7 @@ from uidetox.semantic_adapters import (
     SourceDocument,
     build_application_semantics,
 )
+from uidetox.source_facts import literal_nested_object_strings
 from uidetox.state import _load_json_object, ensure_uidetox_dir, get_uidetox_dir
 from uidetox.utils import now_iso
 
@@ -62,15 +63,6 @@ _DIAGNOSTIC_CATEGORIES = {
     "network": "integration",
     "page": "runtime",
 }
-
-
-def _literal_header_value(expression: str, name: str) -> str | None:
-    match = re.search(
-        rf"""["']{re.escape(name)}["']\s*:\s*(["'])(?P<value>[^"']{{1,256}})\1""",
-        expression,
-        re.IGNORECASE,
-    )
-    return match.group("value") if match else None
 
 
 def _network_call_scope(content: str, facts: Any, call: Any) -> str:
@@ -117,11 +109,12 @@ def _frontend_http_lineage(
         return (), ()
 
     lineage: list[dict[str, Any]] = []
-    headers = {
-        name: value
-        for name in _HTTP_LITERAL_HEADERS
-        if (value := _literal_header_value(options, name)) is not None
-    }
+    headers = literal_nested_object_strings(
+        options,
+        facts.extension,
+        "headers",
+        _HTTP_LITERAL_HEADERS,
+    )
     content_type = headers.get("Content-Type")
     if content_type:
         lineage.append(

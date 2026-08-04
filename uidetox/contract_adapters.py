@@ -1343,9 +1343,8 @@ def _openapi_transport_lineage(
                 lineage.append(item)
         links = response.get("links")
         if isinstance(links, Mapping):
-            for link_name, link_value in sorted(
-                links.items(), key=lambda item: str(item[0])
-            )[:_OPENAPI_SCHEMA_VARIANT_LIMIT]:
+            link_rows = sorted(links.items(), key=lambda item: str(item[0]))
+            for link_name, link_value in link_rows[:_OPENAPI_SCHEMA_VARIANT_LIMIT]:
                 if not isinstance(link_value, Mapping):
                     continue
                 link = _resolve_openapi_mapping(link_value, document)
@@ -1362,6 +1361,22 @@ def _openapi_transport_lineage(
                         ),
                         "provenance": "openapi:response-link",
                         "edge": "returns_link",
+                    }
+                )
+            if len(link_rows) > _OPENAPI_SCHEMA_VARIANT_LIMIT:
+                lineage.append(
+                    {
+                        "kind": "contract_evidence_limit",
+                        "name": "response_links",
+                        "ref": f"contract_evidence_limit:{status}:response_links",
+                        "status": status,
+                        "axis": "response_links",
+                        "observed_count": len(link_rows),
+                        "limit": _OPENAPI_SCHEMA_VARIANT_LIMIT,
+                        "truncated": True,
+                        "capability_status": "unknown",
+                        "provenance": "openapi:response-link",
+                        "edge": "documents",
                     }
                 )
 

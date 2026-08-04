@@ -800,17 +800,24 @@ def test_fullstack_fixture_preserves_sources_and_causal_findings() -> None:
     frontend_map = map_frontend(fixture, ".")
     project = ProjectMap.from_dict(frontend_map.project_map)
 
-    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 146}
+    assert project.counts == {"contract_mismatch": 0, "coverage_gap": 142}
     assert project.evidence["unknown_backend_evidence"] == 0
     assert len(_operation_nodes(project, "frontend")) == 142
     assert len(_operation_nodes(project, "backend")) == 148
-    assert (
-        sum(
-            finding.detector_id == "contract-evidence-contradictory"
-            for finding in project.findings
+    assert {
+        (
+            finding.contract_anchor["method"],
+            finding.contract_anchor["normalized_path"],
+            finding.contract_anchor["field"],
         )
-        == 0
-    )
+        for finding in project.findings
+        if finding.detector_id == "contract-evidence-contradictory"
+    } == {
+        ("DELETE", "/api/projects/{}", "status"),
+        ("DELETE", "/api/team/{}", "status"),
+        ("POST", "/api/projects", "status"),
+        ("POST", "/api/team/invite", "status"),
+    }
 
 
 def test_frontend_map_preserves_same_path_requests_by_method(tmp_path) -> None:

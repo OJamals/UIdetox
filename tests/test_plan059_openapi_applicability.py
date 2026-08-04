@@ -241,6 +241,47 @@ def test_openapi_all_of_overflow_is_explicitly_unknown(tmp_path) -> None:
     assert shape["capability_status"] == "unknown"
 
 
+def test_openapi_response_link_overflow_emits_bounded_unknown_diagnostic(
+    tmp_path,
+) -> None:
+    document = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/orders": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "links": {
+                                f"link-{index:02d}": {
+                                    "operationId": f"operation{index}"
+                                }
+                                for index in range(33)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (tmp_path / "openapi.json").write_text(json.dumps(document), encoding="utf-8")
+
+    project = build_project_map(tmp_path)
+
+    assert len(_nodes(project, "response_link")) == 32
+    diagnostic = _nodes(project, "contract_evidence_limit")[0]
+    assert diagnostic.capability_status == "unknown"
+    assert diagnostic.attributes == {
+        "axis": "response_links",
+        "capability_status": "unknown",
+        "edge": "documents",
+        "limit": 32,
+        "observed_count": 33,
+        "provenance": "openapi:response-link",
+        "status": "200",
+        "truncated": True,
+    }
+
+
 def test_openapi_schema_scalars_are_bounded_and_fail_closed(tmp_path) -> None:
     oversized = "x" * 1_000_000
     document = {
@@ -662,3 +703,31 @@ def test_contradictory_operation_applicability_blocks_actionable_remediation() -
         for finding in findings
         if finding.detector_id == "contract-operation-obligation-missing"
     ]
+
+
+def test_duplicate_operation_status_subsets_are_contradictory_in_both_orders() -> None:
+    from uidetox.contract_graph import _contract_group_contradiction
+
+    source = SourceAnchor("contract.ts", 1, "test", "test", 1.0)
+
+    def operation(identifier: str, statuses: list[str]) -> ContractNode:
+        return ContractNode(
+            identifier,
+            "route",
+            "POST /orders",
+            "backend",
+            "present",
+            source,
+            {
+                "method": "POST",
+                "normalized_path": "/orders",
+                "status_codes": statuses,
+                "evidence": {"status": "present"},
+            },
+        )
+
+    narrow = operation("narrow", ["200"])
+    broad = operation("broad", ["200", "202"])
+
+    assert _contract_group_contradiction((narrow, broad), {}) == "status"
+    assert _contract_group_contradiction((broad, narrow), {}) == "status"

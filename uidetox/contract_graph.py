@@ -673,11 +673,7 @@ def _contract_group_contradiction(
         )
         == "present"
     }
-    if any(
-        set(left) - set(right) and set(right) - set(left)
-        for left in status_sets
-        for right in status_sets
-    ):
+    if len(status_sets) > 1:
         return "status"
     return None
 

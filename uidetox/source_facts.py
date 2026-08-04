@@ -1358,6 +1358,66 @@ def literal_text(value: str | None) -> str | None:
     return None
 
 
+def literal_nested_object_strings(
+    expression: str,
+    extension: str,
+    member_name: str,
+    allowed_names: Iterable[str],
+) -> dict[str, str]:
+    """Extract allowlisted literal strings from one nested object via AST syntax."""
+
+    parser = get_parser(extension)
+    if parser is None or not expression.strip():
+        return {}
+    binding = "__uidetox_literal_object__"
+    source = f"const {binding} = {expression};".encode()
+    tree = parser.parse(source)
+    if tree.root_node.has_error:
+        return {}
+    allowed = {name.lower(): name for name in allowed_names}
+    values: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for node in _walk(tree.root_node):
+        if node.type != "variable_declarator":
+            continue
+        if _text(node.child_by_field_name("name")) != binding:
+            continue
+        root = node.child_by_field_name("value")
+        if root is None or root.type != "object":
+            return {}
+        for pair in root.named_children:
+            if pair.type != "pair":
+                continue
+            key = _text(pair.child_by_field_name("key")).strip("\"'")
+            if key != member_name:
+                continue
+            nested = pair.child_by_field_name("value")
+            if nested is None or nested.type != "object":
+                return {}
+            for item in nested.named_children:
+                if item.type != "pair":
+                    continue
+                raw_name = _text(item.child_by_field_name("key")).strip("\"'")
+                canonical = allowed.get(raw_name.lower())
+                value_node = item.child_by_field_name("value")
+                if (
+                    canonical is None
+                    or value_node is None
+                    or value_node.type != "string"
+                ):
+                    continue
+                value = _literal(value_node)
+                if not value or len(value) > 256 or canonical in values:
+                    ambiguous.add(canonical)
+                    continue
+                values[canonical] = value
+            return {
+                name: value for name, value in values.items() if name not in ambiguous
+            }
+        return {}
+    return {}
+
+
 def _is_identifier(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_$][\w$]*", value))
 
